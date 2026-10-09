@@ -1,0 +1,21 @@
+# Packages Hoot as a macOS app: `pnpm app:package` builds it in release/, and
+# `pnpm app:install` also installs it in /Applications.
+appId: dev.hootcode.app
+productName: Hoot
+directories:
+  output: release
+# Vite bundles the app into dist/ and dist-electron/. The only package loaded at run
+# time is node-pty, the one entry in "dependencies", which electron-builder adds.
+files:
+  - dist/**/*
+  - dist-electron/**/*
+# Package the Electron that `pnpm install` has already downloaded.
+electronDist: node_modules/electron/dist
+# node-pty ships prebuilt Node-API binaries, which Electron loads as they are.
+npmRebuild: false
+mac:
+  target: dir
+  category: public.app-category.developer-tools
+  # The app is signed with a "Developer ID Application" identity from the keychain
+  # when there is one. It is not notarized: it is meant for the Mac that built it.
+  notarize: false

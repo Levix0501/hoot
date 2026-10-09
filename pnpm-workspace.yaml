@@ -1,0 +1,5 @@
+onlyBuiltDependencies:
+  - node-pty
+# Its install script only prepares Windows installers, which Hoot does not build.
+ignoredBuiltDependencies:
+  - electron-winstaller

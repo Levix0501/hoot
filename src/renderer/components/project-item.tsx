@@ -1,0 +1,175 @@
+import { FolderGit2Icon, MoreHorizontalIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import type { Project } from '../../shared/ipc'
+import type { ToolId } from '../../shared/tools'
+import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from './ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
+import { SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
+import { ToolMenuEntries, type ToolMenuComponents } from './tool-menu-entries'
+
+const dropdownComponents: ToolMenuComponents = {
+  Group: DropdownMenuGroup,
+  Item: DropdownMenuItem,
+  Separator: DropdownMenuSeparator,
+  Label: DropdownMenuLabel,
+}
+
+const contextComponents: ToolMenuComponents = {
+  Group: ContextMenuGroup,
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+  Label: ContextMenuLabel,
+}
+
+export function ProjectItem({ project }: { project: Project }) {
+  const tools = useAppStore((state) => state.tools)
+  const permissionLevels = useAppStore((state) => state.permissionLevels)
+  const newSession = useAppStore((state) => state.newSession)
+  const removeProject = useAppStore((state) => state.removeProject)
+  const redetectTools = useAppStore((state) => state.redetectTools)
+  // A project cannot be removed while one of its sessions runs.
+  const runningHere = useAppStore((state) =>
+    state.sessions.some(
+      (session) => session.projectRoot === project.root && isSessionRunning(session),
+    ),
+  )
+
+  const startSession = (toolId: ToolId) => newSession(project.root, toolId)
+  const remove = () => void removeProject(project.root)
+  const redetect = () => void redetectTools()
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        render={<SidebarMenuItem />}
+        data-testid="project-item"
+        data-project-root={project.root}
+      >
+        <SidebarMenuButton
+          size="lg"
+          render={<div />}
+          className="cursor-default group-has-data-[sidebar=menu-action]/menu-item:pr-14"
+        >
+          <FolderGit2Icon className="text-muted-foreground" />
+          <div className="grid min-w-0 flex-1 leading-tight">
+            <span className="truncate font-medium" data-testid="project-name">
+              {project.name}
+            </span>
+            <span
+              className="truncate text-xs text-muted-foreground"
+              title={project.root}
+              data-path=""
+              data-testid="project-path"
+            >
+              {project.root}
+            </span>
+          </div>
+        </SidebarMenuButton>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <SidebarMenuAction
+                className="right-7"
+                aria-label={`New session in ${project.name}`}
+                title="New Session"
+                data-testid="new-session-button"
+              />
+            }
+          >
+            <PlusIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-auto min-w-56"
+            finalFocus={focusAfterOverlay}
+          >
+            <ToolMenuEntries
+              components={dropdownComponents}
+              tools={tools}
+              permissionLevels={permissionLevels}
+              onSelect={startSession}
+              onRedetect={redetect}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <SidebarMenuAction
+                aria-label={`More actions for ${project.name}`}
+                title="More Actions"
+                data-testid="project-actions-button"
+              />
+            }
+          >
+            <MoreHorizontalIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-auto min-w-44"
+            finalFocus={focusAfterOverlay}
+          >
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={runningHere}
+              onClick={remove}
+              data-testid="remove-project"
+            >
+              <Trash2Icon />
+              Remove from list
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger data-testid="context-new-session">
+            <PlusIcon />
+            New Session
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-auto min-w-56">
+            <ToolMenuEntries
+              components={contextComponents}
+              tools={tools}
+              permissionLevels={permissionLevels}
+              onSelect={startSession}
+              onRedetect={redetect}
+            />
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          variant="destructive"
+          disabled={runningHere}
+          onClick={remove}
+          data-testid="context-remove-project"
+        >
+          <Trash2Icon />
+          Remove from list
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}

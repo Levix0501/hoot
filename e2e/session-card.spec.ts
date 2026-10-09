@@ -61,6 +61,18 @@ function distanceOutside(x: number, y: number, box: Box): number {
   return Math.max(dx, dy)
 }
 
+/**
+ * The shortest distance, in CSS pixels, between a rectangle and a box with
+ * rounded corners of the given radius; negative where they overlap.
+ */
+function distanceToRoundedBox(rect: Box, box: Box, radius: number): number {
+  // A box with rounded corners holds every point within `radius` of the box
+  // shrunk by `radius` on each side.
+  const dx = Math.max(box.left + radius - rect.right, 0, rect.left - (box.right - radius))
+  const dy = Math.max(box.top + radius - rect.bottom, 0, rect.top - (box.bottom - radius))
+  return Math.hypot(dx, dy) - radius
+}
+
 async function expectSessionCard(app: AppDriver, withSession: boolean): Promise<void> {
   const layout = await cardLayout(app)
   const { card, sidebar, window } = layout
@@ -108,14 +120,24 @@ async function expectSessionCard(app: AppDriver, withSession: boolean): Promise<
     expect(at(x, y), `card at ${x},${y}`).toEqual(background)
   }
 
-  // Around it, right of the sidebar, the window shows the sidebar's color;
-  // close to the card, its shadow may darken it.
+  // Around it, right of the sidebar, every pixel entirely outside the card,
+  // beside its rounded corners too, shows the sidebar's color; closer to the
+  // card, its shadow may darken it.
+  const radius = Number.parseFloat(layout.radii[0]!)
   const errors: string[] = []
+  let besideCorners = 0
   for (let y = 0; y < shot.height; y++) {
     for (let x = Math.ceil(sidebar.right * scale); x < shot.width; x++) {
-      const point = { x: (x + 0.5) / scale, y: (y + 0.5) / scale }
-      const distance = distanceOutside(point.x, point.y, card)
-      if (distance === 0) continue
+      const pixel = {
+        left: x / scale,
+        top: y / scale,
+        right: (x + 1) / scale,
+        bottom: (y + 1) / scale,
+      }
+      const distance = distanceToRoundedBox(pixel, card, radius)
+      // The card covers the pixel, at least in part.
+      if (distance < 0) continue
+      if (distanceOutside((x + 0.5) / scale, (y + 0.5) / scale, card) === 0) besideCorners++
       const color = shot.pixel(x, y)
       const fine =
         distance >= SHADOW_REACH
@@ -125,6 +147,8 @@ async function expectSessionCard(app: AppDriver, withSession: boolean): Promise<
     }
   }
   expect(errors).toEqual([])
+  // The pixels beside the rounded corners, within the card's bounding box, were among them.
+  expect(besideCorners).toBeGreaterThan(0)
 }
 
 for (const [width, height] of [

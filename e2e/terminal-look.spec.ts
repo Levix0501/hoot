@@ -792,6 +792,34 @@ test('the grid keeps its distance from the edges of the session card', async ({ 
   }
 })
 
+test('the grid keeps its distance from the bar of a session that has ended', async ({ app }) => {
+  for (const [width, height] of [
+    [1200, 780],
+    [720, 480],
+  ] as const) {
+    await app.setWindowSize(width, height)
+    await expect.poll(() => app.page.evaluate(() => window.innerWidth)).toBe(width)
+    await startShell(app)
+    await app.run('seq 1 100')
+    // A process that exits with an error keeps its session, with a bar below the terminal.
+    await app.run('exit 3', { waitForPrompt: false })
+    await expect(app.page.getByTestId('session-ended')).toBeVisible()
+    const gap = () =>
+      app.page.evaluate(() => {
+        const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
+        return (
+          rect('[data-testid="session-ended"]').top -
+          rect('[data-testid="terminal"] .xterm-screen').bottom
+        )
+      })
+    const tolerance = 1 / (await app.page.evaluate(() => window.devicePixelRatio))
+    // Once the grid has been fitted to the area left above the bar.
+    await expect.poll(gap).toBeGreaterThan(12 - tolerance)
+    const { cellHeight } = await app.terminalGeometry()
+    expect(await gap()).toBeLessThan(12 + cellHeight)
+  }
+})
+
 test('only the shown terminal draws with WebGL, however many sessions there are', async ({
   launch,
   world,

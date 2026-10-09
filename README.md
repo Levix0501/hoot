@@ -36,9 +36,14 @@ Hoot supports macOS only for now.
   the session closes by itself; when it fails, is killed by a signal, or the terminal host stops,
   the session stays with its output and says how it ended, until you close it. When the shown
   session closes, the next one in the sidebar is shown, or the previous one after the last.
+- **Back and forward**: like a browser among pages, Hoot goes back and forward among the sessions
+  it has shown, with the arrow buttons at the top left, ⌘[ and ⌘] (**Window > Back** and
+  **Forward**). Showing a session another way drops the sessions you went back from, and a session
+  that closes leaves the list. The list lasts until Hoot quits.
 - **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar, ⌘⇧] and ⌘⇧[ (**Window >
-  Select Next Session** and **Select Previous Session**) the next and previous one, and ⌘W closes
-  the shown session. They work while a terminal has the focus and never reach its program. The
+  Select Next Session** and **Select Previous Session**) the next and previous one, ⌘[ and ⌘] go
+  back and forward, ⌘W closes the shown session, and ⌘B hides or shows the sidebar. They work while
+  a terminal has the focus and never reach its program, whereas Ctrl+B reaches it as usual. The
   window's close button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
@@ -50,6 +55,12 @@ Hoot supports macOS only for now.
 - **Quitting**: closing the window or quitting while sessions run asks first and says how many
   run; confirming ends them. A project cannot be removed from the list while one of its sessions
   runs; removing it closes its other sessions.
+- **Window**: the window has no title bar. The sidebar and the shown session reach up to its top
+  edge, where one row holds the window's traffic lights, the sidebar button, Back and Forward,
+  and the session's header (in full screen, the buttons take the traffic lights' place); drag the
+  window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
+  Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
+  it.
 - The interface and the terminal follow the macOS light or dark appearance.
 
 ## Permission levels
@@ -164,6 +175,7 @@ never cover or take focus from the apps you are working in.
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
 node-pty, the only runtime dependency. Projects are stored in `projects.json`, and the permission
-levels picked in the Agents menu in `settings.json`, in the app's user data folder:
+levels picked in the Agents menu and whether the sidebar is hidden in `settings.json`, in the app's
+user data folder:
 `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository.

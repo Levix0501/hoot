@@ -742,53 +742,58 @@ test('the scrollbar is a thin rounded slider that shows only while it is needed 
   expect(await hidden()).toBe(true)
 })
 
-test('the grid keeps its distance from the edges of the session card', async ({ app }) => {
+test('the grid keeps its distance from the edges of the main area', async ({ app }) => {
   await startShell(app)
   await app.run('seq 1 100')
   for (const [width, height] of [
     [1200, 780],
     [720, 480],
   ] as const) {
-    await app.setWindowSize(width, height)
-    await expect.poll(() => app.page.evaluate(() => window.innerWidth)).toBe(width)
-    // Wait until the grid has been fitted to the new size.
-    await expect
-      .poll(async () => {
-        const geometry = await app.terminalGeometry()
-        const size = await app.terminalSize()
-        const slack = geometry.areaWidth - geometry.scrollbarWidth - size.cols * geometry.cellWidth
-        return slack >= 0 && slack < geometry.cellWidth
+    await app.resizeWindow(width, height)
+    for (const state of ['expanded', 'collapsed'] as const) {
+      if ((await app.sidebarState()) !== state) await app.page.keyboard.press('Meta+b')
+      await app.expectSidebar(state)
+      // Wait until the grid has been fitted to the new size.
+      await expect
+        .poll(async () => {
+          const geometry = await app.terminalGeometry()
+          const size = await app.terminalSize()
+          const slack =
+            geometry.areaWidth - geometry.scrollbarWidth - size.cols * geometry.cellWidth
+          return slack >= 0 && slack < geometry.cellWidth
+        })
+        .toBe(true)
+      const screen = app.page.locator('[data-testid="terminal"] .xterm-screen')
+      const box = (await screen.boundingBox())!
+      await app.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      const scrollbar = app.page.locator(
+        '[data-testid="terminal"] .xterm-scrollbar.xterm-vertical.xterm-visible',
+      )
+      await expect(scrollbar).toHaveCount(1)
+      const edges = await app.page.evaluate(() => {
+        const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
+        return {
+          main: rect('[data-slot="sidebar-inset"]').toJSON() as DOMRect,
+          header: rect('[data-testid="session"] header').toJSON() as DOMRect,
+          grid: rect('[data-testid="terminal"] .xterm-screen').toJSON() as DOMRect,
+          scrollbar: rect(
+            '[data-testid="terminal"] .xterm-scrollbar.xterm-vertical',
+          ).toJSON() as DOMRect,
+          scale: window.devicePixelRatio,
+        }
       })
-      .toBe(true)
-    const screen = app.page.locator('[data-testid="terminal"] .xterm-screen')
-    const box = (await screen.boundingBox())!
-    await app.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    const scrollbar = app.page.locator(
-      '[data-testid="terminal"] .xterm-scrollbar.xterm-vertical.xterm-visible',
-    )
-    await expect(scrollbar).toHaveCount(1)
-    const edges = await app.page.evaluate(() => {
-      const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
-      return {
-        card: rect('[data-slot="sidebar-inset"]').toJSON() as DOMRect,
-        header: rect('[data-testid="session"] header').toJSON() as DOMRect,
-        grid: rect('[data-testid="terminal"] .xterm-screen').toJSON() as DOMRect,
-        scrollbar: rect(
-          '[data-testid="terminal"] .xterm-scrollbar.xterm-vertical',
-        ).toJSON() as DOMRect,
-        scale: window.devicePixelRatio,
-      }
-    })
-    const { cellWidth, cellHeight } = await app.terminalGeometry()
-    const { card, header, grid, scrollbar: bar, scale } = edges
-    const tolerance = 1 / scale
-    expect(Math.abs(grid.left - card.left - 14)).toBeLessThan(tolerance)
-    expect(Math.abs(grid.top - header.bottom - 12)).toBeLessThan(tolerance)
-    expect(Math.abs(card.right - bar.right - 6)).toBeLessThan(tolerance)
-    expect(card.bottom - grid.bottom).toBeGreaterThan(12 - tolerance)
-    expect(card.bottom - grid.bottom).toBeLessThan(12 + cellHeight)
-    expect(bar.left - grid.right).toBeGreaterThan(-tolerance)
-    expect(bar.left - grid.right).toBeLessThan(cellWidth)
+      const { cellWidth, cellHeight } = await app.terminalGeometry()
+      const { main, header, grid, scrollbar: bar, scale } = edges
+      const tolerance = 1 / scale
+      expect(main.left).toBe(state === 'expanded' ? 288 : 0)
+      expect(Math.abs(grid.left - main.left - 14)).toBeLessThan(tolerance)
+      expect(Math.abs(grid.top - header.bottom - 12)).toBeLessThan(tolerance)
+      expect(Math.abs(main.right - bar.right - 6)).toBeLessThan(tolerance)
+      expect(main.bottom - grid.bottom).toBeGreaterThan(12 - tolerance)
+      expect(main.bottom - grid.bottom).toBeLessThan(12 + cellHeight)
+      expect(bar.left - grid.right).toBeGreaterThan(-tolerance)
+      expect(bar.left - grid.right).toBeLessThan(cellWidth)
+    }
   }
 })
 
@@ -803,7 +808,17 @@ test('the grid keeps its distance from the bar of a session that has ended', asy
     await app.run('seq 1 100')
     // A process that exits with an error keeps its session, with a bar below the terminal.
     await app.run('exit 3', { waitForPrompt: false })
-    await expect(app.page.getByTestId('session-ended')).toBeVisible()
+    const bar = app.page.getByTestId('session-ended')
+    await expect(bar).toBeVisible()
+    await expect(bar.getByTestId('session-exit-message')).toHaveText('Process exited with code 3.')
+    await expect(bar.getByRole('button', { name: 'Close' })).toBeVisible()
+    // A line along its top separates it from the terminal.
+    expect(
+      await bar.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return [style.borderTopWidth, style.borderTopStyle]
+      }),
+    ).toEqual(['1px', 'solid'])
     const gap = () =>
       app.page.evaluate(() => {
         const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
@@ -813,10 +828,17 @@ test('the grid keeps its distance from the bar of a session that has ended', asy
         )
       })
     const tolerance = 1 / (await app.page.evaluate(() => window.devicePixelRatio))
-    // Once the grid has been fitted to the area left above the bar.
-    await expect.poll(gap).toBeGreaterThan(12 - tolerance)
-    const { cellHeight } = await app.terminalGeometry()
-    expect(await gap()).toBeLessThan(12 + cellHeight)
+    for (const state of ['expanded', 'collapsed'] as const) {
+      if ((await app.sidebarState()) !== state) await app.page.keyboard.press('Meta+b')
+      await app.expectSidebar(state)
+      // Once the grid has been fitted to the area left above the bar.
+      await expect.poll(gap).toBeGreaterThan(12 - tolerance)
+      const { cellHeight } = await app.terminalGeometry()
+      expect(await gap()).toBeLessThan(12 + cellHeight)
+    }
+    // Sessions start from the sidebar.
+    await app.page.keyboard.press('Meta+b')
+    await app.expectSidebar('expanded')
   }
 })
 

@@ -42,6 +42,13 @@ export interface StartSessionRequest {
 
 export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: false; message: string }
 
+export interface WindowState {
+  /** Whether the sidebar is expanded, as it was when Hoot last showed or hid it. */
+  sidebarOpen: boolean
+  /** Whether the window is in full screen, where macOS hides the traffic lights. */
+  fullScreen: boolean
+}
+
 export const IpcChannel = {
   listProjects: 'projects:list',
   addProject: 'projects:add',
@@ -61,12 +68,24 @@ export const IpcChannel = {
   sessionData: 'session:data',
   sessionUpdated: 'session:updated',
   sessionCommand: 'session:command',
+  getWindowState: 'window:get-state',
+  setSidebarOpen: 'window:set-sidebar-open',
+  toggleSidebarRequested: 'window:toggle-sidebar-requested',
+  fullScreenChanged: 'window:full-screen-changed',
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
 } as const
 
-/** A session command chosen in the application menu. */
-export type SessionCommand = 'close-current' | 'select-next' | 'select-previous'
+/**
+ * A session command chosen in the application menu. `back` and `forward` show
+ * the session shown before or after the current one.
+ */
+export type SessionCommand =
+  | 'close-current'
+  | 'select-next'
+  | 'select-previous'
+  | 'back'
+  | 'forward'
 
 /** API exposed to the renderer by the preload script as `window.hoot`. */
 export interface HootApi {
@@ -94,6 +113,12 @@ export interface HootApi {
   onSessionUpdated(listener: (session: SessionInfo) => void): () => void
   /** The application menu chose a session command. */
   onSessionCommand(listener: (command: SessionCommand) => void): () => void
+  getWindowState(): Promise<WindowState>
+  /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
+  setSidebarOpen(open: boolean): void
+  /** The application menu asked to show or hide the sidebar. */
+  onToggleSidebarRequested(listener: () => void): () => void
+  onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
   /** Quitting needs confirmation because `runningSessions` sessions are running. */
   onConfirmQuit(listener: (runningSessions: number) => void): () => void
   respondToQuit(confirmed: boolean): void

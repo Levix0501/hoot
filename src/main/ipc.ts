@@ -11,6 +11,7 @@ import {
   type AddProjectResult,
   type StartSessionRequest,
   type StartSessionResult,
+  type WindowState,
 } from '../shared/ipc'
 import { TOOL_IDS } from '../shared/tools'
 import type { ProjectRootResult } from './projects/project-root'
@@ -18,6 +19,7 @@ import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { PermissionLevelStore } from './settings/permission-level-store'
+import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
 
 export interface IpcDependencies {
@@ -25,6 +27,7 @@ export interface IpcDependencies {
   projects: ProjectStore
   tools: ToolService
   permissionLevels: PermissionLevelStore
+  sidebar: SidebarStateStore
   sessions: SessionManager
   quitGuard: QuitGuard
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
@@ -126,6 +129,15 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.permissionLevels.on('changed', (settings) =>
     send(IpcChannel.permissionLevelsChanged, settings),
   )
+
+  handle(IpcChannel.getWindowState, (): WindowState => ({
+    sidebarOpen: deps.sidebar.open,
+    fullScreen: deps.getWindow()?.isFullScreen() ?? false,
+  }))
+  on(IpcChannel.setSidebarOpen, (open) => {
+    const parsed = z.boolean().safeParse(open)
+    if (parsed.success) deps.sidebar.setOpen(parsed.data)
+  })
 
   handle(IpcChannel.listSessions, () => deps.sessions.list())
 

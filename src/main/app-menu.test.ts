@@ -5,7 +5,7 @@ vi.mock('electron', () => ({ Menu: { buildFromTemplate: vi.fn<() => void>() } })
 
 const { appMenuTemplate } = await import('./app-menu')
 
-function setup() {
+function setup(options: { sidebarOpen?: boolean } = {}) {
   const calls: string[] = []
   const template = appMenuTemplate({
     includeDeveloperItems: false,
@@ -13,6 +13,10 @@ function setup() {
     closeSession: () => calls.push('closeSession'),
     selectNextSession: () => calls.push('selectNextSession'),
     selectPreviousSession: () => calls.push('selectPreviousSession'),
+    goBack: () => calls.push('goBack'),
+    goForward: () => calls.push('goForward'),
+    sidebarOpen: options.sidebarOpen ?? true,
+    toggleSidebar: () => calls.push('toggleSidebar'),
     selected: { claude: 'bypass-permissions', codex: 'full-access', opencode: 'auto-approve' },
     selectPermissionLevel: () => {},
   })
@@ -57,6 +61,34 @@ describe('appMenuTemplate', () => {
     click(next)
     click(previous)
     expect(calls).toEqual(['selectNextSession', 'selectPreviousSession'])
+  })
+
+  it('goes back and forward from the Window menu, with Cmd+[ and Cmd+]', () => {
+    const { template, calls } = setup()
+    const window = submenu(template.find((item) => item.role === 'windowMenu'))
+    const back = window.find((item) => item.label === 'Back')
+    const forward = window.find((item) => item.label === 'Forward')
+    expect(back?.accelerator).toBe('CmdOrCtrl+[')
+    expect(forward?.accelerator).toBe('CmdOrCtrl+]')
+    click(back)
+    click(forward)
+    expect(calls).toEqual(['goBack', 'goForward'])
+  })
+
+  it('hides or shows the sidebar from the View menu, with Cmd+B', () => {
+    for (const [sidebarOpen, label] of [
+      [true, 'Hide Sidebar'],
+      [false, 'Show Sidebar'],
+    ] as const) {
+      const { template, calls } = setup({ sidebarOpen })
+      const view = submenu(template.find((item) => item.label === 'View'))
+      const item = view.find((entry) => entry.accelerator === 'CmdOrCtrl+B')
+      expect(item?.label).toBe(label)
+      expect(view.filter((entry) => /sidebar/i.test(entry.label ?? ''))).toEqual([item])
+      expect(view.at(-1)?.role).toBe('togglefullscreen')
+      click(item)
+      expect(calls).toEqual(['toggleSidebar'])
+    }
   })
 
   it('has no menu items for Cmd+1 to Cmd+9', () => {

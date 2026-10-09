@@ -55,6 +55,25 @@ test.describe('closing sessions and how sessions end', () => {
     await expect(app.page.getByTestId('session-status')).toHaveAttribute('data-state', 'running')
     await expect(app.page.getByTestId('session-status')).toHaveText('Running')
     await expect(app.page.getByTestId('session-header-close')).toBeVisible()
+    // Pointing at the names shows the session's full name and the project's path.
+    await expect(app.page.getByTestId('session-name')).toHaveAttribute('title', 'Shell')
+    await expect(app.page.getByTestId('session-project')).toHaveAttribute('title', G)
+    // The tool's icon, the session's name, "in", the project's name, the status, the close button.
+    const order = await app.sessionHeader().evaluate((header) => {
+      const word = Array.from(header.querySelectorAll('span')).find(
+        (span) => span.textContent === 'in',
+      )!
+      return [
+        header.querySelector('[data-tool-icon="shell"]')!,
+        header.querySelector('[data-testid="session-name"]')!,
+        word,
+        header.querySelector('[data-testid="session-project"]')!,
+        header.querySelector('[data-testid="session-status"]')!,
+        header.querySelector('[data-testid="session-header-close"]')!,
+      ].map((element) => element.getBoundingClientRect().left)
+    })
+    expect(order).toEqual(order.toSorted((a, b) => a - b))
+    expect(new Set(order).size).toBe(order.length)
     await expectNoEndSession(app, s)
     await app.expectEnglishUi()
 

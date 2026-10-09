@@ -13,6 +13,7 @@ import {
   SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -43,8 +44,13 @@ export function ProjectSidebar() {
   const redetectTools = useAppStore((state) => state.redetectTools)
 
   return (
-    // Always shown. With the inset variant, the session card sits on the sidebar's color.
-    <Sidebar variant="inset" collapsible="none" aria-label="Projects">
+    // Slides out of the window when collapsed, and back in when expanded.
+    <Sidebar aria-label="Projects">
+      {/*
+        The sidebar's part of the window's top row, which drags the window.
+        The traffic lights and the navigation sit on it.
+      */}
+      <SidebarHeader className="h-11 shrink-0 [app-region:drag]" />
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>

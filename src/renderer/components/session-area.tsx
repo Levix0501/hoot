@@ -3,6 +3,7 @@ import { describeExit, describeExitShort, sessionName } from '../../shared/sessi
 import { useAppStore, type UiSession } from '../store/app-store'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
+import { useSessionHeaderInset } from './window-navigation'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import {
@@ -49,6 +50,7 @@ function SessionPane({ session }: { session: UiSession }) {
   )
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
+  const inset = useSessionHeaderInset()
 
   return (
     <div
@@ -58,11 +60,20 @@ function SessionPane({ session }: { session: UiSession }) {
       data-status={session.status}
       data-tool={session.toolId}
     >
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+      {/*
+        The main area's part of the window's top row. Its blank parts drag the
+        window; the names, which show their full text on hover, and the close
+        button do not. While the sidebar slides, its left padding changes in
+        step, keeping its content clear of the navigation.
+      */}
+      <header
+        className="flex h-11 shrink-0 items-center gap-3 px-4 transition-[padding] duration-200 ease-linear [app-region:drag]"
+        style={{ paddingLeft: inset }}
+      >
         <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />
         <div className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm">
           <span
-            className="min-w-0 truncate font-medium"
+            className="min-w-0 truncate font-medium [app-region:no-drag]"
             title={sessionName(session)}
             data-session-name=""
             data-testid="session-name"
@@ -71,7 +82,7 @@ function SessionPane({ session }: { session: UiSession }) {
           </span>
           <span className="shrink-0 text-muted-foreground">in</span>
           <span
-            className="max-w-[50%] shrink-0 truncate font-medium"
+            className="max-w-[50%] shrink-0 truncate font-medium [app-region:no-drag]"
             title={session.projectRoot}
             data-path=""
             data-testid="session-project"
@@ -83,6 +94,7 @@ function SessionPane({ session }: { session: UiSession }) {
         <Button
           variant="ghost"
           size="icon-sm"
+          className="[app-region:no-drag]"
           disabled={session.closing}
           onClick={() => requestCloseSession(session.id)}
           aria-label="Close Session"
@@ -126,27 +138,31 @@ function NoSession() {
   const hasProjects = useAppStore((state) => state.projects.length > 0)
   const addProject = useAppStore((state) => state.addProject)
   return (
-    <Empty className="flex-1" data-testid="no-session">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <SquareTerminalIcon />
-        </EmptyMedia>
-        <EmptyTitle>No session</EmptyTitle>
-        <EmptyDescription>
-          {hasProjects
-            ? 'Start a session from a project in the sidebar.'
-            : 'Add a local Git repository to get started.'}
-        </EmptyDescription>
-      </EmptyHeader>
-      {!hasProjects && (
-        <EmptyContent>
-          <Button onClick={() => void addProject()}>
-            <FolderPlusIcon />
-            Add Project
-          </Button>
-        </EmptyContent>
-      )}
-    </Empty>
+    <>
+      {/* The main area's part of the window's top row, which drags the window. */}
+      <div className="absolute inset-x-0 top-0 h-11 [app-region:drag]" />
+      <Empty className="flex-1" data-testid="no-session">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <SquareTerminalIcon />
+          </EmptyMedia>
+          <EmptyTitle>No session</EmptyTitle>
+          <EmptyDescription>
+            {hasProjects
+              ? 'Start a session from a project in the sidebar.'
+              : 'Add a local Git repository to get started.'}
+          </EmptyDescription>
+        </EmptyHeader>
+        {!hasProjects && (
+          <EmptyContent>
+            <Button onClick={() => void addProject()}>
+              <FolderPlusIcon />
+              Add Project
+            </Button>
+          </EmptyContent>
+        )}
+      </Empty>
+    </>
   )
 }
 

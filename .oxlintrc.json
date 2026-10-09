@@ -30,7 +30,7 @@
       }
     },
     {
-      "files": ["src/renderer/components/ui/**", "src/renderer/hooks/use-mobile.ts"],
+      "files": ["src/renderer/components/ui/**"],
       "rules": {
         "eslint/no-shadow": "off",
         "react/set-state-in-effect": "off"

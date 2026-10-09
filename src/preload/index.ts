@@ -33,6 +33,10 @@ const api: HootApi = {
   onSessionData: (listener) => subscribe(IpcChannel.sessionData, listener),
   onSessionUpdated: (listener) => subscribe(IpcChannel.sessionUpdated, listener),
   onSessionCommand: (listener) => subscribe(IpcChannel.sessionCommand, listener),
+  getWindowState: () => ipcRenderer.invoke(IpcChannel.getWindowState),
+  setSidebarOpen: (open) => ipcRenderer.send(IpcChannel.setSidebarOpen, open),
+  onToggleSidebarRequested: (listener) => subscribe(IpcChannel.toggleSidebarRequested, listener),
+  onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onConfirmQuit: (listener) => subscribe(IpcChannel.confirmQuit, listener),
   respondToQuit: (confirmed) => ipcRenderer.send(IpcChannel.quitResponse, confirmed),
 }

@@ -24,7 +24,12 @@ describe('sessionShortcut', () => {
   it('selects the next and previous session with Shift and the brackets', () => {
     expect(press('}', 'BracketRight', { shift: true })).toEqual({ kind: 'next' })
     expect(press('{', 'BracketLeft', { shift: true })).toEqual({ kind: 'previous' })
-    expect(press(']', 'BracketRight')).toBeNull()
+  })
+
+  it('goes back and forward with the brackets alone', () => {
+    expect(press('[', 'BracketLeft')).toEqual({ kind: 'back' })
+    expect(press(']', 'BracketRight')).toEqual({ kind: 'forward' })
+    expect(press('[', 'BracketLeft', { ctrl: true })).toBeNull()
   })
 
   it('closes the current session with W', () => {

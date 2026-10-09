@@ -14,6 +14,14 @@ import {
   systemColorScheme,
   type SessionTerminal,
 } from '../terminal/session-terminal'
+import {
+  currentEntry,
+  emptyHistory,
+  forget,
+  step,
+  visit,
+  type SessionHistory,
+} from './session-history'
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 
 /** A session as the window shows it. */
@@ -45,13 +53,24 @@ export interface AppState {
   sessions: UiSession[]
   /** The session shown in the window. Whenever there are sessions, one of them. */
   currentSessionId: string | null
+  /** The sessions shown one after another, for going back and forward. */
+  history: SessionHistory
   /** The session whose sidebar row shows the field for renaming it. */
   renamingSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
   /** While Hoot asks whether to quit: how many sessions are running. */
   quitConfirmation: { runningSessions: number } | null
+  /** Whether the sidebar is expanded. */
+  sidebarOpen: boolean
+  /** Whether the window is in full screen. */
+  fullScreen: boolean
 
+  /**
+   * Reads the window's state and follows its changes. Called before the
+   * first render, so that the sidebar opens as it was left, without sliding.
+   */
+  initializeWindow(): Promise<void>
   initialize(): Promise<void>
   addProject(): Promise<void>
   removeProject(root: string): Promise<void>
@@ -62,6 +81,12 @@ export interface AppState {
   selectSession(id: string): void
   runShortcut(shortcut: SessionShortcut): void
   runMenuCommand(command: SessionCommand): void
+  /** Shows the session shown before the current one, if any. */
+  goBack(): void
+  /** Shows the session shown after the current one, if any. */
+  goForward(): void
+  /** Expands or collapses the sidebar, and saves its state. */
+  setSidebarOpen(open: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
   requestCloseSession(id: string): void
   answerCloseConfirmation(confirmed: boolean): void
@@ -162,11 +187,15 @@ export const useAppStore = create<AppState>()((set, get) => {
       const order = sidebarOrder(state.projects, state.sessions).map((session) => session.id)
       const currentSessionId = currentAfterClosing(order, state.currentSessionId, removed)
       currentChanged = currentSessionId !== state.currentSessionId
+      // The history forgets the closed sessions before it records the one shown instead.
+      const history = forget(state.history, removed)
       const keep = (id: string | null) => (id !== null && removed.has(id) ? null : id)
       return {
         projects: projects ?? state.projects,
         sessions: state.sessions.filter((session) => !removed.has(session.id)),
         currentSessionId,
+        history:
+          currentChanged && currentSessionId !== null ? visit(history, currentSessionId) : history,
         renamingSessionId: keep(state.renamingSessionId),
         closeConfirmation: keep(state.closeConfirmation),
       }
@@ -210,6 +239,17 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (id !== null) get().selectSession(id)
   }
 
+  /** Goes back (-1) or forward (1) among the sessions shown. */
+  const stepHistory = (offset: -1 | 1) => {
+    const { history, currentSessionId } = get()
+    const stepped = step(history, offset)
+    const id = stepped && currentEntry(stepped)
+    if (!stepped || id === null) return
+    getSessionTerminal(currentSessionId)?.terminal.blur()
+    // The terminal view of the session takes the focus once it is shown.
+    set({ history: stepped, currentSessionId: id })
+  }
+
   const closeCurrent = () => {
     const { currentSessionId, closeConfirmation, quitConfirmation } = get()
     // While Hoot waits for an answer, ⌘W does not ask anything else.
@@ -224,9 +264,19 @@ export const useAppStore = create<AppState>()((set, get) => {
     permissionLevels: null,
     sessions: [],
     currentSessionId: null,
+    history: emptyHistory,
     renamingSessionId: null,
     closeConfirmation: null,
     quitConfirmation: null,
+    sidebarOpen: true,
+    fullScreen: false,
+
+    async initializeWindow() {
+      api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
+      api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
+      const { sidebarOpen, fullScreen } = await api.getWindowState()
+      set({ sidebarOpen, fullScreen })
+    },
 
     async initialize() {
       if (get().initialized) return
@@ -284,9 +334,13 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (reloaded.length > 0) {
         set((state) => {
           const all = [...state.sessions, ...reloaded.map(fromInfo)]
+          const currentSessionId =
+            state.currentSessionId ?? sidebarOrder(projects, all)[0]?.id ?? null
           return {
             sessions: all,
-            currentSessionId: state.currentSessionId ?? sidebarOrder(projects, all)[0]?.id ?? null,
+            currentSessionId,
+            history:
+              currentSessionId === null ? state.history : visit(state.history, currentSessionId),
           }
         })
       }
@@ -370,6 +424,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           },
         ],
         currentSessionId: id,
+        history: visit(state.history, id),
       }))
     },
 
@@ -419,7 +474,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       getSessionTerminal(currentSessionId)?.terminal.blur()
       // The terminal view of the session takes the focus once it is shown.
-      set({ currentSessionId: id })
+      set((state) => ({ currentSessionId: id, history: visit(state.history, id) }))
     },
 
     runShortcut(shortcut) {
@@ -432,6 +487,12 @@ export const useAppStore = create<AppState>()((set, get) => {
           break
         case 'previous':
           selectRelative(-1)
+          break
+        case 'back':
+          stepHistory(-1)
+          break
+        case 'forward':
+          stepHistory(1)
           break
         case 'close':
           closeCurrent()
@@ -450,7 +511,27 @@ export const useAppStore = create<AppState>()((set, get) => {
         case 'select-previous':
           selectRelative(-1)
           break
+        case 'back':
+          stepHistory(-1)
+          break
+        case 'forward':
+          stepHistory(1)
+          break
       }
+    },
+
+    goBack() {
+      stepHistory(-1)
+    },
+
+    goForward() {
+      stepHistory(1)
+    },
+
+    setSidebarOpen(open) {
+      if (open === get().sidebarOpen) return
+      set({ sidebarOpen: open })
+      api.setSidebarOpen(open)
     },
 
     requestCloseSession(id) {

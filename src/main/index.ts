@@ -15,6 +15,7 @@ import { QuitGuard } from './quit-guard'
 import { resolveLaunch } from './session/launch'
 import { SessionManager } from './session/session-manager'
 import { PermissionLevelStore } from './settings/permission-level-store'
+import { SidebarStateStore } from './settings/sidebar-state-store'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
 
@@ -48,6 +49,7 @@ function defaultShell(): string {
 const shell = defaultShell()
 const projects = new ProjectStore(app.getPath('userData'))
 const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
+const sidebar = new SidebarStateStore(app.getPath('userData'))
 const tools = new ToolService({ shell, baseEnv, cwd: os.homedir() })
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
@@ -125,6 +127,11 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
     minWidth: 720,
     minHeight: 480,
     title: 'Hoot',
+    // No title bar: the page takes the whole window. The traffic lights
+    // (x 15–75, y 15–29) sit in the middle of the page's 44px top row, which
+    // leaves them room.
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 15, y: 15 },
     show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? DARK_BACKGROUND : LIGHT_BACKGROUND,
     webPreferences: {
@@ -142,6 +149,10 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
   })
+  // In full screen macOS hides the traffic lights, and the page moves its
+  // navigation into their place.
+  window.on('enter-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, true))
+  window.on('leave-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, false))
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
 
@@ -169,6 +180,7 @@ if (!app.requestSingleInstanceLock()) {
     projects,
     tools,
     permissionLevels,
+    sidebar,
     sessions,
     quitGuard,
     resolveProjectRoot: async (directory) =>
@@ -211,7 +223,8 @@ if (!app.requestSingleInstanceLock()) {
   const sendSessionCommand = (command: SessionCommand) =>
     getWindow()?.webContents.send(IpcChannel.sessionCommand, command)
 
-  void app.whenReady().then(() => {
+  /** Sets the menu bar, again whenever the sidebar is shown or hidden: its item's label says which. */
+  const updateApplicationMenu = () =>
     Menu.setApplicationMenu(
       buildAppMenu({
         includeDeveloperItems: Boolean(devServerUrl),
@@ -219,10 +232,18 @@ if (!app.requestSingleInstanceLock()) {
         closeSession: () => sendSessionCommand('close-current'),
         selectNextSession: () => sendSessionCommand('select-next'),
         selectPreviousSession: () => sendSessionCommand('select-previous'),
+        goBack: () => sendSessionCommand('back'),
+        goForward: () => sendSessionCommand('forward'),
+        sidebarOpen: sidebar.open,
+        toggleSidebar: () => getWindow()?.webContents.send(IpcChannel.toggleSidebarRequested),
         selected: permissionLevels.all(),
         selectPermissionLevel: (tool, level) => permissionLevels.select(tool, level),
       }),
     )
+
+  void app.whenReady().then(() => {
+    updateApplicationMenu()
+    sidebar.on('changed', updateApplicationMenu)
     mainWindow = createMainWindow({ reveal: !openInBackground })
     // Clicking the Dock icon shows the window, also after a background start.
     app.on('activate', showMainWindow)

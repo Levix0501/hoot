@@ -16,10 +16,10 @@ export const repoRoot = path.resolve(import.meta.dirname, '../..')
 const mainEntry = path.join(repoRoot, 'dist-electron/main/index.js')
 
 /**
- * Characters allowed in the English text Hoot itself shows: printable ASCII
- * plus common English typography.
+ * Characters allowed in the English text Hoot itself shows: printable ASCII,
+ * common English typography and the symbols of the Mac's modifier keys.
  */
-const NON_ENGLISH = /[^\x20-\x7E…–—·’“”]/u
+const NON_ENGLISH = /[^\x20-\x7E…–—·’“”⌘⇧⌥⌃]/u
 
 export interface TerminalCell {
   chars: string
@@ -161,6 +161,81 @@ export class AppDriver {
       ({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]!.setSize(w!, h!),
       [width, height],
     )
+  }
+
+  /** Sets the window's size and waits until the page has it and the layout has settled. */
+  async resizeWindow(width: number, height: number): Promise<void> {
+    await this.setWindowSize(width, height)
+    await expect
+      .poll(() => this.page.evaluate(() => [window.innerWidth, window.innerHeight]))
+      .toEqual([width, height])
+    await this.settle()
+  }
+
+  /** Makes the window emit one of its events, as when macOS changes it, without changing the window. */
+  async emitWindowEvent(event: 'enter-full-screen' | 'leave-full-screen'): Promise<void> {
+    await this.electronApp.evaluate(({ BrowserWindow }, name) => {
+      BrowserWindow.getAllWindows()[0]!.emit(name)
+    }, event)
+  }
+
+  /** Waits until no CSS transition runs, such as the sidebar's slide. */
+  async settle(): Promise<void> {
+    await expect
+      .poll(() =>
+        this.page.evaluate(
+          () =>
+            document
+              .getAnimations()
+              .filter((animation) => animation instanceof CSSTransition)
+              .filter((animation) => animation.playState === 'running').length,
+        ),
+      )
+      .toBe(0)
+  }
+
+  /** The sidebar's root element, which says whether it is expanded or collapsed. */
+  sidebar() {
+    return this.page.locator('[data-slot="sidebar"]')
+  }
+
+  /** `expanded` or `collapsed`. */
+  async sidebarState(): Promise<string | null> {
+    return this.sidebar().getAttribute('data-state')
+  }
+
+  /** Waits until the sidebar has slid into the given state. */
+  async expectSidebar(state: 'expanded' | 'collapsed'): Promise<void> {
+    await expect(this.sidebar()).toHaveAttribute('data-state', state)
+    await this.settle()
+  }
+
+  /** The main area: the current session or the empty page. */
+  mainArea() {
+    return this.page.locator('[data-slot="sidebar-inset"]')
+  }
+
+  /** The current session's header. */
+  sessionHeader() {
+    return this.page.locator('[data-testid="session"] header')
+  }
+
+  /** The navigation's buttons: the sidebar's trigger, Back and Forward. */
+  toggleSidebarButton() {
+    return this.page.getByTestId('toggle-sidebar')
+  }
+
+  backButton() {
+    return this.page.getByTestId('go-back')
+  }
+
+  forwardButton() {
+    return this.page.getByTestId('go-forward')
+  }
+
+  /** The contents of `settings.json` in the user data directory. */
+  settings(): Record<string, unknown> {
+    return JSON.parse(fs.readFileSync(path.join(this.world.userData, 'settings.json'), 'utf8'))
   }
 
   /** Makes the next folder selection return `directory` instead of showing the system dialog. */

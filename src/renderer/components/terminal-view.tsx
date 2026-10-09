@@ -7,6 +7,21 @@ import { drawWithWebgl } from '../terminal/webgl-renderer'
 const launchedSessions = new Set<string>()
 
 /**
+ * The transitions of the space the sidebar takes beside the main area, which
+ * run while the sidebar slides in or out.
+ */
+function sidebarSlide(): Animation[] {
+  return document.querySelector('[data-slot="sidebar-gap"]')?.getAnimations() ?? []
+}
+
+/** Resolves once the sidebar has stopped sliding, also when it turned back half way. */
+async function sidebarSettled(): Promise<void> {
+  for (let slide = sidebarSlide(); slide.length > 0; slide = sidebarSlide()) {
+    await Promise.allSettled(slide.map((animation) => animation.finished))
+  }
+}
+
+/**
  * Shows a session's terminal, which exists for as long as the session: it is
  * moved here when the session is shown and keeps receiving output while it is not.
  */
@@ -27,7 +42,23 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     // Fill the area, which may have changed size while the session was not shown;
     // a new size reaches the session's process through the terminal's resize event.
     fit.fit()
-    const observer = new ResizeObserver(() => fit.fit())
+    // While the sidebar slides in or out, the area changes width on every
+    // frame: the grid keeps its size until the sidebar is in place, then
+    // takes the area's new size at once, so that its program redraws once.
+    let shown = true
+    let waiting = false
+    const observer = new ResizeObserver(() => {
+      if (sidebarSlide().length === 0) {
+        fit.fit()
+        return
+      }
+      if (waiting) return
+      waiting = true
+      void sidebarSettled().then(() => {
+        waiting = false
+        if (shown) fit.fit()
+      })
+    })
     observer.observe(host)
 
     const session = useAppStore.getState().sessions.find((entry) => entry.id === sessionId)
@@ -40,13 +71,14 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     terminal.focus()
 
     return () => {
+      shown = false
       observer.disconnect()
       renderer.dispose()
     }
   }, [sessionId])
 
   return (
-    // The padding keeps the text clear of the session card's edges; the
+    // The padding keeps the text clear of the main area's edges; the
     // scrollbar takes the right side, so less is left there.
     <div
       className="min-h-0 flex-1 bg-background pt-3 pr-1.5 pb-3 pl-3.5"

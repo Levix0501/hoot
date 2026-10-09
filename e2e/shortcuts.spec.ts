@@ -47,7 +47,9 @@ async function echoed(app: AppDriver, sessionId: string): Promise<string> {
 }
 
 test.describe('keyboard shortcuts and menu items for sessions', () => {
-  test('the menu bar has Close Session and next and previous session items', async ({ app }) => {
+  test('the menu bar has items for closing, selecting and going back and forward among sessions, and for the sidebar', async ({
+    app,
+  }) => {
     const items = allItems(await app.applicationMenu())
     const withAccelerator = (accelerator: string) =>
       items
@@ -63,6 +65,10 @@ test.describe('keyboard shortcuts and menu items for sessions', () => {
     )
     expect(withAccelerator('Cmd+Shift+]')).toEqual(['Window > Select Next Session'])
     expect(withAccelerator('Cmd+Shift+[')).toEqual(['Window > Select Previous Session'])
+    expect(withAccelerator('Cmd+[')).toEqual(['Window > Back'])
+    expect(withAccelerator('Cmd+]')).toEqual(['Window > Forward'])
+    expect(withAccelerator('Cmd+B')).toEqual(['View > Hide Sidebar'])
+    expect(withAccelerator('Cmd+O')).toEqual(['File > Add Project…'])
     for (let digit = 1; digit <= 9; digit++) {
       const visible = items.filter(
         (item) =>
@@ -164,5 +170,75 @@ test.describe('keyboard shortcuts and menu items for sessions', () => {
     await expect(app.page.getByTestId('quit-dialog')).toBeHidden()
     expect(app.exited).toBe(false)
     await expect(app.page.getByTestId('no-session')).toBeVisible()
+  })
+
+  test('the session shortcuts work while cat -v runs in the terminal, which receives none of them', async ({
+    launch,
+    world,
+  }) => {
+    const app = await launch({ projects: [world.repos.G] })
+    const sessions: string[] = []
+    for (let count = 0; count < 3; count++) {
+      const id = await app.startSession(world.repos.G, 'shell')
+      await app.waitForPrompt(20_000, id)
+      await app.run('cat -v', { waitForPrompt: false })
+      await expect.poll(() => app.cursorLine(id)).toBe('')
+      sessions.push(id)
+    }
+    const [s1, s2] = sessions as [string, string, string]
+    /** What each `cat -v` has echoed or printed. */
+    const received = async () =>
+      Promise.all(sessions.map(async (id) => (await app.outputOf('cat -v', id)).join('')))
+
+    for (const [keys, current] of [
+      ['Meta+1', s1],
+      ['Meta+Shift+BracketRight', s2],
+      ['Meta+Shift+BracketLeft', s1],
+    ] as const) {
+      await app.page.keyboard.press(keys)
+      await expect(app.session(), keys).toHaveAttribute('data-session-id', current)
+    }
+    await app.page.keyboard.press('Meta+w')
+    await expect(app.closeSessionDialog()).toBeVisible()
+    await app.page.getByTestId('close-session-cancel').click()
+    await expect(app.closeSessionDialog()).toBeHidden()
+    await expect(app.session()).toHaveAttribute('data-session-id', s1)
+
+    // ⌘O is the menu bar's: the window leaves it alone, and File > Add Project… asks for a folder.
+    await app.electronApp.evaluate(({ dialog }) => {
+      const requests: Electron.OpenDialogOptions[] = []
+      ;(globalThis as { folderRequests?: unknown }).folderRequests = requests
+      dialog.showOpenDialog = (async (...args: unknown[]) => {
+        requests.push(args.at(-1) as Electron.OpenDialogOptions)
+        return { canceled: true, filePaths: [] }
+      }) as typeof dialog.showOpenDialog
+    })
+    await app.page.evaluate(() => {
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          ;(window as unknown as { commandO?: boolean }).commandO = event.defaultPrevented
+        },
+        { once: true },
+      )
+    })
+    await app.page.keyboard.press('Meta+o')
+    await expect
+      .poll(() => app.page.evaluate(() => (window as unknown as { commandO?: boolean }).commandO))
+      .toBe(false)
+    await app.chooseMenuItem('File', 'Add Project…')
+    await expect
+      .poll(() =>
+        app.electronApp.evaluate(
+          () =>
+            (globalThis as { folderRequests?: Electron.OpenDialogOptions[] }).folderRequests?.map(
+              (options) => options.properties ?? [],
+            ) ?? [],
+        ),
+      )
+      .toEqual([['openDirectory', 'createDirectory']])
+
+    await app.page.waitForTimeout(300)
+    expect(await received()).toEqual(['', '', ''])
   })
 })

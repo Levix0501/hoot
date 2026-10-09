@@ -71,7 +71,7 @@ function withOpacity(color: string, opacity: number): string {
 /**
  * A theme whose default background and foreground are the interface's
  * `--background` and `--foreground` colors, so that the terminal blends into
- * the session card.
+ * the main area.
  */
 function theme(background: string, foreground: string, ansi: readonly string[]): ITheme {
   return {

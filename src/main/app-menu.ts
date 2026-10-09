@@ -7,13 +7,21 @@ export interface AppMenuActions extends AgentsMenuOptions {
   closeSession(): void
   selectNextSession(): void
   selectPreviousSession(): void
+  /** Shows the session shown before the current one. */
+  goBack(): void
+  /** Shows the session shown after the current one, after going back. */
+  goForward(): void
+  /** Whether the sidebar is expanded: the View menu offers to hide it, or else to show it. */
+  sidebarOpen: boolean
+  toggleSidebar(): void
   includeDeveloperItems: boolean
 }
 
 /**
- * The menu bar. Its session commands are also handled in the window, which
- * receives their key presses first (see the renderer's session shortcuts);
- * ⌘1–⌘9 have no menu items and work only there.
+ * The menu bar. Its session and sidebar commands are also handled in the
+ * window, which receives their key presses first (see the renderer's session
+ * shortcuts and the sidebar's ⌘B); ⌘1–⌘9 have no menu items and work only
+ * there.
  */
 export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOptions[] {
   const viewItems: MenuItemConstructorOptions[] = actions.includeDeveloperItems
@@ -31,13 +39,28 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
       ],
     },
     { role: 'editMenu' },
-    { label: 'View', submenu: [...viewItems, { role: 'togglefullscreen' }] },
+    {
+      label: 'View',
+      submenu: [
+        ...viewItems,
+        {
+          label: actions.sidebarOpen ? 'Hide Sidebar' : 'Show Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => actions.toggleSidebar(),
+        },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
     agentsMenuTemplate(actions),
     {
       role: 'windowMenu',
       submenu: [
         { role: 'minimize' },
         { role: 'zoom' },
+        { type: 'separator' },
+        { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => actions.goBack() },
+        { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => actions.goForward() },
         { type: 'separator' },
         {
           label: 'Select Next Session',

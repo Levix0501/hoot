@@ -2,6 +2,7 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -135,4 +136,9 @@
   body {
     overflow: hidden;
   }
+}
+
+/* The terminal's own scrollbar: a thin slider with round ends. */
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
+  border-radius: calc(infinity * 1px);
 }

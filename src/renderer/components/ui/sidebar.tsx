@@ -157,12 +157,16 @@ function Sidebar({
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
+  // Hoot: a sidebar that cannot collapse still takes part in the floating and
+  // inset layouts, which select it as a peer by its variant.
   if (collapsible === 'none') {
     return (
       <div
         data-slot="sidebar"
+        data-variant={variant}
+        data-side={side}
         className={cn(
-          'flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground',
+          'peer flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground',
           className,
         )}
         {...props}
@@ -291,12 +295,14 @@ function SidebarRail({ className, ...props }: React.ComponentProps<'button'>) {
   )
 }
 
+// Hoot: the inset layout applies at every window width, without the `md:`
+// breakpoint, because Hoot's sidebar is never shown as a sheet.
 function SidebarInset({ className, ...props }: React.ComponentProps<'main'>) {
   return (
     <main
       data-slot="sidebar-inset"
       className={cn(
-        'relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2',
+        'relative flex w-full flex-1 flex-col bg-background peer-data-[variant=inset]:m-2 peer-data-[variant=inset]:ml-0 peer-data-[variant=inset]:rounded-xl peer-data-[variant=inset]:shadow-sm peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2',
         className,
       )}
       {...props}

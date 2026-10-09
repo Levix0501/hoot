@@ -30,6 +30,8 @@ function useSessionShortcuts(): void {
   }, [runShortcut])
 }
 
+function keepSidebarOpen(): void {}
+
 export function App() {
   const initialize = useAppStore((state) => state.initialize)
   useEffect(() => {
@@ -39,11 +41,15 @@ export function App() {
 
   return (
     <TooltipProvider>
+      {/* The sidebar stays open: ⌘B and Ctrl+B do not collapse it. */}
       <SidebarProvider
+        open
+        onOpenChange={keepSidebarOpen}
         className="h-svh overflow-hidden"
         style={{ '--sidebar-width': '18rem' } as React.CSSProperties}
       >
         <ProjectSidebar />
+        {/* The session card. */}
         <SidebarInset className="min-w-0 overflow-hidden">
           <SessionArea />
         </SidebarInset>

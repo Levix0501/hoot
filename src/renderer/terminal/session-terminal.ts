@@ -1,10 +1,14 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from './terminal-font'
 import { terminalTheme, type ColorScheme } from './themes'
 import { applyCurrentUnicodeWidths } from './unicode-widths'
 
 /** Lines kept above the visible screen for scrolling back. */
 export const SCROLLBACK_LINES = 10_000
+
+/** Width of the terminal's scrollbar, in CSS pixels: a thin slider beside the text. */
+const SCROLLBAR_WIDTH = 6
 
 export interface SessionTerminal {
   terminal: Terminal
@@ -23,12 +27,19 @@ export function createSessionTerminal(scheme: ColorScheme): SessionTerminal {
   const terminal = new Terminal({
     allowProposedApi: true,
     scrollback: SCROLLBACK_LINES,
-    // Nerd Font symbol fonts, when installed, supply the icons many prompts use.
-    fontFamily:
-      'Menlo, Monaco, "Courier New", "Symbols Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "MesloLGS NF", monospace',
-    fontSize: 13,
+    fontFamily: TERMINAL_FONT_FAMILY,
+    fontSize: TERMINAL_FONT_SIZE,
+    // The font's own line height, without extra spacing between lines.
+    lineHeight: 1,
+    cursorStyle: 'block',
     cursorBlink: true,
+    // Bold text keeps its color instead of switching to the bright one.
+    drawBoldTextInBrightColors: false,
     macOptionClickForcesSelection: true,
+    scrollbar: { width: SCROLLBAR_WIDTH },
+    // Keys reach programs with their usual encoding: programs cannot turn on
+    // the kitty keyboard protocol.
+    vtExtensions: { kittyKeyboard: false },
     theme: terminalTheme(scheme),
   })
   const fit = new FitAddon()

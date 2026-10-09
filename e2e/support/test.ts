@@ -1,5 +1,5 @@
 import { test as base } from '@playwright/test'
-import { AppDriver } from './app'
+import { AppDriver, type LaunchOptions } from './app'
 import { createWorld, type World } from './world'
 
 export { expect } from '@playwright/test'
@@ -7,7 +7,7 @@ export { expect } from '@playwright/test'
 interface Fixtures {
   world: World
   /** Launches Hoot in the test's world; every launched instance is closed after the test. */
-  launch: () => Promise<AppDriver>
+  launch: (options?: LaunchOptions) => Promise<AppDriver>
   /** A Hoot instance launched before the test starts. */
   app: AppDriver
 }
@@ -21,8 +21,8 @@ export const test = base.extend<Fixtures>({
   },
   launch: async ({ world }, provide, testInfo) => {
     const launched: AppDriver[] = []
-    await provide(async () => {
-      const app = await AppDriver.launch(world)
+    await provide(async (options) => {
+      const app = await AppDriver.launch(world, options)
       launched.push(app)
       return app
     })

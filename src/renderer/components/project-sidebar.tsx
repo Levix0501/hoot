@@ -43,7 +43,8 @@ export function ProjectSidebar() {
   const redetectTools = useAppStore((state) => state.redetectTools)
 
   return (
-    <Sidebar collapsible="none" className="border-r" aria-label="Projects">
+    // Always shown. With the inset variant, the session card sits on the sidebar's color.
+    <Sidebar variant="inset" collapsible="none" aria-label="Projects">
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>

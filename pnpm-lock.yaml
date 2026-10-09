@@ -18,6 +18,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource-variable/geist-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@playwright/test':
         specifier: ^1.64.0
         version: 1.64.0
@@ -46,14 +49,17 @@ importers:
         specifier: ^6.1.2
         version: 6.1.2(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0))
       '@xterm/addon-fit':
-        specifier: ^0.11.0
-        version: 0.11.0
+        specifier: 0.12.0-beta.301
+        version: 0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-unicode-graphemes':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: 0.5.0-beta.301
+        version: 0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)
+      '@xterm/addon-webgl':
+        specifier: 0.20.0-beta.300
+        version: 0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)
       '@xterm/xterm':
-        specifier: ^6.0.0
-        version: 6.0.0
+        specifier: 6.1.0-beta.304
+        version: 6.1.0-beta.304
       birpc:
         specifier: ^4.2.0
         version: 4.2.0
@@ -366,6 +372,9 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@fontsource-variable/geist-mono@5.3.0':
+    resolution: {integrity: sha512-vBbuwDEo9AkrqADMXOrlAR3DFcJi4/JxeuU43FoiQERnNwsfXNnvxvReZG02cQKmyk4DZkZdBZX3oTDvy2zBAw==}
 
   '@fontsource-variable/geist@5.3.0':
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
@@ -1123,14 +1132,23 @@ packages:
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
 
-  '@xterm/addon-fit@0.11.0':
-    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+  '@xterm/addon-fit@0.12.0-beta.301':
+    resolution: {integrity: sha512-MukRyJLAFQrW/++aM209jBZ8G9J/Ioe4SGS6c3ba87v+zYuX/I66JrDB7sVfykQ9t7DlT+c1MWl1jTlX2kyx1w==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.304
 
-  '@xterm/addon-unicode-graphemes@0.4.0':
-    resolution: {integrity: sha512-9+/CqwbKcnlkJU4d3wIgO+wjsL8f6vyz+UwUWLu6nADQz8Gr8ONqGCJfdDjIdI+yYZLABQqQy47FzEM6AWELjw==}
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301':
+    resolution: {integrity: sha512-EBZIZYS6RItWTGO/KpLqV6y3IKGYyugbP07lK0x6G7185FVA61L2t0/XVtVEQNpczsbPo8zAxBhpoV72TP8CYw==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.304
 
-  '@xterm/xterm@6.0.0':
-    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
+  '@xterm/addon-webgl@0.20.0-beta.300':
+    resolution: {integrity: sha512-BJQiOx8I+zz2woe+/E9nWprRRPevo9slPgyOd43E8o18aG307ccsyaTJoIbSu99uqfDoVLWDRLTy91ZXTFsdig==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.304
+
+  '@xterm/xterm@6.1.0-beta.304':
+    resolution: {integrity: sha512-Wq9d4qFYslYQBIan+riXotdyurtREc6v+HWdAwV6Y2JSDI9eJ1dkWm/fzYb2rCGgGnM3baiYuSK4Z6OLNKLzDw==}
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -3738,6 +3756,8 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
+  '@fontsource-variable/geist-mono@5.3.0': {}
+
   '@fontsource-variable/geist@5.3.0': {}
 
   '@hono/node-server@2.1.4(hono@4.13.13)':
@@ -4255,11 +4275,19 @@ snapshots:
 
   '@xmldom/xmldom@0.8.15': {}
 
-  '@xterm/addon-fit@0.11.0': {}
+  '@xterm/addon-fit@0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.304
 
-  '@xterm/addon-unicode-graphemes@0.4.0': {}
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.304
 
-  '@xterm/xterm@6.0.0': {}
+  '@xterm/addon-webgl@0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.304
+
+  '@xterm/xterm@6.1.0-beta.304': {}
 
   abbrev@4.0.0: {}
 

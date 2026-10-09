@@ -9,6 +9,7 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ToolId } from '../../src/shared/tools'
+import { Screenshot, type GridPixels } from './pixels'
 import type { World } from './world'
 
 export const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -48,6 +49,18 @@ export interface MenuEntry {
 /** Where the start of a session is waited for. */
 type SessionStart = 'running' | 'started'
 
+export interface LaunchOptions {
+  /** Physical pixels per CSS pixel the window renders with, instead of its display's. */
+  deviceScaleFactor?: 1 | 2
+  /** More Chromium switches, such as `--disable-gpu`. */
+  switches?: string[]
+  /**
+   * Project roots in the list when Hoot starts, as if added before. Unlike
+   * adding them in the window, this shows no message over the terminal.
+   */
+  projects?: string[]
+}
+
 /** Drives one running Hoot instance. */
 export class AppDriver {
   private constructor(
@@ -58,8 +71,14 @@ export class AppDriver {
     readonly mainProcess: ChildProcess,
   ) {}
 
-  static async launch(world: World): Promise<AppDriver> {
+  static async launch(world: World, options: LaunchOptions = {}): Promise<AppDriver> {
     if (!fs.existsSync(mainEntry)) throw new Error('Build the app first: pnpm build')
+    if (options.projects) {
+      fs.writeFileSync(
+        path.join(world.userData, 'projects.json'),
+        JSON.stringify({ projects: options.projects.map((root) => ({ root })) }),
+      )
+    }
     const electronApp = await electron.launch({
       // Launched like `electron .` so the app reads its name and version from package.json.
       args: [
@@ -71,6 +90,12 @@ export class AppDriver {
         // Keep rendering although the window is never shown.
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
+        // Screenshots show colors as sRGB values, without converting them for the display.
+        '--force-color-profile=srgb',
+        ...(options.deviceScaleFactor === undefined
+          ? []
+          : [`--force-device-scale-factor=${options.deviceScaleFactor}`]),
+        ...(options.switches ?? []),
       ],
       env: world.env,
       cwd: world.root,
@@ -81,6 +106,9 @@ export class AppDriver {
     const page = await electronApp.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await expect(page.getByTestId('add-project')).toBeVisible()
+    if (options.projects) {
+      await expect(page.getByTestId('project-item')).toHaveCount(options.projects.length)
+    }
     return new AppDriver(electronApp, page, world, mainProcess)
   }
 
@@ -463,12 +491,13 @@ export class AppDriver {
     })
   }
 
-  /** Size of one character cell and of the area the terminal is fitted into. */
+  /** Size of one character cell, of the area the terminal is fitted into and of its scrollbar. */
   async terminalGeometry(): Promise<{
     cellWidth: number
     cellHeight: number
     areaWidth: number
     areaHeight: number
+    scrollbarWidth: number
   }> {
     return this.page.evaluate(() => {
       const screen = document.querySelector<HTMLElement>('[data-testid="terminal"] .xterm-screen')!
@@ -482,6 +511,7 @@ export class AppDriver {
         cellHeight: box.height / terminal.rows,
         areaWidth: area.width,
         areaHeight: area.height,
+        scrollbarWidth: terminal.options.scrollbar?.width ?? 0,
       }
     })
   }
@@ -500,11 +530,98 @@ export class AppDriver {
     }
   }
 
-  /** Text of the rows currently rendered on screen. */
+  /** Text of the rows of the current terminal's grid, as it shows them now. */
   async visibleRows(): Promise<string[]> {
-    return this.page
-      .locator('[data-testid="terminal"] .xterm-rows > div')
-      .evaluateAll((rows) => rows.map((row) => row.textContent ?? ''))
+    return this.page.evaluate(() => {
+      const terminal = window.hootTestHooks!.terminal!
+      const buffer = terminal.buffer.active
+      return Array.from(
+        { length: terminal.rows },
+        (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '',
+      )
+    })
+  }
+
+  /** Where the current terminal's grid is in the window, in physical pixels. */
+  async gridPixels(): Promise<GridPixels> {
+    return this.page.evaluate(() => {
+      const terminal = window.hootTestHooks!.terminal!
+      const screen = terminal.element!.querySelector('.xterm-screen')!.getBoundingClientRect()
+      const scale = window.devicePixelRatio
+      const { cell } = terminal.dimensions!.device
+      return {
+        x: Math.round(screen.x * scale),
+        y: Math.round(screen.y * scale),
+        cellWidth: cell.width,
+        cellHeight: cell.height,
+        scale,
+      }
+    })
+  }
+
+  /** A screenshot of the window, in physical pixels, once what was written has been drawn. */
+  async screenshot(): Promise<Screenshot> {
+    // Terminals draw on the next animation frame.
+    await this.page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    )
+    return new Screenshot(await this.page.screenshot({ animations: 'allow' }))
+  }
+
+  /**
+   * Prints lines exactly as given, control sequences included (with `cat`, in
+   * the current session, whose shell is in project G), and returns the index
+   * in the terminal's buffer of the first one.
+   */
+  async printLines(lines: readonly string[]): Promise<number> {
+    const file = 'printed.txt'
+    fs.writeFileSync(path.join(this.world.repos.G, file), lines.map((line) => `${line}\n`).join(''))
+    const command = `cat ${file}`
+    await this.run(command)
+    return this.outputStart(command)
+  }
+
+  /**
+   * Index in the current terminal's buffer of the first line printed after
+   * the last occurrence of the given command line.
+   */
+  async outputStart(command: string): Promise<number> {
+    return this.page.evaluate((commandLine) => {
+      const buffer = window.hootTestHooks!.terminal!.buffer.active
+      for (let index = buffer.length - 1; index >= 0; index--) {
+        if (buffer.getLine(index)?.translateToString(true) === commandLine) return index + 1
+      }
+      return -1
+    }, `${this.world.prompt}${command}`.trimEnd())
+  }
+
+  /** WebGL canvases drawing the grid of the current terminal. */
+  async webglCanvases(): Promise<number> {
+    const current = await this.sessionId()
+    return (await this.webglCanvasesOf([current]))[current] ?? 0
+  }
+
+  /** WebGL canvases drawing the grid of each session's terminal, shown or not. */
+  async webglCanvasesOf(sessionIds: readonly string[]): Promise<Record<string, number>> {
+    return this.page.evaluate((ids) => {
+      const counts: Record<string, number> = {}
+      for (const id of ids) {
+        const element = window.hootTestHooks!.terminalOf(id)?.element
+        // The grid's other canvases have 2D contexts, and a canvas has a context of one kind only.
+        counts[id] = Array.from(element?.querySelectorAll('.xterm-screen canvas') ?? []).filter(
+          (canvas) => (canvas as HTMLCanvasElement).getContext('webgl2') !== null,
+        ).length
+      }
+      return counts
+    }, sessionIds)
+  }
+
+  /** Row elements made by the DOM renderer in the current terminal. */
+  domRendererRows() {
+    return this.page.locator('[data-testid="terminal"] .xterm-rows')
   }
 
   async viewportY(): Promise<number> {

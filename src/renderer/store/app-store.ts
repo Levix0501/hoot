@@ -9,6 +9,7 @@ import { api } from '../lib/api'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
   createSessionTerminal,
+  setTerminalColorScheme,
   setTerminalInputEnabled,
   systemColorScheme,
   type SessionTerminal,
@@ -240,6 +241,13 @@ export const useAppStore = create<AppState>()((set, get) => {
         }
       }
 
+      // Every terminal, shown or not, takes the colors of a new system appearance.
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        const scheme = systemColorScheme()
+        for (const sessionTerminal of terminals.values()) {
+          setTerminalColorScheme(sessionTerminal, scheme)
+        }
+      })
       api.onSessionData((id, data) => terminals.get(id)?.terminal.write(data))
       api.onProjectsChanged(applyProjects)
       api.onToolsChanged((tools) => set({ tools }))

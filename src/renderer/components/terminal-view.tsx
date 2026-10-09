@@ -1,9 +1,7 @@
-import { useTheme } from 'next-themes'
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { getSessionTerminal, useAppStore } from '../store/app-store'
-import { setTerminalColorScheme } from '../terminal/session-terminal'
-import { terminalTheme } from '../terminal/themes'
+import { drawWithWebgl } from '../terminal/webgl-renderer'
 
 /** Sessions whose process start has been requested, so it is requested only once. */
 const launchedSessions = new Set<string>()
@@ -14,16 +12,18 @@ const launchedSessions = new Set<string>()
  */
 export function TerminalView({ sessionId }: { sessionId: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const { resolvedTheme } = useTheme()
-  const scheme = resolvedTheme === 'dark' ? 'dark' : 'light'
 
-  useEffect(() => {
+  // A layout effect: the terminal is in place and fitted before the window
+  // paints, and the terminal shown before has given up its WebGL renderer
+  // before this one takes one.
+  useLayoutEffect(() => {
     const host = hostRef.current
     const sessionTerminal = getSessionTerminal(sessionId)
     if (!host || !sessionTerminal) return
     const { terminal, fit } = sessionTerminal
     if (!terminal.element) terminal.open(host)
     else if (terminal.element.parentElement !== host) host.append(terminal.element)
+    const renderer = drawWithWebgl(sessionTerminal)
     // Fill the area, which may have changed size while the session was not shown;
     // a new size reaches the session's process through the terminal's resize event.
     fit.fit()
@@ -39,18 +39,17 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     }
     terminal.focus()
 
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      renderer.dispose()
+    }
   }, [sessionId])
 
-  useEffect(() => {
-    const sessionTerminal = getSessionTerminal(sessionId)
-    if (sessionTerminal) setTerminalColorScheme(sessionTerminal, scheme)
-  }, [scheme, sessionId])
-
   return (
+    // The padding keeps the text clear of the session card's edges; the
+    // scrollbar takes the right side, so less is left there.
     <div
-      className="min-h-0 flex-1 p-2 pr-0"
-      style={{ backgroundColor: terminalTheme(scheme).background }}
+      className="min-h-0 flex-1 bg-background pt-3 pr-1.5 pb-3 pl-3.5"
       data-testid="terminal-area"
     >
       <div ref={hostRef} className="size-full" data-testid="terminal" />

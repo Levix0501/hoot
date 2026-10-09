@@ -205,14 +205,11 @@ test.describe('multiple sessions', () => {
       .poll(async () => {
         const geometry = await app.terminalGeometry()
         const size = await app.terminalSize()
-        const slackX = geometry.areaWidth - size.cols * geometry.cellWidth
+        const slackX = geometry.areaWidth - geometry.scrollbarWidth - size.cols * geometry.cellWidth
         const slackY = geometry.areaHeight - size.rows * geometry.cellHeight
-        // The grid fills the area: less than one cell is left, besides the scrollbar gutter.
+        // The grid fills the area: besides the scrollbar, less than one cell is left.
         return (
-          slackX >= 0 &&
-          slackX < geometry.cellWidth + 15 &&
-          slackY >= 0 &&
-          slackY < geometry.cellHeight
+          slackX >= 0 && slackX < geometry.cellWidth && slackY >= 0 && slackY < geometry.cellHeight
         )
       })
       .toBe(true)

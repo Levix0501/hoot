@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { World } from './world'
 
-function writeProgram(world: World, name: string, body: string): string {
+/** Writes a Node.js program with the given body and returns the path of its executable file. */
+export function writeProgram(world: World, name: string, body: string): string {
   const directory = path.join(world.root, 'programs')
   fs.mkdirSync(directory, { recursive: true })
   const file = path.join(directory, name)

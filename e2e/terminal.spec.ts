@@ -1,25 +1,39 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import Color from 'colorjs.io'
-import { lightTheme } from '../src/renderer/terminal/themes'
+import { LIGHT_ANSI_COLORS, lightTheme } from '../src/renderer/terminal/themes'
 import type { AppDriver } from './support/app'
+import { cellRect, rgb, sameColor, type PixelRect, type Rgb } from './support/pixels'
 import { childPids } from './support/processes'
 import { writeByteRecorder, writeMouseReporter } from './support/programs'
 import { readRecord, writeSubstitute } from './support/substitutes'
 import { expect, test } from './support/test'
 import type { World } from './support/world'
 
+/** Starts a Shell session in project G, adding the project first unless it is in the list. */
 async function startShell(app: AppDriver, world: World): Promise<void> {
-  await app.addProject(world.repos.G)
-  await expect(app.projectItems()).toHaveCount(1)
+  if ((await app.projectItems().count()) === 0) {
+    await app.addProject(world.repos.G)
+    await expect(app.projectItems()).toHaveCount(1)
+  }
   await app.startSession(world.repos.G, 'shell')
   await expect(app.session()).toHaveAttribute('data-status', 'running')
   await app.waitForPrompt()
 }
 
+/** Whether every pixel of the rectangle is `color`. */
+function onlyColor(
+  shot: { pixels(rect: PixelRect): Iterable<{ color: Rgb }> },
+  rect: PixelRect,
+  color: Rgb,
+): boolean {
+  for (const pixel of shot.pixels(rect)) if (!sameColor(pixel.color, color)) return false
+  return true
+}
+
 /**
- * Prints `text` with `command` and checks the cells it occupies and that, on
- * screen, each character starts at its cell and stays within its cells.
+ * Prints `text` with `command`, checks the cells it takes, and checks on
+ * screen that each character's glyph stays within its own cells. The glyph of
+ * a character is what printing it on its own, between spaces, draws.
  */
 async function expectTwoCellWideCharacters(
   app: AppDriver,
@@ -33,49 +47,30 @@ async function expectTwoCellWideCharacters(
   const cells = await Promise.all(expected.map((_, column) => app.cell(row, column)))
   expect(cells.map((cell) => [cell?.chars, cell?.width])).toEqual(expected)
 
-  const viewportRow = row - (await app.viewportY())
-  await expect.poll(async () => (await app.visibleRows())[viewportRow]).toBe(text)
-  const glyphs = await app.page.evaluate((index) => {
-    const rowElement = document.querySelectorAll('[data-testid="terminal"] .xterm-rows > div')[
-      index
-    ]!
-    const rowBox = rowElement.getBoundingClientRect()
-    const boxes: Array<{ text: string; left: number; right: number }> = []
-    const walker = document.createTreeWalker(rowElement, NodeFilter.SHOW_TEXT)
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      let offset = 0
-      for (const character of Array.from(node.textContent ?? '')) {
-        const range = document.createRange()
-        range.setStart(node, offset)
-        range.setEnd(node, offset + character.length)
-        const box = range.getBoundingClientRect()
-        boxes.push({
-          text: character,
-          left: box.left - rowBox.left,
-          right: box.right - rowBox.left,
-        })
-        offset += character.length
-      }
+  const background = rgb(lightTheme.background!)
+  for (const [chars, width] of expected) {
+    if (chars === '') continue
+    // As escapes: the shell may not know how wide newer characters are when they are typed.
+    const escaped = Array.from(chars, (char) => {
+      const codePoint = char.codePointAt(0)!
+      return codePoint < 0x80 ? char : `\\U${codePoint.toString(16).padStart(8, '0')}`
+    }).join('')
+    const alone = `printf '  ${escaped}  \\n'`
+    await app.run(alone)
+    const line = await app.outputStart(alone)
+    const shot = await app.screenshot()
+    const grid = await app.gridPixels()
+    const viewportRow = line - (await app.viewportY())
+    const own = cellRect(grid, viewportRow, 2)
+    // Its own cells have some of the glyph, the cells around them none.
+    expect(onlyColor(shot, { ...own, width: own.width * width }, background), chars).toBe(false)
+    for (const column of [1, 2 + width]) {
+      expect(
+        onlyColor(shot, cellRect(grid, viewportRow, column), background),
+        `${chars} next to ${column}`,
+      ).toBe(true)
     }
-    return boxes.filter((box) => box.text.trim() !== '')
-  }, viewportRow)
-  const { cellWidth } = await app.terminalGeometry()
-  const characters = expected.filter(([chars]) => chars !== '')
-  expect(glyphs.map((glyph) => glyph.text)).toEqual(characters.map(([chars]) => chars))
-  const startCells = expected.flatMap(([chars], column) => (chars === '' ? [] : [column]))
-  glyphs.forEach((glyph, index) => {
-    expect(Math.abs(glyph.left - startCells[index]! * cellWidth), glyph.text).toBeLessThan(1)
-    const next = glyphs[index + 1]
-    if (next)
-      expect(glyph.right, `${glyph.text} overlaps ${next.text}`).toBeLessThanOrEqual(
-        next.left + 0.5,
-      )
-  })
-}
-
-/** 8-bit sRGB channels of any CSS color. */
-function channels(color: string): number[] {
-  return new Color(color).to('srgb').coords.map((value) => Math.round((value ?? 0) * 255))
+  }
 }
 
 /**
@@ -91,25 +86,6 @@ function xterm256(index: number): string {
   const levels = [0, 95, 135, 175, 215, 255]
   return `rgb(${levels[Math.floor(cube / 36)]}, ${levels[Math.floor(cube / 6) % 6]}, ${levels[cube % 6]})`
 }
-
-const ANSI_THEME_KEYS = [
-  'black',
-  'red',
-  'green',
-  'yellow',
-  'blue',
-  'magenta',
-  'cyan',
-  'white',
-  'brightBlack',
-  'brightRed',
-  'brightGreen',
-  'brightYellow',
-  'brightBlue',
-  'brightMagenta',
-  'brightCyan',
-  'brightWhite',
-] as const
 
 test.describe('basic terminal interaction', () => {
   test('keyboard input and Ctrl+C reach the program', async ({ app, world }) => {
@@ -155,74 +131,78 @@ test.describe('basic terminal interaction', () => {
     await app.waitForPrompt()
   })
 
-  test('16-color, 256-color and 24-bit colors are shown as specified', async ({ app, world }) => {
+  test('16-color, 256-color and 24-bit colors are shown as specified', async ({
+    launch,
+    world,
+  }) => {
+    // The project is in the list from the start, so no message covers the terminal.
+    const app = await launch({ projects: [world.repos.G] })
     await app.setSystemAppearance('light')
     await startShell(app, world)
 
-    const samples: Array<{ text: string; sgr: string; color?: string; background?: string }> = []
-    ANSI_THEME_KEYS.forEach((key, index) => {
+    /** A color as a background block (four cells) and as a foreground full block. */
+    const samples: Array<{ name: string; foreground: string; background: string; color: string }> =
+      []
+    LIGHT_ANSI_COLORS.forEach((color, index) => {
       const foreground = index < 8 ? 30 + index : 90 + index - 8
       const background = index < 8 ? 40 + index : 100 + index - 8
-      samples.push({ text: `f${index}`, sgr: String(foreground), color: lightTheme[key] })
-      samples.push({ text: `b${index}`, sgr: String(background), background: lightTheme[key] })
+      samples.push({
+        name: `color ${index}`,
+        foreground: `${foreground}`,
+        background: `${background}`,
+        color,
+      })
     })
     for (const index of [16, 21, 46, 88, 124, 160, 196, 208, 226, 231, 232, 240, 244, 250, 255]) {
-      samples.push({ text: `x${index}`, sgr: `38;5;${index}`, color: xterm256(index) })
-      samples.push({ text: `y${index}`, sgr: `48;5;${index}`, background: xterm256(index) })
+      samples.push({
+        name: `color ${index} of 256`,
+        foreground: `38;5;${index}`,
+        background: `48;5;${index}`,
+        color: xterm256(index),
+      })
     }
-    samples.push({ text: 't1', sgr: '38;2;10;200;30', color: 'rgb(10, 200, 30)' })
-    samples.push({ text: 't2', sgr: '48;2;250;5;6', background: 'rgb(250, 5, 6)' })
-    samples.push({
-      text: 't3',
-      sgr: '38;2;123;45;67;48;2;1;2;3',
-      color: 'rgb(123, 45, 67)',
-      background: 'rgb(1, 2, 3)',
-    })
+    for (const [red, green, blue] of [
+      [10, 200, 30],
+      [250, 5, 6],
+      [1, 2, 3],
+    ]) {
+      samples.push({
+        name: `24-bit ${red},${green},${blue}`,
+        foreground: `38;2;${red};${green};${blue}`,
+        background: `48;2;${red};${green};${blue}`,
+        color: `rgb(${red}, ${green}, ${blue})`,
+      })
+    }
 
-    // Eight samples per line keeps every line short enough not to wrap.
+    // Eight samples of six cells per line keep every line short enough not to wrap.
+    const perLine = 8
     const lines: string[] = []
-    for (let index = 0; index < samples.length; index += 8) {
+    for (let index = 0; index < samples.length; index += perLine) {
       lines.push(
         samples
-          .slice(index, index + 8)
-          .map((sample) => `\x1b[${sample.sgr}m${sample.text}\x1b[0m`)
-          .join(' '),
+          .slice(index, index + perLine)
+          .map(
+            (sample) => `\x1b[${sample.background}m    \x1b[0m \x1b[${sample.foreground}m█\x1b[0m`,
+          )
+          .join(''),
       )
     }
-    const file = path.join(world.root, 'colors.txt')
-    fs.writeFileSync(file, `${lines.join('\n')}\n`)
-    await app.run(`cat ${file}`)
-
-    const readRendered = () =>
-      app.page.evaluate(() => {
-        const result: Record<string, { color: string; background: string }> = {}
-        for (const span of Array.from(document.querySelectorAll('.xterm-rows span'))) {
-          const text = span.textContent ?? ''
-          const style = getComputedStyle(span)
-          result[text] = { color: style.color, background: style.backgroundColor }
-        }
-        return result
-      })
-    // The screen is redrawn on the next animation frame after the output arrives.
-    await expect
-      .poll(async () => {
-        const rendered = await readRendered()
-        return samples.filter((sample) => !rendered[sample.text]).map((sample) => sample.text)
-      })
-      .toEqual([])
-    const rendered = await readRendered()
-    for (const sample of samples) {
-      const shown = rendered[sample.text]
-      expect(shown, sample.text).toBeDefined()
-      if (sample.color) {
-        expect(channels(shown!.color), `${sample.text} foreground`).toEqual(channels(sample.color))
-      }
-      if (sample.background) {
-        expect(channels(shown!.background), `${sample.text} background`).toEqual(
-          channels(sample.background),
-        )
-      }
-    }
+    const first = await app.printLines(lines)
+    const shot = await app.screenshot()
+    const grid = await app.gridPixels()
+    const firstRow = first - (await app.viewportY())
+    samples.forEach((sample, index) => {
+      const row = firstRow + Math.floor(index / perLine)
+      const column = (index % perLine) * 6
+      const block = cellRect(grid, row, column)
+      expect(
+        shot.middle({ ...block, width: block.width * 4 }),
+        `${sample.name} background`,
+      ).toEqual(rgb(sample.color))
+      expect(shot.middle(cellRect(grid, row, column + 5)), `${sample.name} foreground`).toEqual(
+        rgb(sample.color),
+      )
+    })
   })
 
   test('resizing the window resizes the terminal grid and the program sees the new size', async ({
@@ -239,12 +219,13 @@ test.describe('basic terminal interaction', () => {
         .poll(async () => {
           const geometry = await app.terminalGeometry()
           const size = await app.terminalSize()
-          const slackX = geometry.areaWidth - size.cols * geometry.cellWidth
+          const slackX =
+            geometry.areaWidth - geometry.scrollbarWidth - size.cols * geometry.cellWidth
           const slackY = geometry.areaHeight - size.rows * geometry.cellHeight
-          // The grid fills the area: less than one cell is left, besides the scrollbar gutter.
+          // The grid fills the area: besides the scrollbar, less than one cell is left.
           return (
             slackX >= 0 &&
-            slackX < geometry.cellWidth + 15 &&
+            slackX < geometry.cellWidth &&
             slackY >= 0 &&
             slackY < geometry.cellHeight
           )
@@ -339,13 +320,19 @@ test.describe('basic terminal interaction', () => {
     await expect.poll(() => app.viewportY()).toBeLessThan(bottom)
 
     // Drag the scrollbar to the top: the oldest kept lines come into view.
-    const slider = app.page.locator('[data-testid="terminal"] .scrollbar.vertical .slider')
+    const slider = app.page.locator(
+      '[data-testid="terminal"] .xterm-scrollbar.xterm-vertical .xterm-slider',
+    )
     const thumb = (await slider.boundingBox())!
     await app.page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2)
     await app.page.mouse.down()
     await app.page.mouse.move(thumb.x + thumb.width / 2, screen.y - 100, { steps: 10 })
     await app.page.mouse.up()
     await expect.poll(() => app.viewportY()).toBe(0)
+    const oldest = await app.page.evaluate(() =>
+      window.hootTestHooks!.terminal!.buffer.active.getLine(0)!.translateToString(true),
+    )
+    expect((await app.visibleRows())[0]).toBe(oldest)
 
     const lineVisible = async () => (await app.visibleRows()).includes('2001')
     for (let step = 0; step < 200 && !(await lineVisible()); step++) {
@@ -356,9 +343,12 @@ test.describe('basic terminal interaction', () => {
 })
 
 test('IME composition shows at the cursor, is committed once, and wide characters take two cells', async ({
-  app,
+  launch,
   world,
 }) => {
+  // The device pixel ratio of the Retina displays of Macs.
+  const app = await launch({ deviceScaleFactor: 2, projects: [world.repos.G] })
+  await app.setSystemAppearance('light')
   await startShell(app, world)
   const recorder = writeByteRecorder(world)
   await app.run(recorder.command, { waitForPrompt: false })
@@ -373,7 +363,8 @@ test('IME composition shows at the cursor, is committed once, and wide character
   })
   const composition = app.page.locator('[data-testid="terminal"] .composition-view')
   await expect(composition).toHaveClass(/active/)
-  await expect(composition).toHaveText('zhongwen')
+  // xterm.js marks the text as left-to-right, with invisible marks around it.
+  await expect(composition).toHaveText(/^\u200E?zhongwen\u200E?$/)
   const placement = await app.page.evaluate(() => {
     const terminal = window.hootTestHooks!.terminal!
     const screen = document.querySelector('[data-testid="terminal"] .xterm-screen')!

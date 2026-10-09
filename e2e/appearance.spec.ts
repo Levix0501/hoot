@@ -24,11 +24,24 @@ async function luminances(app: AppDriver): Promise<Luminances> {
   const sidebar = (await app.page.locator('[data-slot="sidebar"]').boundingBox())!
   const header = (await app.page.locator('[data-testid="session"] header').boundingBox())!
   const terminal = (await app.page.getByTestId('terminal').boundingBox())!
-  const textColors = await app.page.evaluate(() => ({
-    interface: getComputedStyle(document.body).color,
-    terminal: getComputedStyle(document.querySelector('[data-testid="terminal"] .xterm-rows')!)
-      .color,
-  }))
+  const interfaceText = await app.page.evaluate(() => getComputedStyle(document.body).color)
+  // The prompt's first letter: its pixel that differs most from the terminal's background.
+  const prompt = await app.cellBox(0, 0)
+  const background = new Color(
+    await shownColor(app, terminal.x + terminal.width - 40, terminal.y + terminal.height - 8),
+  )
+  const letter = PNG.sync.read(await app.page.screenshot({ clip: prompt }))
+  let terminalText = background
+  for (let offset = 0; offset < letter.data.length; offset += 4) {
+    const [red, green, blue] = letter.data.subarray(offset, offset + 3)
+    const color = new Color(`rgb(${red}, ${green}, ${blue})`)
+    if (
+      Math.abs(color.luminance - background.luminance) >
+      Math.abs(terminalText.luminance - background.luminance)
+    ) {
+      terminalText = color
+    }
+  }
   const luminance = (color: string) => new Color(color).luminance
   return {
     // Empty parts of each area: below the project list, the header's top edge,
@@ -37,11 +50,9 @@ async function luminances(app: AppDriver): Promise<Luminances> {
       await shownColor(app, sidebar.x + sidebar.width / 2, sidebar.y + sidebar.height * 0.6),
     ),
     mainBackground: luminance(await shownColor(app, header.x + header.width / 2, header.y + 3)),
-    terminalBackground: luminance(
-      await shownColor(app, terminal.x + terminal.width - 40, terminal.y + terminal.height - 8),
-    ),
-    interfaceText: luminance(textColors.interface),
-    terminalText: luminance(textColors.terminal),
+    terminalBackground: background.luminance,
+    interfaceText: luminance(interfaceText),
+    terminalText: terminalText.luminance,
   }
 }
 

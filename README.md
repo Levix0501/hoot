@@ -42,7 +42,11 @@ Hoot supports macOS only for now.
   window's close button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
-  current Unicode widths.
+  current Unicode widths. The shown terminal is drawn with WebGL, so block elements and box drawing
+  characters (such as Claude Code's mascot and the frames tools draw) fill their cells without
+  gaps; without WebGL it falls back to the DOM renderer. Text is set in Geist Mono at 14 pixels,
+  which comes with Hoot, in Ghostty's default colors in the dark appearance and Claude Light's in
+  the light one.
 - **Quitting**: closing the window or quitting while sessions run asks first and says how many
   run; confirming ends them. A project cannot be removed from the list while one of its sessions
   runs; removing it closes its other sessions.

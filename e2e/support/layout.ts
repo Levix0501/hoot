@@ -206,7 +206,9 @@ export async function blankPointsOutsideDragArea(app: AppDriver): Promise<string
       return false
     }
     const outside: string[] = []
-    for (const y of [0.5, 11, 22, 33, rowHeight - 0.5]) {
+    // The last line is a physical pixel inside the row's bottom edge: any
+    // lower, hit testing already finds the element below the row.
+    for (const y of [0.5, 11, 22, 33, rowHeight - margin]) {
       // A quarter of a pixel into each column: elementFromPoint finds nothing
       // in the last half pixel of the window.
       for (let x = 0.25; x < window.innerWidth; x++) {

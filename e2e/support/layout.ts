@@ -172,6 +172,58 @@ export async function inDragArea(app: AppDriver, x: number, y: number): Promise<
   )
 }
 
+/**
+ * The points of the window's top row that show no text, icon or button but
+ * are not in the drag area, checked in every column of CSS pixels along lines
+ * across the row. A point shows text when it is in the box of an element with
+ * text of its own; points within a physical pixel of such a box, or of an
+ * icon or a button, are left out, since hit testing snaps boxes to physical
+ * pixels.
+ */
+export async function blankPointsOutsideDragArea(app: AppDriver): Promise<string[]> {
+  return app.page.evaluate((rowHeight) => {
+    const margin = 1 / window.devicePixelRatio
+    const shown: DOMRect[] = []
+    for (const element of Array.from(document.body.querySelectorAll('*'))) {
+      const ownText = Array.from(element.childNodes).some(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+      )
+      if (!ownText && element.tagName !== 'BUTTON' && element.tagName.toLowerCase() !== 'svg') {
+        continue
+      }
+      const rect = element.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0 && rect.top < rowHeight) shown.push(rect)
+    }
+    const inDrag = (x: number, y: number) => {
+      for (
+        let element = document.elementFromPoint(x, y);
+        element;
+        element = element.parentElement
+      ) {
+        const region = getComputedStyle(element).getPropertyValue('app-region')
+        if (region === 'drag' || region === 'no-drag') return region === 'drag'
+      }
+      return false
+    }
+    const outside: string[] = []
+    for (const y of [0.5, 11, 22, 33, rowHeight - 0.5]) {
+      // A quarter of a pixel into each column: elementFromPoint finds nothing
+      // in the last half pixel of the window.
+      for (let x = 0.25; x < window.innerWidth; x++) {
+        const onSomething = shown.some(
+          (rect) =>
+            x > rect.left - margin &&
+            x < rect.right + margin &&
+            y > rect.top - margin &&
+            y < rect.bottom + margin,
+        )
+        if (!onSomething && !inDrag(x, y)) outside.push(`${x},${y}`)
+      }
+    }
+    return outside
+  }, TOP_ROW_HEIGHT)
+}
+
 /** The boxes of the elements whose computed `app-region` is `drag`. */
 export async function dragElementBoxes(
   app: AppDriver,

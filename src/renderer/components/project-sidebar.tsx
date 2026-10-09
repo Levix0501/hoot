@@ -48,9 +48,10 @@ export function ProjectSidebar() {
     <Sidebar aria-label="Projects">
       {/*
         The sidebar's part of the window's top row, which drags the window.
-        The traffic lights and the navigation sit on it.
+        The traffic lights and the navigation sit on it. It reaches over the
+        sidebar's right border, so that the line drags the window too.
       */}
-      <SidebarHeader className="h-11 shrink-0 [app-region:drag]" />
+      <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>

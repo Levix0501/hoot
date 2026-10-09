@@ -1,5 +1,6 @@
 import type { AppDriver } from './support/app'
 import {
+  blankPointsOutsideDragArea,
   boxOf,
   dragElementBoxes,
   drawnElements,
@@ -165,6 +166,9 @@ test('the blank parts of the top row drag the window; its buttons and names do n
     for (const point of blank) {
       expect(await inDragArea(app, point.x, point.y), `${state} ${point.x},${point.y}`).toBe(true)
     }
+    // And every other blank part of the row, with the pointer off its buttons.
+    await app.page.mouse.move(600, 760)
+    expect(await blankPointsOutsideDragArea(app), state).toEqual([])
     for (const [name, box] of [
       ['toggle', toggle!],
       ['back', back!],
@@ -211,6 +215,8 @@ test('the blank parts of the top row drag the window; its buttons and names do n
     ]) {
       expect(await inDragArea(app, point.x, point.y), `${state} ${point.x},${point.y}`).toBe(true)
     }
+    await app.page.mouse.move(600, 760)
+    expect(await blankPointsOutsideDragArea(app), `no session, ${state}`).toEqual([])
     expect(await inDragArea(app, 700, 60)).toBe(false)
   }
 })

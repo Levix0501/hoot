@@ -215,7 +215,7 @@ test.describe('worktrees in the sidebar', () => {
     await expect(worktreeItem(app, removed).getByTestId('worktree-missing')).toBeVisible()
   })
 
-  test('a repository made in a project while Hoot runs is followed as a nested repository too', async ({
+  test('repositories made in or moved into a project while Hoot runs are followed as nested repositories too', async ({
     launch,
     world,
   }) => {
@@ -237,6 +237,16 @@ test.describe('worktrees in the sidebar', () => {
 
     git(fresh, 'worktree', 'remove', path.join(ext, 'fresh'))
     await expect.poll(async () => (await hoverWorktree(app, ext)).members, within).toEqual([])
+
+    // A folder that holds a repository below its top, moved into G, then the repository's worktree.
+    const holder = path.join(path.dirname(G), 'holder')
+    initRepository(path.join(holder, 'lib'))
+    fs.renameSync(holder, path.join(G, 'holder'))
+    const lib = path.join(G, 'holder', 'lib')
+    git(lib, 'worktree', 'add', '-q', '-b', 'ext', path.join(ext, 'holder', 'lib'))
+    await expect
+      .poll(async () => (await hoverWorktree(app, ext)).members, within)
+      .toEqual(['holder/lib'])
   })
 
   test('sessions are in sidebar order, which the shortcuts follow', async ({ launch, world }) => {

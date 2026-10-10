@@ -418,6 +418,36 @@ describe('WorktreeService', () => {
     await expect.poll(members, within).toEqual([])
   })
 
+  it('follows the repositories in a folder moved into the project, or out of a dependency folder', async () => {
+    makeRepository(path.join(project, 'vendor', 'dep'))
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/u',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const members = async () =>
+      (await listed()).find((worktree) => worktree.path === R)?.innerMembers
+    const within = { timeout: 2_000, interval: 50 }
+
+    // Moving a folder in reports nothing but the folder, which holds the repository below its top.
+    const holder = path.join(root, 'holder')
+    makeRepository(path.join(holder, 'lib'))
+    fs.renameSync(holder, path.join(project, 'holder'))
+    const lib = path.join(project, 'holder', 'lib')
+    git(lib, 'worktree', 'add', '-q', '-b', 'feat/u', path.join(R, 'holder', 'lib'))
+    await expect.poll(members, within).toEqual(['holder/lib'])
+
+    // Out of a dependency folder, a repository is an inner repository.
+    fs.renameSync(path.join(project, 'vendor'), path.join(project, 'third-party'))
+    const dep = path.join(project, 'third-party', 'dep')
+    git(dep, 'worktree', 'add', '-q', '-b', 'feat/u', path.join(R, 'third-party', 'dep'))
+    await expect.poll(members, within).toEqual(['holder/lib', 'third-party/dep'])
+  })
+
   it('removes the registrations of a missing worktree and its inner members, keeping branches', async () => {
     const gone = path.join(root, 'gone')
     git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)

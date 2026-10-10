@@ -29,6 +29,7 @@ import {
   findInnerRepositories,
   git,
   hasBranch,
+  holdsRepository,
   locateRepository,
   readBranches,
   submodulesAt,
@@ -103,8 +104,8 @@ export function isRegistrationChange(filename: string): boolean {
  * a `.git` entry made or removed, or the folder of a known inner repository
  * (or a folder holding one) moved or removed. Changes inside Git directories
  * and dependency directories cannot, and neither can changed file contents.
- * `null` when it depends on whether the path holds a repository now, as for
- * a folder moved in.
+ * `null` when it depends on whether the path is or holds a repository now, as
+ * for a folder made or moved in.
  */
 export function affectsInnerRepositories(
   event: string,
@@ -834,12 +835,13 @@ export class WorktreeService extends EventEmitter<{
         const innerPaths = (state.inner ?? []).map((repository) => repository.relativePath)
         const affects = affectsInnerRepositories(event, filename, innerPaths)
         if (affects === true) changed()
-        // A folder moved in may be a repository.
-        else if (affects === null) {
-          void fs.promises.lstat(path.join(state.root, filename, '.git')).then(
-            () => changed(),
-            () => undefined,
-          )
+        // A folder made or moved in may be a repository or hold some at any
+        // depth, which a move reports with nothing but the folder. A search
+        // that is already due finds them anyway.
+        else if (affects === null && state.discoveryTimer === null) {
+          void holdsRepository(path.join(state.root, filename)).then((holds) => {
+            if (holds) changed()
+          })
         }
       })
     } catch (error) {

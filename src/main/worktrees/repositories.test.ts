@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   DEPENDENCY_DIRECTORIES,
   findInnerRepositories,
+  holdsRepository,
   readBranches,
   submodulesAt,
   type GitContext,
@@ -85,6 +86,23 @@ describe('findInnerRepositories', () => {
 
   it('finds nothing in a repository without other repositories', async () => {
     expect(await findInnerRepositories(context, path.join(root, 'module-source'))).toEqual([])
+  })
+})
+
+describe('holdsRepository', () => {
+  it('tells the folders that are or hold repositories at any depth, as they are walked', async () => {
+    expect(await holdsRepository(path.join(project, 'inner'))).toBe(true)
+    expect(await holdsRepository(path.join(project, 'build'))).toBe(true)
+    expect(await holdsRepository(path.join(project, 'src'))).toBe(true)
+    // Not repositories in dependency directories or reached through a link.
+    expect(await holdsRepository(path.join(project, 'deps'))).toBe(false)
+    expect(await holdsRepository(path.join(project, 'link'))).toBe(false)
+    const plain = path.join(root, 'plain')
+    fs.mkdirSync(path.join(plain, 'a', 'b'), { recursive: true })
+    fs.writeFileSync(path.join(plain, 'a', 'file.txt'), 'plain\n')
+    expect(await holdsRepository(plain)).toBe(false)
+    expect(await holdsRepository(path.join(plain, 'a', 'file.txt'))).toBe(false)
+    expect(await holdsRepository(path.join(root, 'nothing-here'))).toBe(false)
   })
 })
 

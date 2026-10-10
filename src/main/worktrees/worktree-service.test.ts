@@ -596,6 +596,56 @@ describe('WorktreeService', () => {
     ])
   })
 
+  it('lists and deletes the worktrees made before the worktree directory moved behind a link', async () => {
+    await start()
+    const before = await service.create({
+      projectRoot: project,
+      branch: 'feat/b',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!before.ok) throw new Error(before.message)
+    const R = before.path
+    service.dispose()
+
+    // ~/.hoot moves to another disk, and a link to it takes its place: Git
+    // still lists R by the path it was made with, through the link.
+    const disk = path.join(root, 'disk')
+    fs.mkdirSync(disk)
+    fs.renameSync(path.join(home, '.hoot'), path.join(disk, '.hoot'))
+    fs.symlinkSync(path.join(disk, '.hoot'), path.join(home, '.hoot'))
+    expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
+    service = new WorktreeService({
+      layout: new WorktreeLayout(W, home),
+      gitContext: async () => context,
+    })
+    await start()
+    const after = await service.create({
+      projectRoot: project,
+      branch: 'feat/a',
+      base: 'main',
+      nested: [],
+    })
+    if (!after.ok) throw new Error(after.message)
+    const folder = path.join(disk, '.hoot', 'worktrees', 'project')
+    expect(after.path).toBe(path.join(folder, 'feat-a'))
+    expect((await listed()).map((worktree) => [worktree.path, worktree.innerMembers])).toEqual([
+      [after.path, []],
+      [R, ['inner']],
+    ])
+    expect(await service.currentWorktree(project, R)).toMatchObject({ path: R, missing: false })
+
+    // A worktree an agent makes inside R now is listed by its real path.
+    const agent = path.join(folder, 'feat-b', '.claude', 'worktrees', 'agent')
+    git(R, 'worktree', 'add', '-q', '-b', 'agent', path.join(R, '.claude', 'worktrees', 'agent'))
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toContain(agent)
+    expect(await service.delete(project, R, true)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(linkedWorktrees(project)).toEqual([{ path: after.path, prunable: false }])
+    expect(linkedWorktrees(inner)).toEqual([])
+    expect(branches(project)).toEqual(expect.arrayContaining(['feat/b', 'agent']))
+  })
+
   it('leaves the registration of a missing worktree alone when creating at its path fails', async () => {
     await start()
     const first = await service.create({

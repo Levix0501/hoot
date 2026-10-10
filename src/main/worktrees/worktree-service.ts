@@ -554,12 +554,19 @@ export class WorktreeService extends EventEmitter<{
   private async readEntries(context: GitContext, state: ProjectState): Promise<WorktreeEntry[]> {
     const result = await git(context, ['-C', state.root, 'worktree', 'list', '--porcelain', '-z'])
     if (result.code !== 0) return []
-    // Git lists real paths. The folder may be gone, with its worktrees missing.
+    // Git lists a worktree by the real path it had when it was made, which a
+    // symbolic link added on the way since (to move ~/.hoot to another disk,
+    // say) no longer is: folders are compared by their real paths now. The
+    // folder may be gone, with its worktrees missing.
     const { folder } = await this.options.layout.projectFolder(state.root, { create: false })
     const realFolder = await realPath(folder)
-    return parseWorktreeList(result.stdout)
+    const entries = parseWorktreeList(result.stdout)
       .slice(1)
-      .filter((entry) => !entry.bare && path.dirname(entry.path) === realFolder)
+      .filter((entry) => !entry.bare)
+    const inFolder = await Promise.all(
+      entries.map(async (entry) => (await realPath(path.dirname(entry.path))) === realFolder),
+    )
+    return entries.filter((_entry, index) => inFolder[index])
   }
 
   /** The paths of a repository's linked worktrees. */
@@ -583,11 +590,14 @@ export class WorktreeService extends EventEmitter<{
     root: string,
   ): Promise<void> {
     const repositories = [state.root, ...(state.inner ?? []).map((inner) => inner.path)]
+    // Made at different times, the root and a worktree inside it may be
+    // registered by paths that differ by a symbolic link added since.
+    const realRoot = await realPath(root)
     for (const repository of repositories) {
       const result = await git(context, ['-C', repository, 'worktree', 'list', '--porcelain', '-z'])
       if (result.code !== 0) continue
       for (const entry of parseWorktreeList(result.stdout).slice(1)) {
-        if (!entry.prunable || !isWithin(entry.path, root)) continue
+        if (!entry.prunable || !isWithin(await realPath(entry.path), realRoot)) continue
         const removed = await git(context, ['-C', repository, 'worktree', 'remove', entry.path])
         if (removed.code !== 0) {
           console.error('Could not clear the registration of', entry.path, gitErrorMessage(removed))

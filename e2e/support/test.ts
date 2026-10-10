@@ -4,10 +4,13 @@ import { createWorld, type World } from './world'
 
 export { expect } from '@playwright/test'
 
+/** Launches Hoot in the test's world. */
+export type Launch = (options?: LaunchOptions) => Promise<AppDriver>
+
 interface Fixtures {
   world: World
   /** Launches Hoot in the test's world; every launched instance is closed after the test. */
-  launch: (options?: LaunchOptions) => Promise<AppDriver>
+  launch: Launch
   /** A Hoot instance launched before the test starts. */
   app: AppDriver
 }

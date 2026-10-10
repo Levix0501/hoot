@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import fs, { type FSWatcher } from 'node:fs'
+import fs from 'node:fs'
 import path from 'node:path'
 import {
   compareWorktrees,
@@ -25,12 +25,9 @@ import {
 import { InspectionError, inspectMembers, type MemberToCheck } from './inspection'
 import type { WorktreeLayout } from './layout'
 import {
-  DEPENDENCY_DIRECTORIES,
   findInnerRepositories,
   git,
   hasBranch,
-  holdsRepository,
-  locateRepository,
   readBranches,
   submodulesAt,
   type GitContext,
@@ -39,12 +36,6 @@ import {
 
 /** Creating or removing a worktree runs hooks and touches many files: no short limit. */
 const WORKTREE_COMMAND_TIMEOUT = 10 * 60_000
-/** Changes to the registrations are read this long after the last one. */
-const REFRESH_DELAY_MS = 100
-/** Inner repositories are looked for again this long after the last change that can make or remove one. */
-const DISCOVERY_DELAY_MS = 200
-/** Window focus looks for new inner repositories at most this often. */
-const REDISCOVERY_INTERVAL_MS = 30_000
 
 export interface WorktreeServiceOptions {
   layout: WorktreeLayout
@@ -55,21 +46,13 @@ export interface WorktreeServiceOptions {
 interface ProjectState {
   root: string
   name: string
-  /** The Git directory shared by the project repository's worktrees. */
-  commonDir: string | null
-  /** The inner repositories, once they have been looked for. */
+  /** The inner repositories found by the last search, once there was one. */
   inner: InnerRepository[] | null
-  discoveredAt: number
   discovering: Promise<void> | null
-  /** Watches the main worktree for repositories made, moved or removed in it. */
-  treeWatcher: FSWatcher | null
-  discoveryTimer: NodeJS.Timeout | null
+  /** The worktrees as they were last read. */
   worktrees: WorktreeInfo[]
   refreshing: Promise<void> | null
   refreshAgain: boolean
-  timer: NodeJS.Timeout | null
-  /** The Git directories watched for this project. */
-  watched: Set<string>
   /** Settles once the worktrees have been read for the first time. */
   ready: Promise<void>
   removed: boolean
@@ -86,41 +69,6 @@ interface Member {
   label: string
 }
 
-/**
- * Whether a file name reported by a watch on a Git directory belongs to the
- * worktree registrations: a worktree's administrative directory, the file
- * that says where it is, its lock, or its HEAD.
- */
-export function isRegistrationChange(filename: string): boolean {
-  const parts = filename.split(path.sep)
-  if (parts[0] !== 'worktrees') return false
-  if (parts.length <= 2) return true
-  return parts.length === 3 && ['gitdir', 'locked', 'HEAD'].includes(parts[2]!)
-}
-
-/**
- * Whether a change that a watch on a project's main worktree reports, by its
- * path relative to the main worktree, can make or remove an inner repository:
- * a `.git` entry made or removed, or the folder of a known inner repository
- * (or a folder holding one) moved or removed. Changes inside Git directories
- * and dependency directories cannot, and neither can changed file contents.
- * `null` when it depends on whether the path is or holds a repository now, as
- * for a folder made or moved in.
- */
-export function affectsInnerRepositories(
-  event: string,
-  filename: string,
-  innerPaths: readonly string[],
-): boolean | null {
-  const parts = filename.split(path.sep)
-  if (parts.some((part) => DEPENDENCY_DIRECTORIES.has(part))) return false
-  const gitAt = parts.indexOf('.git')
-  if (gitAt !== -1) return gitAt === parts.length - 1
-  if (event !== 'rename') return false
-  if (innerPaths.some((innerPath) => isWithin(innerPath, filename))) return true
-  return null
-}
-
 /** Deeper relative paths first, as worktree members are deleted. */
 export function deepestFirst<T extends { relativePath: string }>(members: readonly T[]): T[] {
   const depth = (member: T) => member.relativePath.split('/').length
@@ -131,24 +79,36 @@ async function isDirectory(directory: string): Promise<boolean> {
   return (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ?? false
 }
 
+/** The real path of a file that may not exist: its nearest existing ancestor's, with the rest. */
+async function realPath(file: string): Promise<string> {
+  try {
+    return await fs.promises.realpath(file)
+  } catch {
+    const parent = path.dirname(file)
+    return parent === file ? file : path.join(await realPath(parent), path.basename(file))
+  }
+}
+
 function sameWorktrees(a: readonly WorktreeInfo[], b: readonly WorktreeInfo[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /**
- * Lists, watches, creates and deletes the worktrees of the projects in the
- * list. A project's worktrees are read from its repository's registrations,
- * so that worktrees made outside Hoot are listed too, and are read again
- * whenever the registrations of the project repository or of its inner
- * repositories change. Inner repositories are looked for again whenever a
- * repository is made, moved in or removed in the project's main worktree.
- * `changed` reports a project's worktrees whenever they change.
+ * Lists, creates and deletes the worktrees of the projects in the list. A
+ * project's worktrees are the linked worktrees of its repository directly in
+ * its project folder, where Hoot creates them; they are told apart by where
+ * they are, so that the worktrees made by any Hoot are listed. Nothing is
+ * watched: the worktrees are read from Git when a project is added, when
+ * `refreshAll` is called (as the window gets the focus), after Hoot creates
+ * or deletes one, and before a session starts in one or one is deleted or
+ * removed. Inner repositories are looked for when a project is added, when
+ * the new worktree dialog opens, and before a worktree is checked, deleted
+ * or removed. `changed` reports a project's worktrees whenever they change.
  */
 export class WorktreeService extends EventEmitter<{
   changed: [projectRoot: string, worktrees: WorktreeInfo[]]
 }> {
   private readonly projects = new Map<string, ProjectState>()
-  private readonly watchers = new Map<string, { watcher: FSWatcher; projects: Set<string> }>()
 
   constructor(private readonly options: WorktreeServiceOptions) {
     super()
@@ -166,31 +126,16 @@ export class WorktreeService extends EventEmitter<{
     const state: ProjectState = {
       root,
       name: path.basename(root) || root,
-      commonDir: null,
       inner: null,
-      discoveredAt: 0,
       discovering: null,
-      treeWatcher: null,
-      discoveryTimer: null,
       worktrees: [],
       refreshing: null,
       refreshAgain: false,
-      timer: null,
-      watched: new Set(),
       ready: Promise.resolve(),
       removed: false,
     }
     this.projects.set(root, state)
-    state.ready = (async () => {
-      const context = await this.options.gitContext()
-      state.commonDir = (await locateRepository(context, root))?.commonDir ?? null
-      if (state.removed) return
-      if (state.commonDir) {
-        this.watch(state, state.commonDir)
-        this.watchTree(state)
-      }
-      await this.refresh(state)
-    })().catch((error: unknown) => console.error('Could not list the worktrees of', root, error))
+    state.ready = this.refresh(state)
     void state.ready.then(() => this.discover(state))
   }
 
@@ -198,14 +143,10 @@ export class WorktreeService extends EventEmitter<{
     const state = this.projects.get(root)
     if (!state) return
     state.removed = true
-    if (state.timer) clearTimeout(state.timer)
-    if (state.discoveryTimer) clearTimeout(state.discoveryTimer)
-    state.treeWatcher?.close()
-    this.unwatch(state, new Set())
     this.projects.delete(root)
   }
 
-  /** Stops every watch. */
+  /** Forgets every project, as Hoot quits. */
   dispose(): void {
     // Deleting the entry being visited does not disturb the iteration.
     for (const root of this.projects.keys()) this.removeProject(root)
@@ -219,18 +160,31 @@ export class WorktreeService extends EventEmitter<{
   }
 
   /**
-   * Reads every project's worktrees again, as when the window gets the focus:
-   * a worktree whose directory was deleted is then shown as missing. Inner
-   * repositories are looked for again when they have not been for a while.
+   * Reads every project's worktrees again, as when the window gets the focus,
+   * with the inner repositories of the last search: what changed outside
+   * Hoot, such as a worktree whose directory was deleted, shows then.
    */
   refreshAll(): void {
-    for (const state of this.projects.values()) {
-      if (Date.now() - state.discoveredAt >= REDISCOVERY_INTERVAL_MS) void this.discover(state)
-      else void this.refresh(state)
-    }
+    for (const state of this.projects.values()) void this.refresh(state)
   }
 
-  /** Whether a directory is the root of one of the project's worktrees that exists. */
+  /**
+   * Reads the project's worktrees again, which `changed` then reports, and
+   * returns the worktree at a root as it is now, or `null` when there is no
+   * such worktree: before a session starts in it, or before it is deleted or
+   * removed, which may no longer be possible.
+   */
+  async currentWorktree(projectRoot: string, worktreePath: string): Promise<WorktreeInfo | null> {
+    const state = this.projects.get(projectRoot)
+    if (!state) return null
+    await this.refresh(state)
+    return state.worktrees.find((worktree) => worktree.path === worktreePath) ?? null
+  }
+
+  /**
+   * Whether a directory is the root of one of the project's worktrees that
+   * exists, as Git lists them now, without showing what changed.
+   */
   async isWorktreeOf(projectRoot: string, directory: string): Promise<boolean> {
     const state = this.projects.get(projectRoot)
     if (!state) return false
@@ -551,27 +505,24 @@ export class WorktreeService extends EventEmitter<{
    * Removes the registrations of a worktree whose root is missing, in the
    * project repository and the inner repositories, keeping every branch.
    * A lock does not stop it: the user asks for the registrations to go.
+   * The worktrees are read again first, and nothing is removed unless the
+   * worktree is still there and still missing.
    */
   async removeMissing(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state) return { ok: false, message: 'The project is not in the list.' }
-    // Its inner members are found as when checking a worktree.
-    await this.discover(state)
-    const context = await this.options.gitContext()
-    const entry = (await this.readEntries(context, state)).find(
-      (candidate) => candidate.path === worktreePath,
-    )
-    if (!entry) {
-      await this.refresh(state)
-      return { ok: true }
-    }
-    if (await isDirectory(entry.path)) {
+    const worktree = await this.currentWorktree(projectRoot, worktreePath)
+    if (!worktree) return { ok: false, message: 'The worktree no longer exists.' }
+    if (!worktree.missing) {
       return {
         ok: false,
         message: 'The folder of the worktree exists; delete the worktree instead.',
       }
     }
-    const members = await this.membersOf(context, state, entry.path)
+    // Its inner members are found as when checking a worktree.
+    await this.discover(state)
+    const context = await this.options.gitContext()
+    const members = await this.membersOf(context, state, worktree.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
       // The folder is gone, so forcing twice only overrides a lock.
       const result = await git(context, [
@@ -595,13 +546,20 @@ export class WorktreeService extends EventEmitter<{
     return { ok: true }
   }
 
-  /** The project repository's linked worktrees, as Git lists them now. */
+  /**
+   * The project's worktrees as Git lists them now: the project repository's
+   * linked worktrees directly in the project folder. Its other linked
+   * worktrees, such as those coding agents make elsewhere, are not Hoot's.
+   */
   private async readEntries(context: GitContext, state: ProjectState): Promise<WorktreeEntry[]> {
     const result = await git(context, ['-C', state.root, 'worktree', 'list', '--porcelain', '-z'])
     if (result.code !== 0) return []
+    // Git lists real paths. The folder may be gone, with its worktrees missing.
+    const { folder } = await this.options.layout.projectFolder(state.root, { create: false })
+    const realFolder = await realPath(folder)
     return parseWorktreeList(result.stdout)
       .slice(1)
-      .filter((entry) => !entry.bare)
+      .filter((entry) => !entry.bare && path.dirname(entry.path) === realFolder)
   }
 
   /** The paths of a repository's linked worktrees. */
@@ -719,7 +677,11 @@ export class WorktreeService extends EventEmitter<{
     return problems
   }
 
-  /** Reads the project's worktrees and reports them if they changed. */
+  /**
+   * Reads the project's worktrees and reports them if they changed. Called
+   * while a read is under way, it reads once more after it, so that what it
+   * settles with is as new as the call.
+   */
   private refresh(state: ProjectState): Promise<void> {
     if (state.refreshing) {
       state.refreshAgain = true
@@ -743,15 +705,6 @@ export class WorktreeService extends EventEmitter<{
         state.refreshing = null
       })
     return state.refreshing
-  }
-
-  private schedule(state: ProjectState): void {
-    if (state.removed) return
-    if (state.timer) clearTimeout(state.timer)
-    state.timer = setTimeout(() => {
-      state.timer = null
-      void this.refresh(state)
-    }, REFRESH_DELAY_MS)
   }
 
   private async readWorktrees(state: ProjectState): Promise<WorktreeInfo[]> {
@@ -797,7 +750,7 @@ export class WorktreeService extends EventEmitter<{
     return result.code === 0 ? result.stdout.trim() : (entry.head ?? '').slice(0, 7)
   }
 
-  /** Looks for the project's inner repositories, watches their registrations, and lists again. */
+  /** Looks for the project's inner repositories, and reads the worktrees again with them. */
   private discover(state: ProjectState): Promise<void> {
     if (state.discovering) return state.discovering
     state.discovering = (async () => {
@@ -806,11 +759,6 @@ export class WorktreeService extends EventEmitter<{
       const inner = await findInnerRepositories(context, state.root)
       if (state.removed) return
       state.inner = inner
-      state.discoveredAt = Date.now()
-      const wanted = new Set(inner.map((repository) => repository.commonDir))
-      if (state.commonDir) wanted.add(state.commonDir)
-      this.unwatch(state, wanted)
-      for (const directory of wanted) this.watch(state, directory)
       await this.refresh(state)
     })()
       .catch((error: unknown) =>
@@ -820,92 +768,6 @@ export class WorktreeService extends EventEmitter<{
         state.discovering = null
       })
     return state.discovering
-  }
-
-  /**
-   * Watches the project's main worktree for repositories made, moved in or
-   * removed there, which may be inner repositories: they are looked for again
-   * shortly after, so that the registrations of a new one are followed too.
-   */
-  private watchTree(state: ProjectState): void {
-    const changed = () => this.scheduleDiscovery(state)
-    try {
-      state.treeWatcher = fs.watch(state.root, { recursive: true }, (event, filename) => {
-        if (filename === null) return changed()
-        const innerPaths = (state.inner ?? []).map((repository) => repository.relativePath)
-        const affects = affectsInnerRepositories(event, filename, innerPaths)
-        if (affects === true) changed()
-        // A folder made or moved in may be a repository or hold some at any
-        // depth, which a move reports with nothing but the folder. A search
-        // that is already due finds them anyway.
-        else if (affects === null && state.discoveryTimer === null) {
-          void holdsRepository(path.join(state.root, filename)).then((holds) => {
-            if (holds) changed()
-          })
-        }
-      })
-    } catch (error) {
-      console.error('Could not watch', state.root, error)
-      return
-    }
-    state.treeWatcher.on('error', (error) => console.error('Stopped watching', state.root, error))
-  }
-
-  /** Looks for the inner repositories again once the changes that can affect them settle. */
-  private scheduleDiscovery(state: ProjectState): void {
-    if (state.removed) return
-    if (state.discoveryTimer) clearTimeout(state.discoveryTimer)
-    state.discoveryTimer = setTimeout(() => {
-      state.discoveryTimer = null
-      void this.discoverAfterChange(state)
-    }, DISCOVERY_DELAY_MS)
-  }
-
-  /** Looks for the inner repositories in a search that starts now: one under way may have missed a change. */
-  private async discoverAfterChange(state: ProjectState): Promise<void> {
-    while (state.discovering) await state.discovering
-    await this.discover(state)
-  }
-
-  private watch(state: ProjectState, directory: string): void {
-    if (state.watched.has(directory)) return
-    let entry = this.watchers.get(directory)
-    if (!entry) {
-      const projects = new Set<string>()
-      let watcher: FSWatcher
-      try {
-        watcher = fs.watch(directory, { recursive: true }, (_event, filename) => {
-          if (filename !== null && !isRegistrationChange(filename)) return
-          for (const root of projects) {
-            const project = this.projects.get(root)
-            if (project) this.schedule(project)
-          }
-        })
-      } catch (error) {
-        console.error('Could not watch', directory, error)
-        return
-      }
-      watcher.on('error', (error) => console.error('Stopped watching', directory, error))
-      entry = { watcher, projects }
-      this.watchers.set(directory, entry)
-    }
-    entry.projects.add(state.root)
-    state.watched.add(directory)
-  }
-
-  /** Stops watching the directories of a project that are not in `keep`. */
-  private unwatch(state: ProjectState, keep: ReadonlySet<string>): void {
-    for (const directory of state.watched) {
-      if (keep.has(directory)) continue
-      state.watched.delete(directory)
-      const entry = this.watchers.get(directory)
-      if (!entry) continue
-      entry.projects.delete(state.root)
-      if (entry.projects.size === 0) {
-        entry.watcher.close()
-        this.watchers.delete(directory)
-      }
-    }
   }
 }
 

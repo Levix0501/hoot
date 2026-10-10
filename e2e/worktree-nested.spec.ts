@@ -102,9 +102,11 @@ test.describe('worktrees with inner repositories', () => {
     launch,
     world,
   }) => {
-    const { O, inner, deep, loose, empty, pkg } = createO(world)
+    const { O, inner, deep, loose, empty, pkg, side } = createO(world)
     const W = worktreesDir(world)
     const app = await launch({ projects: [O] })
+    // O's own linked worktree in .claude/worktrees is not in its project folder.
+    await expect(worktreeItem(app, side)).toHaveCount(0)
 
     const R = await createWorktree(app, O, 'feat/x', { base: 'develop' })
     expect(R).toBe(path.join(W, 'O', 'feat-x'))
@@ -123,9 +125,10 @@ test.describe('worktrees with inner repositories', () => {
     expect(registrations(empty)).toEqual([])
     expect(registrations(pkg)).toEqual([])
 
-    // One row for the worktree; its inner members have none.
-    expect(await worktreeNames(app, O)).toEqual(['feat/x', 'side'])
-    await expect(worktreeItems(app)).toHaveCount(2)
+    // One row for the worktree; its inner members have none, and side has none either.
+    expect(await worktreeNames(app, O)).toEqual(['feat/x'])
+    await expect(worktreeItems(app)).toHaveCount(1)
+    await expect(worktreeItem(app, side)).toHaveCount(0)
     expect(await hoverWorktree(app, R)).toEqual({
       path: R,
       members: ['inner', 'inner/deep', 'loose'],

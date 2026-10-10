@@ -176,11 +176,21 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!deps.projects.find(request.projectRoot)) {
       return { ok: false, message: 'The project is not in the list.' }
     }
-    if (
-      request.worktreePath !== null &&
-      !(await deps.worktrees.isWorktreeOf(request.projectRoot, request.worktreePath))
-    ) {
-      return { ok: false, message: `The worktree is not available: ${request.worktreePath}` }
+    if (request.worktreePath !== null) {
+      // As it is now, which the sidebar then shows: it may be gone or missing since it last did.
+      const worktree = await deps.worktrees.currentWorktree(
+        request.projectRoot,
+        request.worktreePath,
+      )
+      if (!worktree) {
+        return { ok: false, message: `The worktree no longer exists: ${request.worktreePath}` }
+      }
+      if (worktree.missing) {
+        return {
+          ok: false,
+          message: `The folder of the worktree is missing: ${request.worktreePath}`,
+        }
+      }
     }
     try {
       return { ok: true, session: await deps.sessions.start(request) }
@@ -216,6 +226,10 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle(IpcChannel.listWorktrees, () => deps.worktrees.listAll())
+  handle(IpcChannel.currentWorktree, (_event, ...args) => {
+    const parsed = worktreeArguments.safeParse(args)
+    return parsed.success ? deps.worktrees.currentWorktree(...parsed.data) : null
+  })
   deps.worktrees.on('changed', (root, worktrees) =>
     send(IpcChannel.worktreesChanged, root, worktrees),
   )

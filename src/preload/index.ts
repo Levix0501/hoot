@@ -40,6 +40,8 @@ const api: HootApi = {
   onConfirmQuit: (listener) => subscribe(IpcChannel.confirmQuit, listener),
   respondToQuit: (confirmed) => ipcRenderer.send(IpcChannel.quitResponse, confirmed),
   listWorktrees: () => ipcRenderer.invoke(IpcChannel.listWorktrees),
+  currentWorktree: (projectRoot, worktreePath) =>
+    ipcRenderer.invoke(IpcChannel.currentWorktree, projectRoot, worktreePath),
   onWorktreesChanged: (listener) => subscribe(IpcChannel.worktreesChanged, listener),
   getNewWorktreeOptions: (projectRoot) =>
     ipcRenderer.invoke(IpcChannel.newWorktreeOptions, projectRoot),

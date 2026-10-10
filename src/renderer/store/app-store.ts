@@ -121,10 +121,17 @@ export interface AppState {
   answerQuit(confirmed: boolean): void
   openNewWorktreeDialog(projectRoot: string): void
   closeNewWorktreeDialog(): void
-  /** Checks a worktree and asks for confirmation before deleting it. */
+  /**
+   * Reads the project's worktrees again and, unless the worktree is gone,
+   * missing or locked now, checks it and asks for confirmation before
+   * deleting it.
+   */
   requestDeleteWorktree(projectRoot: string, path: string): void
   answerDeleteWorktree(confirmed: boolean): Promise<void>
-  /** Removes the registrations of a worktree whose folder is missing. */
+  /**
+   * Removes the registrations of a worktree whose folder is missing, unless
+   * reading the project's worktrees again shows it gone or no longer missing.
+   */
   removeMissingWorktree(projectRoot: string, path: string): Promise<void>
 }
 
@@ -154,6 +161,14 @@ function pathText(path: string): ReactNode {
 /** The message of something thrown, such as a failed call to the main process. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Why a worktree, as it is now, cannot be deleted; `null` when it can. */
+function whyNotDeletable(worktree: WorktreeInfo | null): string | null {
+  if (worktree === null) return 'The worktree no longer exists.'
+  if (worktree.missing) return 'The folder of the worktree is missing.'
+  if (worktree.locked) return 'The worktree is locked.'
+  return null
 }
 
 /** True while a session is starting or running. */
@@ -313,6 +328,9 @@ export const useAppStore = create<AppState>()((set, get) => {
       },
     }))
   }
+
+  /** Whether Delete was chosen and the worktree is being read again before it is checked. */
+  let preparingDeletion = false
 
   /** Closes the ended sessions of a worktree that is gone, as its deletion does. */
   const closeEndedSessionsIn = (path: string) => {
@@ -711,26 +729,41 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     requestDeleteWorktree(projectRoot, path) {
-      if (get().worktreeDeletion !== null) return
-      const deletion: WorktreeDeletion = {
-        projectRoot,
-        path,
-        phase: 'checking',
-        inspection: null,
-        error: null,
-      }
-      set({ worktreeDeletion: deletion })
-      void api
-        .inspectWorktree(projectRoot, path)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        .then((result) => {
-          if (get().worktreeDeletion !== deletion) return
-          set({
-            worktreeDeletion: result.ok
-              ? { ...deletion, phase: 'confirm', inspection: result.inspection }
-              : { ...deletion, phase: 'confirm', error: result.message },
-          })
+      if (get().worktreeDeletion !== null || preparingDeletion) return
+      preparingDeletion = true
+      void (async () => {
+        // As it is now, which the sidebar then shows: gone, missing or locked
+        // since the sidebar last showed it, it is neither checked nor deleted.
+        let reason: string | null
+        try {
+          reason = whyNotDeletable(await api.currentWorktree(projectRoot, path))
+        } catch (error) {
+          reason = errorMessage(error)
+        } finally {
+          preparingDeletion = false
+        }
+        if (reason !== null) {
+          toast.error('Could not delete the worktree.', { description: reason })
+          return
+        }
+        const deletion: WorktreeDeletion = {
+          projectRoot,
+          path,
+          phase: 'checking',
+          inspection: null,
+          error: null,
+        }
+        set({ worktreeDeletion: deletion })
+        const result = await api
+          .inspectWorktree(projectRoot, path)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (get().worktreeDeletion !== deletion) return
+        set({
+          worktreeDeletion: result.ok
+            ? { ...deletion, phase: 'confirm', inspection: result.inspection }
+            : { ...deletion, phase: 'confirm', error: result.message },
         })
+      })()
     },
 
     async answerDeleteWorktree(confirmed) {

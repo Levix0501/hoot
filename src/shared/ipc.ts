@@ -86,6 +86,7 @@ export const IpcChannel = {
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
   listWorktrees: 'worktrees:list',
+  currentWorktree: 'worktrees:current',
   worktreesChanged: 'worktrees:changed',
   newWorktreeOptions: 'worktrees:new-options',
   checkBranchName: 'worktrees:check-branch-name',
@@ -147,6 +148,12 @@ export interface HootApi {
   respondToQuit(confirmed: boolean): void
   /** The worktrees of every project in the list, by project root. */
   listWorktrees(): Promise<Record<string, WorktreeInfo[]>>
+  /**
+   * Reads a project's worktrees again, which `onWorktreesChanged` then
+   * reports, and returns the worktree at a root as it is now, or `null` when
+   * there is none.
+   */
+  currentWorktree(projectRoot: string, worktreePath: string): Promise<WorktreeInfo | null>
   onWorktreesChanged(listener: (projectRoot: string, worktrees: WorktreeInfo[]) => void): () => void
   /** What the new worktree dialog offers; `null` when the project is not in the list. */
   getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptions | null>

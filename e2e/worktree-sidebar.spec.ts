@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { expect, test } from './support/test'
 import {
   createG,
@@ -9,7 +10,6 @@ import {
   emitWindowFocus,
   git,
   hoverWorktree,
-  initRepository,
   localBranches,
   menuEntries,
   openWorktreeActions,
@@ -22,43 +22,60 @@ import {
   worktreeItems,
   worktreeNames,
   worktreeNamed,
+  worktreesDir,
 } from './support/worktrees'
 
 test.describe('worktrees in the sidebar', () => {
-  test('worktrees made outside Hoot are listed, with their state, and can be removed or deleted', async ({
+  test('only the worktrees in the project folder are listed, as they are when Hoot starts', async ({
     launch,
     world,
   }) => {
     const G = createG(world)
+    const folder = path.join(worktreesDir(world), 'G')
+    const first = await launch({ projects: [G] })
+    for (const branch of ['alpha', 'beta', 'zeta', 'det']) {
+      expect(await createWorktree(first, G, branch)).toBe(path.join(folder, branch))
+    }
+    await first.close()
+
+    // Outside Hoot, while it does not run.
+    const [alpha, beta, zeta, det, manual] = ['alpha', 'beta', 'zeta', 'det', 'manual'].map(
+      (name) => path.join(folder, name),
+    )
+    git(G, 'worktree', 'lock', '--reason', 'on usb', alpha)
+    git(det, 'checkout', '-q', '--detach')
     const outside = path.dirname(G)
     const ext = path.join(outside, 'G-ext')
-    const det = path.join(outside, 'G-det')
-    const lock = path.join(outside, 'G-lock')
+    git(G, 'worktree', 'add', '-q', '-b', 'ext', ext)
+    git(G, 'worktree', 'add', '-q', '-b', 'manual', manual)
     const gone = path.join(outside, 'G-gone')
-    git(G, 'worktree', 'add', '-q', '-b', 'zeta', ext)
-    git(G, 'worktree', 'add', '-q', '--detach', det)
-    git(G, 'worktree', 'add', '-q', '-b', 'alpha', lock)
-    git(G, 'worktree', 'lock', '--reason', 'on usb', lock)
-    git(G, 'worktree', 'add', '-q', '-b', 'beta', gone)
+    git(G, 'worktree', 'add', '-q', '-b', 'gone', gone)
+    fs.rmSync(beta, { recursive: true, force: true })
     fs.rmSync(gone, { recursive: true, force: true })
     const app = await launch({ projects: [G] })
 
-    await expect(worktreeItems(app, G)).toHaveCount(4)
-    const short = git(det, 'rev-parse', '--short', 'HEAD')
+    await expect(worktreeItems(app, G)).toHaveCount(5)
+    const listed = await worktreeItems(app, G).evaluateAll((items) =>
+      items.map((item) => item.getAttribute('data-worktree-path') ?? ''),
+    )
+    expect(listed.toSorted()).toEqual([alpha, beta, det, manual, zeta].toSorted())
+    await expect(worktreeItem(app, ext)).toHaveCount(0)
+    await expect(worktreeItem(app, gone)).toHaveCount(0)
     const names = await worktreeNames(app, G)
-    expect(names.toSorted()).toEqual([short, 'alpha', 'beta', 'zeta'].toSorted())
-    expect(names.filter((name) => ['alpha', 'beta', 'zeta'].includes(name))).toEqual([
+    expect(names.filter((name) => ['alpha', 'beta', 'manual', 'zeta'].includes(name))).toEqual([
       'alpha',
       'beta',
+      'manual',
       'zeta',
     ])
+    const short = git(det, 'rev-parse', '--short', 'HEAD')
     await expect(worktreeItem(app, det).getByTestId('worktree-name')).toHaveText(short)
-    expect((await hoverWorktree(app, ext)).path).toBe(ext)
+    expect((await hoverWorktree(app, zeta)).path).toBe(zeta)
 
     // Locked: marked, and Delete is unavailable, with the reason.
-    await expect(worktreeItem(app, lock)).toHaveAttribute('data-locked', 'true')
-    await expect(worktreeItem(app, lock).getByTestId('worktree-locked')).toHaveText('Locked')
-    await openWorktreeActions(app, lock)
+    await expect(worktreeItem(app, alpha)).toHaveAttribute('data-locked', 'true')
+    await expect(worktreeItem(app, alpha).getByTestId('worktree-locked')).toHaveText('Locked')
+    await openWorktreeActions(app, alpha)
     expect(await menuEntries(app)).toEqual([
       ['Reveal in Finder', true],
       ['Copy Path', true],
@@ -68,7 +85,7 @@ test.describe('worktrees in the sidebar', () => {
       'This worktree is locked: on usb',
     )
     await app.closeMenus()
-    await openWorktreeContextMenu(app, lock)
+    await openWorktreeContextMenu(app, alpha)
     expect(await menuEntries(app)).toEqual([
       ['New Session', true],
       ['Reveal in Finder', true],
@@ -81,18 +98,18 @@ test.describe('worktrees in the sidebar', () => {
     await app.closeMenus()
 
     // Missing: marked, no new sessions, and Remove is all it offers.
-    await expect(worktreeItem(app, gone)).toHaveAttribute('data-missing', 'true')
-    await expect(worktreeItem(app, gone).getByTestId('worktree-missing')).toHaveText('Missing')
-    await expect(worktreeItem(app, gone).getByTestId('worktree-new-session-button')).toBeDisabled()
-    await openWorktreeActions(app, gone)
+    await expect(worktreeItem(app, beta)).toHaveAttribute('data-missing', 'true')
+    await expect(worktreeItem(app, beta).getByTestId('worktree-missing')).toHaveText('Missing')
+    await expect(worktreeItem(app, beta).getByTestId('worktree-new-session-button')).toBeDisabled()
+    await openWorktreeActions(app, beta)
     expect(await menuEntries(app)).toEqual([['Remove', true]])
     await app.closeMenus()
-    await openWorktreeContextMenu(app, gone)
+    await openWorktreeContextMenu(app, beta)
     expect(await menuEntries(app)).toEqual([['Remove', true]])
     await app.closeMenus()
 
     // The others offer everything; their + lists only the tools.
-    for (const worktree of [ext, det]) {
+    for (const worktree of [zeta, det, manual]) {
       await openWorktreeActions(app, worktree)
       expect(await menuEntries(app)).toEqual([
         ['Reveal in Finder', true],
@@ -116,26 +133,26 @@ test.describe('worktrees in the sidebar', () => {
     }
     await app.expectEnglishUi()
 
-    // Removing the missing worktree clears its registration and keeps its branch.
-    await openWorktreeActions(app, gone)
-    await app.page.getByTestId('worktree-remove').click()
-    await expect(worktreeItem(app, gone)).toHaveCount(0)
-    expect(registeredPaths(G)).not.toContain(gone)
-    expect(registrations(G).filter((entry) => entry.prunable)).toEqual([])
-    expect(localBranches(G)).toContain('beta')
+    // Asked directly, Hoot neither deletes G-ext nor clears G-gone's registration.
+    const deleted = await app.page.evaluate(
+      ([root, worktree]) => window.hoot.deleteWorktree(root!, worktree!, true),
+      [G, ext],
+    )
+    expect(deleted.ok).toBe(false)
+    const removed = await app.page.evaluate(
+      ([root, worktree]) => window.hoot.removeWorktree(root!, worktree!),
+      [G, gone],
+    )
+    expect(removed.ok).toBe(false)
+    expect(fs.existsSync(ext)).toBe(true)
+    expect(registeredPaths(G)).toEqual(expect.arrayContaining([ext, gone]))
 
-    // A worktree made outside Hoot is deleted like one Hoot made.
-    await openWorktreeActions(app, ext)
-    await app.page.getByTestId('worktree-delete').click()
-    await expect(deleteDialog(app)).toHaveAttribute('data-phase', 'confirm')
-    await expect(deleteDialog(app)).toHaveAttribute('data-dirty', 'false')
-    await app.page.getByTestId('worktree-delete-confirm').click()
-    await expect(deleteDialog(app)).toBeHidden()
-    await expect(worktreeItem(app, ext)).toHaveCount(0)
-    expect(fs.existsSync(ext)).toBe(false)
-    expect(registeredPaths(G)).not.toContain(ext)
-    expect(registrations(G).filter((entry) => entry.prunable)).toEqual([])
-    expect(localBranches(G)).toContain('zeta')
+    // Removing the missing worktree clears its registration and keeps its branch.
+    await openWorktreeActions(app, beta)
+    await app.page.getByTestId('worktree-remove').click()
+    await expect(worktreeItem(app, beta)).toHaveCount(0)
+    expect(registeredPaths(G)).not.toContain(beta)
+    expect(localBranches(G)).toContain('beta')
   })
 
   test('a locked worktree whose folder is missing can be removed, below its lock note', async ({
@@ -143,7 +160,8 @@ test.describe('worktrees in the sidebar', () => {
     world,
   }) => {
     const G = createG(world)
-    const usb = path.join(path.dirname(G), 'G-usb')
+    // Made with git in G's project folder, where Hoot makes worktrees.
+    const usb = path.join(worktreesDir(world), 'G', 'usb')
     git(G, 'worktree', 'add', '-q', '-b', 'usb', usb)
     git(G, 'worktree', 'lock', '--reason', 'on usb', usb)
     fs.rmSync(usb, { recursive: true, force: true })
@@ -172,81 +190,67 @@ test.describe('worktrees in the sidebar', () => {
     expect(localBranches(G)).toContain('usb')
   })
 
-  test('changes made outside Hoot show within 2 seconds, and a missing folder once the window has the focus', async ({
+  test('changes made outside Hoot show when the window gets the focus, or when a worktree is used, and not before', async ({
     launch,
     world,
   }) => {
     const G = createG(world)
-    const { O, inner } = createO(world)
-    const outside = path.dirname(G)
+    const { O, loose } = createO(world)
     const app = await launch({ projects: [G, O] })
+    const w: Record<string, string> = {}
+    for (const name of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6']) {
+      w[name] = await createWorktree(app, G, name)
+    }
+    const o1 = await createWorktree(app, O, 'o1')
     const shell = await app.startSession(G, 'shell')
     await app.waitForPrompt(20_000, shell)
-    await expect(worktreeNames(app, O)).resolves.toEqual(['side'])
-    // The window never has the focus in these tests; nothing below changes that.
-    const within = { timeout: 2_000 }
+    const rows = await sidebarRows(app)
+    expect((await hoverWorktree(app, o1)).members).toEqual(['inner', 'inner/deep', 'loose'])
 
-    const added = path.join(outside, 'G-new')
+    // Step 1: changes outside Hoot, the window's focus as it is. The window
+    // never has the focus in these tests; nothing below changes that.
+    await app.run(`git worktree lock ${w.w1}`)
+    git(G, 'worktree', 'remove', w.w2!)
+    fs.rmSync(w.w3!, { recursive: true, force: true })
+    git(w.w4!, 'switch', '-q', '-c', 'w4b')
+    const added = path.join(path.dirname(G), 'G-new')
     git(G, 'worktree', 'add', '-q', '-b', 'ext2', added)
-    await expect(worktreeNamed(app, G, 'ext2')).toHaveCount(1, within)
+    git(loose, 'worktree', 'remove', path.join(o1, 'loose'))
+    await delay(3_000)
+    expect(await sidebarRows(app)).toEqual(rows)
+    await expect(worktreeItem(app, w.w1!)).toHaveAttribute('data-locked', 'false')
+    await expect(worktreeItem(app, w.w2!)).toHaveAttribute('data-missing', 'false')
+    await expect(worktreeItem(app, w.w3!)).toHaveAttribute('data-missing', 'false')
+    await expect(worktreeItem(app, w.w4!).getByTestId('worktree-name')).toHaveText('w4')
+    await expect(worktreeNamed(app, G, 'ext2')).toHaveCount(0)
+    expect((await hoverWorktree(app, o1)).members).toEqual(['inner', 'inner/deep', 'loose'])
 
-    await app.run(`git worktree lock ${added}`)
-    await expect(worktreeItem(app, added)).toHaveAttribute('data-locked', 'true', within)
-    await app.run(`git worktree unlock ${added}`)
-    await expect(worktreeItem(app, added)).toHaveAttribute('data-locked', 'false', within)
-
-    git(G, 'worktree', 'remove', added)
-    await expect(worktreeItem(app, added)).toHaveCount(0, within)
-
-    const cli = path.join(outside, 'O-cli')
-    git(O, 'worktree', 'add', '-q', '-b', 'w', cli)
-    await expect(worktreeNamed(app, O, 'w')).toHaveCount(1, within)
-    git(inner, 'worktree', 'add', '-q', '-b', 'w', path.join(cli, 'inner'))
-    await expect
-      .poll(async () => (await hoverWorktree(app, cli)).members, within)
-      .toEqual(['inner'])
-
-    const removed = path.join(outside, 'G-rm')
-    git(G, 'worktree', 'add', '-q', '-b', 'gone2', removed)
-    await expect(worktreeNamed(app, G, 'gone2')).toHaveCount(1, within)
-    fs.rmSync(removed, { recursive: true, force: true })
+    // Step 2: the window gets the focus, and keeps it from now on.
     await emitWindowFocus(app)
-    await expect(worktreeItem(app, removed)).toHaveAttribute('data-missing', 'true')
-    await expect(worktreeItem(app, removed).getByTestId('worktree-missing')).toBeVisible()
-  })
-
-  test('repositories made in or moved into a project while Hoot runs are followed as nested repositories too', async ({
-    launch,
-    world,
-  }) => {
-    const G = createG(world)
-    const ext = path.join(path.dirname(G), 'G-ext')
-    git(G, 'worktree', 'add', '-q', '-b', 'ext', ext)
-    const app = await launch({ projects: [G] })
-    await expect(worktreeNamed(app, G, 'ext')).toHaveCount(1)
-    expect((await hoverWorktree(app, ext)).members).toEqual([])
-    // As in the other test, the window's focus stays as it is.
     const within = { timeout: 2_000 }
+    await expect(worktreeItem(app, w.w1!)).toHaveAttribute('data-locked', 'true', within)
+    await expect(worktreeItem(app, w.w2!)).toHaveCount(0, within)
+    await expect(worktreeItem(app, w.w3!)).toHaveAttribute('data-missing', 'true', within)
+    await expect(worktreeItem(app, w.w4!).getByTestId('worktree-name')).toHaveText('w4b', within)
+    await expect(worktreeNamed(app, G, 'ext2')).toHaveCount(0)
+    expect((await hoverWorktree(app, o1)).members).toEqual(['inner', 'inner/deep'])
 
-    // Outside Hoot: a new repository in G, which G does not track, then its worktree in G-ext.
-    const fresh = initRepository(path.join(G, 'fresh'))
-    git(fresh, 'worktree', 'add', '-q', '-b', 'ext', path.join(ext, 'fresh'))
-    await expect
-      .poll(async () => (await hoverWorktree(app, ext)).members, within)
-      .toEqual(['fresh'])
+    // Step 3: w5 removed outside Hoot, then a session started from its row.
+    git(G, 'worktree', 'remove', w.w5!)
+    const sessions = await app.sessionIds()
+    await worktreeItem(app, w.w5!).getByTestId('worktree-new-session-button').click()
+    await app.toolItem('shell').click()
+    await expect(worktreeItem(app, w.w5!)).toHaveCount(0)
+    expect(await app.sessionIds()).toEqual(sessions)
 
-    git(fresh, 'worktree', 'remove', path.join(ext, 'fresh'))
-    await expect.poll(async () => (await hoverWorktree(app, ext)).members, within).toEqual([])
-
-    // A folder that holds a repository below its top, moved into G, then the repository's worktree.
-    const holder = path.join(path.dirname(G), 'holder')
-    initRepository(path.join(holder, 'lib'))
-    fs.renameSync(holder, path.join(G, 'holder'))
-    const lib = path.join(G, 'holder', 'lib')
-    git(lib, 'worktree', 'add', '-q', '-b', 'ext', path.join(ext, 'holder', 'lib'))
-    await expect
-      .poll(async () => (await hoverWorktree(app, ext)).members, within)
-      .toEqual(['holder/lib'])
+    // Step 4: w6's folder deleted outside Hoot, then Delete chosen on its row.
+    fs.rmSync(w.w6!, { recursive: true, force: true })
+    await openWorktreeActions(app, w.w6!)
+    await app.page.getByTestId('worktree-delete').click()
+    await expect(worktreeItem(app, w.w6!)).toHaveAttribute('data-missing', 'true')
+    await expect(deleteDialog(app)).toHaveCount(0)
+    expect(registeredPaths(G)).toContain(w.w6)
+    expect(await app.sessionIds()).toEqual(sessions)
   })
 
   test('sessions are in sidebar order, which the shortcuts follow', async ({ launch, world }) => {

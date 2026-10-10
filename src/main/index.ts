@@ -162,8 +162,8 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
   })
-  // Worktrees may have changed while Hoot was in the background, for example
-  // a worktree's folder deleted, which changes nothing Hoot watches.
+  // Nothing is watched: what changed outside Hoot, such as a worktree's
+  // folder deleted, shows when the window gets the focus.
   window.on('focus', () => worktrees.refreshAll())
   // In full screen macOS hides the traffic lights, and the page moves its
   // navigation into their place.

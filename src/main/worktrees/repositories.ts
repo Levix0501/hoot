@@ -82,23 +82,6 @@ export async function walkRepositories<Context>(
   })
 }
 
-/**
- * Whether a directory is the working directory of a Git repository, or holds
- * one at any depth as `walkRepositories` finds them: without following
- * symbolic links and outside `.git` and dependency directories.
- */
-export async function holdsRepository(directory: string): Promise<boolean> {
-  const stats = await fs.lstat(directory).catch(() => null)
-  if (!stats?.isDirectory()) return false
-  if (await fs.lstat(path.join(directory, '.git')).then(Boolean, () => false)) return true
-  let found = false
-  await walkRepositories(directory, null, async () => {
-    found = true
-    return null
-  })
-  return found
-}
-
 async function realpath(file: string): Promise<string> {
   return fs.realpath(file).catch(() => path.resolve(file))
 }

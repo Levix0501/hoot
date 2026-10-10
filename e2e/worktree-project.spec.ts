@@ -7,7 +7,6 @@ import {
   createWorktree,
   deleteDialog,
   emitWindowFocus,
-  git,
   localBranches,
   openWorktreeActions,
   registrations,
@@ -87,15 +86,15 @@ test.describe('worktrees and their projects', () => {
     await expect(deleteDialog(app)).toBeHidden()
     await expect(worktreeItem(app, R)).toHaveCount(0)
 
-    const gone = path.join(path.dirname(G), 'G-gone')
-    git(G, 'worktree', 'add', '-q', '-b', 'beta', gone)
-    await expect(worktreeNamed(app, G, 'beta')).toHaveCount(1)
+    // Another worktree, whose root is deleted outside Hoot: Missing once the window has the focus.
+    const gone = await createWorktree(app, G, 'beta')
     fs.rmSync(gone, { recursive: true, force: true })
     await emitWindowFocus(app)
     await expect(worktreeItem(app, gone)).toHaveAttribute('data-missing', 'true')
     await openWorktreeActions(app, gone)
     await app.page.getByTestId('worktree-remove').click()
     await expect(worktreeItem(app, gone)).toHaveCount(0)
+    expect(registrations(G)).toEqual([])
 
     expect(state()).toEqual(before)
   })

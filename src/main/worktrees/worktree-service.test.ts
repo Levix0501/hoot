@@ -1,6 +1,6 @@
-import { once } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { WorktreeInfo } from '../../shared/worktrees'
 import { WorktreeLayout } from './layout'
@@ -13,47 +13,7 @@ import {
   makeRepository,
   makeSandbox,
 } from './test-support'
-import {
-  WorktreeService,
-  affectsInnerRepositories,
-  deepestFirst,
-  isRegistrationChange,
-} from './worktree-service'
-
-describe('isRegistrationChange', () => {
-  it('matches the administrative directories, their gitdir, lock and HEAD files', () => {
-    expect(isRegistrationChange('worktrees')).toBe(true)
-    expect(isRegistrationChange('worktrees/feat')).toBe(true)
-    expect(isRegistrationChange('worktrees/feat/gitdir')).toBe(true)
-    expect(isRegistrationChange('worktrees/feat/locked')).toBe(true)
-    expect(isRegistrationChange('worktrees/feat/HEAD')).toBe(true)
-    expect(isRegistrationChange('worktrees/feat/index')).toBe(false)
-    expect(isRegistrationChange('worktrees/feat/logs/HEAD')).toBe(false)
-    expect(isRegistrationChange('refs/heads/main')).toBe(false)
-    expect(isRegistrationChange('index')).toBe(false)
-  })
-})
-
-describe('affectsInnerRepositories', () => {
-  it('tells the changes in a main worktree that can make or remove an inner repository', () => {
-    // A `.git` entry made or removed, at any depth.
-    expect(affectsInnerRepositories('rename', 'later/.git', [])).toBe(true)
-    expect(affectsInnerRepositories('rename', 'a/b/.git', [])).toBe(true)
-    // Not what happens inside Git directories or dependency directories.
-    expect(affectsInnerRepositories('rename', 'later/.git/index.lock', [])).toBe(false)
-    expect(affectsInnerRepositories('rename', '.git/worktrees/feat/locked', [])).toBe(false)
-    expect(affectsInnerRepositories('rename', 'node_modules/pkg/.git', [])).toBe(false)
-    expect(affectsInnerRepositories('rename', 'vendor/x', [])).toBe(false)
-    // The folder of a known inner repository, or one holding it, moved or removed.
-    expect(affectsInnerRepositories('rename', 'inner', ['inner/deep'])).toBe(true)
-    expect(affectsInnerRepositories('rename', 'inner/deep', ['inner/deep'])).toBe(true)
-    expect(affectsInnerRepositories('change', 'inner/deep', ['inner/deep'])).toBe(false)
-    expect(affectsInnerRepositories('change', 'inner/deep/file.txt', ['inner/deep'])).toBe(false)
-    // Anything else made or moved in may be a repository.
-    expect(affectsInnerRepositories('rename', 'moved', ['inner'])).toBeNull()
-    expect(affectsInnerRepositories('rename', 'inner/deep/file.txt', ['inner/deep'])).toBeNull()
-  })
-})
+import { WorktreeService, deepestFirst } from './worktree-service'
 
 describe('deepestFirst', () => {
   it('orders members by depth, deepest first', () => {
@@ -114,28 +74,34 @@ describe('WorktreeService', () => {
     return (await service.listAll())[project] ?? []
   }
 
-  it('lists worktrees made outside Hoot, by display name, with their state and inner members', async () => {
-    const outside = path.join(root, 'outside')
-    git(project, 'worktree', 'add', '-q', '-b', 'zeta', path.join(outside, 'z'))
-    git(project, 'worktree', 'add', '-q', '--detach', path.join(outside, 'd'))
-    git(project, 'worktree', 'add', '-q', '-b', 'alpha', path.join(outside, 'a'))
-    git(project, 'worktree', 'lock', '--reason', 'on usb', path.join(outside, 'a'))
-    git(project, 'worktree', 'add', '-q', '-b', 'beta', path.join(outside, 'b'))
-    git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(outside, 'b', 'inner'))
-    fs.rmSync(path.join(outside, 'b'), { recursive: true })
-    git(inner, 'worktree', 'add', '-q', '-b', 'zeta', path.join(outside, 'z', 'inner'))
+  it('lists the linked worktrees directly in the project folder, by display name, with their state and inner members', async () => {
+    // Made with git in the project folder, as Hoot makes them.
+    const folder = path.join(W, 'project')
+    git(project, 'worktree', 'add', '-q', '-b', 'zeta', path.join(folder, 'z'))
+    git(project, 'worktree', 'add', '-q', '--detach', path.join(folder, 'd'))
+    git(project, 'worktree', 'add', '-q', '-b', 'alpha', path.join(folder, 'a'))
+    git(project, 'worktree', 'lock', '--reason', 'on usb', path.join(folder, 'a'))
+    git(project, 'worktree', 'add', '-q', '-b', 'beta', path.join(folder, 'b'))
+    git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(folder, 'b', 'inner'))
+    fs.rmSync(path.join(folder, 'b'), { recursive: true })
+    git(inner, 'worktree', 'add', '-q', '-b', 'zeta', path.join(folder, 'z', 'inner'))
     // A linked worktree of an inner repository outside any worktree is no member.
-    git(deep, 'worktree', 'add', '-q', '-b', 'loner', path.join(outside, 'loner'))
+    git(deep, 'worktree', 'add', '-q', '-b', 'loner', path.join(root, 'loner'))
+    // The project repository's other linked worktrees are not worktrees.
+    const outside = path.join(root, 'outside')
+    git(project, 'worktree', 'add', '-q', '-b', 'ext', outside)
+    git(project, 'worktree', 'add', '-q', '-b', 'deeper', path.join(folder, 'deeper', 'd'))
+    git(project, 'worktree', 'add', '-q', '-b', 'side', path.join(project, '.claude', 'side'))
     await start()
 
-    const short = git(path.join(outside, 'd'), 'rev-parse', '--short', 'HEAD')
+    const short = git(path.join(folder, 'd'), 'rev-parse', '--short', 'HEAD')
     const worktrees = await listed()
     expect(worktrees.map((worktree) => worktree.displayName)).toEqual(
       ['alpha', 'beta', 'zeta', short].toSorted((a, b) => a.localeCompare(b)),
     )
     const byName = Object.fromEntries(worktrees.map((worktree) => [worktree.displayName, worktree]))
     expect(byName.alpha).toEqual({
-      path: path.join(outside, 'a'),
+      path: path.join(folder, 'a'),
       branch: 'alpha',
       displayName: 'alpha',
       missing: false,
@@ -145,20 +111,135 @@ describe('WorktreeService', () => {
     })
     expect(byName.beta).toMatchObject({ missing: true, locked: false, innerMembers: ['inner'] })
     expect(byName.zeta).toMatchObject({ missing: false, innerMembers: ['inner'] })
-    expect(byName[short]).toMatchObject({ branch: null, path: path.join(outside, 'd') })
-    expect(await service.isWorktreeOf(project, path.join(outside, 'z'))).toBe(true)
-    expect(await service.isWorktreeOf(project, path.join(outside, 'b'))).toBe(false)
+    expect(byName[short]).toMatchObject({ branch: null, path: path.join(folder, 'd') })
+    expect(await service.isWorktreeOf(project, path.join(folder, 'z'))).toBe(true)
+    expect(await service.isWorktreeOf(project, path.join(folder, 'b'))).toBe(false)
+    expect(await service.isWorktreeOf(project, outside)).toBe(false)
     expect(await service.isWorktreeOf(project, project)).toBe(false)
   })
 
-  it('reports changes to the registrations as they happen', async () => {
+  it('shows what changed outside Hoot only once the worktrees are read again', async () => {
     await start()
-    const changed = once(service, 'changed')
-    const added = path.join(root, 'added')
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/r',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const changes: WorktreeInfo[][] = []
+    service.on('changed', (_root, worktrees) => changes.push(worktrees))
+
+    // Outside Hoot: a lock, an inner member removed, and worktrees added in and out of the folder.
+    git(project, 'worktree', 'lock', '--reason', 'kept', R)
+    git(inner, 'worktree', 'remove', path.join(R, 'inner'))
+    const added = path.join(W, 'project', 'added')
     git(project, 'worktree', 'add', '-q', '-b', 'added', added)
-    const [changedRoot, worktrees] = (await changed) as [string, WorktreeInfo[]]
-    expect(changedRoot).toBe(project)
-    expect(worktrees.map((worktree) => worktree.path)).toEqual([added])
+    git(project, 'worktree', 'add', '-q', '-b', 'elsewhere', path.join(root, 'elsewhere'))
+    await delay(500)
+    expect(changes).toEqual([])
+    expect(await listed()).toMatchObject([{ path: R, locked: false, innerMembers: ['inner'] }])
+
+    // As when the window gets the focus.
+    service.refreshAll()
+    await expect.poll(() => changes.length).toBe(1)
+    expect(changes[0]).toMatchObject([
+      { path: added, displayName: 'added', locked: false },
+      { path: R, displayName: 'feat/r', locked: true, lockReason: 'kept', innerMembers: [] },
+    ])
+  })
+
+  it('reads the worktrees again for a worktree about to be used, and goes no further when it changed', async () => {
+    await start()
+    const make = async (branch: string) => {
+      const created = await service.create({
+        projectRoot: project,
+        branch,
+        base: 'main',
+        nested: [],
+      })
+      if (!created.ok) throw new Error(created.message)
+      return created.path
+    }
+    const gone = await make('w-gone')
+    const missing = await make('w-missing')
+    const locked = await make('w-locked')
+    const back = await make('w-back')
+    const changes: WorktreeInfo[][] = []
+    service.on('changed', (_root, worktrees) => changes.push(worktrees))
+    const shown = () => changes.at(-1) ?? []
+
+    git(project, 'worktree', 'remove', gone)
+    expect(await service.currentWorktree(project, gone)).toBeNull()
+    expect(shown().map((worktree) => worktree.path)).not.toContain(gone)
+    expect(await service.removeMissing(project, gone)).toEqual({
+      ok: false,
+      message: 'The worktree no longer exists.',
+    })
+
+    fs.rmSync(missing, { recursive: true })
+    expect(await service.currentWorktree(project, missing)).toMatchObject({ missing: true })
+    expect(shown().find((worktree) => worktree.path === missing)).toMatchObject({ missing: true })
+
+    git(project, 'worktree', 'lock', locked)
+    expect(await service.currentWorktree(project, locked)).toMatchObject({ locked: true })
+    expect(shown().find((worktree) => worktree.path === locked)).toMatchObject({ locked: true })
+
+    // Missing when last shown, then back: Remove reads again and leaves it.
+    fs.renameSync(back, `${back}.away`)
+    service.refreshAll()
+    await expect.poll(() => shown().find((worktree) => worktree.path === back)?.missing).toBe(true)
+    fs.renameSync(`${back}.away`, back)
+    expect(await service.removeMissing(project, back)).toEqual({
+      ok: false,
+      message: 'The folder of the worktree exists; delete the worktree instead.',
+    })
+    expect(shown().find((worktree) => worktree.path === back)).toMatchObject({ missing: false })
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toContain(back)
+  })
+
+  it('neither deletes nor removes the other linked worktrees of the project repository', async () => {
+    const ext = path.join(root, 'ext')
+    git(project, 'worktree', 'add', '-q', '-b', 'ext', ext)
+    const gone = path.join(root, 'gone')
+    git(project, 'worktree', 'add', '-q', '-b', 'gone', gone)
+    fs.rmSync(gone, { recursive: true })
+    await start()
+    expect(await listed()).toEqual([])
+
+    expect(await service.inspect(project, ext)).toMatchObject({ ok: false })
+    expect(await service.delete(project, ext, true)).toMatchObject({
+      ok: false,
+      reason: 'not-found',
+    })
+    expect(await service.removeMissing(project, gone)).toMatchObject({ ok: false })
+    expect(await service.currentWorktree(project, ext)).toBeNull()
+    expect(fs.existsSync(ext)).toBe(true)
+    expect(linkedWorktrees(project).toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: ext, prunable: false },
+      { path: gone, prunable: true },
+    ])
+    expect(branches(project)).toEqual(expect.arrayContaining(['ext', 'gone']))
+  })
+
+  it('looks for inner repositories when the dialog opens or before a check, not when reading the worktrees again', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/i',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const later = makeRepository(path.join(project, 'later'))
+    git(later, 'worktree', 'add', '-q', '-b', 'feat/i', path.join(R, 'later'))
+
+    service.refreshAll()
+    expect(await service.currentWorktree(project, R)).toMatchObject({ innerMembers: [] })
+    await service.newWorktreeOptions(project)
+    expect(await listed()).toMatchObject([{ path: R, innerMembers: ['later'] }])
   })
 
   it('offers the branches and inner repositories, checks names, and previews the location', async () => {
@@ -384,72 +465,8 @@ describe('WorktreeService', () => {
     }
   })
 
-  it('follows the repositories made in, moved into or deleted from the project while it runs', async () => {
-    await start()
-    const created = await service.create({
-      projectRoot: project,
-      branch: 'feat/t',
-      base: 'main',
-      nested: [],
-    })
-    if (!created.ok) throw new Error(created.message)
-    const R = created.path
-    const members = async () =>
-      (await listed()).find((worktree) => worktree.path === R)?.innerMembers
-    const within = { timeout: 2_000, interval: 50 }
-
-    // Made in the project, with its worktree in the root: nothing else asks to look.
-    const later = makeRepository(path.join(project, 'later'))
-    git(later, 'worktree', 'add', '-q', '-b', 'feat/t', path.join(R, 'later'))
-    await expect.poll(members, within).toEqual(['later'])
-
-    // Moved into the project, then with its worktree in the root.
-    const moved = path.join(project, 'moved')
-    fs.renameSync(makeRepository(path.join(root, 'elsewhere')), moved)
-    git(moved, 'worktree', 'add', '-q', '-b', 'feat/t', path.join(R, 'moved'))
-    await expect.poll(members, within).toEqual(['later', 'moved'])
-
-    // Its later registration changes are followed as an inner repository's.
-    git(later, 'worktree', 'remove', path.join(R, 'later'))
-    await expect.poll(members, within).toEqual(['moved'])
-
-    // Deleted from the project, it is no inner repository anymore.
-    fs.rmSync(moved, { recursive: true })
-    await expect.poll(members, within).toEqual([])
-  })
-
-  it('follows the repositories in a folder moved into the project, or out of a dependency folder', async () => {
-    makeRepository(path.join(project, 'vendor', 'dep'))
-    await start()
-    const created = await service.create({
-      projectRoot: project,
-      branch: 'feat/u',
-      base: 'main',
-      nested: [],
-    })
-    if (!created.ok) throw new Error(created.message)
-    const R = created.path
-    const members = async () =>
-      (await listed()).find((worktree) => worktree.path === R)?.innerMembers
-    const within = { timeout: 2_000, interval: 50 }
-
-    // Moving a folder in reports nothing but the folder, which holds the repository below its top.
-    const holder = path.join(root, 'holder')
-    makeRepository(path.join(holder, 'lib'))
-    fs.renameSync(holder, path.join(project, 'holder'))
-    const lib = path.join(project, 'holder', 'lib')
-    git(lib, 'worktree', 'add', '-q', '-b', 'feat/u', path.join(R, 'holder', 'lib'))
-    await expect.poll(members, within).toEqual(['holder/lib'])
-
-    // Out of a dependency folder, a repository is an inner repository.
-    fs.renameSync(path.join(project, 'vendor'), path.join(project, 'third-party'))
-    const dep = path.join(project, 'third-party', 'dep')
-    git(dep, 'worktree', 'add', '-q', '-b', 'feat/u', path.join(R, 'third-party', 'dep'))
-    await expect.poll(members, within).toEqual(['holder/lib', 'third-party/dep'])
-  })
-
   it('removes the registrations of a missing worktree and its inner members, keeping branches', async () => {
-    const gone = path.join(root, 'gone')
+    const gone = path.join(W, 'project', 'gone')
     git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)
     git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(gone, 'inner'))
     fs.rmSync(gone, { recursive: true })
@@ -466,7 +483,7 @@ describe('WorktreeService', () => {
   })
 
   it('removes a missing worktree that is locked, and its locked inner members', async () => {
-    const gone = path.join(root, 'gone')
+    const gone = path.join(W, 'project', 'gone')
     git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)
     git(project, 'worktree', 'lock', '--reason', 'on usb', gone)
     git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(gone, 'inner'))

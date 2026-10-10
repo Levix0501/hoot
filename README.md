@@ -85,14 +85,19 @@ a folder of its own.
 - **When Git complains**: if a hook such as `post-checkout` fails after Git has created a
   worktree, the worktree is kept and Hoot shows Git's output as a warning. If Git cannot create a
   worktree at all, Hoot removes what it created and shows Git's error.
-- **In the sidebar**: every linked worktree of a project, also one made outside Hoot, is listed
-  below the sessions of the project's main worktree, by branch, or by commit for a detached HEAD.
-  Changes made outside Hoot, by Git or by an agent, show within two seconds. Point at a worktree to
-  see its folder and its nested repositories. Its `+` starts a session in it, and its `⋯` menu or
-  context menu reveals it in Finder, copies its path or deletes it. Sessions started in a worktree
-  are listed below it, and the session header names the worktree after the project. A worktree
-  whose folder is gone shows as Missing and can only be removed from Git's records; a locked
-  worktree cannot be deleted.
+- **In the sidebar**: a project's worktrees, the linked worktrees in its folder in
+  `~/.hoot/worktrees`, are listed below the sessions of the project's main worktree, by branch, or
+  by commit for a detached HEAD. Linked worktrees elsewhere, such as those coding agents make, are
+  not listed. Point at a worktree to see its folder and its nested repositories. Its `+` starts a
+  session in it, and its `⋯` menu or context menu reveals it in Finder, copies its path or deletes
+  it. Sessions started in a worktree are listed below it, and the session header names the worktree
+  after the project. A worktree whose folder is gone shows as Missing and can only be removed from
+  Git's records; a locked worktree cannot be deleted.
+- **Changes made outside Hoot**, by Git or by an agent, show when Hoot starts and when its window
+  gets the focus; Hoot watches no files for them. Before starting a session in a worktree, deleting
+  one or removing one, Hoot reads the worktrees again and goes ahead only if the worktree still
+  allows it: a worktree that is gone allows nothing, a missing one only removing, a locked one no
+  deleting, and one whose folder is back no removing.
 - **Deleting**: Hoot checks every repository of the worktree, populated submodules included, for
   uncommitted changes and for commits that are on no branch, and looks for other repositories
   inside the worktree's folder, which would be deleted with it. Then it asks: when something would
@@ -218,5 +223,5 @@ levels picked in the Agents menu and whether the sidebar is hidden in `settings.
 user data folder:
 `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository. Worktrees are read from
-Git, and those Hoot creates are in `~/.hoot/worktrees`, in one folder per project, whose
+Git: a project's worktrees are the linked worktrees in its folder in `~/.hoot/worktrees`, whose
 `.hoot-project.json` records the project it belongs to.

@@ -2,17 +2,31 @@ import type { Project } from '../../shared/ipc'
 
 /**
  * Sessions in sidebar order: grouped by project in the order of the project
- * list, and within a project in the order they were started.
+ * list. Within a project come first the sessions in its main worktree, then
+ * those of each of its worktrees in the order of the worktree rows
+ * (`worktreeOrder` gives the roots of a project's worktree rows); each in
+ * the order they were started.
  */
-export function sidebarOrder<T extends { projectRoot: string }>(
+export function sidebarOrder<T extends { projectRoot: string; worktreePath: string | null }>(
   projects: readonly Project[],
   sessions: readonly T[],
+  worktreeOrder: (projectRoot: string) => readonly string[] = () => [],
 ): T[] {
   const roots = new Set(projects.map((project) => project.root))
   return [
-    ...projects.flatMap((project) =>
-      sessions.filter((session) => session.projectRoot === project.root),
-    ),
+    ...projects.flatMap((project) => {
+      const own = sessions.filter((session) => session.projectRoot === project.root)
+      const worktrees = worktreeOrder(project.root)
+      const listed = new Set(worktrees)
+      return [
+        ...own.filter((session) => session.worktreePath === null),
+        ...worktrees.flatMap((path) => own.filter((session) => session.worktreePath === path)),
+        // Not expected: every worktree a session runs in has a row.
+        ...own.filter(
+          (session) => session.worktreePath !== null && !listed.has(session.worktreePath),
+        ),
+      ]
+    }),
     // Not expected: a session's project leaves the list only after it is closed.
     ...sessions.filter((session) => !roots.has(session.projectRoot)),
   ]

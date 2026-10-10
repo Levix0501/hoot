@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import {
+  clipboard,
   dialog,
   ipcMain,
+  shell,
   type BrowserWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -14,6 +16,11 @@ import {
   type WindowState,
 } from '../shared/ipc'
 import { TOOL_IDS } from '../shared/tools'
+import type {
+  CreateWorktreeRequest,
+  DeleteWorktreeResult,
+  RemoveWorktreeResult,
+} from '../shared/worktrees'
 import type { ProjectRootResult } from './projects/project-root'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
@@ -21,6 +28,7 @@ import { SessionError, type SessionManager } from './session/session-manager'
 import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
+import type { WorktreeService } from './worktrees/worktree-service'
 
 export interface IpcDependencies {
   getWindow(): BrowserWindow | null
@@ -30,6 +38,7 @@ export interface IpcDependencies {
   sidebar: SidebarStateStore
   sessions: SessionManager
   quitGuard: QuitGuard
+  worktrees: WorktreeService
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
 
@@ -38,11 +47,26 @@ const terminalDimension = z.number().int().positive().max(9_999)
 const startSessionRequest = z.object({
   id: sessionId,
   projectRoot: z.string().min(1),
+  worktreePath: z.string().min(1).nullable(),
   toolId: z.enum(TOOL_IDS),
   cols: terminalDimension,
   rows: terminalDimension,
 }) satisfies z.ZodType<StartSessionRequest>
 const projectRoot = z.string().min(1)
+const worktreeArguments = z.tuple([projectRoot, z.string().min(1)])
+const branchName = z.string().max(1_000)
+const createWorktreeRequest = z.object({
+  projectRoot,
+  branch: branchName.min(1),
+  base: z.string().min(1),
+  nested: z
+    .array(z.object({ relativePath: z.string().min(1), base: z.string().min(1) }))
+    .max(1_000),
+}) satisfies z.ZodType<CreateWorktreeRequest>
+const submoduleArguments = z.tuple([
+  projectRoot,
+  z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
+])
 const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
 
@@ -98,6 +122,7 @@ export function registerIpc(deps: IpcDependencies): void {
       case 'ok': {
         const { added, project } = deps.projects.add(resolved.root)
         if (!added) return { kind: 'duplicate', project }
+        deps.worktrees.addProject(project.root)
         send(IpcChannel.projectsChanged, deps.projects.list())
         return { kind: 'added', project }
       }
@@ -108,6 +133,7 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = projectRoot.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid project.' }
     const root = parsed.data
+    // Also a session in one of its worktrees.
     if (deps.sessions.isRunningIn(root)) {
       return {
         ok: false,
@@ -115,6 +141,8 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     deps.projects.remove(root)
+    // Its worktrees, their files and branches stay as they are.
+    deps.worktrees.removeProject(root)
     // Removing a project closes its sessions, which have all ended.
     deps.sessions.forgetProject(root)
     send(IpcChannel.projectsChanged, deps.projects.list())
@@ -148,6 +176,12 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!deps.projects.find(request.projectRoot)) {
       return { ok: false, message: 'The project is not in the list.' }
     }
+    if (
+      request.worktreePath !== null &&
+      !(await deps.worktrees.isWorktreeOf(request.projectRoot, request.worktreePath))
+    ) {
+      return { ok: false, message: `The worktree is not available: ${request.worktreePath}` }
+    }
     try {
       return { ok: true, session: await deps.sessions.start(request) }
     } catch (error) {
@@ -179,5 +213,87 @@ export function registerIpc(deps: IpcDependencies): void {
 
   on(IpcChannel.quitResponse, (confirmed) => {
     void deps.quitGuard.answer(z.literal(true).safeParse(confirmed).success)
+  })
+
+  handle(IpcChannel.listWorktrees, () => deps.worktrees.listAll())
+  deps.worktrees.on('changed', (root, worktrees) =>
+    send(IpcChannel.worktreesChanged, root, worktrees),
+  )
+
+  handle(IpcChannel.newWorktreeOptions, (_event, value) => {
+    const parsed = projectRoot.safeParse(value)
+    return parsed.success ? deps.worktrees.newWorktreeOptions(parsed.data) : null
+  })
+
+  handle(IpcChannel.checkBranchName, (_event, value) => {
+    const parsed = branchName.safeParse(value)
+    return parsed.success ? deps.worktrees.isValidBranchName(parsed.data) : false
+  })
+
+  handle(IpcChannel.previewWorktreePath, (_event, ...args) => {
+    const parsed = z.tuple([projectRoot, branchName]).safeParse(args)
+    return parsed.success ? deps.worktrees.previewPath(...parsed.data) : null
+  })
+
+  handle(IpcChannel.worktreeSubmodules, (_event, ...args) => {
+    const parsed = submoduleArguments.safeParse(args)
+    return parsed.success ? deps.worktrees.submodules(...parsed.data) : []
+  })
+
+  handle(IpcChannel.createWorktree, (_event, value) => {
+    const parsed = createWorktreeRequest.safeParse(value)
+    if (!parsed.success) return { ok: false, reason: 'invalid', message: 'Invalid request.' }
+    return deps.worktrees.create(parsed.data)
+  })
+
+  handle(IpcChannel.inspectWorktree, (_event, ...args) => {
+    const parsed = worktreeArguments.safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    return deps.worktrees.inspect(...parsed.data)
+  })
+
+  handle(IpcChannel.deleteWorktree, async (_event, ...args): Promise<DeleteWorktreeResult> => {
+    const parsed = z.tuple([projectRoot, z.string().min(1), z.boolean()]).safeParse(args)
+    if (!parsed.success) return { ok: false, reason: 'not-found', message: 'Invalid request.' }
+    const [root, worktreePath, discard] = parsed.data
+    // Also a session in a project's worktree inside it, which deleting it would delete.
+    const running = () => deps.sessions.isRunningWithin(worktreePath)
+    if (running()) {
+      return {
+        ok: false,
+        reason: 'running',
+        message: 'End the running sessions in this worktree before deleting it.',
+      }
+    }
+    const result = await deps.worktrees.delete(root, worktreePath, discard, running)
+    // Its sessions, which have all ended, close with it.
+    if (result.ok) deps.sessions.forgetWorktree(worktreePath)
+    return result
+  })
+
+  handle(IpcChannel.removeWorktree, async (_event, ...args): Promise<RemoveWorktreeResult> => {
+    const parsed = worktreeArguments.safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    const result = await deps.worktrees.removeMissing(...parsed.data)
+    if (result.ok) deps.sessions.forgetWorktree(parsed.data[1])
+    return result
+  })
+
+  on(IpcChannel.revealWorktree, (...args) => {
+    const parsed = worktreeArguments.safeParse(args)
+    if (!parsed.success) return
+    const [root, worktreePath] = parsed.data
+    void deps.worktrees.isWorktreeOf(root, worktreePath).then((found) => {
+      if (found) shell.showItemInFolder(worktreePath)
+    })
+  })
+
+  on(IpcChannel.copyWorktreePath, (...args) => {
+    const parsed = worktreeArguments.safeParse(args)
+    if (!parsed.success) return
+    const [root, worktreePath] = parsed.data
+    void deps.worktrees.isWorktreeOf(root, worktreePath).then((found) => {
+      if (found) clipboard.writeText(worktreePath)
+    })
   })
 }

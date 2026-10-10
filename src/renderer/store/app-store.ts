@@ -5,6 +5,7 @@ import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
 import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
+import type { WorktreeInfo, WorktreeInspection } from '../../shared/worktrees'
 import { api } from '../lib/api'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
@@ -23,11 +24,14 @@ import {
   type SessionHistory,
 } from './session-history'
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
+import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
 /** A session as the window shows it. */
 export interface UiSession {
   id: string
   projectRoot: string
+  /** The root of the worktree it runs in, or `null` for the project's main worktree. */
+  worktreePath: string | null
   toolId: ToolId
   /**
    * `starting` covers the time until the process runs. A starting session
@@ -43,9 +47,27 @@ export interface UiSession {
   closing: boolean
 }
 
+/** The deletion of a worktree, from checking it until it is deleted or cancelled. */
+export interface WorktreeDeletion {
+  projectRoot: string
+  path: string
+  /** Checking what would be lost, asking for confirmation, or deleting. */
+  phase: 'checking' | 'confirm' | 'deleting'
+  inspection: WorktreeInspection | null
+  /** What went wrong while checking or deleting. */
+  error: string | null
+}
+
 export interface AppState {
   initialized: boolean
   projects: Project[]
+  /** Each project's worktrees as Git lists them, by project root. */
+  worktrees: Record<string, WorktreeInfo[]>
+  /** The last known state of every worktree listed since Hoot started, by root. */
+  knownWorktrees: Record<string, WorktreeInfo>
+  /** The project whose new worktree dialog is open. */
+  newWorktreeProject: string | null
+  worktreeDeletion: WorktreeDeletion | null
   tools: ToolsState
   /** The permission level selected for each coding tool; `null` until it is known. */
   permissionLevels: PermissionLevelSettings | null
@@ -75,7 +97,8 @@ export interface AppState {
   addProject(): Promise<void>
   removeProject(root: string): Promise<void>
   redetectTools(): Promise<void>
-  newSession(projectRoot: string, toolId: ToolId): void
+  /** Starts a session in the project's main worktree, or in one of its worktrees. */
+  newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   launchSession(id: string, cols: number, rows: number): Promise<void>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
@@ -96,6 +119,13 @@ export interface AppState {
   /** Ends renaming; `null` keeps the name as it was. */
   finishRenaming(id: string, name: string | null): void
   answerQuit(confirmed: boolean): void
+  openNewWorktreeDialog(projectRoot: string): void
+  closeNewWorktreeDialog(): void
+  /** Checks a worktree and asks for confirmation before deleting it. */
+  requestDeleteWorktree(projectRoot: string, path: string): void
+  answerDeleteWorktree(confirmed: boolean): Promise<void>
+  /** Removes the registrations of a worktree whose folder is missing. */
+  removeMissingWorktree(projectRoot: string, path: string): Promise<void>
 }
 
 declare global {
@@ -121,6 +151,11 @@ function pathText(path: string): ReactNode {
   return createElement('span', { 'data-path': '' }, path)
 }
 
+/** The message of something thrown, such as a failed call to the main process. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** True while a session is starting or running. */
 export function isSessionRunning(session: UiSession): boolean {
   return session.status !== 'exited'
@@ -128,6 +163,43 @@ export function isSessionRunning(session: UiSession): boolean {
 
 function fromInfo(info: SessionInfo): UiSession {
   return { ...info, title: '', customName: null, closing: false }
+}
+
+/** The worktree rows of a project: its worktrees, and those its sessions run in. */
+export function projectWorktreeRows(
+  state: Pick<AppState, 'worktrees' | 'knownWorktrees' | 'sessions'>,
+  projectRoot: string,
+): WorktreeRow[] {
+  return worktreeRows(
+    state.worktrees[projectRoot],
+    sessionWorktrees(state.sessions, projectRoot),
+    state.knownWorktrees,
+  )
+}
+
+/** The worktrees a project's sessions run in, without duplicates. */
+export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: string): string[] {
+  return [
+    ...new Set(
+      sessions
+        .filter((session) => session.projectRoot === projectRoot && session.worktreePath !== null)
+        .map((session) => session.worktreePath!),
+    ),
+  ]
+}
+
+/** Every session in sidebar order. */
+export function orderedSessions(
+  state: Pick<AppState, 'projects' | 'worktrees' | 'knownWorktrees' | 'sessions'>,
+): UiSession[] {
+  return sidebarOrder(state.projects, state.sessions, (root) =>
+    projectWorktreeRows(state, root).map((row) => row.path),
+  )
+}
+
+/** What the sidebar shows for a worktree: its branch, or its abbreviated commit. */
+export function worktreeDisplayName(state: Pick<AppState, 'knownWorktrees'>, path: string): string {
+  return state.knownWorktrees[path]?.displayName ?? path.split('/').filter(Boolean).at(-1) ?? path
 }
 
 function updateSession(
@@ -184,7 +256,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     const removed = new Set(ids)
     let currentChanged = false
     set((state) => {
-      const order = sidebarOrder(state.projects, state.sessions).map((session) => session.id)
+      const order = orderedSessions(state).map((session) => session.id)
       const currentSessionId = currentAfterClosing(order, state.currentSessionId, removed)
       currentChanged = currentSessionId !== state.currentSessionId
       // The history forgets the closed sessions before it records the one shown instead.
@@ -224,18 +296,40 @@ export const useAppStore = create<AppState>()((set, get) => {
     // Their processes have all ended: a project cannot be removed while one runs.
     if (orphaned.length > 0) removeSessions(orphaned, projects)
     else set({ projects })
+    set((state) => ({
+      worktrees: Object.fromEntries(
+        Object.entries(state.worktrees).filter(([root]) => roots.has(root)),
+      ),
+    }))
+  }
+
+  /** Applies a project's worktrees as Git lists them now. */
+  const applyWorktrees = (projectRoot: string, worktrees: WorktreeInfo[]) => {
+    set((state) => ({
+      worktrees: { ...state.worktrees, [projectRoot]: worktrees },
+      knownWorktrees: {
+        ...state.knownWorktrees,
+        ...Object.fromEntries(worktrees.map((worktree) => [worktree.path, worktree])),
+      },
+    }))
+  }
+
+  /** Closes the ended sessions of a worktree that is gone, as its deletion does. */
+  const closeEndedSessionsIn = (path: string) => {
+    const ended = get()
+      .sessions.filter((session) => session.worktreePath === path && !isSessionRunning(session))
+      .map((session) => session.id)
+    if (ended.length > 0) removeSessions(ended)
   }
 
   const selectAt = (index: number) => {
-    const { projects, sessions } = get()
-    const session = sidebarOrder(projects, sessions)[index]
+    const session = orderedSessions(get())[index]
     if (session) get().selectSession(session.id)
   }
 
   const selectRelative = (offset: 1 | -1) => {
-    const { projects, sessions, currentSessionId } = get()
-    const order = sidebarOrder(projects, sessions).map((session) => session.id)
-    const id = relativeSession(order, currentSessionId, offset)
+    const order = orderedSessions(get()).map((session) => session.id)
+    const id = relativeSession(order, get().currentSessionId, offset)
     if (id !== null) get().selectSession(id)
   }
 
@@ -260,6 +354,10 @@ export const useAppStore = create<AppState>()((set, get) => {
   return {
     initialized: false,
     projects: [],
+    worktrees: {},
+    knownWorktrees: {},
+    newWorktreeProject: null,
+    worktreeDeletion: null,
     tools: { detecting: true, tools: [], error: null },
     permissionLevels: null,
     sessions: [],
@@ -319,6 +417,21 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onSessionCommand((command) => get().runMenuCommand(command))
       api.onConfirmQuit((runningSessions) => set({ quitConfirmation: { runningSessions } }))
       api.onAddProjectRequested(() => void get().addProject())
+      // Changes reported while the list is read are newer than the list.
+      const changedWorktrees = new Set<string>()
+      api.onWorktreesChanged((root, worktrees) => {
+        changedWorktrees.add(root)
+        applyWorktrees(root, worktrees)
+      })
+      // Read in the background: listing worktrees waits for Git, the projects do not.
+      void api.listWorktrees().then(
+        (worktrees) => {
+          for (const [root, list] of Object.entries(worktrees)) {
+            if (!changedWorktrees.has(root)) applyWorktrees(root, list)
+          }
+        },
+        (error: unknown) => console.error('Could not list the worktrees:', error),
+      )
 
       const [projects, sessions, permissionLevels] = await Promise.all([
         api.listProjects(),
@@ -335,7 +448,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         set((state) => {
           const all = [...state.sessions, ...reloaded.map(fromInfo)]
           const currentSessionId =
-            state.currentSessionId ?? sidebarOrder(projects, all)[0]?.id ?? null
+            state.currentSessionId ?? orderedSessions({ ...state, sessions: all })[0]?.id ?? null
           return {
             sessions: all,
             currentSessionId,
@@ -403,7 +516,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ tools })
     },
 
-    newSession(projectRoot, toolId) {
+    newSession(projectRoot, toolId, worktreePath = null) {
       const id = crypto.randomUUID()
       openTerminal(id)
       getSessionTerminal(get().currentSessionId)?.terminal.blur()
@@ -415,6 +528,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           {
             id,
             projectRoot,
+            worktreePath,
             toolId,
             status: 'starting',
             exit: null,
@@ -434,6 +548,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       const result = await api.startSession({
         id,
         projectRoot: session.projectRoot,
+        worktreePath: session.worktreePath,
         toolId: session.toolId,
         cols,
         rows,
@@ -583,6 +698,84 @@ export const useAppStore = create<AppState>()((set, get) => {
     answerQuit(confirmed) {
       set({ quitConfirmation: null })
       api.respondToQuit(confirmed)
+    },
+
+    openNewWorktreeDialog(projectRoot) {
+      if (get().projects.some((project) => project.root === projectRoot)) {
+        set({ newWorktreeProject: projectRoot })
+      }
+    },
+
+    closeNewWorktreeDialog() {
+      set({ newWorktreeProject: null })
+    },
+
+    requestDeleteWorktree(projectRoot, path) {
+      if (get().worktreeDeletion !== null) return
+      const deletion: WorktreeDeletion = {
+        projectRoot,
+        path,
+        phase: 'checking',
+        inspection: null,
+        error: null,
+      }
+      set({ worktreeDeletion: deletion })
+      void api
+        .inspectWorktree(projectRoot, path)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        .then((result) => {
+          if (get().worktreeDeletion !== deletion) return
+          set({
+            worktreeDeletion: result.ok
+              ? { ...deletion, phase: 'confirm', inspection: result.inspection }
+              : { ...deletion, phase: 'confirm', error: result.message },
+          })
+        })
+    },
+
+    async answerDeleteWorktree(confirmed) {
+      const deletion = get().worktreeDeletion
+      if (deletion === null || deletion.phase === 'deleting') return
+      if (!confirmed || deletion.phase !== 'confirm' || !deletion.inspection) {
+        set({ worktreeDeletion: null })
+        return
+      }
+      const deleting: WorktreeDeletion = { ...deletion, phase: 'deleting' }
+      set({ worktreeDeletion: deleting })
+      // Discarding is confirmed only for what the confirmation listed.
+      const discard =
+        deletion.inspection.changes.length > 0 || deletion.inspection.foreignRepositories.length > 0
+      const result = await api
+        .deleteWorktree(deletion.projectRoot, deletion.path, discard)
+        .catch((error: unknown) => ({
+          ok: false as const,
+          reason: 'failed' as const,
+          message: errorMessage(error),
+          inspection: undefined,
+        }))
+      if (get().worktreeDeletion !== deleting) return
+      if (result.ok) {
+        set({ worktreeDeletion: null })
+        closeEndedSessionsIn(deletion.path)
+        return
+      }
+      // Something to lose appeared since the check: ask again, listing it.
+      if (result.reason === 'changed' && result.inspection) {
+        set({ worktreeDeletion: { ...deletion, phase: 'confirm', inspection: result.inspection } })
+        return
+      }
+      set({ worktreeDeletion: { ...deletion, phase: 'confirm', error: result.message } })
+    },
+
+    async removeMissingWorktree(projectRoot, path) {
+      const result = await api
+        .removeWorktree(projectRoot, path)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error('Could not remove the worktree.', { description: result.message })
+        return
+      }
+      closeEndedSessionsIn(path)
     },
   }
 })

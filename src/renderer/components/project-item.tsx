@@ -1,4 +1,10 @@
-import { FolderGit2Icon, MoreHorizontalIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import {
+  FolderGit2Icon,
+  GitBranchPlusIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  Trash2Icon,
+} from 'lucide-react'
 import type { Project } from '../../shared/ipc'
 import type { ToolId } from '../../shared/tools'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
@@ -26,14 +32,14 @@ import {
 import { SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 import { ToolMenuEntries, type ToolMenuComponents } from './tool-menu-entries'
 
-const dropdownComponents: ToolMenuComponents = {
+export const dropdownComponents: ToolMenuComponents = {
   Group: DropdownMenuGroup,
   Item: DropdownMenuItem,
   Separator: DropdownMenuSeparator,
   Label: DropdownMenuLabel,
 }
 
-const contextComponents: ToolMenuComponents = {
+export const contextComponents: ToolMenuComponents = {
   Group: ContextMenuGroup,
   Item: ContextMenuItem,
   Separator: ContextMenuSeparator,
@@ -46,7 +52,8 @@ export function ProjectItem({ project }: { project: Project }) {
   const newSession = useAppStore((state) => state.newSession)
   const removeProject = useAppStore((state) => state.removeProject)
   const redetectTools = useAppStore((state) => state.redetectTools)
-  // A project cannot be removed while one of its sessions runs.
+  const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
+  // A project cannot be removed while one of its sessions runs, in any of its worktrees.
   const runningHere = useAppStore((state) =>
     state.sessions.some(
       (session) => session.projectRoot === project.root && isSessionRunning(session),
@@ -56,6 +63,7 @@ export function ProjectItem({ project }: { project: Project }) {
   const startSession = (toolId: ToolId) => newSession(project.root, toolId)
   const remove = () => void removeProject(project.root)
   const redetect = () => void redetectTools()
+  const newWorktree = () => openNewWorktreeDialog(project.root)
 
   return (
     <ContextMenu>
@@ -110,6 +118,11 @@ export function ProjectItem({ project }: { project: Project }) {
               onSelect={startSession}
               onRedetect={redetect}
             />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={newWorktree} data-testid="new-worktree">
+              <GitBranchPlusIcon />
+              New Worktree…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -159,6 +172,10 @@ export function ProjectItem({ project }: { project: Project }) {
             />
           </ContextMenuSubContent>
         </ContextMenuSub>
+        <ContextMenuItem onClick={newWorktree} data-testid="context-new-worktree">
+          <GitBranchPlusIcon />
+          New Worktree…
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           variant="destructive"

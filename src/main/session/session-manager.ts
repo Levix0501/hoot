@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { StartSessionRequest } from '../../shared/ipc'
 import type { PtySpawnRequest } from '../../shared/pty-protocol'
 import type { SessionExit, SessionInfo } from '../../shared/session'
+import { isWithin } from '../../shared/worktrees'
 import type { ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
 
@@ -26,7 +27,8 @@ export interface PtyHost {
 
 export interface SessionManagerOptions {
   host: PtyHost
-  resolveLaunch(toolId: ToolId, projectRoot: string): Promise<SessionLaunch>
+  /** Decides what a session runs in its working directory. */
+  resolveLaunch(toolId: ToolId, cwd: string): Promise<SessionLaunch>
   /** Sends a signal to a process group; replaceable for tests. */
   signalProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
   /** How long to wait for a process to exit after SIGHUP before using SIGKILL. */
@@ -107,10 +109,22 @@ export class SessionManager extends EventEmitter<{
     return this.runningCount() > 0
   }
 
-  /** Whether a session of the project is starting or running. */
+  /** Whether a session of the project, in its main worktree or any other, is starting or running. */
   isRunningIn(projectRoot: string): boolean {
     return [...this.records.values()].some(
       (record) => record.info.projectRoot === projectRoot && isRunning(record),
+    )
+  }
+
+  /**
+   * Whether a session is starting or running in a directory or below it: in
+   * a worktree with this root, say, or in a project's worktree inside it.
+   */
+  isRunningWithin(directory: string): boolean {
+    return [...this.records.values()].some(
+      (record) =>
+        isRunning(record) &&
+        isWithin(record.info.worktreePath ?? record.info.projectRoot, directory),
     )
   }
 
@@ -121,6 +135,7 @@ export class SessionManager extends EventEmitter<{
       info: {
         id: request.id,
         projectRoot: request.projectRoot,
+        worktreePath: request.worktreePath,
         toolId: request.toolId,
         status: 'running',
         exit: null,
@@ -132,15 +147,17 @@ export class SessionManager extends EventEmitter<{
       exitWaiters: [],
     }
     this.records.set(request.id, record)
+    // A session in a worktree runs in the worktree's root.
+    const cwd = request.worktreePath ?? request.projectRoot
     try {
-      const launch = await this.options.resolveLaunch(request.toolId, request.projectRoot)
+      const launch = await this.options.resolveLaunch(request.toolId, cwd)
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {
         record.pid = await this.options.host.spawn({
           id: request.id,
           file: launch.file,
           args: launch.args,
-          cwd: request.projectRoot,
+          cwd,
           env: launch.env,
           cols: request.cols,
           rows: request.rows,
@@ -197,6 +214,13 @@ export class SessionManager extends EventEmitter<{
   forgetProject(projectRoot: string): void {
     for (const [id, record] of this.records) {
       if (record.info.projectRoot === projectRoot && !isRunning(record)) this.records.delete(id)
+    }
+  }
+
+  /** Forgets the ended sessions of a worktree that is deleted. */
+  forgetWorktree(worktreePath: string): void {
+    for (const [id, record] of this.records) {
+      if (record.info.worktreePath === worktreePath && !isRunning(record)) this.records.delete(id)
     }
   }
 

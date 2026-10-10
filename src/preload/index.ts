@@ -39,6 +39,26 @@ const api: HootApi = {
   onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onConfirmQuit: (listener) => subscribe(IpcChannel.confirmQuit, listener),
   respondToQuit: (confirmed) => ipcRenderer.send(IpcChannel.quitResponse, confirmed),
+  listWorktrees: () => ipcRenderer.invoke(IpcChannel.listWorktrees),
+  onWorktreesChanged: (listener) => subscribe(IpcChannel.worktreesChanged, listener),
+  getNewWorktreeOptions: (projectRoot) =>
+    ipcRenderer.invoke(IpcChannel.newWorktreeOptions, projectRoot),
+  checkBranchName: (name) => ipcRenderer.invoke(IpcChannel.checkBranchName, name),
+  previewWorktreePath: (projectRoot, branch) =>
+    ipcRenderer.invoke(IpcChannel.previewWorktreePath, projectRoot, branch),
+  getWorktreeSubmodules: (projectRoot, participants) =>
+    ipcRenderer.invoke(IpcChannel.worktreeSubmodules, projectRoot, participants),
+  createWorktree: (request) => ipcRenderer.invoke(IpcChannel.createWorktree, request),
+  inspectWorktree: (projectRoot, worktreePath) =>
+    ipcRenderer.invoke(IpcChannel.inspectWorktree, projectRoot, worktreePath),
+  deleteWorktree: (projectRoot, worktreePath, discard) =>
+    ipcRenderer.invoke(IpcChannel.deleteWorktree, projectRoot, worktreePath, discard),
+  removeWorktree: (projectRoot, worktreePath) =>
+    ipcRenderer.invoke(IpcChannel.removeWorktree, projectRoot, worktreePath),
+  revealWorktree: (projectRoot, worktreePath) =>
+    ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
+  copyWorktreePath: (projectRoot, worktreePath) =>
+    ipcRenderer.send(IpcChannel.copyWorktreePath, projectRoot, worktreePath),
 }
 
 contextBridge.exposeInMainWorld('hoot', api)

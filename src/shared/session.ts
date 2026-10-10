@@ -15,6 +15,8 @@ export type SessionStatus = 'running' | 'exited'
 export interface SessionInfo {
   id: string
   projectRoot: string
+  /** The root of the project's worktree the session runs in, or `null` for the main worktree. */
+  worktreePath: string | null
   toolId: ToolId
   status: SessionStatus
   exit: SessionExit | null

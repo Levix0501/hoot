@@ -16,7 +16,8 @@ Hoot supports macOS only for now.
   across restarts. Right-click a project, or use its `⋯` menu, to remove it from the list
   (its files are never touched).
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
-  default shell in the project root, from the project's `+` button or its context menu. Tools run
+  default shell in the project root, from the project's `+` button or its context menu, or in one
+  of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment, with only the arguments of their
   [permission level](#permission-levels); the shell runs as an interactive login shell. Tools that
   are not installed are shown disabled with an install command, and **Re-detect Tools** checks
@@ -62,6 +63,44 @@ Hoot supports macOS only for now.
   Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
   it.
 - The interface and the terminal follow the macOS light or dark appearance.
+
+## Worktrees
+
+Worktrees let several agents work on one project at the same time, each on a branch of its own in
+a folder of its own.
+
+- **Creating**: choose **New Worktree…** from a project's `+` menu or its context menu, enter the
+  name of a new branch and pick the local branch it starts from. Hoot creates the branch and checks
+  it out in a linked worktree in `~/.hoot/worktrees/<project>/<branch>` (with `/` and other
+  characters that do not belong in a folder name replaced by `-`). An installed Hoot and one run
+  from its repository use the same folders. Hoot does not start a session in the new worktree.
+- **Nested repositories**: repositories inside the project that it ignores or does not track (such
+  as the `hoot/` repository in Hoot's own workspace) get the same branch, at the same path inside
+  the worktree, so that the worktree looks like the project. Each starts from its own base branch:
+  by default the one named like the project's, or else the branch it has checked out. Leave out any
+  of them in the dialog. Repositories in dependency folders such as `node_modules`, `vendor` or
+  `.venv`, submodules and repositories reached through symbolic links are not included.
+- **Submodules** are left empty in new worktrees, and the dialog lists them; run
+  `git submodule update --init` in the worktree if you need them.
+- **When Git complains**: if a hook such as `post-checkout` fails after Git has created a
+  worktree, the worktree is kept and Hoot shows Git's output as a warning. If Git cannot create a
+  worktree at all, Hoot removes what it created and shows Git's error.
+- **In the sidebar**: every linked worktree of a project, also one made outside Hoot, is listed
+  below the sessions of the project's main worktree, by branch, or by commit for a detached HEAD.
+  Changes made outside Hoot, by Git or by an agent, show within two seconds. Point at a worktree to
+  see its folder and its nested repositories. Its `+` starts a session in it, and its `⋯` menu or
+  context menu reveals it in Finder, copies its path or deletes it. Sessions started in a worktree
+  are listed below it, and the session header names the worktree after the project. A worktree
+  whose folder is gone shows as Missing and can only be removed from Git's records; a locked
+  worktree cannot be deleted.
+- **Deleting**: Hoot checks every repository of the worktree, populated submodules included, for
+  uncommitted changes and for commits that are on no branch, and looks for other repositories
+  inside the worktree's folder, which would be deleted with it. Then it asks: when something would
+  be lost, it lists it repository by repository, and deleting needs **Discard Changes and Delete**.
+  Nested worktrees are deleted before the outer one. Branches are always kept. A worktree in which
+  a session runs cannot be deleted.
+- **Removing a project** from the list is not possible while a session runs in it or in any of its
+  worktrees, and leaves its worktrees, their files and their branches as they are.
 
 ## Permission levels
 
@@ -178,4 +217,6 @@ node-pty, the only runtime dependency. Projects are stored in `projects.json`, a
 levels picked in the Agents menu and whether the sidebar is hidden in `settings.json`, in the app's
 user data folder:
 `~/Library/Application Support/Hoot` for the installed app, and
-`~/Library/Application Support/Hoot-dev` for runs from the repository.
+`~/Library/Application Support/Hoot-dev` for runs from the repository. Worktrees are read from
+Git, and those Hoot creates are in `~/.hoot/worktrees`, in one folder per project, whose
+`.hoot-project.json` records the project it belongs to.

@@ -6,10 +6,10 @@ const project = (root: string) => ({ root, name: root.slice(1) })
 describe('sidebarOrder', () => {
   it('groups sessions by project in list order, then by start order', () => {
     const sessions = [
-      { id: 'h1', projectRoot: '/H' },
-      { id: 'g1', projectRoot: '/G' },
-      { id: 'h2', projectRoot: '/H' },
-      { id: 'g2', projectRoot: '/G' },
+      { id: 'h1', projectRoot: '/H', worktreePath: null },
+      { id: 'g1', projectRoot: '/G', worktreePath: null },
+      { id: 'h2', projectRoot: '/H', worktreePath: null },
+      { id: 'g2', projectRoot: '/G', worktreePath: null },
     ]
     expect(
       sidebarOrder([project('/G'), project('/H')], sessions).map((session) => session.id),
@@ -17,6 +17,36 @@ describe('sidebarOrder', () => {
     expect(
       sidebarOrder([project('/H'), project('/G')], sessions).map((session) => session.id),
     ).toEqual(['h1', 'h2', 'g1', 'g2'])
+  })
+})
+
+describe('sidebarOrder with worktrees', () => {
+  it('puts the sessions of the main worktree first, then those of each worktree in row order', () => {
+    const sessions = [
+      { id: 's1', projectRoot: '/G', worktreePath: null },
+      { id: 's2', projectRoot: '/G', worktreePath: null },
+      { id: 's3', projectRoot: '/G', worktreePath: '/W/G/b-tree' },
+      { id: 's4', projectRoot: '/G', worktreePath: '/W/G/a-tree' },
+      { id: 's5', projectRoot: '/O', worktreePath: null },
+      { id: 's6', projectRoot: '/G', worktreePath: '/W/G/a-tree' },
+    ]
+    const rows: Record<string, string[]> = { '/G': ['/W/G/a-tree', '/W/G/b-tree'] }
+    expect(
+      sidebarOrder([project('/G'), project('/O')], sessions, (root) => rows[root] ?? []).map(
+        (session) => session.id,
+      ),
+    ).toEqual(['s1', 's2', 's4', 's6', 's3', 's5'])
+  })
+
+  it('keeps sessions of a worktree without a row with their project', () => {
+    const sessions = [
+      { id: 'w1', projectRoot: '/G', worktreePath: '/W/G/gone' },
+      { id: 'm1', projectRoot: '/G', worktreePath: null },
+      { id: 'h1', projectRoot: '/H', worktreePath: null },
+    ]
+    expect(
+      sidebarOrder([project('/G'), project('/H')], sessions).map((session) => session.id),
+    ).toEqual(['m1', 'w1', 'h1'])
   })
 })
 

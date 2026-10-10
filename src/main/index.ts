@@ -7,6 +7,7 @@ import { IpcChannel, type SessionCommand } from '../shared/ipc'
 import { buildAppMenu } from './app-menu'
 import { captureBaseEnv } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
+import { gitEnvironment } from './git/git'
 import { registerIpc } from './ipc'
 import { resolveProjectRoot } from './projects/project-root'
 import { ProjectStore } from './projects/project-store'
@@ -18,6 +19,8 @@ import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
+import { WorktreeLayout } from './worktrees/layout'
+import { WorktreeService } from './worktrees/worktree-service'
 
 // Captured before anything else can change it: sessions inherit this environment.
 const baseEnv = captureBaseEnv()
@@ -56,7 +59,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, projectRoot) =>
+  resolveLaunch: (toolId, cwd) =>
     resolveLaunch(
       {
         shell,
@@ -70,7 +73,7 @@ const sessions = new SessionManager({
         permissionLevel: (tool) => permissionLevels.level(tool),
       },
       toolId,
-      projectRoot,
+      cwd,
     ),
 })
 
@@ -119,6 +122,16 @@ async function gitExecutable(): Promise<string> {
   )
 }
 
+// Worktrees live in the home directory, not in the user data directory, so
+// that an installed Hoot and one run from its repository share them.
+const worktrees = new WorktreeService({
+  layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
+  gitContext: async () => ({
+    git: await gitExecutable(),
+    env: gitEnvironment((await tools.getLoginEnvironment()).env),
+  }),
+})
+
 /** Opens the main window; `reveal` shows it once its first paint is ready. */
 function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   const window = new BrowserWindow({
@@ -149,6 +162,9 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
   })
+  // Worktrees may have changed while Hoot was in the background, for example
+  // a worktree's folder deleted, which changes nothing Hoot watches.
+  window.on('focus', () => worktrees.refreshAll())
   // In full screen macOS hides the traffic lights, and the page moves its
   // navigation into their place.
   window.on('enter-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, true))
@@ -183,6 +199,7 @@ if (!app.requestSingleInstanceLock()) {
     sidebar,
     sessions,
     quitGuard,
+    worktrees,
     resolveProjectRoot: async (directory) =>
       resolveProjectRoot(directory, {
         git: await gitExecutable(),
@@ -199,6 +216,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', (event) => {
     if (shutDown) return
     event.preventDefault()
+    worktrees.dispose()
     const shutdown = (async () => {
       await sessions.endAll()
       await ptyHost.stop()
@@ -248,5 +266,6 @@ if (!app.requestSingleInstanceLock()) {
     // Clicking the Dock icon shows the window, also after a background start.
     app.on('activate', showMainWindow)
     void tools.detect()
+    worktrees.setProjects(projects.list().map((project) => project.root))
   })
 }

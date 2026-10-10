@@ -1,6 +1,6 @@
 import { FolderPlusIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
 import { describeExit, describeExitShort, sessionName } from '../../shared/session'
-import { useAppStore, type UiSession } from '../store/app-store'
+import { useAppStore, worktreeDisplayName, type UiSession } from '../store/app-store'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
 import { useSessionHeaderInset } from './window-navigation'
@@ -48,6 +48,11 @@ function SessionPane({ session }: { session: UiSession }) {
   const project = useAppStore((state) =>
     state.projects.find((candidate) => candidate.root === session.projectRoot),
   )
+  // A session in a worktree also names the worktree.
+  const worktree = useAppStore((state) =>
+    session.worktreePath === null ? null : worktreeDisplayName(state, session.worktreePath),
+  )
+  const projectLabel = project?.name ?? projectName(session.projectRoot)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
   const inset = useSessionHeaderInset()
@@ -83,11 +88,11 @@ function SessionPane({ session }: { session: UiSession }) {
           <span className="shrink-0 text-muted-foreground">in</span>
           <span
             className="max-w-[50%] shrink-0 truncate font-medium [app-region:no-drag]"
-            title={session.projectRoot}
+            title={session.worktreePath ?? session.projectRoot}
             data-path=""
             data-testid="session-project"
           >
-            {project?.name ?? projectName(session.projectRoot)}
+            {worktree === null ? projectLabel : `${projectLabel} · ${worktree}`}
           </span>
         </div>
         <StatusBadge session={session} />

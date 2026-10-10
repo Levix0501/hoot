@@ -1,10 +1,12 @@
 import { FolderPlusIcon, RefreshCwIcon } from 'lucide-react'
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
-import { useAppStore } from '../store/app-store'
+import { sessionWorktrees, useAppStore } from '../store/app-store'
+import { worktreeRows } from '../store/worktree-rows'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
+import { WorktreeItem } from './worktree-item'
 import {
   Sidebar,
   SidebarContent,
@@ -20,10 +22,17 @@ import {
   SidebarMenuSub,
 } from './ui/sidebar'
 
-/** The sessions of a project, below its row, in the order they were started. */
+/**
+ * The sessions in a project's main worktree, below its row, in the order they
+ * were started.
+ */
 function ProjectSessions({ project }: { project: Project }) {
   const sessions = useAppStore(
-    useShallow((state) => state.sessions.filter((session) => session.projectRoot === project.root)),
+    useShallow((state) =>
+      state.sessions.filter(
+        (session) => session.projectRoot === project.root && session.worktreePath === null,
+      ),
+    ),
   )
   if (sessions.length === 0) return null
   return (
@@ -35,6 +44,49 @@ function ProjectSessions({ project }: { project: Project }) {
       </SidebarMenuSub>
     </SidebarMenuItem>
   )
+}
+
+/** The sessions in a worktree, below its row, in the order they were started. */
+function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: string }) {
+  const sessions = useAppStore(
+    useShallow((state) =>
+      state.sessions.filter(
+        (session) => session.projectRoot === projectRoot && session.worktreePath === path,
+      ),
+    ),
+  )
+  if (sessions.length === 0) return null
+  return (
+    <SidebarMenuItem data-testid="worktree-session-list" data-worktree-path={path}>
+      <SidebarMenuSub className="mr-0 ml-7 pr-0">
+        {sessions.map((session) => (
+          <SessionItem key={session.id} session={session} />
+        ))}
+      </SidebarMenuSub>
+    </SidebarMenuItem>
+  )
+}
+
+/**
+ * A project's worktrees, after the sessions of its main worktree, by display
+ * name; each with its sessions below it.
+ */
+function ProjectWorktrees({ project }: { project: Project }) {
+  const listed = useAppStore((state) => state.worktrees[project.root])
+  const known = useAppStore((state) => state.knownWorktrees)
+  const withSessions = useAppStore(
+    useShallow((state) => sessionWorktrees(state.sessions, project.root)),
+  )
+  const rows = useMemo(
+    () => worktreeRows(listed, withSessions, known),
+    [listed, withSessions, known],
+  )
+  return rows.map((worktree) => (
+    <Fragment key={worktree.path}>
+      <WorktreeItem projectRoot={project.root} worktree={worktree} />
+      <WorktreeSessions projectRoot={project.root} path={worktree.path} />
+    </Fragment>
+  ))
 }
 
 export function ProjectSidebar() {
@@ -74,6 +126,7 @@ export function ProjectSidebar() {
                   <Fragment key={project.root}>
                     <ProjectItem project={project} />
                     <ProjectSessions project={project} />
+                    <ProjectWorktrees project={project} />
                   </Fragment>
                 ))}
               </SidebarMenu>

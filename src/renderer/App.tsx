@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
 import { CloseSessionDialog } from './components/close-session-dialog'
+import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
+import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
 import { QuitDialog } from './components/quit-dialog'
 import { SessionArea } from './components/session-area'
@@ -57,6 +59,8 @@ export function App() {
         <WindowNavigation />
       </SidebarProvider>
       <CloseSessionDialog />
+      <NewWorktreeDialog />
+      <DeleteWorktreeDialog />
       <QuitDialog />
       {/* Below the session header, clear of its buttons and of the ended-session bar. */}
       <Toaster position="top-right" offset={{ top: 60, right: 16 }} />

@@ -1,6 +1,15 @@
 import type { PermissionLevelSettings } from './permission-levels'
 import type { SessionInfo } from './session'
 import type { ToolId } from './tools'
+import type {
+  CreateWorktreeRequest,
+  CreateWorktreeResult,
+  DeleteWorktreeResult,
+  InspectWorktreeResult,
+  NewWorktreeOptions,
+  RemoveWorktreeResult,
+  WorktreeInfo,
+} from './worktrees'
 
 export interface Project {
   /** Canonical path of the main worktree's top-level directory. */
@@ -35,6 +44,8 @@ export interface ToolsState {
 export interface StartSessionRequest {
   id: string
   projectRoot: string
+  /** The root of one of the project's worktrees to run in, or `null` for the main worktree. */
+  worktreePath: string | null
   toolId: ToolId
   cols: number
   rows: number
@@ -74,6 +85,18 @@ export const IpcChannel = {
   fullScreenChanged: 'window:full-screen-changed',
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
+  listWorktrees: 'worktrees:list',
+  worktreesChanged: 'worktrees:changed',
+  newWorktreeOptions: 'worktrees:new-options',
+  checkBranchName: 'worktrees:check-branch-name',
+  previewWorktreePath: 'worktrees:preview-path',
+  worktreeSubmodules: 'worktrees:submodules',
+  createWorktree: 'worktrees:create',
+  inspectWorktree: 'worktrees:inspect',
+  deleteWorktree: 'worktrees:delete',
+  removeWorktree: 'worktrees:remove',
+  revealWorktree: 'worktrees:reveal',
+  copyWorktreePath: 'worktrees:copy-path',
 } as const
 
 /**
@@ -122,4 +145,34 @@ export interface HootApi {
   /** Quitting needs confirmation because `runningSessions` sessions are running. */
   onConfirmQuit(listener: (runningSessions: number) => void): () => void
   respondToQuit(confirmed: boolean): void
+  /** The worktrees of every project in the list, by project root. */
+  listWorktrees(): Promise<Record<string, WorktreeInfo[]>>
+  onWorktreesChanged(listener: (projectRoot: string, worktrees: WorktreeInfo[]) => void): () => void
+  /** What the new worktree dialog offers; `null` when the project is not in the list. */
+  getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptions | null>
+  /** Whether Git accepts the name as a new branch's name. */
+  checkBranchName(name: string): Promise<boolean>
+  /** Where a new worktree of the branch would be created, also with `~` for the home directory. */
+  previewWorktreePath(
+    projectRoot: string,
+    branch: string,
+  ): Promise<{ path: string; displayPath: string } | null>
+  /** The submodules in the base branches' commits of the repositories that would take part. */
+  getWorktreeSubmodules(
+    projectRoot: string,
+    participants: Array<{ relativePath: string; base: string }>,
+  ): Promise<string[]>
+  createWorktree(request: CreateWorktreeRequest): Promise<CreateWorktreeResult>
+  /** Checks what deleting a worktree would delete and lose. */
+  inspectWorktree(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult>
+  /** Deletes a worktree; with `discard` false, only one with nothing to lose. */
+  deleteWorktree(
+    projectRoot: string,
+    worktreePath: string,
+    discard: boolean,
+  ): Promise<DeleteWorktreeResult>
+  /** Removes the registrations of a worktree whose folder is missing. */
+  removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
+  revealWorktree(projectRoot: string, worktreePath: string): void
+  copyWorktreePath(projectRoot: string, worktreePath: string): void
 }

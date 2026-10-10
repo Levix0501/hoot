@@ -41,7 +41,7 @@ class FakeHost extends EventEmitter implements PtyHost {
 function setup(
   options: {
     killTimeoutMs?: number
-    resolveLaunch?: (toolId: string) => Promise<SessionLaunch>
+    resolveLaunch?: (toolId: string, cwd: string) => Promise<SessionLaunch>
   } = {},
 ) {
   const host = new FakeHost()
@@ -67,9 +67,11 @@ const request = (
   id: string,
   toolId: 'shell' | 'claude' = 'shell',
   projectRoot = '/work/project',
+  worktreePath: string | null = null,
 ) => ({
   id,
   projectRoot,
+  worktreePath,
   toolId,
   cols: 80,
   rows: 24,
@@ -94,6 +96,7 @@ describe('SessionManager', () => {
     expect(session).toEqual({
       id: 's1',
       projectRoot: '/work/project',
+      worktreePath: null,
       toolId: 'claude',
       status: 'running',
       exit: null,
@@ -233,6 +236,41 @@ describe('SessionManager', () => {
     await closed
     expect(host.killed).toEqual([['s1', 'SIGHUP']])
     expect(manager.list()).toEqual([])
+  })
+
+  it('runs a session in a worktree in its root, and tells its running sessions apart', async () => {
+    const launched: string[] = []
+    const { host, manager } = setup({
+      resolveLaunch: async (toolId, cwd) => {
+        launched.push(cwd)
+        return { file: toolId, args: [], env: {} }
+      },
+    })
+    const session = await manager.start(request('w1', 'shell', '/work/project', '/wt/feat'))
+    expect(session).toMatchObject({ projectRoot: '/work/project', worktreePath: '/wt/feat' })
+    expect(launched).toEqual(['/wt/feat'])
+    expect(host.spawned[0]).toMatchObject({ id: 'w1', cwd: '/wt/feat' })
+    expect(manager.isRunningWithin('/wt/feat')).toBe(true)
+    expect(manager.isRunningWithin('/wt')).toBe(true)
+    expect(manager.isRunningWithin('/wt/fea')).toBe(false)
+    expect(manager.isRunningWithin('/wt/feat/sub')).toBe(false)
+    expect(manager.isRunningWithin('/wt/other')).toBe(false)
+    // A session in a worktree belongs to its project.
+    expect(manager.isRunningIn('/work/project')).toBe(true)
+    host.emit('exit', 'w1', 3, 0)
+    expect(manager.isRunningWithin('/wt/feat')).toBe(false)
+  })
+
+  it('forgets the ended sessions of a deleted worktree only', async () => {
+    const { manager, host } = setup()
+    await manager.start(request('m1'))
+    await manager.start(request('w1', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('w2', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('o1', 'shell', '/work/project', '/wt/other'))
+    for (const id of ['m1', 'w1', 'o1']) host.emit('exit', id, 3, 0)
+    // Running sessions stay, and so do ended ones elsewhere.
+    manager.forgetWorktree('/wt/feat')
+    expect(manager.list().map((session) => session.id)).toEqual(['m1', 'w2', 'o1'])
   })
 
   it('forgets the ended sessions of a removed project', async () => {

@@ -18,38 +18,40 @@ export interface LaunchContext {
   permissionLevel(tool: CodingToolId): PermissionLevel
 }
 
-async function checkProjectFolder(projectRoot: string): Promise<void> {
-  const stats = await fs.stat(projectRoot).catch(() => null)
+async function checkFolder(cwd: string): Promise<void> {
+  const stats = await fs.stat(cwd).catch(() => null)
   if (!stats?.isDirectory()) {
-    throw new SessionError(`The project folder no longer exists: ${projectRoot}`)
+    throw new SessionError(`The folder no longer exists: ${cwd}`)
   }
 }
 
 /**
- * Decides what a session runs. A Shell session runs the default shell as a
- * login shell, starting from the same environment a terminal opened from the
- * Dock would give it. A coding tool runs its command directly, with the login
- * shell environment and with exactly the arguments of its permission level.
+ * Decides what a session runs in its working directory (the project root, or
+ * the root of one of the project's worktrees). A Shell session runs the
+ * default shell as a login shell, starting from the same environment a
+ * terminal opened from the Dock would give it. A coding tool runs its command
+ * directly, with the login shell environment and with exactly the arguments
+ * of its permission level.
  */
 export async function resolveLaunch(
   context: LaunchContext,
   toolId: ToolId,
-  projectRoot: string,
+  cwd: string,
 ): Promise<SessionLaunch> {
   const tool = getTool(toolId)
   if (tool.command === null) {
-    await checkProjectFolder(projectRoot)
+    await checkFolder(cwd)
     return {
       file: context.shell,
       args: ['-l'],
-      env: buildSessionEnv(context.baseEnv, { ...context.terminal(), cwd: projectRoot }),
+      env: buildSessionEnv(context.baseEnv, { ...context.terminal(), cwd }),
     }
   }
 
   // Read when the session starts: selecting another level later does not
   // change this session, even while it waits for the login shell environment.
   const level = context.permissionLevel(tool.id)
-  await checkProjectFolder(projectRoot)
+  await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
   const found = await findCommand(tool.command, login.env.PATH)
   if (!found) {
@@ -60,6 +62,6 @@ export async function resolveLaunch(
   return {
     file: tool.command,
     args: [...level.args],
-    env: buildSessionEnv(login.env, { ...context.terminal(), cwd: projectRoot }),
+    env: buildSessionEnv(login.env, { ...context.terminal(), cwd }),
   }
 }

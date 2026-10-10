@@ -35,7 +35,7 @@ import {
 import { SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
-/** Why a worktree cannot be deleted (or removed), shown below the menu item. */
+/** Below a menu item: why Delete is unavailable, or the lock that Remove overrides. */
 function Note({ children, testId }: { children: ReactNode; testId: string }) {
   return (
     <p className="max-w-64 px-1.5 pt-0.5 pb-1 text-xs text-muted-foreground" data-testid={testId}>
@@ -125,7 +125,9 @@ export function WorktreeItem({
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
   const requestDelete = () => requestDeleteWorktree(projectRoot, worktree.path)
   const deletable = !worktree.locked && !runningHere
-  const removable = worktree.registered && !worktree.locked
+  // A missing worktree can always be removed, also a locked one: its lock note
+  // shows below Remove.
+  const removable = worktree.registered
   const deleteNote = worktree.locked ? (
     <LockNote worktree={worktree} />
   ) : runningHere ? (

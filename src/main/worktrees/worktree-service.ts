@@ -4,6 +4,7 @@ import path from 'node:path'
 import {
   compareWorktrees,
   inspectionIsClean,
+  isWithin,
   type CreateWorktreeRequest,
   type CreateWorktreeResult,
   type DeleteWorktreeResult,
@@ -335,7 +336,11 @@ export class WorktreeService extends EventEmitter<{
     let root: string
     try {
       projectFolder = await layout.projectFolder(state.root, { create: true })
-      root = await layout.worktreeRoot(projectFolder.folder, request.branch)
+      // Git registers a worktree by its real path, which a symbolic link on the
+      // way (to move ~/.hoot to another disk, say) changes: the root is the real
+      // path too, so that the members can be found among the registrations.
+      const folder = await fs.promises.realpath(projectFolder.folder)
+      root = await layout.worktreeRoot(folder, request.branch)
     } catch (error) {
       return {
         ok: false,
@@ -354,6 +359,11 @@ export class WorktreeService extends EventEmitter<{
         relativePath,
         label: label(relativePath),
       }
+      // A registration already at the path, of a worktree whose folder is
+      // missing, is another worktree's: Git refuses to replace it, and it stays.
+      const registeredBefore = (await this.registeredPaths(context, repository)).includes(
+        member.path,
+      )
       const result = await runGit(
         context.git,
         [
@@ -370,7 +380,8 @@ export class WorktreeService extends EventEmitter<{
         context.env,
         { timeout: WORKTREE_COMMAND_TIMEOUT },
       )
-      const registered = (await this.registeredPaths(context, repository)).includes(member.path)
+      const registered =
+        !registeredBefore && (await this.registeredPaths(context, repository)).includes(member.path)
       if (registered && (await isDirectory(member.path))) {
         created.push(member)
         branched.push(member)
@@ -398,6 +409,10 @@ export class WorktreeService extends EventEmitter<{
   async inspect(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state) return { ok: false, message: 'The project is not in the list.' }
+    // Its inner members are the worktrees of the inner repositories there are
+    // now, which may not have been looked for yet: right after Hoot starts, say,
+    // or since one was made.
+    await this.discover(state)
     const context = await this.options.gitContext()
     const entry = (await this.readEntries(context, state)).find(
       (candidate) => candidate.path === worktreePath,
@@ -413,9 +428,10 @@ export class WorktreeService extends EventEmitter<{
 
   /**
    * Deletes a worktree: its inner members, deeper ones first, then its outer
-   * member, with everything in its root. Branches are kept. Unless `discard`
-   * is set, a worktree with anything to lose is not deleted, and neither is
-   * one where `hasRunningSessions` reports running sessions.
+   * member, with everything in its root, and then the registrations of other
+   * linked worktrees that were inside the root. Branches are kept. Unless
+   * `discard` is set, a worktree with anything to lose is not deleted, and
+   * neither is one where `hasRunningSessions` reports running sessions.
    */
   async delete(
     projectRoot: string,
@@ -426,6 +442,8 @@ export class WorktreeService extends EventEmitter<{
     const state = this.projects.get(projectRoot)
     if (!state)
       return { ok: false, reason: 'not-found', message: 'The project is not in the list.' }
+    // Its inner members are found as when checking it.
+    await this.discover(state)
     const context = await this.options.gitContext()
     const entry = (await this.readEntries(context, state)).find(
       (candidate) => candidate.path === worktreePath,
@@ -483,6 +501,7 @@ export class WorktreeService extends EventEmitter<{
         }
       }
     }
+    await this.clearRegistrationsWithin(context, state, entry.path)
     await this.refresh(state)
     return { ok: true }
   }
@@ -490,10 +509,13 @@ export class WorktreeService extends EventEmitter<{
   /**
    * Removes the registrations of a worktree whose root is missing, in the
    * project repository and the inner repositories, keeping every branch.
+   * A lock does not stop it: the user asks for the registrations to go.
    */
   async removeMissing(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state) return { ok: false, message: 'The project is not in the list.' }
+    // Its inner members are found as when checking a worktree.
+    await this.discover(state)
     const context = await this.options.gitContext()
     const entry = (await this.readEntries(context, state)).find(
       (candidate) => candidate.path === worktreePath,
@@ -508,14 +530,16 @@ export class WorktreeService extends EventEmitter<{
         message: 'The folder of the worktree exists; delete the worktree instead.',
       }
     }
-    if (entry.locked) return { ok: false, message: 'The worktree is locked.' }
     const members = await this.membersOf(context, state, entry.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
+      // The folder is gone, so forcing twice only overrides a lock.
       const result = await git(context, [
         '-C',
         member.repository,
         'worktree',
         'remove',
+        '--force',
+        '--force',
         member.path,
       ])
       if (result.code !== 0) {
@@ -546,6 +570,31 @@ export class WorktreeService extends EventEmitter<{
     return parseWorktreeList(result.stdout)
       .slice(1)
       .map((entry) => entry.path)
+  }
+
+  /**
+   * Clears the registrations, in the project repository and the inner
+   * repositories, of linked worktrees that were inside a deleted root (such
+   * as one an agent made there) and are prunable now: deleting the root
+   * deleted their folders too.
+   */
+  private async clearRegistrationsWithin(
+    context: GitContext,
+    state: ProjectState,
+    root: string,
+  ): Promise<void> {
+    const repositories = [state.root, ...(state.inner ?? []).map((inner) => inner.path)]
+    for (const repository of repositories) {
+      const result = await git(context, ['-C', repository, 'worktree', 'list', '--porcelain', '-z'])
+      if (result.code !== 0) continue
+      for (const entry of parseWorktreeList(result.stdout).slice(1)) {
+        if (!entry.prunable || !isWithin(entry.path, root)) continue
+        const removed = await git(context, ['-C', repository, 'worktree', 'remove', entry.path])
+        if (removed.code !== 0) {
+          console.error('Could not clear the registration of', entry.path, gitErrorMessage(removed))
+        }
+      }
+    }
   }
 
   /** The members of the worktree at a root: its outer member and its inner members. */

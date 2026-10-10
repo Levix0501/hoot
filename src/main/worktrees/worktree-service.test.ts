@@ -313,6 +313,180 @@ describe('WorktreeService', () => {
     expect(branches(inner)).toContain('beta')
   })
 
+  it('removes a missing worktree that is locked, and its locked inner members', async () => {
+    const gone = path.join(root, 'gone')
+    git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)
+    git(project, 'worktree', 'lock', '--reason', 'on usb', gone)
+    git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(gone, 'inner'))
+    git(inner, 'worktree', 'lock', path.join(gone, 'inner'))
+    fs.rmSync(gone, { recursive: true })
+    await start()
+    expect(await listed()).toMatchObject([{ path: gone, missing: true, locked: true }])
+    expect(await service.removeMissing(project, gone)).toEqual({ ok: true })
+    expect(linkedWorktrees(project)).toEqual([])
+    expect(linkedWorktrees(inner)).toEqual([])
+    expect(branches(project)).toContain('beta')
+    expect(branches(inner)).toContain('beta')
+  })
+
+  it('checks and deletes a worktree with the inner repositories there are, also right after it starts', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/n',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    fs.writeFileSync(path.join(R, 'inner', 'work.txt'), 'x\n')
+
+    // Hoot starts again, and lists the worktree before it has looked for inner repositories.
+    service.dispose()
+    service = new WorktreeService({
+      layout: new WorktreeLayout(W, home),
+      gitContext: async () => context,
+    })
+    service.addProject(project)
+    expect((await listed()).map((worktree) => worktree.path)).toEqual([R])
+    expect(await service.inspect(project, R)).toEqual({
+      ok: true,
+      inspection: {
+        root: R,
+        innerMembers: [path.join(R, 'inner')],
+        branch: 'feat/n',
+        changes: [{ repository: 'inner', files: ['work.txt'], total: 1, detachedCommits: false }],
+        foreignRepositories: [],
+      },
+    })
+
+    // A repository made in the project since then, with a worktree in the root, is one too.
+    const later = makeRepository(path.join(project, 'later'))
+    git(later, 'worktree', 'add', '-q', '-b', 'feat/n', path.join(R, 'later'))
+    fs.writeFileSync(path.join(R, 'later', 'more.txt'), 'x\n')
+    const inspected = await service.inspect(project, R)
+    expect(inspected.ok && inspected.inspection.innerMembers).toEqual([
+      path.join(R, 'inner'),
+      path.join(R, 'later'),
+    ])
+    expect(
+      inspected.ok && inspected.inspection.changes.map((changes) => changes.repository),
+    ).toEqual(['inner', 'later'])
+    expect(inspected.ok && inspected.inspection.foreignRepositories).toEqual([])
+
+    expect(await service.delete(project, R, true)).toEqual({ ok: true })
+    for (const repository of [project, inner, later]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).toContain('feat/n')
+    }
+  })
+
+  it('deletes the inner members of a worktree also when asked right after it starts', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/s',
+      base: 'main',
+      nested: [
+        { relativePath: 'inner', base: 'main' },
+        { relativePath: 'inner/deep', base: 'main' },
+      ],
+    })
+    if (!created.ok) throw new Error(created.message)
+    service.dispose()
+    service = new WorktreeService({
+      layout: new WorktreeLayout(W, home),
+      gitContext: async () => context,
+    })
+    service.addProject(project)
+    await service.listAll()
+    expect(await service.delete(project, created.path, true)).toEqual({ ok: true })
+    for (const repository of [project, inner, deep]) expect(linkedWorktrees(repository)).toEqual([])
+  })
+
+  it('creates worktrees at their real path when the worktree directory is reached through a link', async () => {
+    const elsewhere = path.join(root, 'elsewhere')
+    fs.mkdirSync(elsewhere)
+    fs.symlinkSync(elsewhere, path.join(home, '.hoot'))
+    await start()
+    expect((await service.previewPath(project, 'feat/l'))?.displayPath).toBe(
+      '~/.hoot/worktrees/project/feat-l',
+    )
+    const result = await service.create({
+      projectRoot: project,
+      branch: 'feat/l',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    const R = path.join(elsewhere, 'worktrees', 'project', 'feat-l')
+    expect(result).toEqual({ ok: true, path: R, warning: null })
+    expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
+    expect(linkedWorktrees(inner)).toEqual([{ path: path.join(R, 'inner'), prunable: false }])
+    expect((await listed()).map((worktree) => [worktree.path, worktree.innerMembers])).toEqual([
+      [R, ['inner']],
+    ])
+  })
+
+  it('leaves the registration of a missing worktree alone when creating at its path fails', async () => {
+    await start()
+    const first = await service.create({
+      projectRoot: project,
+      branch: 'a/x',
+      base: 'main',
+      nested: [],
+    })
+    if (!first.ok) throw new Error(first.message)
+    fs.rmSync(first.path, { recursive: true })
+    // `a-x` is also the folder of `a/x`, whose worktree Git still registers there.
+    const result = await service.create({
+      projectRoot: project,
+      branch: 'a-x',
+      base: 'main',
+      nested: [],
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'failed' })
+    expect(result.ok === false && result.message).toContain('missing but already registered')
+    expect(linkedWorktrees(project)).toEqual([{ path: first.path, prunable: true }])
+    expect(branches(project)).toContain('a/x')
+    expect(branches(project)).not.toContain('a-x')
+  })
+
+  it('deleting a worktree clears the registrations of the linked worktrees made inside it', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/a',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    // Worktrees an agent made inside it, of the project repository and of the inner one.
+    git(R, 'worktree', 'add', '-q', '-b', 'agent', path.join(R, '.claude', 'worktrees', 'agent'))
+    git(
+      path.join(R, 'inner'),
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'agent',
+      path.join(R, 'inner', 'agent'),
+    )
+    const inspected = await service.inspect(project, R)
+    expect(inspected.ok && inspected.inspection.foreignRepositories).toEqual([
+      '.claude/worktrees/agent',
+      'inner/agent',
+    ])
+
+    expect(await service.delete(project, R, true)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    for (const repository of [project, inner]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).toContain('agent')
+    }
+    expect(await listed()).toEqual([])
+  })
+
   it('lists the submodules of the base branches that would be left empty', async () => {
     const source = makeRepository(path.join(root, 'module-source'))
     git(inner, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source, 'lib/mod')

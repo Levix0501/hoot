@@ -137,6 +137,40 @@ test.describe('worktrees in the sidebar', () => {
     expect(localBranches(G)).toContain('zeta')
   })
 
+  test('a locked worktree whose folder is missing can be removed, below its lock note', async ({
+    launch,
+    world,
+  }) => {
+    const G = createG(world)
+    const usb = path.join(path.dirname(G), 'G-usb')
+    git(G, 'worktree', 'add', '-q', '-b', 'usb', usb)
+    git(G, 'worktree', 'lock', '--reason', 'on usb', usb)
+    fs.rmSync(usb, { recursive: true, force: true })
+    const app = await launch({ projects: [G] })
+
+    const row = worktreeItem(app, usb)
+    await expect(row).toHaveAttribute('data-missing', 'true')
+    await expect(row).toHaveAttribute('data-locked', 'true')
+    await expect(row.getByTestId('worktree-new-session-button')).toBeDisabled()
+    await openWorktreeContextMenu(app, usb)
+    expect(await menuEntries(app)).toEqual([['Remove', true]])
+    await expect(app.page.getByTestId('worktree-lock-note')).toHaveText(
+      'This worktree is locked: on usb',
+    )
+    await app.closeMenus()
+    await openWorktreeActions(app, usb)
+    expect(await menuEntries(app)).toEqual([['Remove', true]])
+    await expect(app.page.getByTestId('worktree-lock-note')).toHaveText(
+      'This worktree is locked: on usb',
+    )
+    await app.expectEnglishUi()
+
+    await app.page.getByTestId('worktree-remove').click()
+    await expect(row).toHaveCount(0)
+    expect(registrations(G)).toEqual([])
+    expect(localBranches(G)).toContain('usb')
+  })
+
   test('changes made outside Hoot show within 2 seconds, and a missing folder once the window has the focus', async ({
     launch,
     world,

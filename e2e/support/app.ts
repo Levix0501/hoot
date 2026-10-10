@@ -59,6 +59,8 @@ export interface LaunchOptions {
    * adding them in the window, this shows no message over the terminal.
    */
   projects?: string[]
+  /** Another user data directory than the world's. */
+  userData?: string
 }
 
 /** Drives one running Hoot instance. */
@@ -73,9 +75,11 @@ export class AppDriver {
 
   static async launch(world: World, options: LaunchOptions = {}): Promise<AppDriver> {
     if (!fs.existsSync(mainEntry)) throw new Error('Build the app first: pnpm build')
+    const userData = options.userData ?? world.userData
+    fs.mkdirSync(userData, { recursive: true })
     if (options.projects) {
       fs.writeFileSync(
-        path.join(world.userData, 'projects.json'),
+        path.join(userData, 'projects.json'),
         JSON.stringify({ projects: options.projects.map((root) => ({ root })) }),
       )
     }
@@ -83,7 +87,7 @@ export class AppDriver {
       // Launched like `electron .` so the app reads its name and version from package.json.
       args: [
         repoRoot,
-        `--user-data-dir=${world.userData}`,
+        `--user-data-dir=${userData}`,
         '--test-hooks',
         // Keep the window off screen: never cover or take focus from the user's apps.
         '--background',
@@ -824,9 +828,10 @@ export class AppDriver {
     const texts = await this.page.evaluate(() => {
       const collected: string[] = [document.title]
       // Terminal content, session names (which come from terminal titles or the
-      // user) and file paths are not text Hoot itself shows.
+      // user), file paths and other text from the user or Git (such as branch
+      // names) are not text Hoot itself shows.
       const excluded = (element: Element) =>
-        element.closest('.xterm, [data-path], [data-session-name]') !== null ||
+        element.closest('.xterm, [data-path], [data-session-name], [data-user-text]') !== null ||
         !element.checkVisibility()
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {

@@ -114,6 +114,20 @@ test.describe('an issue’s description (A9)', () => {
     expect(dialogs).toEqual([])
     await app.expectEnglishUi()
 
+    // When macOS cannot open the address, Hoot says so in its log and goes on.
+    const output: string[] = []
+    app.mainProcess.stderr?.on('data', (chunk: Buffer) => output.push(chunk.toString()))
+    await app.electronApp.evaluate(({ shell }) => {
+      shell.openExternal = async () => {
+        throw new Error('no browser')
+      }
+    })
+    await description.getByRole('link', { name: 'web' }).click()
+    await expect
+      .poll(() => output.join(''))
+      .toContain('Could not open https://example.com/path: Error: no browser')
+    await expectShown(app, `issue:${id}`)
+
     // 6: the description's field in the edit state is plain text, with no preview.
     await issuePage(app).getByTestId('issue-edit').click()
     const field = issuePage(app).getByTestId('issue-description-input')

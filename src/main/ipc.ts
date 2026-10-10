@@ -427,6 +427,9 @@ export function registerIpc(deps: IpcDependencies): void {
 
   on(IpcChannel.openExternalLink, (value) => {
     const link = typeof value === 'string' ? browserLink(value) : null
-    if (link !== null) void shell.openExternal(link)
+    if (link === null) return
+    shell.openExternal(link).catch((error: unknown) => {
+      console.error(`Could not open ${link}:`, error)
+    })
   })
 }

@@ -1,3 +1,4 @@
+import type { Issue, IssueChanges, IssueResult, IssueState, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { SessionInfo } from './session'
 import type { ToolId } from './tools'
@@ -12,6 +13,8 @@ import type {
 } from './worktrees'
 
 export interface Project {
+  /** Stays the same when the project is removed from the list and added again. */
+  id: number
   /** Canonical path of the main worktree's top-level directory. */
   root: string
   /** Display name, the last path segment of `root`. */
@@ -60,7 +63,24 @@ export interface WindowState {
   fullScreen: boolean
 }
 
+/**
+ * Whether Hoot could open its database when it started. Without it, the
+ * window only says why and where the database is.
+ */
+export type StartupState =
+  | { kind: 'ready' }
+  | {
+      kind: 'database-error'
+      /** What went wrong, as SQLite or the file system said. */
+      message: string
+      /** The database file's full path. */
+      path: string
+    }
+
 export const IpcChannel = {
+  getStartupState: 'app:get-startup-state',
+  revealDatabase: 'app:reveal-database',
+  quit: 'app:quit',
   listProjects: 'projects:list',
   addProject: 'projects:add',
   removeProject: 'projects:remove',
@@ -98,6 +118,12 @@ export const IpcChannel = {
   removeWorktree: 'worktrees:remove',
   revealWorktree: 'worktrees:reveal',
   copyWorktreePath: 'worktrees:copy-path',
+  listIssues: 'issues:list',
+  createIssue: 'issues:create',
+  updateIssue: 'issues:update',
+  setIssueState: 'issues:set-state',
+  deleteIssue: 'issues:delete',
+  openExternalLink: 'links:open-external',
 } as const
 
 /**
@@ -114,6 +140,10 @@ export type SessionCommand =
 /** API exposed to the renderer by the preload script as `window.hoot`. */
 export interface HootApi {
   testHooks: boolean
+  getStartupState(): Promise<StartupState>
+  /** Shows the database file, or the nearest folder of it there is, in Finder. */
+  revealDatabase(): void
+  quit(): void
   listProjects(): Promise<Project[]>
   addProject(): Promise<AddProjectResult>
   removeProject(root: string): Promise<{ ok: boolean; message?: string }>
@@ -182,4 +212,14 @@ export interface HootApi {
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void
+  /** The issues of a project in the list, in the order they were created. */
+  listIssues(projectId: number): Promise<Issue[]>
+  createIssue(issue: NewIssue): Promise<IssueResult>
+  updateIssue(id: number, changes: IssueChanges): Promise<IssueResult>
+  /** Closes an issue or opens it again. */
+  setIssueState(id: number, state: IssueState): Promise<IssueResult>
+  /** Deletes an issue for good. */
+  deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
+  /** Opens an http or https address in the default browser; other addresses are ignored. */
+  openExternalLink(url: string): void
 }

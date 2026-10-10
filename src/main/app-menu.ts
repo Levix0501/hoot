@@ -82,3 +82,16 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
 export function buildAppMenu(actions: AppMenuActions): Menu {
   return Menu.buildFromTemplate(appMenuTemplate(actions))
 }
+
+/**
+ * The menu bar while the database cannot be opened, when the window only
+ * says why: no projects, sessions or sidebar to act on, so only the app's
+ * own items, editing (for copying the error) and the window's items.
+ */
+export function databaseErrorMenuTemplate(): MenuItemConstructorOptions[] {
+  return [{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]
+}
+
+export function buildDatabaseErrorMenu(): Menu {
+  return Menu.buildFromTemplate(databaseErrorMenuTemplate())
+}

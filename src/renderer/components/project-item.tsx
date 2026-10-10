@@ -8,6 +8,7 @@ import {
 import type { Project } from '../../shared/ipc'
 import type { ToolId } from '../../shared/tools'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import { isIssuesPage } from '../store/page-history'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,6 +47,12 @@ export const contextComponents: ToolMenuComponents = {
   Label: ContextMenuLabel,
 }
 
+/**
+ * A project's row in the sidebar: click it to show the project's issue list.
+ * It shows how many of its issues are open, and is selected while one of its
+ * Issues pages is shown. Its `+` and `⋯` buttons and its context menu start
+ * sessions, create worktrees and remove the project.
+ */
 export function ProjectItem({ project }: { project: Project }) {
   const tools = useAppStore((state) => state.tools)
   const permissionLevels = useAppStore((state) => state.permissionLevels)
@@ -53,6 +60,15 @@ export function ProjectItem({ project }: { project: Project }) {
   const removeProject = useAppStore((state) => state.removeProject)
   const redetectTools = useAppStore((state) => state.redetectTools)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
+  const showIssueList = useAppStore((state) => state.showIssueList)
+  const openIssues = useAppStore(
+    (state) =>
+      state.issues.filter((issue) => issue.projectId === project.id && issue.state === 'open')
+        .length,
+  )
+  const selected = useAppStore(
+    (state) => isIssuesPage(state.currentPage) && state.currentPage.projectId === project.id,
+  )
   // A project cannot be removed while one of its sessions runs, in any of its worktrees.
   const runningHere = useAppStore((state) =>
     state.sessions.some(
@@ -74,8 +90,11 @@ export function ProjectItem({ project }: { project: Project }) {
       >
         <SidebarMenuButton
           size="lg"
-          render={<div />}
+          render={<button type="button" />}
+          isActive={selected}
           className="cursor-default group-has-data-[sidebar=menu-action]/menu-item:pr-14"
+          onClick={() => showIssueList(project.id)}
+          data-testid="project-item-button"
         >
           <FolderGit2Icon className="text-muted-foreground" />
           <div className="grid min-w-0 flex-1 leading-tight">
@@ -91,6 +110,15 @@ export function ProjectItem({ project }: { project: Project }) {
               {project.root}
             </span>
           </div>
+          {openIssues > 0 && (
+            <span
+              className="shrink-0 rounded-full bg-sidebar-foreground/10 px-1.5 text-xs font-medium tabular-nums"
+              title={openIssues === 1 ? '1 open issue' : `${openIssues} open issues`}
+              data-testid="project-open-issues"
+            >
+              {openIssues}
+            </span>
+          )}
         </SidebarMenuButton>
 
         <DropdownMenu>

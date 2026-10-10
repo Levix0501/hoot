@@ -2,6 +2,7 @@ import { PencilIcon, XIcon } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { describeExit, describeExitCompact, sessionName } from '../../shared/session'
 import {
+  currentSessionId,
   focusAfterOverlay,
   focusCurrentTerminal,
   useAppStore,
@@ -104,7 +105,7 @@ function RenameField({ session }: { session: UiSession }) {
  * appears on hover or from the context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
-  const current = useAppStore((state) => state.currentSessionId === session.id)
+  const current = useAppStore((state) => currentSessionId(state) === session.id)
   const renaming = useAppStore((state) => state.renamingSessionId === session.id)
   const selectSession = useAppStore((state) => state.selectSession)
   const startRenaming = useAppStore((state) => state.startRenaming)

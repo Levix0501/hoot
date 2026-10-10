@@ -1,5 +1,8 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { z } from 'zod'
 import {
+  app,
   clipboard,
   dialog,
   ipcMain,
@@ -13,14 +16,25 @@ import {
   type AddProjectResult,
   type StartSessionRequest,
   type StartSessionResult,
+  type StartupState,
   type WindowState,
 } from '../shared/ipc'
+import {
+  ISSUE_DESCRIPTION_MAX_LENGTH,
+  ISSUE_TITLE_MAX_LENGTH,
+  type Issue,
+  type IssueChanges,
+  type IssueResult,
+  type NewIssue,
+} from '../shared/issues'
+import { browserLink } from '../shared/links'
 import { TOOL_IDS } from '../shared/tools'
 import type {
   CreateWorktreeRequest,
   DeleteWorktreeResult,
   RemoveWorktreeResult,
 } from '../shared/worktrees'
+import type { IssueStore } from './issues/issue-store'
 import type { ProjectRootResult } from './projects/project-root'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
@@ -33,6 +47,7 @@ import type { WorktreeService } from './worktrees/worktree-service'
 export interface IpcDependencies {
   getWindow(): BrowserWindow | null
   projects: ProjectStore
+  issues: IssueStore
   tools: ToolService
   permissionLevels: PermissionLevelStore
   sidebar: SidebarStateStore
@@ -69,10 +84,40 @@ const submoduleArguments = z.tuple([
 ])
 const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
+const rowId = z.number().int().positive()
+const issueTitle = z.string().max(ISSUE_TITLE_MAX_LENGTH)
+const issueDescription = z.string().max(ISSUE_DESCRIPTION_MAX_LENGTH)
+const newIssue = z.object({
+  projectId: rowId,
+  title: issueTitle,
+  description: issueDescription,
+}) satisfies z.ZodType<NewIssue>
+const issueChanges = z.object({
+  title: issueTitle,
+  description: issueDescription,
+}) satisfies z.ZodType<IssueChanges>
 
-export function registerIpc(deps: IpcDependencies): void {
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Runs a change to an issue, saying what went wrong instead of throwing;
+ * `missing` says why there is no issue when the change returns none.
+ */
+function changeIssue(change: () => Issue | null, missing: string): IssueResult {
+  try {
+    const issue = change()
+    return issue ? { ok: true, issue } : { ok: false, message: missing }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
+/** Registers handlers that accept messages only from the main window. */
+function trustedIpc(getWindow: () => BrowserWindow | null) {
   const trusted = (event: IpcMainInvokeEvent | IpcMainEvent) => {
-    const window = deps.getWindow()
+    const window = getWindow()
     return window !== null && !window.isDestroyed() && event.sender === window.webContents
   }
   const handle = (
@@ -90,9 +135,43 @@ export function registerIpc(deps: IpcDependencies): void {
     })
   }
   const send = (channel: string, ...args: unknown[]) => {
-    const window = deps.getWindow()
+    const window = getWindow()
     if (window && !window.isDestroyed()) window.webContents.send(channel, ...args)
   }
+  return { handle, on, send }
+}
+
+/**
+ * The messages the window can send while the database cannot be opened: it
+ * learns why, and can show the file in Finder or quit.
+ */
+export function registerDatabaseErrorIpc(options: {
+  getWindow(): BrowserWindow | null
+  databasePath: string
+  message: string
+}): void {
+  const { handle, on } = trustedIpc(options.getWindow)
+  handle(IpcChannel.getStartupState, (): StartupState => ({
+    kind: 'database-error',
+    message: options.message,
+    path: options.databasePath,
+  }))
+  on(IpcChannel.revealDatabase, () => {
+    // The file, or the nearest of its folders that can be seen, such as the
+    // one it is in when that cannot be read.
+    let target = options.databasePath
+    while (!fs.existsSync(target) && path.dirname(target) !== target) {
+      target = path.dirname(target)
+    }
+    shell.showItemInFolder(target)
+  })
+  on(IpcChannel.quit, () => app.quit())
+}
+
+export function registerIpc(deps: IpcDependencies): void {
+  const { handle, on, send } = trustedIpc(deps.getWindow)
+
+  handle(IpcChannel.getStartupState, (): StartupState => ({ kind: 'ready' }))
 
   handle(IpcChannel.listProjects, () => deps.projects.list())
 
@@ -309,5 +388,45 @@ export function registerIpc(deps: IpcDependencies): void {
     void deps.worktrees.isWorktreeOf(root, worktreePath).then((found) => {
       if (found) clipboard.writeText(worktreePath)
     })
+  })
+
+  const noIssue = 'The issue no longer exists.'
+
+  handle(IpcChannel.listIssues, (_event, value) => {
+    const parsed = rowId.safeParse(value)
+    return parsed.success ? deps.issues.list(parsed.data) : []
+  })
+
+  handle(IpcChannel.createIssue, (_event, value): IssueResult => {
+    const parsed = newIssue.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    return changeIssue(() => deps.issues.create(parsed.data), 'The project is not in the list.')
+  })
+
+  handle(IpcChannel.updateIssue, (_event, ...args): IssueResult => {
+    const parsed = z.tuple([rowId, issueChanges]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    return changeIssue(() => deps.issues.update(...parsed.data), noIssue)
+  })
+
+  handle(IpcChannel.setIssueState, (_event, ...args): IssueResult => {
+    const parsed = z.tuple([rowId, z.enum(['open', 'closed'])]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    return changeIssue(() => deps.issues.setState(...parsed.data), noIssue)
+  })
+
+  handle(IpcChannel.deleteIssue, (_event, value) => {
+    const parsed = rowId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    try {
+      return deps.issues.delete(parsed.data) ? { ok: true } : { ok: false, message: noIssue }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
+  })
+
+  on(IpcChannel.openExternalLink, (value) => {
+    const link = typeof value === 'string' ? browserLink(value) : null
+    if (link !== null) void shell.openExternal(link)
   })
 }

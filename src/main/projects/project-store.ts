@@ -1,60 +1,71 @@
 import path from 'node:path'
-import Conf from 'conf'
+import type { DatabaseSync } from 'node:sqlite'
 import type { Project } from '../../shared/ipc'
+import { transaction } from '../database/database'
 
-interface StoredProjects {
-  projects: Array<{ root: string }>
+interface ProjectRow {
+  id: number
+  root: string
 }
 
-export function projectFromRoot(root: string): Project {
-  return { root, name: path.basename(root) || root }
+function projectFromRow(row: ProjectRow): Project {
+  return { id: row.id, root: row.root, name: path.basename(row.root) || row.root }
 }
 
-/** The project list, persisted as JSON in the user data directory. */
+/**
+ * The project list, kept in the database. A removed project keeps its row,
+ * and so its id and its issues, and the same root added again brings it back
+ * at the end of the list.
+ */
 export class ProjectStore {
-  private readonly config: Conf<StoredProjects>
+  private readonly statements
 
-  constructor(directory: string) {
-    this.config = new Conf<StoredProjects>({
-      cwd: directory,
-      configName: 'projects',
-      defaults: { projects: [] },
-      clearInvalidConfig: true,
-    })
+  constructor(private readonly db: DatabaseSync) {
+    this.statements = {
+      list: db.prepare(
+        'SELECT id, root FROM projects WHERE list_position IS NOT NULL ORDER BY list_position',
+      ),
+      byRoot: db.prepare('SELECT id, root, list_position FROM projects WHERE root = ?'),
+      nextPosition: db.prepare(
+        'SELECT coalesce(max(list_position), 0) + 1 AS position FROM projects',
+      ),
+      insert: db.prepare('INSERT INTO projects (root, list_position) VALUES (?, ?)'),
+      setPosition: db.prepare('UPDATE projects SET list_position = ? WHERE id = ?'),
+      unlist: db.prepare(
+        'UPDATE projects SET list_position = NULL WHERE root = ? AND list_position IS NOT NULL',
+      ),
+    }
   }
 
+  /** The projects in the list, in its order. */
   list(): Project[] {
-    const stored = this.config.get('projects')
-    const roots = Array.isArray(stored)
-      ? stored
-          .map((entry) => entry?.root)
-          .filter((root): root is string => typeof root === 'string' && root.length > 0)
-      : []
-    return [...new Set(roots)].map(projectFromRoot)
+    return (this.statements.list.all() as unknown as ProjectRow[]).map(projectFromRow)
   }
 
+  /** The project in the list with this root. */
   find(root: string): Project | undefined {
     return this.list().find((project) => project.root === root)
   }
 
+  /** Adds a project to the end of the list, unless it is in the list already. */
   add(root: string): { added: boolean; project: Project } {
-    const existing = this.find(root)
-    if (existing) return { added: false, project: existing }
-    this.save([...this.list().map((project) => project.root), root])
-    return { added: true, project: projectFromRoot(root) }
+    return transaction(this.db, () => {
+      const row = this.statements.byRoot.get(root) as
+        | (ProjectRow & { list_position: number | null })
+        | undefined
+      if (row && row.list_position !== null) return { added: false, project: projectFromRow(row) }
+      const { position } = this.statements.nextPosition.get() as { position: number }
+      if (row) {
+        this.statements.setPosition.run(position, row.id)
+        return { added: true, project: projectFromRow(row) }
+      }
+      const { lastInsertRowid } = this.statements.insert.run(root, position)
+      return { added: true, project: projectFromRow({ id: Number(lastInsertRowid), root }) }
+    })
   }
 
+  /** Takes a project out of the list; its row and issues stay. */
   remove(root: string): boolean {
-    const projects = this.list()
-    if (!projects.some((project) => project.root === root)) return false
-    this.save(projects.map((project) => project.root).filter((entry) => entry !== root))
-    return true
-  }
-
-  private save(roots: string[]): void {
-    this.config.set(
-      'projects',
-      roots.map((root) => ({ root })),
-    )
+    return this.statements.unlist.run(root).changes > 0
   }
 }

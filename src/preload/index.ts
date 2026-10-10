@@ -14,6 +14,9 @@ function subscribe<Args extends unknown[]>(
 
 const api: HootApi = {
   testHooks: process.argv.includes('--hoot-test-hooks'),
+  getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),
+  revealDatabase: () => ipcRenderer.send(IpcChannel.revealDatabase),
+  quit: () => ipcRenderer.send(IpcChannel.quit),
   listProjects: () => ipcRenderer.invoke(IpcChannel.listProjects),
   addProject: () => ipcRenderer.invoke(IpcChannel.addProject),
   removeProject: (root) => ipcRenderer.invoke(IpcChannel.removeProject, root),
@@ -61,6 +64,12 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.copyWorktreePath, projectRoot, worktreePath),
+  listIssues: (projectId) => ipcRenderer.invoke(IpcChannel.listIssues, projectId),
+  createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
+  updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),
+  setIssueState: (id, state) => ipcRenderer.invoke(IpcChannel.setIssueState, id, state),
+  deleteIssue: (id) => ipcRenderer.invoke(IpcChannel.deleteIssue, id),
+  openExternalLink: (url) => ipcRenderer.send(IpcChannel.openExternalLink, url),
 }
 
 contextBridge.exposeInMainWorld('hoot', api)

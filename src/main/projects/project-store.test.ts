@@ -1,59 +1,78 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { databaseFile, openDatabase } from '../database/database'
 import { ProjectStore } from './project-store'
 
 let directory: string
 let file: string
+const databases: DatabaseSync[] = []
+
+/** Opens the database the way Hoot does when it starts. */
+function start(): ProjectStore {
+  const db = openDatabase(file)
+  databases.push(db)
+  return new ProjectStore(db)
+}
 
 beforeEach(() => {
-  directory = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-store-')), 'nested')
-  file = path.join(directory, 'projects.json')
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-projects-'))
+  file = databaseFile(directory)
 })
 
-afterEach(() => fs.rmSync(path.dirname(directory), { recursive: true, force: true }))
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close()
+  fs.rmSync(directory, { recursive: true, force: true })
+})
 
 describe('ProjectStore', () => {
-  it('starts empty when nothing was saved', () => {
-    expect(new ProjectStore(directory).list()).toEqual([])
-  })
-
-  it('adds a project once and names it after its folder', () => {
-    const store = new ProjectStore(directory)
-    expect(store.add('/work/alpha')).toEqual({
-      added: true,
-      project: { root: '/work/alpha', name: 'alpha' },
-    })
-    expect(store.add('/work/alpha').added).toBe(false)
-    expect(store.list()).toEqual([{ root: '/work/alpha', name: 'alpha' }])
-  })
-
-  it('keeps additions and removals across instances', () => {
-    const first = new ProjectStore(directory)
-    first.add('/work/alpha')
-    first.add('/work/beta')
-    expect(first.remove('/work/beta')).toBe(true)
-    expect(first.remove('/work/missing')).toBe(false)
-
-    expect(new ProjectStore(directory).list()).toEqual([{ root: '/work/alpha', name: 'alpha' }])
-    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
-      projects: [{ root: '/work/alpha' }],
-    })
-  })
-
-  it('treats an unreadable file as an empty list', () => {
-    fs.mkdirSync(directory, { recursive: true })
-    fs.writeFileSync(file, '{ not json')
-    expect(new ProjectStore(directory).list()).toEqual([])
-  })
-
-  it('ignores malformed and duplicate entries', () => {
-    fs.mkdirSync(directory, { recursive: true })
+  it('starts empty, also with a projects.json beside the database', () => {
     fs.writeFileSync(
-      file,
-      JSON.stringify({ projects: [{ root: '/a' }, { root: 3 }, null, { root: '/a' }] }),
+      path.join(directory, 'projects.json'),
+      JSON.stringify({ projects: [{ root: '/work/alpha' }] }),
     )
-    expect(new ProjectStore(directory).list()).toEqual([{ root: '/a', name: 'a' }])
+    expect(start().list()).toEqual([])
+  })
+
+  it('adds a project once, at the end of the list, and names it after its folder', () => {
+    const store = start()
+    const alpha = store.add('/work/alpha')
+    expect(alpha).toEqual({
+      added: true,
+      project: { id: expect.any(Number), root: '/work/alpha', name: 'alpha' },
+    })
+    const beta = store.add('/work/beta').project
+    expect(store.add('/work/alpha')).toEqual({ added: false, project: alpha.project })
+    expect(store.list()).toEqual([alpha.project, beta])
+    expect(beta.id).not.toBe(alpha.project.id)
+    expect(store.find('/work/beta')).toEqual(beta)
+    expect(store.find('/work/gamma')).toBeUndefined()
+  })
+
+  it('keeps the list and its order across starts', () => {
+    const first = start()
+    for (const root of ['/work/c', '/work/a', '/work/b']) first.add(root)
+    expect(first.remove('/work/a')).toBe(true)
+    expect(first.remove('/work/missing')).toBe(false)
+    expect(
+      start()
+        .list()
+        .map((project) => project.root),
+    ).toEqual(['/work/c', '/work/b'])
+  })
+
+  it('brings a removed project back with its id, at the end of the list', () => {
+    const store = start()
+    const alpha = store.add('/work/alpha').project
+    store.add('/work/beta')
+    expect(store.remove('/work/alpha')).toBe(true)
+    expect(store.remove('/work/alpha')).toBe(false)
+    expect(store.find('/work/alpha')).toBeUndefined()
+    expect(store.list().map((project) => project.root)).toEqual(['/work/beta'])
+
+    expect(store.add('/work/alpha')).toEqual({ added: true, project: alpha })
+    expect(start().list()).toEqual([expect.objectContaining({ root: '/work/beta' }), alpha])
   })
 })

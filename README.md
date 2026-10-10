@@ -13,8 +13,8 @@ Hoot supports macOS only for now.
   repository's main worktree, the working directory it was created with. Folders outside Git, bare
   repositories, and folders from which Git cannot tell where the main worktree is (such as a linked
   worktree of a repository whose Git directory is kept elsewhere) are refused. The list is kept
-  across restarts. Right-click a project, or use its `⋯` menu, to remove it from the list
-  (its files are never touched).
+  across restarts. Click a project to show its [issues](#issues). Right-click a project, or use
+  its `⋯` menu, to remove it from the list (its files and its issues are never touched).
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
@@ -36,16 +36,20 @@ Hoot supports macOS only for now.
   running session asks first, then ends its process. When a session's process exits with code 0
   the session closes by itself; when it fails, is killed by a signal, or the terminal host stops,
   the session stays with its output and says how it ended, until you close it. When the shown
-  session closes, the next one in the sidebar is shown, or the previous one after the last.
-- **Back and forward**: like a browser among pages, Hoot goes back and forward among the sessions
-  it has shown, with the arrow buttons at the top left, ⌘[ and ⌘] (**Window > Back** and
-  **Forward**). Showing a session another way drops the sessions you went back from, and a session
-  that closes leaves the list. The list lasts until Hoot quits.
+  session closes, the next one in the sidebar is shown, or the previous one after the last; when
+  it was the only one, the page shown before it, if any.
+- **Back and forward**: like a browser among pages, Hoot goes back and forward among the pages it
+  has shown, sessions and [Issues pages](#issues) alike, with the arrow buttons at the top left, ⌘[
+  and ⌘] (**Window > Back** and **Forward**). Showing a page another way drops the pages you went
+  back from. A page that is gone leaves the list: a session that closes, an issue that is deleted,
+  a new issue page left with **Create** or **Cancel**, and the Issues pages of a removed project.
+  The list lasts until Hoot quits.
 - **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar, ⌘⇧] and ⌘⇧[ (**Window >
   Select Next Session** and **Select Previous Session**) the next and previous one, ⌘[ and ⌘] go
   back and forward, ⌘W closes the shown session, and ⌘B hides or shows the sidebar. They work while
-  a terminal has the focus and never reach its program, whereas Ctrl+B reaches it as usual. The
-  window's close button and ⌘Q quit Hoot.
+  a terminal or a text field has the focus and never reach the terminal's program or the field,
+  whereas Ctrl+B reaches the program as usual. On an Issues page, where no session is shown, ⌘W
+  closes nothing. The window's close button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
   current Unicode widths. The shown terminal is drawn with WebGL, so block elements and box drawing
@@ -56,13 +60,41 @@ Hoot supports macOS only for now.
 - **Quitting**: closing the window or quitting while sessions run asks first and says how many
   run; confirming ends them. A project cannot be removed from the list while one of its sessions
   runs; removing it closes its other sessions.
-- **Window**: the window has no title bar. The sidebar and the shown session reach up to its top
+- **Window**: the window has no title bar. The sidebar and the shown page reach up to its top
   edge, where one row holds the window's traffic lights, the sidebar button, Back and Forward,
-  and the session's header (in full screen, the buttons take the traffic lights' place); drag the
-  window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
+  and the session's header or the Issues page's title (in full screen, the buttons take the
+  traffic lights' place); drag the window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
   Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
   it.
 - The interface and the terminal follow the macOS light or dark appearance.
+
+## Issues
+
+Note what to do in a project, such as an idea you have or a problem you notice while an agent
+works, as an issue, and come back to it later. Issues are kept on your Mac, in
+[Hoot's database](#architecture).
+
+- **The list**: click a project's row in the sidebar to show its issues; the row shows how many of
+  them are open, and is selected while one of the project's Issues pages is shown. **Open** lists
+  the open issues, newest first, with when each was opened, and **Closed** the closed ones, the
+  most recently closed first. Each project's list shows Open or Closed as you left it, until Hoot
+  quits. An issue in the list shows its page when clicked.
+- **New issues**: **+ New Issue** opens a page with a title, which an issue needs, and a
+  description. **Create** saves the issue, without the spaces around its title, and shows it.
+- **An issue's page** shows its title, whether it is open or closed, when it was opened, and its
+  description as GitHub Flavored Markdown: headings, lists, code, task lists, tables and links.
+  HTML in a description shows as the text it is. Links to `http` and `https` addresses open in
+  your default browser; other links open nothing. A task list's boxes show what is done; editing
+  the description changes them.
+- **Changing issues**: on an issue's page, **Edit** turns the title and description into fields
+  where they are, with **Save** and **Cancel**; **Close Issue** and **Reopen Issue** close and
+  reopen it; **Delete** deletes it for good, after asking. A description is edited as plain
+  Markdown text.
+- **Drafts**: what you enter on a new issue page, or while editing an issue, stays while other
+  pages are shown, until you create, save or cancel, remove the project, or quit Hoot. Quitting
+  does not ask about drafts.
+- **Removing a project** from the list keeps its issues; they come back, closed ones included,
+  when you add the project again.
 
 ## Worktrees
 
@@ -170,7 +202,7 @@ pnpm dev
 starts Vite with hot reload and launches Electron from the current terminal. In this mode the app
 inherits the terminal's environment, so use `pnpm start` to check environment-related behavior.
 
-Runs from the repository (`pnpm start` and `pnpm dev`) keep their projects and settings apart from
+Runs from the repository (`pnpm start` and `pnpm dev`) keep their projects, issues and settings apart from
 an [installed](#installing) Hoot, so both can run at the same time.
 
 ## Installing
@@ -209,19 +241,29 @@ never cover or take focus from the apps you are working in.
 
 ## Architecture
 
-| Part     | Location       | Role                                                                                   |
-| -------- | -------------- | -------------------------------------------------------------------------------------- |
-| Main     | `src/main`     | Window, menu, projects, permission levels, tool detection, session processes, quitting |
-| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                            |
-| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                     |
-| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                    |
-| Shared   | `src/shared`   | Types and messages used by more than one process                                       |
+| Part     | Location       | Role                                                                                                     |
+| -------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, session processes, quitting |
+| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                              |
+| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                       |
+| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                      |
+| Shared   | `src/shared`   | Types and messages used by more than one process                                                         |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
-node-pty, the only runtime dependency. Projects are stored in `projects.json`, and the permission
-levels picked in the Agents menu and whether the sidebar is hidden in `settings.json`, in the app's
-user data folder:
+node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder:
 `~/Library/Application Support/Hoot` for the installed app, and
-`~/Library/Application Support/Hoot-dev` for runs from the repository. Worktrees are read from
-Git: a project's worktrees are the linked worktrees in its folder in `~/.hoot/worktrees`, whose
-`.hoot-project.json` records the project it belongs to.
+`~/Library/Application Support/Hoot-dev` for runs from the repository.
+
+- The projects and their issues are in a SQLite database, `data/hoot.db`, which Hoot reads and
+  writes with Node's built-in `node:sqlite`, in plain SQL. Its tables' version is its
+  `PRAGMA user_version`; on opening it, Hoot applies the migrations in `src/main/database`
+  after that version, all in one transaction. The project list used to be kept in
+  `projects.json`, which is no longer read: add your projects again.
+- If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
+  or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
+  where the file is, with **Show in Finder** and **Quit**, and Hoot leaves the file as it is.
+- The permission levels picked in the Agents menu and whether the sidebar is hidden are in
+  `settings.json`.
+
+Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
+`~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.

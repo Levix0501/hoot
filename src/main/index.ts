@@ -2,13 +2,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme } from 'electron'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
-import { buildAppMenu } from './app-menu'
+import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
+import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
 import { gitEnvironment } from './git/git'
-import { registerIpc } from './ipc'
+import { registerDatabaseErrorIpc, registerIpc } from './ipc'
+import { IssueStore } from './issues/issue-store'
 import { resolveProjectRoot } from './projects/project-root'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
@@ -50,7 +53,6 @@ function defaultShell(): string {
 }
 
 const shell = defaultShell()
-const projects = new ProjectStore(app.getPath('userData'))
 const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const tools = new ToolService({ shell, baseEnv, cwd: os.homedir() })
@@ -183,28 +185,26 @@ nativeTheme.on('updated', () => {
   )
 })
 
+/**
+ * Opens the database, which holds the projects and their issues; or says why
+ * it cannot, leaving its file as it was.
+ */
+function tryOpenDatabase(
+  file: string,
+): { kind: 'opened'; database: DatabaseSync } | { kind: 'failed'; message: string } {
+  try {
+    return { kind: 'opened', database: openDatabase(file) }
+  } catch (error) {
+    return { kind: 'failed', message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   // Starting Hoot again shows the window, unless that start is unattended too.
   app.on('second-instance', (_event, argv) => {
     if (!argv.includes('--background')) showMainWindow()
-  })
-
-  registerIpc({
-    getWindow,
-    projects,
-    tools,
-    permissionLevels,
-    sidebar,
-    sessions,
-    quitGuard,
-    worktrees,
-    resolveProjectRoot: async (directory) =>
-      resolveProjectRoot(directory, {
-        git: await gitExecutable(),
-        env: (await tools.getLoginEnvironment()).env,
-      }),
   })
 
   app.on('before-quit', (event) => quitGuard.intercept(event))
@@ -238,6 +238,32 @@ if (!app.requestSingleInstanceLock()) {
 
   app.setAboutPanelOptions({ applicationName: 'Hoot', applicationVersion: app.getVersion() })
 
+  const databasePath = databaseFile(app.getPath('userData'))
+  const opened = tryOpenDatabase(databasePath)
+  if (opened.kind === 'opened') startWithDatabase(opened.database)
+  else startWithoutDatabase(databasePath, opened.message)
+}
+
+/** Starts Hoot with its projects, sessions and issues. */
+function startWithDatabase(database: DatabaseSync): void {
+  const projects = new ProjectStore(database)
+  registerIpc({
+    getWindow,
+    projects,
+    issues: new IssueStore(database),
+    tools,
+    permissionLevels,
+    sidebar,
+    sessions,
+    quitGuard,
+    worktrees,
+    resolveProjectRoot: async (directory) =>
+      resolveProjectRoot(directory, {
+        git: await gitExecutable(),
+        env: (await tools.getLoginEnvironment()).env,
+      }),
+  })
+
   const sendSessionCommand = (command: SessionCommand) =>
     getWindow()?.webContents.send(IpcChannel.sessionCommand, command)
 
@@ -267,5 +293,20 @@ if (!app.requestSingleInstanceLock()) {
     app.on('activate', showMainWindow)
     void tools.detect()
     worktrees.setProjects(projects.list().map((project) => project.root))
+  })
+}
+
+/**
+ * Starts Hoot without its database, which could not be opened: the window
+ * only says why and where the file is, and offers to show it in Finder or to
+ * quit. Nothing else starts, and the file is left as it is.
+ */
+function startWithoutDatabase(databasePath: string, error: string): void {
+  console.error(`Could not open the database ${databasePath}: ${error}`)
+  registerDatabaseErrorIpc({ getWindow, databasePath, message: error })
+  void app.whenReady().then(() => {
+    Menu.setApplicationMenu(buildDatabaseErrorMenu())
+    mainWindow = createMainWindow({ reveal: !openInBackground })
+    app.on('activate', showMainWindow)
   })
 }

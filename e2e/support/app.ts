@@ -9,6 +9,7 @@ import {
   type Page,
 } from '@playwright/test'
 import type { ToolId } from '../../src/shared/tools'
+import { addProjectsBeforeLaunch, type SeedIssue } from './database'
 import { Screenshot, type GridPixels } from './pixels'
 import type { World } from './world'
 
@@ -59,8 +60,15 @@ export interface LaunchOptions {
    * adding them in the window, this shows no message over the terminal.
    */
   projects?: string[]
+  /** Issues of those projects, there when Hoot starts, as if created in it before. */
+  issues?: SeedIssue[]
   /** Another user data directory than the world's. */
   userData?: string
+  /**
+   * What the window is expected to show once Hoot has started: the sidebar,
+   * or only why the database cannot be opened.
+   */
+  startsWith?: 'sidebar' | 'database-error'
 }
 
 /** Drives one running Hoot instance. */
@@ -77,12 +85,7 @@ export class AppDriver {
     if (!fs.existsSync(mainEntry)) throw new Error('Build the app first: pnpm build')
     const userData = options.userData ?? world.userData
     fs.mkdirSync(userData, { recursive: true })
-    if (options.projects) {
-      fs.writeFileSync(
-        path.join(userData, 'projects.json'),
-        JSON.stringify({ projects: options.projects.map((root) => ({ root })) }),
-      )
-    }
+    if (options.projects) addProjectsBeforeLaunch(userData, options.projects, options.issues)
     const electronApp = await electron.launch({
       // Launched like `electron .` so the app reads its name and version from package.json.
       args: [
@@ -109,7 +112,11 @@ export class AppDriver {
     const mainProcess = electronApp.process()
     const page = await electronApp.firstWindow()
     await page.waitForLoadState('domcontentloaded')
-    await expect(page.getByTestId('add-project')).toBeVisible()
+    if (options.startsWith === 'database-error') {
+      await expect(page.getByTestId('database-error')).toBeVisible()
+    } else {
+      await expect(page.getByTestId('add-project')).toBeVisible()
+    }
     if (options.projects) {
       await expect(page.getByTestId('project-item')).toHaveCount(options.projects.length)
     }
@@ -214,7 +221,7 @@ export class AppDriver {
     await this.settle()
   }
 
-  /** The main area: the current session or the empty page. */
+  /** The main area: the current page or the empty page. */
   mainArea() {
     return this.page.locator('[data-slot="sidebar-inset"]')
   }

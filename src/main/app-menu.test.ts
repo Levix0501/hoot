@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({ Menu: { buildFromTemplate: vi.fn<() => void>() } }))
 
-const { appMenuTemplate } = await import('./app-menu')
+const { appMenuTemplate, databaseErrorMenuTemplate } = await import('./app-menu')
 
 function setup(options: { sidebarOpen?: boolean } = {}) {
   const calls: string[] = []
@@ -102,5 +102,15 @@ describe('appMenuTemplate', () => {
     }
     visit(template)
     expect(accelerators.filter((accelerator) => /\+[1-9]$/.test(accelerator))).toEqual([])
+  })
+})
+
+describe('databaseErrorMenuTemplate', () => {
+  it('offers only the app menu, editing and the window, with nothing about projects or sessions', () => {
+    const template = databaseErrorMenuTemplate()
+    expect(template.map((item) => item.role)).toEqual(['appMenu', 'editMenu', 'windowMenu'])
+    expect(template.every((item) => item.submenu === undefined && item.click === undefined)).toBe(
+      true,
+    )
   })
 })

@@ -3,7 +3,7 @@ import { describeExit, describeExitShort, sessionName } from '../../shared/sessi
 import { useAppStore, worktreeDisplayName, type UiSession } from '../store/app-store'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
-import { useSessionHeaderInset } from './window-navigation'
+import { useTopRowInset } from './window-navigation'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import {
@@ -44,7 +44,8 @@ function StatusBadge({ session }: { session: UiSession }) {
   )
 }
 
-function SessionPane({ session }: { session: UiSession }) {
+/** A session's page: its header in the window's top row, and its terminal. */
+export function SessionPane({ session }: { session: UiSession }) {
   const project = useAppStore((state) =>
     state.projects.find((candidate) => candidate.root === session.projectRoot),
   )
@@ -55,7 +56,7 @@ function SessionPane({ session }: { session: UiSession }) {
   const projectLabel = project?.name ?? projectName(session.projectRoot)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
-  const inset = useSessionHeaderInset()
+  const inset = useTopRowInset()
 
   return (
     <div
@@ -139,7 +140,8 @@ function SessionPane({ session }: { session: UiSession }) {
   )
 }
 
-function NoSession() {
+/** The empty page, shown when the main area shows no other page. */
+export function NoSession() {
   const hasProjects = useAppStore((state) => state.projects.length > 0)
   const addProject = useAppStore((state) => state.addProject)
   return (
@@ -169,11 +171,4 @@ function NoSession() {
       </Empty>
     </>
   )
-}
-
-export function SessionArea() {
-  const session = useAppStore((state) =>
-    state.sessions.find((candidate) => candidate.id === state.currentSessionId),
-  )
-  return session ? <SessionPane session={session} /> : <NoSession />
 }

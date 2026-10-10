@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
+import type { Issue, IssueState } from '../../shared/issues'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
 import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
@@ -19,10 +20,13 @@ import {
   currentEntry,
   emptyHistory,
   forget,
+  samePage,
+  sessionPage,
   step,
   visit,
-  type SessionHistory,
-} from './session-history'
+  type Page,
+  type PageHistory,
+} from './page-history'
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
@@ -46,6 +50,14 @@ export interface UiSession {
   /** Set once the session is being closed, until it is gone. */
   closing: boolean
 }
+
+/** What is entered for an issue's title and description, before it is saved. */
+export interface IssueDraft {
+  title: string
+  description: string
+}
+
+export const emptyDraft: IssueDraft = { title: '', description: '' }
 
 /** The deletion of a worktree, from checking it until it is deleted or cancelled. */
 export interface WorktreeDeletion {
@@ -73,10 +85,18 @@ export interface AppState {
   permissionLevels: PermissionLevelSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
-  /** The session shown in the window. Whenever there are sessions, one of them. */
-  currentSessionId: string | null
-  /** The sessions shown one after another, for going back and forward. */
-  history: SessionHistory
+  /** What the main area shows; `null` for the empty page. */
+  currentPage: Page | null
+  /** The pages shown one after another, for going back and forward. */
+  history: PageHistory
+  /** The issues of the projects in the list. */
+  issues: Issue[]
+  /** The issues each project's list showed last, by project id; open ones until then. */
+  issueListStates: Record<number, IssueState>
+  /** What is entered on each project's new issue page, by project id. */
+  newIssueDrafts: Record<number, IssueDraft>
+  /** The issues whose page is in the edit state, with what is entered, by issue id. */
+  issueEdits: Record<number, IssueDraft>
   /** The session whose sidebar row shows the field for renaming it. */
   renamingSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
@@ -104,10 +124,36 @@ export interface AppState {
   selectSession(id: string): void
   runShortcut(shortcut: SessionShortcut): void
   runMenuCommand(command: SessionCommand): void
-  /** Shows the session shown before the current one, if any. */
+  /** Shows the page shown before the current one, if any. */
   goBack(): void
-  /** Shows the session shown after the current one, if any. */
+  /** Shows the page shown after the current one, if any. */
   goForward(): void
+  /** Shows a project's issue list, with the issues it showed last. */
+  showIssueList(projectId: number): void
+  /** Shows a project's open or closed issues in its list. */
+  setIssueListState(projectId: number, state: IssueState): void
+  /** Shows a project's new issue page, with what was entered on it before. */
+  showNewIssue(projectId: number): void
+  showIssue(issueId: number): void
+  updateNewIssueDraft(projectId: number, draft: IssueDraft): void
+  /**
+   * Creates an issue from what is entered on the project's new issue page,
+   * then shows it instead of that page, which leaves the history.
+   */
+  createIssue(projectId: number): Promise<void>
+  /** Drops what is entered on the project's new issue page and shows its list instead. */
+  cancelNewIssue(projectId: number): void
+  /** Puts an issue's page in the edit state, with its title and description entered. */
+  startEditingIssue(issueId: number): void
+  updateIssueEdit(issueId: number, draft: IssueDraft): void
+  /** Saves what is entered for an issue, and ends the edit state. */
+  saveIssueEdit(issueId: number): Promise<void>
+  /** Ends an issue's edit state without saving. */
+  cancelIssueEdit(issueId: number): void
+  /** Closes an issue or opens it again. */
+  setIssueState(issueId: number, state: IssueState): Promise<void>
+  /** Deletes an issue for good, then shows its project's list instead of its page. */
+  deleteIssue(issueId: number): Promise<void>
   /** Expands or collapses the sidebar, and saves its state. */
   setSidebarOpen(open: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
@@ -151,6 +197,32 @@ const terminals = new Map<string, SessionTerminal>()
 
 export function getSessionTerminal(id: string | null): SessionTerminal | undefined {
   return id === null ? undefined : terminals.get(id)
+}
+
+/** The session the main area shows, or `null` when it shows an Issues page or the empty page. */
+export function currentSessionId(state: Pick<AppState, 'currentPage'>): string | null {
+  return state.currentPage?.kind === 'session' ? state.currentPage.sessionId : null
+}
+
+/** Whether a page shows a session among `ids`, or an Issues page of a project among `projectIds`. */
+function pageIn(page: Page, ids: ReadonlySet<string>, projectIds: ReadonlySet<number>): boolean {
+  return page.kind === 'session' ? ids.has(page.sessionId) : projectIds.has(page.projectId)
+}
+
+/** A record by id without the entries whose ids `gone` picks. */
+function withoutIds<V>(
+  record: Record<number, V>,
+  gone: (id: number) => boolean,
+): Record<number, V> {
+  return Object.fromEntries(Object.entries(record).filter(([id]) => !gone(Number(id))))
+}
+
+/**
+ * The issues with one replaced by its new state; unchanged without it, as
+ * when its project left the list while it was being changed.
+ */
+function withIssue(issues: readonly Issue[], issue: Issue): Issue[] {
+  return issues.map((entry) => (entry.id === issue.id ? issue : entry))
 }
 
 /** A file path shown in a message; marked so it is not mistaken for interface text. */
@@ -227,22 +299,24 @@ function updateSession(
 
 /** Puts the keyboard focus in the current session's terminal. */
 export function focusCurrentTerminal(): void {
-  getSessionTerminal(useAppStore.getState().currentSessionId)?.terminal.focus()
+  getSessionTerminal(currentSessionId(useAppStore.getState()))?.terminal.focus()
 }
 
 /**
  * Where a menu or dialog moves the keyboard focus when it closes: into the
- * current session's terminal, or where it would go anyway when there is none.
+ * current session's terminal, or where it would go anyway when the main area
+ * shows no session.
  */
 export function focusAfterOverlay(): HTMLElement | boolean {
-  const { currentSessionId } = useAppStore.getState()
-  if (currentSessionId === null) return true
+  const id = currentSessionId(useAppStore.getState())
+  if (id === null) return true
   // A terminal that is not on screen yet takes the focus once it is.
-  return getSessionTerminal(currentSessionId)?.terminal.textarea ?? false
+  return getSessionTerminal(id)?.terminal.textarea ?? false
 }
 
 export const useAppStore = create<AppState>()((set, get) => {
   const findSession = (id: string) => get().sessions.find((session) => session.id === id)
+  const findIssue = (id: number) => get().issues.find((issue) => issue.id === id)
 
   /** Creates a session's terminal, wired to the session's process. */
   const openTerminal = (id: string): SessionTerminal => {
@@ -263,59 +337,144 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
-   * Removes sessions from the window, together with their terminals. When the
-   * current session is among them, the next session in sidebar order is shown,
-   * or the previous one when there is none after it.
+   * Shows a page other than by going back or forward, recording it in the
+   * history. Showing the current session again only puts the keyboard focus
+   * in its terminal.
    */
-  const removeSessions = (ids: readonly string[], projects?: Project[]) => {
-    const removed = new Set(ids)
-    let currentChanged = false
+  const showPage = (page: Page) => {
+    const { currentPage } = get()
+    if (samePage(currentPage, page)) {
+      if (page.kind === 'session') focusCurrentTerminal()
+      return
+    }
+    getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    // The terminal view of a session takes the focus once it is shown.
+    set((state) => ({ currentPage: page, history: visit(state.history, page) }))
+  }
+
+  /**
+   * Takes the pages of closed sessions and removed projects out of the
+   * window, and the closed sessions with their terminals. When the current
+   * page is among them, a closed session gives way to the next session in
+   * sidebar order (or the previous one when there is none after it), which
+   * is recorded in the history; without another session, and for a removed
+   * project's page, the page of the history's current entry is shown, or the
+   * empty page without one.
+   */
+  const removePages = (
+    ids: ReadonlySet<string>,
+    projectIds: ReadonlySet<number> = new Set(),
+    projects?: Project[],
+  ) => {
+    let sessionShown = false
+    const gone = (page: Page) => pageIn(page, ids, projectIds)
+    const keep = (id: string | null) => (id !== null && ids.has(id) ? null : id)
     set((state) => {
-      const order = orderedSessions(state).map((session) => session.id)
-      const currentSessionId = currentAfterClosing(order, state.currentSessionId, removed)
-      currentChanged = currentSessionId !== state.currentSessionId
-      // The history forgets the closed sessions before it records the one shown instead.
-      const history = forget(state.history, removed)
-      const keep = (id: string | null) => (id !== null && removed.has(id) ? null : id)
+      // The history forgets the pages before it records the one shown instead.
+      let history = forget(state.history, gone)
+      let currentPage = state.currentPage
+      if (currentPage !== null && gone(currentPage)) {
+        const order = orderedSessions(state).map((session) => session.id)
+        const next =
+          currentPage.kind === 'session'
+            ? currentAfterClosing(order, currentPage.sessionId, ids)
+            : null
+        if (next !== null) {
+          currentPage = sessionPage(next)
+          history = visit(history, currentPage)
+          sessionShown = true
+        } else {
+          currentPage = currentEntry(history)
+          sessionShown = currentPage?.kind === 'session'
+        }
+      }
+      const goneIssue = (issueId: number) =>
+        state.issues.some((issue) => issue.id === issueId && projectIds.has(issue.projectId))
       return {
         projects: projects ?? state.projects,
-        sessions: state.sessions.filter((session) => !removed.has(session.id)),
-        currentSessionId,
-        history:
-          currentChanged && currentSessionId !== null ? visit(history, currentSessionId) : history,
+        sessions: state.sessions.filter((session) => !ids.has(session.id)),
+        currentPage,
+        history,
         renamingSessionId: keep(state.renamingSessionId),
         closeConfirmation: keep(state.closeConfirmation),
+        // What was entered for a removed project's issues goes with it.
+        issues: state.issues.filter((issue) => !projectIds.has(issue.projectId)),
+        newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => projectIds.has(id)),
+        issueEdits: withoutIds(state.issueEdits, goneIssue),
       }
     })
     // Once the window no longer shows them.
     setTimeout(() => {
-      for (const id of removed) {
+      for (const id of ids) {
         terminals.get(id)?.terminal.dispose()
         terminals.delete(id)
       }
       // A newly shown session's terminal takes the focus by itself. Otherwise
       // give the focus back to the terminal if what had it went away.
       const focused = document.activeElement
-      if (!currentChanged && (focused === null || focused === document.body)) {
+      if (!sessionShown && (focused === null || focused === document.body)) {
         focusCurrentTerminal()
       }
     }, 0)
   }
 
-  /** Applies a new project list; sessions of projects that left it are closed. */
+  /** Closes sessions, whose processes have ended, and takes them out of the window. */
+  const removeSessions = (ids: readonly string[]) => removePages(new Set(ids))
+
+  /**
+   * Replaces Issues pages that are gone, and the history's entries of them,
+   * with another page, recorded as any page shown is.
+   */
+  const replacePages = (gone: (page: Page) => boolean, page: Page) => {
+    getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    set((state) => {
+      const history = forget(state.history, gone)
+      return { currentPage: page, history: visit(history, page) }
+    })
+  }
+
+  /** Reads a project's issues, unless it has left the list by then. */
+  const loadIssues = (projectId: number) => {
+    void api.listIssues(projectId).then(
+      (issues) =>
+        set((state) =>
+          state.projects.some((project) => project.id === projectId)
+            ? {
+                issues: [
+                  ...state.issues.filter((issue) => issue.projectId !== projectId),
+                  ...issues,
+                ],
+              }
+            : state,
+        ),
+      (error: unknown) => console.error('Could not list the issues:', error),
+    )
+  }
+
+  /**
+   * Applies a new project list: the sessions of projects that left it are
+   * closed, and their Issues pages go; the issues of projects new to it are read.
+   */
   const applyProjects = (projects: Project[]) => {
+    const state = get()
+    const ids = new Set(projects.map((project) => project.id))
     const roots = new Set(projects.map((project) => project.root))
-    const orphaned = get()
-      .sessions.filter((session) => !roots.has(session.projectRoot))
+    const known = new Set(state.projects.map((project) => project.id))
+    const removed = new Set(
+      state.projects.filter((project) => !ids.has(project.id)).map((project) => project.id),
+    )
+    const orphaned = state.sessions
+      .filter((session) => !roots.has(session.projectRoot))
       .map((session) => session.id)
     // Their processes have all ended: a project cannot be removed while one runs.
-    if (orphaned.length > 0) removeSessions(orphaned, projects)
+    if (orphaned.length > 0 || removed.size > 0) removePages(new Set(orphaned), removed, projects)
     else set({ projects })
-    set((state) => ({
+    set((current) => ({
       worktrees: Object.fromEntries(
-        Object.entries(state.worktrees).filter(([root]) => roots.has(root)),
+        Object.entries(current.worktrees).filter(([root]) => roots.has(root)),
       ),
     }))
+    for (const project of projects) if (!known.has(project.id)) loadIssues(project.id)
   }
 
   /** Applies a project's worktrees as Git lists them now. */
@@ -347,26 +506,40 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   const selectRelative = (offset: 1 | -1) => {
     const order = orderedSessions(get()).map((session) => session.id)
-    const id = relativeSession(order, get().currentSessionId, offset)
+    const id = relativeSession(order, currentSessionId(get()), offset)
     if (id !== null) get().selectSession(id)
   }
 
-  /** Goes back (-1) or forward (1) among the sessions shown. */
+  /** Goes back (-1) or forward (1) among the pages shown. */
   const stepHistory = (offset: -1 | 1) => {
-    const { history, currentSessionId } = get()
+    const { history } = get()
     const stepped = step(history, offset)
-    const id = stepped && currentEntry(stepped)
-    if (!stepped || id === null) return
-    getSessionTerminal(currentSessionId)?.terminal.blur()
-    // The terminal view of the session takes the focus once it is shown.
-    set({ history: stepped, currentSessionId: id })
+    const page = stepped && currentEntry(stepped)
+    if (!stepped || page === null) return
+    getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    // The terminal view of a session takes the focus once it is shown.
+    set({ history: stepped, currentPage: page })
   }
 
   const closeCurrent = () => {
-    const { currentSessionId, closeConfirmation, quitConfirmation } = get()
-    // While Hoot waits for an answer, ⌘W does not ask anything else.
-    if (currentSessionId === null || closeConfirmation !== null || quitConfirmation !== null) return
-    get().requestCloseSession(currentSessionId)
+    const { closeConfirmation, quitConfirmation } = get()
+    const id = currentSessionId(get())
+    // While Hoot waits for an answer, ⌘W does not ask anything else; and
+    // without a session shown, it closes nothing.
+    if (id === null || closeConfirmation !== null || quitConfirmation !== null) return
+    get().requestCloseSession(id)
+  }
+
+  /** Changes to issues under way, so that a second click does not repeat one. */
+  const issueRequests = new Set<string>()
+  const once = async (key: string, request: () => Promise<void>) => {
+    if (issueRequests.has(key)) return
+    issueRequests.add(key)
+    try {
+      await request()
+    } finally {
+      issueRequests.delete(key)
+    }
   }
 
   return {
@@ -379,8 +552,12 @@ export const useAppStore = create<AppState>()((set, get) => {
     tools: { detecting: true, tools: [], error: null },
     permissionLevels: null,
     sessions: [],
-    currentSessionId: null,
+    currentPage: null,
     history: emptyHistory,
+    issues: [],
+    issueListStates: {},
+    newIssueDrafts: {},
+    issueEdits: {},
     renamingSessionId: null,
     closeConfirmation: null,
     quitConfirmation: null,
@@ -401,7 +578,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (api.testHooks) {
         window.hootTestHooks = {
           get terminal() {
-            return getSessionTerminal(get().currentSessionId)?.terminal
+            return getSessionTerminal(currentSessionId(get()))?.terminal
           },
           terminalOf: (id) => terminals.get(id)?.terminal,
         }
@@ -457,7 +634,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         api.getPermissionLevels(),
       ])
       // A level selected while this was read is reported by the change event, which is newer.
-      set((state) => ({ projects, permissionLevels: state.permissionLevels ?? permissionLevels }))
+      set((state) => ({ permissionLevels: state.permissionLevels ?? permissionLevels }))
+      applyProjects(projects)
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
       const reloaded = sessions.filter((session) => !known.has(session.id))
@@ -465,13 +643,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (reloaded.length > 0) {
         set((state) => {
           const all = [...state.sessions, ...reloaded.map(fromInfo)]
-          const currentSessionId =
-            state.currentSessionId ?? orderedSessions({ ...state, sessions: all })[0]?.id ?? null
+          const first = orderedSessions({ ...state, sessions: all })[0]
+          const currentPage =
+            state.currentPage ?? (first === undefined ? null : sessionPage(first.id))
           return {
             sessions: all,
-            currentSessionId,
+            currentPage,
             history:
-              currentSessionId === null ? state.history : visit(state.history, currentSessionId),
+              currentPage === null || state.currentPage !== null
+                ? state.history
+                : visit(state.history, currentPage),
           }
         })
       }
@@ -482,14 +663,14 @@ export const useAppStore = create<AppState>()((set, get) => {
     async addProject() {
       const result = await api.addProject()
       switch (result.kind) {
-        case 'added':
-          set((state) =>
-            state.projects.some((project) => project.root === result.project.root)
-              ? state
-              : { projects: [...state.projects, result.project] },
-          )
+        case 'added': {
+          const { projects } = get()
+          if (!projects.some((project) => project.id === result.project.id)) {
+            applyProjects([...projects, result.project])
+          }
           toast.success('Project added.', { description: pathText(result.project.root) })
           break
+        }
         case 'duplicate':
           toast.info('This project is already in the list.', {
             description: pathText(result.project.root),
@@ -537,7 +718,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     newSession(projectRoot, toolId, worktreePath = null) {
       const id = crypto.randomUUID()
       openTerminal(id)
-      getSessionTerminal(get().currentSessionId)?.terminal.blur()
+      getSessionTerminal(currentSessionId(get()))?.terminal.blur()
       // The new session is shown at once; its terminal view starts the process
       // with the size the terminal has on screen.
       set((state) => ({
@@ -555,8 +736,8 @@ export const useAppStore = create<AppState>()((set, get) => {
             closing: false,
           },
         ],
-        currentSessionId: id,
-        history: visit(state.history, id),
+        currentPage: sessionPage(id),
+        history: visit(state.history, sessionPage(id)),
       }))
     },
 
@@ -599,15 +780,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     selectSession(id) {
-      const { currentSessionId } = get()
-      if (!findSession(id)) return
-      if (id === currentSessionId) {
-        focusCurrentTerminal()
-        return
-      }
-      getSessionTerminal(currentSessionId)?.terminal.blur()
-      // The terminal view of the session takes the focus once it is shown.
-      set((state) => ({ currentSessionId: id, history: visit(state.history, id) }))
+      if (findSession(id)) showPage(sessionPage(id))
     },
 
     runShortcut(shortcut) {
@@ -659,6 +832,144 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     goForward() {
       stepHistory(1)
+    },
+
+    showIssueList(projectId) {
+      if (get().projects.some((project) => project.id === projectId)) {
+        showPage({ kind: 'issue-list', projectId })
+      }
+    },
+
+    setIssueListState(projectId, state) {
+      set((current) => ({ issueListStates: { ...current.issueListStates, [projectId]: state } }))
+    },
+
+    showNewIssue(projectId) {
+      if (get().projects.some((project) => project.id === projectId)) {
+        showPage({ kind: 'new-issue', projectId })
+      }
+    },
+
+    showIssue(issueId) {
+      const issue = findIssue(issueId)
+      if (issue) showPage({ kind: 'issue', projectId: issue.projectId, issueId })
+    },
+
+    updateNewIssueDraft(projectId, draft) {
+      set((state) => ({ newIssueDrafts: { ...state.newIssueDrafts, [projectId]: draft } }))
+    },
+
+    async createIssue(projectId) {
+      await once(`create:${projectId}`, async () => {
+        const draft = get().newIssueDrafts[projectId] ?? emptyDraft
+        const result = await api
+          .createIssue({ projectId, ...draft })
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error('Could not create the issue.', { description: result.message })
+          return
+        }
+        const { issue } = result
+        // Unless the project left the list while the issue was being created.
+        if (!get().projects.some((project) => project.id === projectId)) return
+        set((state) => ({
+          issues: [...state.issues, issue],
+          newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => id === projectId),
+        }))
+        replacePages((page) => page.kind === 'new-issue' && page.projectId === projectId, {
+          kind: 'issue',
+          projectId,
+          issueId: issue.id,
+        })
+      })
+    },
+
+    cancelNewIssue(projectId) {
+      set((state) => ({
+        newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => id === projectId),
+      }))
+      replacePages((page) => page.kind === 'new-issue' && page.projectId === projectId, {
+        kind: 'issue-list',
+        projectId,
+      })
+    },
+
+    startEditingIssue(issueId) {
+      const issue = findIssue(issueId)
+      if (!issue || get().issueEdits[issueId]) return
+      set((state) => ({
+        issueEdits: {
+          ...state.issueEdits,
+          [issueId]: { title: issue.title, description: issue.description },
+        },
+      }))
+    },
+
+    updateIssueEdit(issueId, draft) {
+      if (!get().issueEdits[issueId]) return
+      set((state) => ({ issueEdits: { ...state.issueEdits, [issueId]: draft } }))
+    },
+
+    async saveIssueEdit(issueId) {
+      await once(`issue:${issueId}`, async () => {
+        const draft = get().issueEdits[issueId]
+        if (!draft) return
+        const result = await api
+          .updateIssue(issueId, draft)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error('Could not save the issue.', { description: result.message })
+          return
+        }
+        set((state) => ({
+          issues: withIssue(state.issues, result.issue),
+          issueEdits: withoutIds(state.issueEdits, (id) => id === issueId),
+        }))
+      })
+    },
+
+    cancelIssueEdit(issueId) {
+      set((state) => ({ issueEdits: withoutIds(state.issueEdits, (id) => id === issueId) }))
+    },
+
+    async setIssueState(issueId, state) {
+      await once(`issue:${issueId}`, async () => {
+        const result = await api
+          .setIssueState(issueId, state)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error(
+            state === 'closed' ? 'Could not close the issue.' : 'Could not reopen the issue.',
+            { description: result.message },
+          )
+          return
+        }
+        set((current) => ({ issues: withIssue(current.issues, result.issue) }))
+      })
+    },
+
+    async deleteIssue(issueId) {
+      await once(`issue:${issueId}`, async () => {
+        const issue = findIssue(issueId)
+        if (!issue) return
+        const result = await api
+          .deleteIssue(issueId)
+          .catch((error: unknown) => ({ ok: false, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error('Could not delete the issue.', { description: result.message })
+          return
+        }
+        set((state) => ({
+          issues: state.issues.filter((entry) => entry.id !== issueId),
+          issueEdits: withoutIds(state.issueEdits, (id) => id === issueId),
+        }))
+        // Its project's pages have gone already if the project left the list meanwhile.
+        if (!get().projects.some((project) => project.id === issue.projectId)) return
+        replacePages((page) => page.kind === 'issue' && page.issueId === issueId, {
+          kind: 'issue-list',
+          projectId: issue.projectId,
+        })
+      })
     },
 
     setSidebarOpen(open) {
@@ -727,7 +1038,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     closeNewWorktreeDialog() {
       set({ newWorktreeProject: null })
     },
-
     requestDeleteWorktree(projectRoot, path) {
       if (get().worktreeDeletion !== null || preparingDeletion) return
       preparingDeletion = true

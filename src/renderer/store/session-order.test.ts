@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 
-const project = (root: string) => ({ root, name: root.slice(1) })
+const project = (root: string) => ({ id: root.charCodeAt(1), root, name: root.slice(1) })
 
 describe('sidebarOrder', () => {
   it('groups sessions by project in list order, then by start order', () => {

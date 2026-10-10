@@ -8,7 +8,7 @@ import {
 } from './support/issues'
 import { expect, test } from './support/test'
 
-test.describe('what is entered but not saved (A10)', () => {
+test.describe('what is entered but not saved', () => {
   test('stays while other pages are shown, until it is saved or dropped, the project is removed or Hoot quits', async ({
     launch,
     world,

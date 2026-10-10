@@ -44,7 +44,7 @@ async function removeProject(app: AppDriver, root: string): Promise<void> {
   await expect(app.projectItems()).toHaveCount(count - 1)
 }
 
-test.describe('going back and forward among pages (A11)', () => {
+test.describe('going back and forward among pages', () => {
   test('1–2: through issue lists and an issue, like a browser through pages', async ({
     launch,
     world,

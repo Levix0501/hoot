@@ -24,7 +24,7 @@ import { isAlive } from './support/processes'
 import { expect, test, type Launch } from './support/test'
 
 test.describe('where issues are kept', () => {
-  test('the projects and issues are in data/hoot.db of the user data directory, and stay across restarts (A1)', async ({
+  test('the projects and issues are in data/hoot.db of the user data directory, and stay across restarts', async ({
     launch,
     world,
   }) => {
@@ -103,7 +103,7 @@ test.describe('where issues are kept', () => {
     expect(fs.existsSync(databaseFile(other))).toBe(true)
   })
 
-  test('projects.json is neither read nor changed (A2)', async ({ launch, world }) => {
+  test('projects.json is neither read nor changed', async ({ launch, world }) => {
     const { G, H } = world.repos
     const json = path.join(world.userData, 'projects.json')
     const content = JSON.stringify({ projects: [{ root: G }] })
@@ -132,7 +132,7 @@ async function databaseWithAnIssue(launch: Launch, root: string): Promise<void> 
   await app.waitForExit()
 }
 
-test.describe('when the database cannot be opened (A3)', () => {
+test.describe('when the database cannot be opened', () => {
   /** Checks what the window shows, then Show in Finder and Quit. */
   async function expectDatabaseError(launch: Launch, file: string, message: RegExp): Promise<void> {
     const app = await launch({ startsWith: 'database-error' })

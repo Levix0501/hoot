@@ -144,7 +144,7 @@ for (const [width, height] of [
   [1200, 780],
   [720, 480],
 ] as const) {
-  test(`Issues pages have their title row in the window's top row, clear of the navigation, and all of them can be used (${width}×${height}) (A13)`, async ({
+  test(`Issues pages have their title row in the window's top row, clear of the navigation, and all of them can be used (${width}×${height})`, async ({
     launch,
     world,
   }) => {
@@ -192,7 +192,7 @@ for (const [width, height] of [
   })
 }
 
-test('Issues pages follow the system appearance (A13)', async ({ launch, world }) => {
+test('Issues pages follow the system appearance', async ({ launch, world }) => {
   const { G } = world.repos
   const app = await launch({ projects: [G], issues: manyIssues(G) })
   const textColors: Record<string, { title: string; description: string }> = {}
@@ -225,7 +225,7 @@ test('Issues pages follow the system appearance (A13)', async ({ launch, world }
   expect(sameCssColor(textColors.light!.description, textColors.dark!.description)).toBe(false)
 })
 
-test.describe('session commands on Issues pages (A14)', () => {
+test.describe('session commands on Issues pages', () => {
   test('⌘W closes nothing, and ⌘1–⌘9 and the next and previous session commands show sessions, also from a text field', async ({
     launch,
     world,

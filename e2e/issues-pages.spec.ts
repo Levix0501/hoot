@@ -31,7 +31,7 @@ async function aSecondLater(app: AppDriver): Promise<void> {
   await app.page.waitForTimeout(1_100)
 }
 
-test.describe('the issue list (A5)', () => {
+test.describe('the issue list', () => {
   test('lists open issues newest first and closed ones most recently closed first, and remembers its tab', async ({
     launch,
     world,
@@ -123,7 +123,7 @@ test.describe('the issue list (A5)', () => {
   })
 })
 
-test.describe('the new issue page (A6)', () => {
+test.describe('the new issue page', () => {
   test('creates an issue with its title trimmed and its description as entered, then shows it', async ({
     launch,
     world,
@@ -227,7 +227,7 @@ test.describe('the new issue page (A6)', () => {
   })
 })
 
-test.describe('an issue’s page (A7)', () => {
+test.describe('an issue’s page', () => {
   test('shows the issue, edits it in place, and closes and reopens it', async ({
     launch,
     world,
@@ -363,7 +363,7 @@ test.describe('an issue’s page (A7)', () => {
   })
 })
 
-test.describe('deleting an issue (A8)', () => {
+test.describe('deleting an issue', () => {
   test('asks first, deletes it for good, and shows the list without it', async ({
     launch,
     world,

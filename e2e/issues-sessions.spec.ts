@@ -1,7 +1,7 @@
 import { clickProjectRow, expectList, expectShown } from './support/issues'
 import { expect, test } from './support/test'
 
-test.describe('sessions beside Issues pages (A15)', () => {
+test.describe('sessions beside Issues pages', () => {
   test('a session runs on while an issue list is shown, and has its output and the focus when shown again', async ({
     launch,
     world,

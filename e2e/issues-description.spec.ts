@@ -28,7 +28,7 @@ const DESCRIPTION = [
 /** In the main process: the addresses Hoot asked macOS to open. */
 type Opened = { openedExternally?: string[] }
 
-test.describe('an issue’s description (A9)', () => {
+test.describe('an issue’s description', () => {
   test('is rendered as GitHub Flavored Markdown, without its HTML; only its web links open, in the browser', async ({
     launch,
     world,

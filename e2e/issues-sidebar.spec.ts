@@ -20,7 +20,7 @@ import {
 } from './support/issues'
 import { expect, test } from './support/test'
 
-test.describe('the project row (A4)', () => {
+test.describe('the project row', () => {
   test('shows how many issues are open, shows the issue list when clicked, and is selected then', async ({
     launch,
     world,
@@ -95,7 +95,7 @@ test.describe('the project row (A4)', () => {
   })
 })
 
-test.describe('removing and adding a project again (A12)', () => {
+test.describe('removing and adding a project again', () => {
   test('keeps its id and its issues, which come back with it', async ({ launch, world }) => {
     const { G, Gsub, H } = world.repos
     const app = await launch({

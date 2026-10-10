@@ -8,10 +8,8 @@ const dateTimeFormat = new Intl.DateTimeFormat('en-US', {
   timeStyle: 'short',
   hourCycle: 'h23',
 })
-
-function count(value: number, unit: string): string {
-  return `${value} ${unit}${value === 1 ? '' : 's'} ago`
-}
+/** "5 minutes ago", and "1 day ago" rather than "yesterday". */
+const relativeTimeFormat = new Intl.RelativeTimeFormat('en-US', { numeric: 'always' })
 
 /**
  * How long before `now` a moment was, the way GitHub says it: "just now",
@@ -20,9 +18,9 @@ function count(value: number, unit: string): string {
 export function timeAgo(time: number, now: number): string {
   const elapsed = Math.max(0, now - time)
   if (elapsed < MINUTE) return 'just now'
-  if (elapsed < HOUR) return count(Math.floor(elapsed / MINUTE), 'minute')
-  if (elapsed < DAY) return count(Math.floor(elapsed / HOUR), 'hour')
-  if (elapsed < 30 * DAY) return count(Math.floor(elapsed / DAY), 'day')
+  if (elapsed < HOUR) return relativeTimeFormat.format(-Math.floor(elapsed / MINUTE), 'minute')
+  if (elapsed < DAY) return relativeTimeFormat.format(-Math.floor(elapsed / HOUR), 'hour')
+  if (elapsed < 30 * DAY) return relativeTimeFormat.format(-Math.floor(elapsed / DAY), 'day')
   return `on ${dateFormat.format(time)}`
 }
 

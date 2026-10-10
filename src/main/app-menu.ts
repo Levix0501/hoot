@@ -7,9 +7,9 @@ export interface AppMenuActions extends AgentsMenuOptions {
   closeSession(): void
   selectNextSession(): void
   selectPreviousSession(): void
-  /** Shows the session shown before the current one. */
+  /** Shows the page shown before the current one: a session or an Issues page. */
   goBack(): void
-  /** Shows the session shown after the current one, after going back. */
+  /** Shows the page shown after the current one, after going back. */
   goForward(): void
   /** Whether the sidebar is expanded: the View menu offers to hide it, or else to show it. */
   sidebarOpen: boolean

@@ -15,9 +15,9 @@ type ShortcutKeyEvent = Pick<
 /**
  * The session command of a key press: ⌘1–⌘9 select the session at that place
  * in the sidebar, ⌘⇧] and ⌘⇧[ the next and previous session, ⌘[ and ⌘] go
- * back and forward among the sessions shown, and ⌘W closes the current
- * session. Digits are matched by the key's position on the number row, the
- * other keys by the character they type.
+ * back and forward among the pages shown (sessions and Issues pages), and ⌘W
+ * closes the current session. Digits are matched by the key's position on the
+ * number row, the other keys by the character they type.
  */
 export function sessionShortcut(event: ShortcutKeyEvent): SessionShortcut | null {
   if (!event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return null

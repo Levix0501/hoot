@@ -128,7 +128,7 @@ export const IpcChannel = {
 
 /**
  * A session command chosen in the application menu. `back` and `forward` show
- * the session shown before or after the current one.
+ * the page shown before or after the current one: a session or an Issues page.
  */
 export type SessionCommand =
   | 'close-current'

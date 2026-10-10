@@ -9,6 +9,7 @@ import {
   emitWindowFocus,
   git,
   hoverWorktree,
+  initRepository,
   localBranches,
   menuEntries,
   openWorktreeActions,
@@ -212,6 +213,30 @@ test.describe('worktrees in the sidebar', () => {
     await emitWindowFocus(app)
     await expect(worktreeItem(app, removed)).toHaveAttribute('data-missing', 'true')
     await expect(worktreeItem(app, removed).getByTestId('worktree-missing')).toBeVisible()
+  })
+
+  test('a repository made in a project while Hoot runs is followed as a nested repository too', async ({
+    launch,
+    world,
+  }) => {
+    const G = createG(world)
+    const ext = path.join(path.dirname(G), 'G-ext')
+    git(G, 'worktree', 'add', '-q', '-b', 'ext', ext)
+    const app = await launch({ projects: [G] })
+    await expect(worktreeNamed(app, G, 'ext')).toHaveCount(1)
+    expect((await hoverWorktree(app, ext)).members).toEqual([])
+    // As in the other test, the window's focus stays as it is.
+    const within = { timeout: 2_000 }
+
+    // Outside Hoot: a new repository in G, which G does not track, then its worktree in G-ext.
+    const fresh = initRepository(path.join(G, 'fresh'))
+    git(fresh, 'worktree', 'add', '-q', '-b', 'ext', path.join(ext, 'fresh'))
+    await expect
+      .poll(async () => (await hoverWorktree(app, ext)).members, within)
+      .toEqual(['fresh'])
+
+    git(fresh, 'worktree', 'remove', path.join(ext, 'fresh'))
+    await expect.poll(async () => (await hoverWorktree(app, ext)).members, within).toEqual([])
   })
 
   test('sessions are in sidebar order, which the shortcuts follow', async ({ launch, world }) => {

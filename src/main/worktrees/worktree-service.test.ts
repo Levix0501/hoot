@@ -13,7 +13,12 @@ import {
   makeRepository,
   makeSandbox,
 } from './test-support'
-import { WorktreeService, deepestFirst, isRegistrationChange } from './worktree-service'
+import {
+  WorktreeService,
+  affectsInnerRepositories,
+  deepestFirst,
+  isRegistrationChange,
+} from './worktree-service'
 
 describe('isRegistrationChange', () => {
   it('matches the administrative directories, their gitdir, lock and HEAD files', () => {
@@ -26,6 +31,27 @@ describe('isRegistrationChange', () => {
     expect(isRegistrationChange('worktrees/feat/logs/HEAD')).toBe(false)
     expect(isRegistrationChange('refs/heads/main')).toBe(false)
     expect(isRegistrationChange('index')).toBe(false)
+  })
+})
+
+describe('affectsInnerRepositories', () => {
+  it('tells the changes in a main worktree that can make or remove an inner repository', () => {
+    // A `.git` entry made or removed, at any depth.
+    expect(affectsInnerRepositories('rename', 'later/.git', [])).toBe(true)
+    expect(affectsInnerRepositories('rename', 'a/b/.git', [])).toBe(true)
+    // Not what happens inside Git directories or dependency directories.
+    expect(affectsInnerRepositories('rename', 'later/.git/index.lock', [])).toBe(false)
+    expect(affectsInnerRepositories('rename', '.git/worktrees/feat/locked', [])).toBe(false)
+    expect(affectsInnerRepositories('rename', 'node_modules/pkg/.git', [])).toBe(false)
+    expect(affectsInnerRepositories('rename', 'vendor/x', [])).toBe(false)
+    // The folder of a known inner repository, or one holding it, moved or removed.
+    expect(affectsInnerRepositories('rename', 'inner', ['inner/deep'])).toBe(true)
+    expect(affectsInnerRepositories('rename', 'inner/deep', ['inner/deep'])).toBe(true)
+    expect(affectsInnerRepositories('change', 'inner/deep', ['inner/deep'])).toBe(false)
+    expect(affectsInnerRepositories('change', 'inner/deep/file.txt', ['inner/deep'])).toBe(false)
+    // Anything else made or moved in may be a repository.
+    expect(affectsInnerRepositories('rename', 'moved', ['inner'])).toBeNull()
+    expect(affectsInnerRepositories('rename', 'inner/deep/file.txt', ['inner/deep'])).toBeNull()
   })
 })
 
@@ -294,6 +320,102 @@ describe('WorktreeService', () => {
       reason: 'locked',
     })
     expect(fs.existsSync(created.path)).toBe(true)
+  })
+
+  it('deletes a worktree whose inner member is locked: only the outer member’s lock makes it locked', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/k',
+      base: 'main',
+      nested: [
+        { relativePath: 'inner', base: 'main' },
+        { relativePath: 'inner/deep', base: 'main' },
+      ],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    git(inner, 'worktree', 'lock', '--reason', 'kept', path.join(R, 'inner'))
+    expect(await listed()).toMatchObject([{ path: R, locked: false }])
+
+    expect(await service.delete(project, R, false)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    for (const repository of [project, inner, deep]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).toContain('feat/k')
+    }
+  })
+
+  it('checks and deletes a worktree whose inner members’ folders were deleted', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/m',
+      base: 'main',
+      nested: [
+        { relativePath: 'inner', base: 'main' },
+        { relativePath: 'inner/deep', base: 'main' },
+      ],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    fs.rmSync(path.join(R, 'inner', 'deep'), { recursive: true })
+    expect(await service.inspect(project, R)).toEqual({
+      ok: true,
+      inspection: {
+        root: R,
+        innerMembers: [path.join(R, 'inner')],
+        branch: 'feat/m',
+        changes: [],
+        foreignRepositories: [],
+      },
+    })
+    fs.rmSync(path.join(R, 'inner'), { recursive: true })
+    expect(await service.inspect(project, R)).toMatchObject({
+      ok: true,
+      inspection: { innerMembers: [], changes: [], foreignRepositories: [] },
+    })
+
+    expect(await service.delete(project, R, false)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    for (const repository of [project, inner, deep]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).toContain('feat/m')
+    }
+  })
+
+  it('follows the repositories made in, moved into or deleted from the project while it runs', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/t',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const members = async () =>
+      (await listed()).find((worktree) => worktree.path === R)?.innerMembers
+    const within = { timeout: 2_000, interval: 50 }
+
+    // Made in the project, with its worktree in the root: nothing else asks to look.
+    const later = makeRepository(path.join(project, 'later'))
+    git(later, 'worktree', 'add', '-q', '-b', 'feat/t', path.join(R, 'later'))
+    await expect.poll(members, within).toEqual(['later'])
+
+    // Moved into the project, then with its worktree in the root.
+    const moved = path.join(project, 'moved')
+    fs.renameSync(makeRepository(path.join(root, 'elsewhere')), moved)
+    git(moved, 'worktree', 'add', '-q', '-b', 'feat/t', path.join(R, 'moved'))
+    await expect.poll(members, within).toEqual(['later', 'moved'])
+
+    // Its later registration changes are followed as an inner repository's.
+    git(later, 'worktree', 'remove', path.join(R, 'later'))
+    await expect.poll(members, within).toEqual(['moved'])
+
+    // Deleted from the project, it is no inner repository anymore.
+    fs.rmSync(moved, { recursive: true })
+    await expect.poll(members, within).toEqual([])
   })
 
   it('removes the registrations of a missing worktree and its inner members, keeping branches', async () => {

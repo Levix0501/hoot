@@ -37,7 +37,7 @@ function reposDir(world: World): string {
 }
 
 /** A repository with a first commit on `branch`, which is checked out. */
-function initRepository(directory: string, branch = 'main', file = 'README.md'): string {
+export function initRepository(directory: string, branch = 'main', file = 'README.md'): string {
   fs.mkdirSync(directory, { recursive: true })
   git(directory, 'init', '-q', '-b', branch)
   fs.writeFileSync(path.join(directory, file), `# ${path.basename(directory)}\n`)

@@ -112,7 +112,7 @@ export interface RepositoryChanges {
 /** What deleting a worktree would delete, and what would be lost with it. */
 export interface WorktreeInspection {
   root: string
-  /** The directories of the inner members. */
+  /** The directories of the inner members whose folders exist, which deleting deletes. */
   innerMembers: string[]
   /** The branch of the outer member, which is kept, or `null` when detached. */
   branch: string | null

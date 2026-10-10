@@ -167,6 +167,36 @@ test.describe('deleting worktrees', () => {
     expect(cleared.loose).toBeLessThan(cleared.outer)
   })
 
+  test('a worktree is deleted all the same when an inner member is locked or its folder is gone', async ({
+    launch,
+    world,
+  }) => {
+    const { O, inner, deep, loose } = createO(world)
+    const repositories = [O, inner, deep, loose]
+    const app = await launch({ projects: [O] })
+    const R = await createWorktree(app, O, 'feat/x')
+    git(inner, 'worktree', 'lock', '--reason', 'kept', path.join(R, 'inner'))
+    fs.rmSync(path.join(R, 'loose'), { recursive: true, force: true })
+    await expect(worktreeItem(app, R)).toHaveAttribute('data-locked', 'false')
+
+    await requestDelete(app, R)
+    await expect(deleteDialog(app)).toHaveAttribute('data-dirty', 'false')
+    await expect(deleteDialog(app).getByTestId('worktree-delete-folder')).toHaveText([
+      R,
+      path.join(R, 'inner'),
+      path.join(R, 'inner', 'deep'),
+    ])
+    expect(await confirmationButtons(app)).toEqual(['Cancel', 'Delete'])
+    await confirmDeletion(app)
+    expect(fs.existsSync(R)).toBe(false)
+    for (const repository of repositories) {
+      expect(registrations(repository).filter((entry) => entry.path.startsWith(R))).toEqual([])
+      expect(registrations(repository).filter((entry) => entry.prunable)).toEqual([])
+      expect(localBranches(repository)).toContain('feat/x')
+    }
+    await expect(worktreeItem(app, R)).toHaveCount(0)
+  })
+
   test('commits on no branch and repositories that are not part of the worktree are listed', async ({
     launch,
     world,

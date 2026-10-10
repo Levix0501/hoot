@@ -90,6 +90,34 @@ describe('WorktreeLayout', () => {
     )
   })
 
+  it('counts a link to a folder as the folder, and skips a link that leads nowhere', async () => {
+    const G = path.join(root, 'G')
+    const { folder } = await layout.projectFolder(G, { create: true })
+    // The project folder moves to another disk, and a link to it takes its place.
+    const disk = path.join(root, 'disk')
+    fs.mkdirSync(disk)
+    fs.renameSync(folder, path.join(disk, 'G'))
+    fs.symlinkSync(path.join(disk, 'G'), folder)
+    expect(await layout.existingProjectFolder(G)).toBe(folder)
+    expect(await layout.projectFolder(G, { create: true })).toEqual({ folder, created: false })
+    expect(fs.readdirSync(directory)).toEqual(['G'])
+
+    // A link to a folder without a marker is taken over, as the folder would be.
+    fs.mkdirSync(path.join(disk, 'App'))
+    fs.symlinkSync(path.join(disk, 'App'), path.join(directory, 'App'))
+    expect(await layout.projectFolder(path.join(root, 'App'), { create: true })).toEqual({
+      folder: path.join(directory, 'App'),
+      created: false,
+    })
+    expect(fs.existsSync(path.join(disk, 'App', PROJECT_MARKER))).toBe(true)
+
+    // A link to a disk that is not there is no project's folder.
+    fs.symlinkSync(path.join(root, 'gone'), path.join(directory, 'H'))
+    expect((await layout.projectFolder(path.join(root, 'H'), { create: true })).folder).toBe(
+      path.join(directory, 'H-2'),
+    )
+  })
+
   it('names a worktree folder after the branch, with -2, -3, … when taken', async () => {
     const folder = path.join(directory, 'G')
     fs.mkdirSync(path.join(folder, 'fix-1'), { recursive: true })

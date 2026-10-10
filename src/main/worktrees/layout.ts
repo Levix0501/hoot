@@ -16,21 +16,32 @@ export function safeName(text: string): string {
  */
 export const PROJECT_MARKER = '.hoot-project.json'
 
-/** `undefined` when nothing is at the path, `null` when it is not a project folder of Hoot's. */
+async function exists(file: string): Promise<boolean> {
+  return (await fs.lstat(file).catch(() => null)) !== null
+}
+
+/**
+ * Whether a path is a folder. A symbolic link to a folder counts as one, so
+ * that a project folder moved to another disk, with a link to it in its
+ * place, is still the project's.
+ */
+async function isFolder(file: string): Promise<boolean> {
+  return (await fs.stat(file).catch(() => null))?.isDirectory() ?? false
+}
+
+/**
+ * `undefined` when nothing is at the path, `null` when it is not a project
+ * folder of Hoot's (also a link that leads nowhere).
+ */
 async function readMarker(folder: string): Promise<string | null | undefined> {
-  const stats = await fs.lstat(folder).catch(() => undefined)
-  if (!stats) return undefined
-  if (!stats.isDirectory()) return null
+  if (!(await exists(folder))) return undefined
+  if (!(await isFolder(folder))) return null
   try {
     const marker = JSON.parse(await fs.readFile(path.join(folder, PROJECT_MARKER), 'utf8'))
     return typeof marker?.root === 'string' ? marker.root : null
   } catch {
     return null
   }
-}
-
-async function exists(file: string): Promise<boolean> {
-  return (await fs.lstat(file).catch(() => null)) !== null
 }
 
 /**
@@ -83,7 +94,8 @@ export class WorktreeLayout {
       const folder = path.join(this.directory, attempt === 1 ? base : `${base}-${attempt}`)
       const marker = await readMarker(folder)
       if (marker !== undefined && marker !== null) continue
-      if (marker === null && !(await fs.lstat(folder)).isDirectory()) continue
+      // Not a folder: a file, or a link that leads nowhere.
+      if (marker === null && !(await isFolder(folder))) continue
       if (!options.create) return { folder, created: false }
       let created = false
       if (marker === undefined) {
@@ -100,7 +112,8 @@ export class WorktreeLayout {
           throw error
         }
       }
-      // A folder without a marker (for example one made by hand) is taken over.
+      // A folder without a marker (for example one made by hand, or a link to
+      // one) is taken over.
       await fs.writeFile(
         path.join(folder, PROJECT_MARKER),
         `${JSON.stringify({ root: projectRoot })}\n`,

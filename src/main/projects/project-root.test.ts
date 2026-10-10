@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { gitEnvironment, parseWorktreeList, resolveProjectRoot } from './project-root'
+import { resolveProjectRoot } from './project-root'
 
 let root: string
 const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: os.homedir() }
@@ -159,32 +159,5 @@ describe('resolveProjectRoot', () => {
     await resolve(path.join(root, 'repo', 'sub'))
     expect(fs.readFileSync(path.join(root, 'repo', '.git', 'HEAD'), 'utf8')).toBe(head)
     expect(fs.readdirSync(path.join(root, 'repo', '.git')).toSorted()).toEqual(entries)
-  })
-})
-
-describe('parseWorktreeList', () => {
-  it('reads paths and the bare flag', () => {
-    expect(
-      parseWorktreeList(
-        'worktree /r/bare.git\0bare\0\0worktree /r/linked\0HEAD 0123\0branch refs/heads/main\0\0',
-      ),
-    ).toEqual([
-      { path: '/r/bare.git', bare: true },
-      { path: '/r/linked', bare: false },
-    ])
-  })
-})
-
-describe('gitEnvironment', () => {
-  it('removes repository overrides and asks for untranslated messages', () => {
-    const result = gitEnvironment({
-      PATH: '/bin',
-      GIT_DIR: '/x',
-      GIT_WORK_TREE: '/y',
-      LANG: 'zh_CN.UTF-8',
-    })
-    expect(result).toMatchObject({ PATH: '/bin', LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0' })
-    expect(result).not.toHaveProperty('GIT_DIR')
-    expect(result).not.toHaveProperty('GIT_WORK_TREE')
   })
 })

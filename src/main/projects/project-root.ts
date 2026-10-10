@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Env } from '../env/env'
+import { gitEnvironment, parseWorktreeList, runGit } from '../git/git'
 
 export type ProjectRootResult =
   | { kind: 'ok'; root: string }
@@ -10,65 +10,6 @@ export type ProjectRootResult =
   /** Git does not record where the repository's main worktree is. */
   | { kind: 'unknown-main-worktree' }
   | { kind: 'error'; message: string }
-
-export interface WorktreeEntry {
-  path: string
-  bare: boolean
-}
-
-/** Parses `git worktree list --porcelain -z`. */
-export function parseWorktreeList(output: string): WorktreeEntry[] {
-  const entries: WorktreeEntry[] = []
-  let current: WorktreeEntry | null = null
-  for (const field of output.split('\0')) {
-    if (field === '') {
-      current = null
-      continue
-    }
-    if (field.startsWith('worktree ')) {
-      current = { path: field.slice('worktree '.length), bare: false }
-      entries.push(current)
-    } else if (field === 'bare' && current) {
-      current.bare = true
-    }
-  }
-  return entries
-}
-
-/** Environment for running git: no repository overrides and untranslated messages. */
-export function gitEnvironment(env: Env): Env {
-  const result: Env = {}
-  for (const [name, value] of Object.entries(env)) {
-    if (!name.startsWith('GIT_')) result[name] = value
-  }
-  result.LC_ALL = 'C'
-  result.GIT_TERMINAL_PROMPT = '0'
-  result.GIT_OPTIONAL_LOCKS = '0'
-  return result
-}
-
-interface GitResult {
-  code: number
-  stdout: string
-  stderr: string
-}
-
-function runGit(git: string, args: string[], env: Env): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile(
-      git,
-      args,
-      { env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30_000 },
-      (error, stdout, stderr) => {
-        if (error && typeof error.code !== 'number') {
-          resolve({ code: -1, stdout: '', stderr: error.message })
-          return
-        }
-        resolve({ code: error ? (error.code as number) : 0, stdout, stderr })
-      },
-    )
-  })
-}
 
 interface RepositoryLocation {
   /** The repository's Git directory, shared by all of its worktrees. */

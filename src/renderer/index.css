@@ -52,7 +52,14 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
+/*
+ * The light colors, and the dark ones below. The window takes the dark ones
+ * with the `dark` class on its root, which follows the appearance in effect.
+ * Under the `light` or `dark` class, an element and what it holds take those
+ * colors whatever the window's appearance: the settings' theme previews.
+ */
+:root,
+.light {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

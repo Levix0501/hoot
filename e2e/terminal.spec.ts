@@ -255,8 +255,7 @@ test.describe('basic terminal interaction', () => {
 
     // A slow tool detection keeps the next session starting while the window is resized.
     fs.appendFileSync(path.join(world.home, '.zshrc'), 'sleep 3\n')
-    await app.page.getByTestId('sidebar-redetect-tools').click()
-    await app.openToolMenu(G)
+    await app.redetectTools(G)
     await app.toolItem('claude').click()
     await expect(app.session()).toHaveAttribute('data-status', 'starting')
     const before = await app.terminalSize()

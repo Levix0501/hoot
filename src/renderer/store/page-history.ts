@@ -1,21 +1,29 @@
 /**
- * What the main area shows: a session, or one of a project's Issues pages
- * (its issue list, or one issue).
+ * What the window shows: in its main area a session or one of a project's
+ * Issues pages (its issue list, or one issue), or in place of the sidebar and
+ * the main area the settings.
  */
 export type Page =
   | { kind: 'session'; sessionId: string }
   | { kind: 'issue-list'; projectId: number }
   | { kind: 'issue'; projectId: number; issueId: number }
+  | { kind: 'settings' }
 
 /** One of a project's Issues pages. */
-export type IssuesPage = Exclude<Page, { kind: 'session' }>
+export type IssuesPage = Extract<Page, { kind: 'issue-list' | 'issue' }>
 
 export function sessionPage(sessionId: string): Page {
   return { kind: 'session', sessionId }
 }
 
+export const settingsPage: Page = { kind: 'settings' }
+
 export function isIssuesPage(page: Page | null): page is IssuesPage {
-  return page !== null && page.kind !== 'session'
+  return page?.kind === 'issue-list' || page?.kind === 'issue'
+}
+
+export function isSettingsPage(page: Page | null): boolean {
+  return page?.kind === 'settings'
 }
 
 /** Whether two pages are the same page. */
@@ -28,6 +36,8 @@ export function samePage(a: Page | null, b: Page | null): boolean {
       return b.kind === 'issue-list' && b.projectId === a.projectId
     case 'issue':
       return b.kind === 'issue' && b.issueId === a.issueId
+    case 'settings':
+      return b.kind === 'settings'
   }
 }
 

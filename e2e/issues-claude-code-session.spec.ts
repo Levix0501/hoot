@@ -113,6 +113,8 @@ const MENU_BAR = [
     'Hoot|appmenu|submenu|null': [
       'About Hoot|about|normal|null',
       '|null|separator|null',
+      'Settings…|null|normal|CmdOrCtrl+,',
+      '|null|separator|null',
       'Services|services|normal|null',
       '|null|separator|null',
       'Hide Hoot|hide|normal|Command+H',

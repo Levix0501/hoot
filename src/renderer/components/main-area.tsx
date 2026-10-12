@@ -3,7 +3,10 @@ import { IssueListPage } from './issues/issue-list-page'
 import { IssuePage } from './issues/issue-page'
 import { NoSession, SessionPane } from './session-area'
 
-/** What the main area shows: the current page, or the empty page without one. */
+/**
+ * What the main area shows: the current page, or the empty page without one.
+ * The settings are shown in place of the main area, not in it.
+ */
 export function MainArea() {
   const page = useAppStore((state) => state.currentPage)
   const session = useAppStore((state) => {
@@ -17,6 +20,8 @@ export function MainArea() {
       return <IssueListPage key={`list-${page.projectId}`} projectId={page.projectId} />
     case 'issue':
       return <IssuePage key={`issue-${page.issueId}`} issueId={page.issueId} />
+    case 'settings':
+      return null
     case undefined:
       return <NoSession />
   }

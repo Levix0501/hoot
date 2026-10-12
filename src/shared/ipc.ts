@@ -1,3 +1,4 @@
+import type { Appearance } from './appearance'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { SessionInfo } from './session'
@@ -113,6 +114,10 @@ export const IpcChannel = {
   setProjectExpanded: 'window:set-project-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
+  showSettingsRequested: 'settings:show-requested',
+  getAppearance: 'appearance:get',
+  setAppearance: 'appearance:set',
+  appearanceChanged: 'appearance:changed',
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
   listWorktrees: 'worktrees:list',
@@ -138,7 +143,8 @@ export const IpcChannel = {
 
 /**
  * A session command chosen in the application menu. `back` and `forward` show
- * the page shown before or after the current one: a session or an Issues page.
+ * the page shown before or after the current one: a session, an Issues page or
+ * the settings.
  */
 export type SessionCommand =
   | 'close-current'
@@ -185,6 +191,13 @@ export interface HootApi {
   /** The application menu asked to show or hide the sidebar. */
   onToggleSidebarRequested(listener: () => void): () => void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+  /** The application menu asked to show the settings. */
+  onShowSettingsRequested(listener: () => void): () => void
+  /** The appearance picked in the settings, which Hoot shows in. */
+  getAppearance(): Promise<Appearance>
+  /** Picks an appearance, which applies at once and is saved for the next start. */
+  setAppearance(appearance: Appearance): void
+  onAppearanceChanged(listener: (appearance: Appearance) => void): () => void
   /** Quitting needs confirmation because `runningSessions` sessions are running. */
   onConfirmQuit(listener: (runningSessions: number) => void): () => void
   respondToQuit(confirmed: boolean): void

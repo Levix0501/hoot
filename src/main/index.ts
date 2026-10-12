@@ -18,6 +18,7 @@ import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
 import { resolveLaunch } from './session/launch'
 import { SessionManager } from './session/session-manager'
+import { AppearanceStore } from './settings/appearance-store'
 import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { findCommand } from './tools/find-command'
@@ -63,6 +64,14 @@ const claudePlugin = app.isPackaged
   : path.join(app.getAppPath(), 'resources', 'claude-plugins', 'hoot')
 const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
+const appearance = new AppearanceStore(app.getPath('userData'))
+// The appearance picked in the settings, macOS's until one is picked. Applied
+// before the window opens, so that its background and its first paint have
+// it already, as have the menus and dialogs macOS draws for Hoot.
+nativeTheme.themeSource = appearance.appearance
+appearance.on('changed', (picked) => {
+  nativeTheme.themeSource = picked
+})
 const tools = new ToolService({ shell, baseEnv, cwd: os.homedir() })
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
@@ -189,6 +198,7 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   return window
 }
 
+// Also when macOS changes its appearance while Hoot follows it.
 nativeTheme.on('updated', () => {
   getWindow()?.setBackgroundColor(
     nativeTheme.shouldUseDarkColors ? DARK_BACKGROUND : LIGHT_BACKGROUND,
@@ -266,6 +276,7 @@ function startWithDatabase(database: DatabaseSync): void {
     tools,
     permissionLevels,
     sidebar,
+    appearance,
     sessions,
     quitGuard,
     worktrees,
@@ -285,6 +296,7 @@ function startWithDatabase(database: DatabaseSync): void {
     Menu.setApplicationMenu(
       buildAppMenu({
         includeDeveloperItems: Boolean(devServerUrl),
+        showSettings: () => getWindow()?.webContents.send(IpcChannel.showSettingsRequested),
         addProject: () => getWindow()?.webContents.send(IpcChannel.addProjectRequested),
         closeSession: () => sendSessionCommand('close-current'),
         selectNextSession: () => sendSessionCommand('select-next'),
@@ -312,7 +324,9 @@ function startWithDatabase(database: DatabaseSync): void {
 /**
  * Starts Hoot without its database, which could not be opened: the window
  * only says why and where the file is, and offers to show it in Finder or to
- * quit. Nothing else starts, and the file is left as it is.
+ * quit. Nothing else starts, and the file is left as it is. It shows in the
+ * appearance picked in the settings, which cannot be changed until Hoot
+ * starts with its database.
  */
 function startWithoutDatabase(databasePath: string, error: string): void {
   console.error(`Could not open the database ${databasePath}: ${error}`)

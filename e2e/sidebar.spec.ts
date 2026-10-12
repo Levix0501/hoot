@@ -340,19 +340,22 @@ for (const [width, height] of [
     await expect(app.sessionItemName(fromButton)).toHaveText('Renamed')
     await expect(app.page.getByTestId('session-name')).toHaveText('Renamed')
 
+    // Re-detecting tools from the new session menu, which says so while it
+    // lasts; the sidebar itself has no row for it.
+    await expect(app.sidebar().getByText(/Re-detect Tools|Detecting tools…/)).toHaveCount(0)
+    fs.appendFileSync(path.join(world.home, '.zshrc'), 'sleep 2\n')
+    await app.redetectTools(G)
+    const redetect = app.page.getByTestId('redetect-tools')
+    await expect(redetect).toHaveText('Detecting tools…')
+    await expect(redetect).toHaveText('Re-detect Tools', { timeout: 30_000 })
+    await expect(redetect).toBeEnabled()
+    await app.closeMenus()
+
     // Closing the sessions, then removing the project.
     for (const id of [fromButton, fromMenu]) await app.closeSession(id)
     await app.projectItem(G).getByTestId('project-actions-button').click()
     await app.page.getByTestId('remove-project').click()
     await expect(app.projectItems()).toHaveCount(0)
-
-    // Re-detecting tools, which says so while it lasts.
-    fs.appendFileSync(path.join(world.home, '.zshrc'), 'sleep 2\n')
-    const redetect = app.page.getByTestId('sidebar-redetect-tools')
-    await redetect.click()
-    await expect(redetect).toHaveText('Detecting tools…')
-    await expect(redetect).toHaveText('Re-detect Tools', { timeout: 30_000 })
-    await expect(redetect).toBeEnabled()
     await expectExpanded(app)
   })
 }

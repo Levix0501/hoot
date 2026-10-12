@@ -9,6 +9,7 @@ function setup(options: { sidebarOpen?: boolean } = {}) {
   const calls: string[] = []
   const template = appMenuTemplate({
     includeDeveloperItems: false,
+    showSettings: () => calls.push('showSettings'),
     addProject: () => calls.push('addProject'),
     closeSession: () => calls.push('closeSession'),
     selectNextSession: () => calls.push('selectNextSession'),
@@ -37,6 +38,29 @@ function click(item: MenuItemConstructorOptions | undefined): void {
 }
 
 describe('appMenuTemplate', () => {
+  it('has Settings…, with Cmd+, between About and Services in the app menu', () => {
+    const { template, calls } = setup()
+    expect(template[0]?.role).toBe('appMenu')
+    const app = submenu(template[0])
+    expect(
+      app.map((item) => [item.role ?? item.label ?? item.type, item.accelerator ?? null]),
+    ).toEqual([
+      ['about', null],
+      ['separator', null],
+      ['Settings…', 'CmdOrCtrl+,'],
+      ['separator', null],
+      ['services', null],
+      ['separator', null],
+      ['hide', null],
+      ['hideOthers', null],
+      ['unhide', null],
+      ['separator', null],
+      ['quit', null],
+    ])
+    click(app.find((item) => item.label === 'Settings…'))
+    expect(calls).toEqual(['showSettings'])
+  })
+
   it('puts Close Session, with Cmd+W, in place of Close Window in the File menu', () => {
     const { template, calls } = setup()
     const file = submenu(template.find((item) => item.label === 'File'))
@@ -106,7 +130,7 @@ describe('appMenuTemplate', () => {
 })
 
 describe('databaseErrorMenuTemplate', () => {
-  it('offers only the app menu, editing and the window, with nothing about projects or sessions', () => {
+  it('offers only the app menu, editing and the window, with nothing about projects, sessions or settings', () => {
     const template = databaseErrorMenuTemplate()
     expect(template.map((item) => item.role)).toEqual(['appMenu', 'editMenu', 'windowMenu'])
     expect(template.every((item) => item.submenu === undefined && item.click === undefined)).toBe(

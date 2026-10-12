@@ -1,4 +1,4 @@
-import { FolderPlusIcon, RefreshCwIcon } from 'lucide-react'
+import { FolderPlusIcon, SettingsIcon } from 'lucide-react'
 import { Fragment, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
@@ -127,9 +127,8 @@ function ProjectEntry({ project }: { project: Project }) {
 
 export function ProjectSidebar() {
   const projects = useAppStore((state) => state.projects)
-  const detecting = useAppStore((state) => state.tools.detecting)
   const addProject = useAppStore((state) => state.addProject)
-  const redetectTools = useAppStore((state) => state.redetectTools)
+  const showSettings = useAppStore((state) => state.showSettings)
 
   return (
     // Slides out of the window when collapsed, and back in when expanded.
@@ -169,13 +168,9 @@ export function ProjectSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              disabled={detecting}
-              onClick={() => void redetectTools()}
-              data-testid="sidebar-redetect-tools"
-            >
-              <RefreshCwIcon className={detecting ? 'animate-spin' : undefined} />
-              <span>{detecting ? 'Detecting tools…' : 'Re-detect Tools'}</span>
+            <SidebarMenuButton onClick={showSettings} data-testid="sidebar-settings">
+              <SettingsIcon />
+              <span>Settings</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

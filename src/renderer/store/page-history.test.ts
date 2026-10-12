@@ -5,15 +5,17 @@ import {
   emptyHistory,
   forget,
   isIssuesPage,
+  isSettingsPage,
   samePage,
   sessionPage,
+  settingsPage,
   step,
   visit,
   type Page,
   type PageHistory,
 } from './page-history'
 
-/** Session pages by session id, and the Issues pages of projects 1 and 2. */
+/** Session pages by session id, the Issues pages of projects 1 and 2, and the settings. */
 const page = {
   s1: sessionPage('s1'),
   s2: sessionPage('s2'),
@@ -23,6 +25,7 @@ const page = {
   issue11: { kind: 'issue', projectId: 1, issueId: 11 },
   list2: { kind: 'issue-list', projectId: 2 },
   issue20: { kind: 'issue', projectId: 2, issueId: 20 },
+  settings: settingsPage,
 } satisfies Record<string, Page>
 
 type Name = keyof typeof page
@@ -37,7 +40,7 @@ const sessions = (...ids: string[]) => {
   return (gone: Page) => gone.kind === 'session' && closed.has(gone.sessionId)
 }
 
-const ofProject2 = (gone: Page) => gone.kind !== 'session' && gone.projectId === 2
+const ofProject2 = (gone: Page) => isIssuesPage(gone) && gone.projectId === 2
 
 /** Steps back or forward, failing when there is no entry that way. */
 function go(from: PageHistory, offset: -1 | 1): PageHistory {
@@ -58,6 +61,21 @@ describe('samePage', () => {
     expect(samePage(null, null)).toBe(true)
     expect(samePage(page.s1, null)).toBe(false)
     expect([page.s1, page.list1, page.issue10].map(isIssuesPage)).toEqual([false, true, true])
+  })
+
+  it('takes the settings for one page, which is neither a session nor an Issues page', () => {
+    expect(samePage(page.settings, { kind: 'settings' })).toBe(true)
+    expect(
+      [page.s1, page.list1, page.issue10].map((other) => samePage(page.settings, other)),
+    ).toEqual([false, false, false])
+    expect(samePage(page.s1, page.settings)).toBe(false)
+    expect(isIssuesPage(page.settings)).toBe(false)
+    expect([page.settings, page.s1, page.list1, null].map(isSettingsPage)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ])
   })
 })
 
@@ -139,6 +157,38 @@ describe('forget', () => {
     expect(forget(history(['list1', 'list2', 'list1', 'issue20'], 2), ofProject2)).toEqual(
       history(['list1'], 0),
     )
+  })
+})
+
+describe('the settings among the pages', () => {
+  it('are recorded as any page shown, once while they are shown', () => {
+    let shown = visit(visit(emptyHistory, page.s1), page.settings)
+    expect(shown).toEqual(history(['s1', 'settings'], 1))
+    expect(visit(shown, page.settings)).toEqual(shown)
+    // Back to s1, then the settings again: the way forward is dropped as for any page.
+    shown = visit(visit(go(shown, -1), page.list1), page.settings)
+    expect(shown).toEqual(history(['s1', 'list1', 'settings'], 2))
+    expect(currentEntry(go(shown, -1))).toEqual(page.list1)
+    expect(currentEntry(go(go(shown, -1), 1))).toEqual(page.settings)
+  })
+
+  it('stay when other pages are gone, which leaves nothing before them', () => {
+    const shown = forget(history(['s1', 'list2', 'settings', 's2'], 2), (gone) =>
+      gone.kind === 'session' ? gone.sessionId === 's1' : ofProject2(gone),
+    )
+    expect(shown).toEqual(history(['settings', 's2'], 0))
+    expect(canStep(shown, -1)).toBe(false)
+  })
+
+  it('leave no way forward once they are forgotten without a page before them', () => {
+    const shown = forget(history(['settings', 's2', 'settings'], 0), isSettingsPage)
+    expect(shown).toEqual(history(['s2'], -1))
+    expect([canStep(shown, -1), canStep(shown, 1), currentEntry(shown)]).toEqual([
+      false,
+      false,
+      null,
+    ])
+    expect(forget(history(['settings'], 0), isSettingsPage)).toEqual(emptyHistory)
   })
 })
 

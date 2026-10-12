@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hoot</title>
+    <script>
+      // Before anything is drawn, the colors of the appearance in effect: the
+      // one picked in the settings, or macOS's, which the main process has set.
+      {
+        const scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        document.documentElement.classList.add(scheme)
+        document.documentElement.style.colorScheme = scheme
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

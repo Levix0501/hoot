@@ -11,6 +11,7 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
   type AddProjectResult,
@@ -44,6 +45,7 @@ import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import type { SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
+import type { AppearanceStore } from './settings/appearance-store'
 import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
@@ -56,6 +58,7 @@ export interface IpcDependencies {
   tools: ToolService
   permissionLevels: PermissionLevelStore
   sidebar: SidebarStateStore
+  appearance: AppearanceStore
   sessions: SessionManager
   quitGuard: QuitGuard
   worktrees: WorktreeService
@@ -299,6 +302,13 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!expanded && !deps.projects.list().some((project) => project.id === id)) return
     deps.sidebar.setProjectCollapsed(id, !expanded)
   })
+
+  handle(IpcChannel.getAppearance, () => deps.appearance.appearance)
+  on(IpcChannel.setAppearance, (appearance) => {
+    const parsed = z.enum(APPEARANCES).safeParse(appearance)
+    if (parsed.success) deps.appearance.select(parsed.data)
+  })
+  deps.appearance.on('changed', (appearance) => send(IpcChannel.appearanceChanged, appearance))
 
   handle(IpcChannel.listSessions, () => deps.sessions.list())
 

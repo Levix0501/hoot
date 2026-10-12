@@ -2,12 +2,14 @@ import { Menu, type MenuItemConstructorOptions } from 'electron'
 import { agentsMenuTemplate, type AgentsMenuOptions } from './agents-menu'
 
 export interface AppMenuActions extends AgentsMenuOptions {
+  /** Shows the settings in the window. */
+  showSettings(): void
   addProject(): void
   /** Closes the session shown in the window. */
   closeSession(): void
   selectNextSession(): void
   selectPreviousSession(): void
-  /** Shows the page shown before the current one: a session or an Issues page. */
+  /** Shows the page shown before the current one: a session, an Issues page or the settings. */
   goBack(): void
   /** Shows the page shown after the current one, after going back. */
   goForward(): void
@@ -18,17 +20,33 @@ export interface AppMenuActions extends AgentsMenuOptions {
 }
 
 /**
- * The menu bar. Its session and sidebar commands are also handled in the
- * window, which receives their key presses first (see the renderer's session
- * shortcuts and the sidebar's ⌘B); ⌘1–⌘9 have no menu items and work only
- * there.
+ * The menu bar. Its session, sidebar and settings commands are also handled
+ * in the window, which receives their key presses first (see the renderer's
+ * session shortcuts and the sidebar's ⌘B); ⌘1–⌘9 have no menu items and work
+ * only there.
  */
 export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOptions[] {
   const viewItems: MenuItemConstructorOptions[] = actions.includeDeveloperItems
     ? [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }]
     : []
   return [
-    { role: 'appMenu' },
+    {
+      // The app menu macOS apps have, with Settings… after About.
+      role: 'appMenu',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => actions.showSettings() },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
     {
       label: 'File',
       submenu: [
@@ -85,8 +103,8 @@ export function buildAppMenu(actions: AppMenuActions): Menu {
 
 /**
  * The menu bar while the database cannot be opened, when the window only
- * says why: no projects, sessions or sidebar to act on, so only the app's
- * own items, editing (for copying the error) and the window's items.
+ * says why: no projects, sessions, sidebar or settings to act on, so only the
+ * app's own items, editing (for copying the error) and the window's items.
  */
 export function databaseErrorMenuTemplate(): MenuItemConstructorOptions[] {
   return [{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]

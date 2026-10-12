@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
+import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
 import {
   isCompleted,
@@ -28,11 +29,15 @@ import {
   type SessionTerminal,
 } from '../terminal/session-terminal'
 import {
+  canStep,
   currentEntry,
   emptyHistory,
   forget,
+  isIssuesPage,
+  isSettingsPage,
   samePage,
   sessionPage,
+  settingsPage,
   step,
   visit,
   type Page,
@@ -107,7 +112,7 @@ export interface AppState {
   permissionLevels: PermissionLevelSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
-  /** What the main area shows; `null` for the empty page. */
+  /** What the window shows; `null` for the empty page. */
   currentPage: Page | null
   /** The pages shown one after another, for going back and forward. */
   history: PageHistory
@@ -134,7 +139,7 @@ export interface AppState {
   closeConfirmation: string | null
   /** While Hoot asks whether to quit: how many sessions are running. */
   quitConfirmation: { runningSessions: number } | null
-  /** Whether the sidebar is expanded. */
+  /** Whether the sidebar is expanded, also while the settings are shown in its place. */
   sidebarOpen: boolean
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
   collapsedProjects: ReadonlySet<number>
@@ -142,10 +147,13 @@ export interface AppState {
   fullScreen: boolean
   /** The user's home directory, which paths show as `~`. */
   homeDirectory: string
+  /** The appearance picked in the settings. */
+  appearance: Appearance
 
   /**
-   * Reads the window's state and follows its changes. Called before the
-   * first render, so that the sidebar opens as it was left, without sliding.
+   * Reads the window's state and the appearance picked, and follows their
+   * changes. Called before the first render, so that the sidebar opens as it
+   * was left, without sliding.
    */
   initializeWindow(): Promise<void>
   initialize(): Promise<void>
@@ -170,6 +178,15 @@ export interface AppState {
   goBack(): void
   /** Shows the page shown after the current one, if any. */
   goForward(): void
+  /** Shows the settings in place of the sidebar and the main area. */
+  showSettings(): void
+  /**
+   * Leaves the settings as going back does. Without a page before them, shows
+   * the empty page instead, and takes the settings out of the history.
+   */
+  leaveSettings(): void
+  /** Picks an appearance, which applies at once and is saved for the next start. */
+  setAppearance(appearance: Appearance): void
   /** Shows a project's issue list, with the view it showed last. */
   showIssueList(projectId: number): void
   /** Shows another view of a project's issue list; not recorded in the history. */
@@ -212,7 +229,10 @@ export interface AppState {
   /** Puts an issue's identifier, such as "HOO-12", on the clipboard. */
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
-  /** Expands or collapses the sidebar, and saves its state. */
+  /**
+   * Expands or collapses the sidebar, and saves its state; not while the
+   * settings are shown in its place.
+   */
   setSidebarOpen(open: boolean): void
   /** Expands or collapses a project in the sidebar, and saves its state. */
   setProjectExpanded(projectId: number, expanded: boolean): void
@@ -259,14 +279,21 @@ export function getSessionTerminal(id: string | null): SessionTerminal | undefin
   return id === null ? undefined : terminals.get(id)
 }
 
-/** The session the main area shows, or `null` when it shows an Issues page or the empty page. */
+/**
+ * The session the main area shows, or `null` when it shows an Issues page or
+ * the empty page, or when the window shows the settings.
+ */
 export function currentSessionId(state: Pick<AppState, 'currentPage'>): string | null {
   return state.currentPage?.kind === 'session' ? state.currentPage.sessionId : null
 }
 
-/** Whether a page shows a session among `ids`, or an Issues page of a project among `projectIds`. */
+/**
+ * Whether a page shows a session among `ids`, or an Issues page of a project
+ * among `projectIds`. The settings are never among them.
+ */
 function pageIn(page: Page, ids: ReadonlySet<string>, projectIds: ReadonlySet<number>): boolean {
-  return page.kind === 'session' ? ids.has(page.sessionId) : projectIds.has(page.projectId)
+  if (page.kind === 'session') return ids.has(page.sessionId)
+  return isIssuesPage(page) && projectIds.has(page.projectId)
 }
 
 /** A record by id without the entries whose ids `gone` picks. */
@@ -772,13 +799,21 @@ export const useAppStore = create<AppState>()((set, get) => {
     collapsedProjects: new Set(),
     fullScreen: false,
     homeDirectory: '',
+    appearance: DEFAULT_APPEARANCE,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
-      const { sidebarOpen, collapsedProjects, fullScreen, homeDirectory } =
-        await api.getWindowState()
-      set({ sidebarOpen, collapsedProjects: new Set(collapsedProjects), fullScreen, homeDirectory })
+      api.onAppearanceChanged((appearance) => set({ appearance }))
+      const [{ sidebarOpen, collapsedProjects, fullScreen, homeDirectory }, appearance] =
+        await Promise.all([api.getWindowState(), api.getAppearance()])
+      set({
+        sidebarOpen,
+        collapsedProjects: new Set(collapsedProjects),
+        fullScreen,
+        homeDirectory,
+        appearance,
+      })
     },
 
     async initialize() {
@@ -794,7 +829,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         }
       }
 
-      // Every terminal, shown or not, takes the colors of a new system appearance.
+      // Every terminal, shown or not, takes the colors of the appearance in
+      // effect when it changes: the one picked in the settings, or macOS's.
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         const scheme = systemColorScheme()
         for (const sessionTerminal of terminals.values()) {
@@ -820,6 +856,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (info.exit && isNormalExit(info.exit)) void get().closeSession(info.id)
       })
       api.onSessionCommand((command) => get().runMenuCommand(command))
+      api.onShowSettingsRequested(() => get().showSettings())
       api.onConfirmQuit((runningSessions) => set({ quitConfirmation: { runningSessions } }))
       api.onAddProjectRequested(() => void get().addProject())
       // Changes reported while the list is read are newer than the list.
@@ -1013,6 +1050,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         case 'close':
           closeCurrent()
           break
+        case 'settings':
+          get().showSettings()
+          break
       }
     },
 
@@ -1042,6 +1082,30 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     goForward() {
       stepHistory(1)
+    },
+
+    showSettings() {
+      if (isSettingsPage(get().currentPage)) return
+      // What has the keyboard focus gives it up as when another page takes
+      // it, such as a session's name being edited, which keeps what was typed.
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      showPage(settingsPage)
+    },
+
+    leaveSettings() {
+      const { currentPage, history } = get()
+      if (!isSettingsPage(currentPage)) return
+      if (canStep(history, -1)) {
+        stepHistory(-1)
+        return
+      }
+      set((state) => ({ currentPage: null, history: forget(state.history, isSettingsPage) }))
+    },
+
+    setAppearance(appearance) {
+      if (appearance === get().appearance) return
+      set({ appearance })
+      api.setAppearance(appearance)
     },
 
     showIssueList(projectId) {
@@ -1206,7 +1270,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     setSidebarOpen(open) {
-      if (open === get().sidebarOpen) return
+      const state = get()
+      if (open === state.sidebarOpen || isSettingsPage(state.currentPage)) return
       set({ sidebarOpen: open })
       api.setSidebarOpen(open)
     },

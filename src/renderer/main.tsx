@@ -12,7 +12,12 @@ import { loadTerminalFont } from './terminal/terminal-font'
 function render(content: ReactNode): void {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      {/* The interface follows the system appearance; there is no manual theme choice. */}
+      {/*
+        The interface takes the appearance in effect: the one picked in the
+        settings, or macOS's. The main process applies it to the window, whose
+        `prefers-color-scheme` follows it; index.html sets it before the first
+        paint, and the provider keeps it up when it changes.
+      */}
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {content}
       </ThemeProvider>

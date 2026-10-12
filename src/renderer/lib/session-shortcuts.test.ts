@@ -38,6 +38,12 @@ describe('sessionShortcut', () => {
     expect(press('W', 'KeyW', { shift: true })).toBeNull()
   })
 
+  it('shows the settings with the comma', () => {
+    expect(press(',', 'Comma')).toEqual({ kind: 'settings' })
+    expect(press('<', 'Comma', { shift: true })).toBeNull()
+    expect(press(',', 'Comma', { ctrl: true })).toBeNull()
+  })
+
   it('ignores other keys and other modifiers', () => {
     expect(press('a', 'KeyA')).toBeNull()
     expect(press('1', 'Digit1', { ctrl: true })).toBeNull()

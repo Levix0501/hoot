@@ -1,7 +1,7 @@
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useAppStore } from '../store/app-store'
-import { canStep } from '../store/page-history'
+import { canStep, isSettingsPage } from '../store/page-history'
 import { Button } from './ui/button'
 import { Kbd } from './ui/kbd'
 import { SidebarTrigger, useSidebar } from './ui/sidebar'
@@ -13,8 +13,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
  * gives them, or near the edge in full screen, where macOS hides them.
  */
 const NAVIGATION_START = { windowed: 84, fullScreen: 8 }
-/** The width of the navigation: its three `icon-sm` buttons (28px), `gap-1` (4px) apart. */
-const NAVIGATION_WIDTH = 3 * 28 + 2 * 4
+/** The width of an `icon-sm` button, and the space between two buttons (`gap-1`). */
+const BUTTON_WIDTH = 28
+const BUTTON_GAP = 4
+/** The width of the navigation: its three buttons. */
+const NAVIGATION_WIDTH = 3 * BUTTON_WIDTH + 2 * BUTTON_GAP
 /** Space between the navigation and the content of the main area's top row. */
 const HEADER_GAP = 12
 
@@ -41,16 +44,18 @@ export function useTopRowInset(): number | undefined {
 function NavigationButton({
   label,
   shortcut,
+  style,
   children,
 }: {
   label: string
   shortcut: string
+  style?: React.CSSProperties
   children: ReactNode
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<span className="flex" />}
+        render={<span className="flex" style={style} />}
         onMouseDown={(event) => event.preventDefault()}
       >
         {children}
@@ -69,9 +74,12 @@ function NavigationButton({
  * shown. It stays in place while the sidebar slides in and out. Its blank
  * parts are part of the area that drags the window; its buttons are not.
  * Entering or leaving full screen moves it the way the content of the main
- * area's top row moves then, so that the two never overlap.
+ * area's top row moves then, so that the two never overlap. While the
+ * settings are shown there is no sidebar to show or hide: Back and Forward
+ * stay where they are, and the trigger's place is left blank.
  */
 export function WindowNavigation() {
+  const settingsShown = useAppStore((state) => isSettingsPage(state.currentPage))
   const fullScreen = useAppStore((state) => state.fullScreen)
   const canGoBack = useAppStore((state) => canStep(state.history, -1))
   const canGoForward = useAppStore((state) => canStep(state.history, 1))
@@ -86,10 +94,17 @@ export function WindowNavigation() {
       data-testid="window-navigation"
       data-full-screen={fullScreen}
     >
-      <NavigationButton label="Toggle Sidebar" shortcut="⌘B">
-        <SidebarTrigger data-testid="toggle-sidebar" />
-      </NavigationButton>
-      <NavigationButton label="Back" shortcut="⌘[">
+      {!settingsShown && (
+        <NavigationButton label="Toggle Sidebar" shortcut="⌘B">
+          <SidebarTrigger data-testid="toggle-sidebar" />
+        </NavigationButton>
+      )}
+      <NavigationButton
+        label="Back"
+        shortcut="⌘["
+        // A margin, not a blank element, keeps the trigger's place in the drag area.
+        style={settingsShown ? { marginLeft: BUTTON_WIDTH + BUTTON_GAP } : undefined}
+      >
         <Button
           variant="ghost"
           size="icon-sm"

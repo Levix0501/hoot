@@ -15,6 +15,8 @@ import type { World } from './world'
 
 export const repoRoot = path.resolve(import.meta.dirname, '../..')
 const mainEntry = path.join(repoRoot, 'dist-electron/main/index.js')
+/** Loaded into the main process before Hoot's own code: see the file. */
+const mainHooks = path.join(import.meta.dirname, 'main-hooks.cjs')
 
 /**
  * Characters allowed in the English text Hoot itself shows: printable ASCII,
@@ -50,6 +52,28 @@ export interface MenuEntry {
 /** Where the start of a session is waited for. */
 type SessionStart = 'running' | 'started'
 
+export type ColorScheme = 'light' | 'dark'
+
+/** What main-hooks.cjs gives the main process. */
+interface MainHooks {
+  setSystemAppearance(appearance: ColorScheme): void
+  windowBackgrounds: string[][]
+}
+
+/** What the window showed at a frame, before it was drawn (see first-paint-recorder.cjs). */
+export interface FrameRecord {
+  /** When, in milliseconds since the page started. */
+  time: number
+  /** Whether the page's root had the class of the dark colors, or of the light ones. */
+  dark: boolean
+  light: boolean
+  /** The background colors of the page, and of what it showed once it showed it. */
+  page: string | null
+  sidebar: string | null
+  main: string | null
+  databaseError: string | null
+}
+
 export interface LaunchOptions {
   /** Physical pixels per CSS pixel the window renders with, instead of its display's. */
   deviceScaleFactor?: 1 | 2
@@ -69,6 +93,13 @@ export interface LaunchOptions {
    * or only why the database cannot be opened.
    */
   startsWith?: 'sidebar' | 'database-error'
+  /**
+   * The appearance macOS uses as Hoot starts, standing in for the Mac's own,
+   * which is left alone; the Mac's own when left out.
+   */
+  systemAppearance?: ColorScheme
+  /** Records what the window shows at every frame from the page's start: see `framesShown`. */
+  recordFirstPaint?: boolean
 }
 
 /** Drives one running Hoot instance. */
@@ -91,6 +122,8 @@ export class AppDriver {
     const electronApp = await electron.launch({
       // Launched like `electron .` so the app reads its name and version from package.json.
       args: [
+        '-r',
+        mainHooks,
         repoRoot,
         `--user-data-dir=${userData}`,
         '--test-hooks',
@@ -104,6 +137,10 @@ export class AppDriver {
         ...(options.deviceScaleFactor === undefined
           ? []
           : [`--force-device-scale-factor=${options.deviceScaleFactor}`]),
+        ...(options.systemAppearance === undefined
+          ? []
+          : [`--hoot-e2e-system-appearance=${options.systemAppearance}`]),
+        ...(options.recordFirstPaint ? ['--hoot-e2e-record-first-paint'] : []),
         ...(options.switches ?? []),
       ],
       env: world.env,
@@ -248,7 +285,7 @@ export class AppDriver {
 
   /** The contents of `settings.json` in the user data directory. */
   settings(): Record<string, unknown> {
-    return JSON.parse(fs.readFileSync(path.join(this.world.userData, 'settings.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(path.join(this.userData, 'settings.json'), 'utf8'))
   }
 
   /** Makes the next folder selection return `directory` instead of showing the system dialog. */
@@ -311,6 +348,15 @@ export class AppDriver {
       }
       await expect(this.toolItem('shell')).toBeVisible({ timeout: 2_000 })
     }).toPass({ timeout: 30_000 })
+  }
+
+  /**
+   * Detects the tools again with Re-detect Tools, the last item of a
+   * project's new session menu, which stays open.
+   */
+  async redetectTools(root: string): Promise<void> {
+    await this.openToolMenu(root)
+    await this.page.getByTestId('redetect-tools').click()
   }
 
   async closeMenus(): Promise<void> {
@@ -750,11 +796,59 @@ export class AppDriver {
       ?.pid
   }
 
-  /** Changes the appearance Electron reports, as a system appearance change would. */
-  async setSystemAppearance(appearance: 'light' | 'dark'): Promise<void> {
-    await this.electronApp.evaluate(({ nativeTheme }, value) => {
-      nativeTheme.themeSource = value
+  /**
+   * Changes the appearance macOS uses, as the Mac's settings would, without
+   * changing the Mac's own (see main-hooks.cjs).
+   */
+  async setSystemAppearance(appearance: ColorScheme): Promise<void> {
+    await this.electronApp.evaluate((_electron, value) => {
+      ;(globalThis as unknown as { hootE2e: MainHooks }).hootE2e.setSystemAppearance(value)
     }, appearance)
+  }
+
+  /** The `nativeTheme.themeSource` Hoot has set in the main process. */
+  async themeSource(): Promise<string> {
+    return this.electronApp.evaluate(({ nativeTheme }) => nativeTheme.themeSource)
+  }
+
+  /** The appearance macOS applies to Hoot, which it draws Hoot's menus, dialogs and panels in. */
+  async effectiveAppearance(): Promise<string> {
+    return this.electronApp.evaluate(({ systemPreferences }) =>
+      systemPreferences.getEffectiveAppearance(),
+    )
+  }
+
+  /** The window's own background color, as `#RRGGBB`. */
+  async windowBackground(): Promise<string> {
+    return this.electronApp.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]!.getBackgroundColor(),
+    )
+  }
+
+  /** The background colors the first window has had since it was created, in order. */
+  async windowBackgrounds(): Promise<string[]> {
+    return this.electronApp.evaluate(
+      () => (globalThis as unknown as { hootE2e: MainHooks }).hootE2e.windowBackgrounds[0] ?? [],
+    )
+  }
+
+  /** What the window showed at every frame from the page's start, with `recordFirstPaint`. */
+  async framesShown(): Promise<{
+    records: FrameRecord[]
+    paints: Array<{ name: string; time: number }>
+  }> {
+    return this.page.evaluate(() =>
+      (
+        window as unknown as {
+          hootE2eFirstPaint: {
+            records(): {
+              records: FrameRecord[]
+              paints: Array<{ name: string; time: number }>
+            }
+          }
+        }
+      ).hootE2eFirstPaint.records(),
+    )
   }
 
   async readClipboard(): Promise<string> {

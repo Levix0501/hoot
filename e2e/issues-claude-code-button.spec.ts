@@ -172,7 +172,8 @@ test.describe('the Claude Code button of an issue', () => {
 
     // Nothing that keeps an issue from being sent keeps the button from showing its session.
     fs.rmSync(claude)
-    await app.page.getByTestId('sidebar-redetect-tools').click()
+    await app.redetectTools(G)
+    await app.closeMenus()
     await expectClaudeCodeInMenu(app, G, 'Not installed')
     await setShownIssueDescription(app, 'a'.repeat(100_001 - 'Alpha 2'.length))
     await expectClaudeCodeButton(app, 'show', true)
@@ -259,7 +260,8 @@ test.describe('the Claude Code button of an issue', () => {
 
     // Installed and detected again: the short issue can be sent, the long one still cannot.
     writeSubstitute(world.laterBin, 'claude', world.records)
-    await app.page.getByTestId('sidebar-redetect-tools').click()
+    await app.redetectTools(G)
+    await app.closeMenus()
     await expectClaudeCodeInMenu(app, G, 'available')
     await expectClaudeCodeButton(app, 'send', false)
     expect(await claudeCodeTooltip(app)).toBe('This issue is too long to send. Shorten it first.')

@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { displayPath } from '../../shared/paths'
 
 /**
  * Replaces every character other than a letter (of any script), a digit, `.`,
@@ -63,8 +64,7 @@ export class WorktreeLayout {
 
   /** A path with the home directory shown as `~`. */
   displayPath(file: string): string {
-    if (file === this.home) return '~'
-    return file.startsWith(`${this.home}/`) ? `~${file.slice(this.home.length)}` : file
+    return displayPath(file, this.home)
   }
 
   /** The project folder that already belongs to the project, if any. */

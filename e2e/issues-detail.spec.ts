@@ -1,7 +1,7 @@
 import type { AppDriver } from './support/app'
 import { storedIssues } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   expectList,
   expectSaved,
   expectShown,
@@ -188,7 +188,7 @@ test.describe('an issue’s page', () => {
     await expect(title).toHaveValue('C')
 
     // In the list's view; an issue outside it moves through all the issues.
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await viewTab(app, 'active').click()
     await app.page.getByTestId('issue-row').nth(1).click()
     await expect(title).toHaveValue('B')

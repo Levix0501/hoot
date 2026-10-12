@@ -2,7 +2,7 @@ import type { Locator } from '@playwright/test'
 import type { AppDriver } from './support/app'
 import type { SeedIssue } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   expectList,
   expectShown,
   issuePage,
@@ -70,7 +70,7 @@ async function movePointerAway(app: AppDriver): Promise<void> {
 async function showPage(app: AppDriver, page: IssuesPageName): Promise<void> {
   const { G } = app.world.repos
   if (page === 'list') {
-    if ((await shownPage(app)) !== `list:${G}`) await clickProjectRow(app, G)
+    if ((await shownPage(app)) !== `list:${G}`) await clickIssuesButton(app, G)
     await expectList(app, G)
   } else {
     await openIssue(app, G, 'Alpha')
@@ -300,7 +300,7 @@ test.describe('session commands on Issues pages', () => {
      */
     const situations = {
       list: async () => {
-        await clickProjectRow(app, G)
+        await clickIssuesButton(app, G)
         await expectList(app, G)
         await viewTab(app, 'backlog').focus()
         await expect(viewTab(app, 'backlog')).toBeFocused()

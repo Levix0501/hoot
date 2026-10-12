@@ -136,8 +136,12 @@ export interface AppState {
   quitConfirmation: { runningSessions: number } | null
   /** Whether the sidebar is expanded. */
   sidebarOpen: boolean
+  /** The projects collapsed in the sidebar, by id; every other project is expanded. */
+  collapsedProjects: ReadonlySet<number>
   /** Whether the window is in full screen. */
   fullScreen: boolean
+  /** The user's home directory, which paths show as `~`. */
+  homeDirectory: string
 
   /**
    * Reads the window's state and follows its changes. Called before the
@@ -210,6 +214,8 @@ export interface AppState {
   copyIssueTitle(issueId: number): void
   /** Expands or collapses the sidebar, and saves its state. */
   setSidebarOpen(open: boolean): void
+  /** Expands or collapses a project in the sidebar, and saves its state. */
+  setProjectExpanded(projectId: number, expanded: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
   requestCloseSession(id: string): void
   answerCloseConfirmation(confirmed: boolean): void
@@ -430,12 +436,26 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
+   * Expands the project of a session that has just become the current one,
+   * however it became current, so that its row shows in the sidebar.
+   */
+  const expandProjectOf = (page: Page | null) => {
+    if (page?.kind !== 'session') return
+    const { sessions, projects, setProjectExpanded } = get()
+    const session = sessions.find((candidate) => candidate.id === page.sessionId)
+    const project = projects.find((candidate) => candidate.root === session?.projectRoot)
+    if (project) setProjectExpanded(project.id, true)
+  }
+
+  /**
    * Shows a page other than by going back or forward, recording it in the
    * history. Showing the current session again only puts the keyboard focus
    * in its terminal.
    */
   const showPage = (page: Page) => {
     const { currentPage } = get()
+    // Also a session shown again becomes current again.
+    expandProjectOf(page)
     if (samePage(currentPage, page)) {
       if (page.kind === 'session') focusCurrentTerminal()
       return
@@ -507,6 +527,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           : state.issueDeletion,
       }
     })
+    if (sessionShown) expandProjectOf(get().currentPage)
     // Once the window no longer shows them.
     setTimeout(() => {
       for (const id of ids) {
@@ -557,7 +578,8 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /**
    * Applies a new project list: the sessions of projects that left it are
-   * closed, and their Issues pages go; the issues of projects new to it are read.
+   * closed, and their Issues pages go; a project that left it is expanded
+   * when it is added again; the issues of projects new to it are read.
    */
   const applyProjects = (projects: Project[]) => {
     const state = get()
@@ -573,11 +595,19 @@ export const useAppStore = create<AppState>()((set, get) => {
     // Their processes have all ended: a project cannot be removed while one runs.
     if (orphaned.length > 0 || removed.size > 0) removePages(new Set(orphaned), removed, projects)
     else set({ projects })
-    set((current) => ({
-      worktrees: Object.fromEntries(
-        Object.entries(current.worktrees).filter(([root]) => roots.has(root)),
-      ),
-    }))
+    set((current) => {
+      // Forgotten as the main process forgets them.
+      const collapsed = [...current.collapsedProjects].filter((id) => ids.has(id))
+      return {
+        worktrees: Object.fromEntries(
+          Object.entries(current.worktrees).filter(([root]) => roots.has(root)),
+        ),
+        collapsedProjects:
+          collapsed.length === current.collapsedProjects.size
+            ? current.collapsedProjects
+            : new Set(collapsed),
+      }
+    })
     for (const project of projects) if (!known.has(project.id)) loadIssues(project.id)
   }
 
@@ -623,6 +653,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     getSessionTerminal(currentSessionId(get()))?.terminal.blur()
     // The terminal view of a session takes the focus once it is shown.
     set({ history: stepped, currentPage: page, newIssueDialog: null })
+    expandProjectOf(page)
   }
 
   /**
@@ -658,6 +689,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       history: visit(state.history, sessionPage(id)),
       newIssueDialog: null,
     }))
+    expandProjectOf(sessionPage(id))
   }
 
   const closeCurrent = () => {
@@ -737,13 +769,16 @@ export const useAppStore = create<AppState>()((set, get) => {
     closeConfirmation: null,
     quitConfirmation: null,
     sidebarOpen: true,
+    collapsedProjects: new Set(),
     fullScreen: false,
+    homeDirectory: '',
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
-      const { sidebarOpen, fullScreen } = await api.getWindowState()
-      set({ sidebarOpen, fullScreen })
+      const { sidebarOpen, collapsedProjects, fullScreen, homeDirectory } =
+        await api.getWindowState()
+      set({ sidebarOpen, collapsedProjects: new Set(collapsedProjects), fullScreen, homeDirectory })
     },
 
     async initialize() {
@@ -816,6 +851,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       const reloaded = sessions.filter((session) => !known.has(session.id))
       for (const session of reloaded) openTerminal(session.id)
       if (reloaded.length > 0) {
+        const shown = get().currentPage
         set((state) => {
           const all = [...state.sessions, ...reloaded.map(fromInfo)]
           const first = orderedSessions({ ...state, sessions: all })[0]
@@ -830,6 +866,7 @@ export const useAppStore = create<AppState>()((set, get) => {
                 : visit(state.history, currentPage),
           }
         })
+        if (shown === null) expandProjectOf(get().currentPage)
       }
       const tools = await api.getTools()
       set({ tools })
@@ -1172,6 +1209,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (open === get().sidebarOpen) return
       set({ sidebarOpen: open })
       api.setSidebarOpen(open)
+    },
+
+    setProjectExpanded(projectId, expanded) {
+      const { collapsedProjects } = get()
+      if (collapsedProjects.has(projectId) === !expanded) return
+      const collapsed = new Set(collapsedProjects)
+      if (expanded) collapsed.delete(projectId)
+      else collapsed.add(projectId)
+      set({ collapsedProjects: collapsed })
+      api.setProjectExpanded(projectId, expanded)
     },
 
     requestCloseSession(id) {

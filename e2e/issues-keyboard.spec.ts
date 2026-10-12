@@ -1,7 +1,7 @@
 import type { AppDriver } from './support/app'
 import { storedIssues } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   expectList,
   expectShown,
   issuePage,
@@ -44,7 +44,7 @@ test.describe('the keys of Issues pages', () => {
         { root: G, title: 'C', status: 'backlog' },
       ],
     })
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await blurAll(app)
 
@@ -117,7 +117,7 @@ test.describe('the keys of Issues pages', () => {
     })
 
     // Typed into the new issue dialog's title.
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await blurAll(app)
     await app.page.keyboard.press('c')

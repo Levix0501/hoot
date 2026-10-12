@@ -1,7 +1,7 @@
 import type { AppDriver } from './support/app'
 import { storedIssues } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   expectList,
   expectShown,
   issuePage,
@@ -25,9 +25,9 @@ async function start(launch: Launch, world: World): Promise<AppDriver> {
   })
 }
 
-/** Shows the page of an issue listed on the project's list, by clicking the project's row and then the issue. */
+/** Shows an issue's page: its project's list, with its row's Issues button, then the issue. */
 async function showIssue(app: AppDriver, root: string, title: string): Promise<number> {
-  await clickProjectRow(app, root)
+  await clickIssuesButton(app, root)
   await expectList(app, root)
   await issueRow(app, title).click()
   await expect(app.page.getByTestId('issue-page')).toBeVisible()
@@ -63,7 +63,7 @@ test.describe('going back and forward among pages', () => {
     const app = await start(launch, world)
     await expectNoWayBackOrForward(app)
     const x = await showIssue(app, G, 'X')
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H)
 
     // 1
@@ -99,7 +99,7 @@ test.describe('going back and forward among pages', () => {
     const app = await start(launch, world)
     const x = await showIssue(app, G, 'X')
     const s = await startShell(app, G)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await app.selectSession(s)
     await app.run('exit 0', { waitForPrompt: false })
@@ -132,9 +132,9 @@ test.describe('going back and forward among pages', () => {
 
     await app.addProject(H)
     await expect(app.projectItems()).toHaveCount(2)
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await removeProject(app, H)
     await expectList(app, G)
@@ -148,7 +148,7 @@ test.describe('going back and forward among pages', () => {
   }) => {
     const { H } = world.repos
     const app = await start(launch, world)
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H)
     await removeProject(app, H)
     await expectShown(app, 'empty')
@@ -161,7 +161,7 @@ test.describe('going back and forward among pages', () => {
   }) => {
     const { G, H } = world.repos
     const app = await start(launch, world)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     const sh = await startShell(app, H)
     await app.run('exit 3', { waitForPrompt: false })
@@ -179,7 +179,7 @@ test.describe('going back and forward among pages', () => {
     const { G, H } = world.repos
     const app = await start(launch, world)
     const x = await showIssue(app, G, 'X')
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H)
 
     // In the new issue dialog's title: the dialog goes with the page, and keeps what was typed.

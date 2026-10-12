@@ -141,6 +141,10 @@ function NewWorktreeForm({
   const [submodules, setSubmodules] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const projectId = useAppStore(
+    (state) => state.projects.find((project) => project.root === projectRoot)?.id,
+  )
+  const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
 
   useEffect(() => {
     if (branch === '') return
@@ -239,6 +243,8 @@ function NewWorktreeForm({
       setError(result.message)
       return
     }
+    // The new worktree's row shows below the project, also when it was collapsed.
+    if (projectId !== undefined) setProjectExpanded(projectId, true)
     if (result.warning) {
       toast.warning('The worktree was created, but Git reported a problem.', {
         description: (

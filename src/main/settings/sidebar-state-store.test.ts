@@ -75,3 +75,73 @@ describe('SidebarStateStore', () => {
     expect(saved()).toEqual({ sidebarCollapsed: true })
   })
 })
+
+describe('SidebarStateStore: collapsed projects', () => {
+  it('has every project expanded when nothing was saved, without writing anything', () => {
+    expect(new SidebarStateStore(directory).collapsedProjects).toEqual([])
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it('saves which projects are collapsed, and keeps them across instances', () => {
+    const first = new SidebarStateStore(directory)
+    first.setProjectCollapsed(3, true)
+    first.setProjectCollapsed(1, true)
+    expect(first.collapsedProjects).toEqual([3, 1])
+    expect(saved()).toEqual({ collapsedProjects: [3, 1] })
+    expect(new SidebarStateStore(directory).collapsedProjects).toEqual([3, 1])
+
+    first.setProjectCollapsed(3, false)
+    expect(saved()).toEqual({ collapsedProjects: [1] })
+    expect(new SidebarStateStore(directory).collapsedProjects).toEqual([1])
+  })
+
+  it('writes nothing when a project is already in the state asked for', () => {
+    const store = new SidebarStateStore(directory)
+    store.setProjectCollapsed(2, false)
+    expect(fs.existsSync(file)).toBe(false)
+    store.setProjectCollapsed(2, true)
+    fs.writeFileSync(file, JSON.stringify({ collapsedProjects: [2], marker: true }))
+    store.setProjectCollapsed(2, true)
+    expect(saved()).toEqual({ collapsedProjects: [2], marker: true })
+  })
+
+  it('forgets the projects that are no longer in the list, so that they are expanded when added again', () => {
+    const store = new SidebarStateStore(directory)
+    for (const id of [1, 2, 3]) store.setProjectCollapsed(id, true)
+    store.retainProjects([1, 3, 4])
+    expect(store.collapsedProjects).toEqual([1, 3])
+    expect(saved()).toEqual({ collapsedProjects: [1, 3] })
+    expect(new SidebarStateStore(directory).collapsedProjects).toEqual([1, 3])
+
+    // Nothing to forget: the file is left as it is.
+    fs.writeFileSync(file, JSON.stringify({ collapsedProjects: [1, 3], marker: true }))
+    store.retainProjects([1, 3])
+    expect(saved()).toEqual({ collapsedProjects: [1, 3], marker: true })
+  })
+
+  it('shares settings.json with the sidebar state and the permission levels', () => {
+    const levels = new PermissionLevelStore(directory)
+    const sidebar = new SidebarStateStore(directory)
+    levels.select('claude', 'plan')
+    sidebar.setProjectCollapsed(5, true)
+    sidebar.setOpen(false)
+    expect(saved()).toEqual({
+      permissionLevels: { claude: 'plan' },
+      collapsedProjects: [5],
+      sidebarCollapsed: true,
+    })
+    const reopened = new SidebarStateStore(directory)
+    expect(reopened.open).toBe(false)
+    expect(reopened.collapsedProjects).toEqual([5])
+  })
+
+  it('leaves out saved values that are not project ids', () => {
+    writeSettings({ collapsedProjects: [1, 'two', 3.5, -4, 0, null, 6] })
+    expect(new SidebarStateStore(directory).collapsedProjects).toEqual([1, 6])
+    writeSettings({ collapsedProjects: 'all' })
+    const store = new SidebarStateStore(directory)
+    expect(store.collapsedProjects).toEqual([])
+    store.setProjectCollapsed(7, true)
+    expect(saved()).toEqual({ collapsedProjects: [7] })
+  })
+})

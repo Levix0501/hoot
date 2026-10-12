@@ -7,7 +7,7 @@ import {
   tableShape,
 } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   createIssue,
   deleteShownIssue,
   expectList,
@@ -21,7 +21,7 @@ import {
 import { expect, test } from './support/test'
 
 test.describe('the project row', () => {
-  test('shows how many issues are open, shows the issue list when clicked, and is selected then', async ({
+  test('shows how many issues are open, shows the issue list with its Issues button, and is selected then', async ({
     launch,
     world,
   }) => {
@@ -45,7 +45,7 @@ test.describe('the project row', () => {
       'data-active',
       '',
     )
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await expect(projectRowButton(app, G)).toHaveAttribute('data-active', '')
     await expect(projectRowButton(app, H)).not.toHaveAttribute('data-active')
@@ -129,7 +129,7 @@ test.describe('removing and adding a project again', () => {
     await app.addProject(Gsub)
     await expect(app.projectItems()).toHaveCount(2)
     expect(await app.projectRoots()).toEqual([H, G])
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'all')
     expect(await listedGroups(app)).toEqual([
       { status: 'backlog', count: 1, titles: ['Open one'] },

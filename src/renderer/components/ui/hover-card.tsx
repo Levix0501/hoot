@@ -20,12 +20,16 @@ function HoverCardContent({
   Pick<PreviewCardPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>) {
   return (
     <PreviewCardPrimitive.Portal data-slot="hover-card-portal">
+      {/*
+        Hoot: below menus, dialogs and tooltips, so that a card that shows
+        while one of them is open never covers it.
+      */}
       <PreviewCardPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="isolate z-50"
+        className="isolate z-40"
       >
         <PreviewCardPrimitive.Popup
           data-slot="hover-card-content"

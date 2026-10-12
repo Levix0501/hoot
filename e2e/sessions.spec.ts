@@ -28,16 +28,29 @@ function lineRange(first: number, last: number): string[] {
   return Array.from({ length: last - first + 1 }, (_, index) => `line ${first + index}`)
 }
 
-/** Whether the project's session rows come right after its project row. */
+/** Whether the project's session rows come right after its project row, among the sidebar's rows. */
 async function sessionsFollowProject(app: AppDriver, root: string): Promise<boolean> {
   return app.page.evaluate((projectRoot) => {
-    const project = document.querySelector(
-      `[data-testid="project-item"][data-project-root="${projectRoot}"]`,
+    const rows = Array.from(
+      document.querySelectorAll(
+        '[data-testid="project-item"], [data-testid="session-item"], [data-testid="worktree-item"]',
+      ),
     )
-    const sessions = document.querySelector(
-      `[data-testid="session-list"][data-project-root="${projectRoot}"]`,
+    const project = rows.findIndex(
+      (row) =>
+        row.getAttribute('data-testid') === 'project-item' &&
+        row.getAttribute('data-project-root') === projectRoot,
     )
-    return project !== null && project.nextElementSibling === sessions
+    const sessions = Array.from(
+      document.querySelectorAll(
+        `[data-testid="session-list"][data-project-root="${projectRoot}"] [data-testid="session-item"]`,
+      ),
+    )
+    return (
+      project !== -1 &&
+      sessions.length > 0 &&
+      sessions.every((session, index) => rows[project + 1 + index] === session)
+    )
   }, root)
 }
 

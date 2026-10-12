@@ -257,6 +257,8 @@ if (!app.requestSingleInstanceLock()) {
 /** Starts Hoot with its projects, sessions and issues. */
 function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
+  // Only projects in the list are kept collapsed, so that a project added later is expanded.
+  sidebar.retainProjects(projects.list().map((project) => project.id))
   registerIpc({
     getWindow,
     projects,
@@ -267,6 +269,7 @@ function startWithDatabase(database: DatabaseSync): void {
     sessions,
     quitGuard,
     worktrees,
+    homeDirectory: os.homedir(),
     resolveProjectRoot: async (directory) =>
       resolveProjectRoot(directory, {
         git: await gitExecutable(),

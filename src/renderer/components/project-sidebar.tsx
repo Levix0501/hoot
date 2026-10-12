@@ -7,6 +7,7 @@ import { worktreeRows } from '../store/worktree-rows'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
 import { WorktreeItem } from './worktree-item'
+import { Collapsible, CollapsibleContent } from './ui/collapsible'
 import {
   Sidebar,
   SidebarContent,
@@ -89,6 +90,36 @@ function ProjectWorktrees({ project }: { project: Project }) {
   ))
 }
 
+/**
+ * A project in the sidebar: its row, with the rows of its sessions and
+ * worktrees below it while it is expanded. They slide open and closed as the
+ * sidebar itself slides, or show and hide at once when the system reduces
+ * motion.
+ */
+function ProjectEntry({ project }: { project: Project }) {
+  const expanded = useAppStore((state) => !state.collapsedProjects.has(project.id))
+  const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
+  return (
+    <Collapsible
+      render={<li />}
+      open={expanded}
+      onOpenChange={(open) => setProjectExpanded(project.id, open)}
+      data-testid="project"
+      data-project-root={project.root}
+    >
+      <ProjectItem project={project} expanded={expanded} />
+      <CollapsibleContent
+        render={<ul />}
+        className="flex h-(--collapsible-panel-height) min-w-0 flex-col overflow-hidden transition-[height] duration-200 ease-linear data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0"
+        data-testid="project-rows"
+      >
+        <ProjectSessions project={project} />
+        <ProjectWorktrees project={project} />
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 export function ProjectSidebar() {
   const projects = useAppStore((state) => state.projects)
   const detecting = useAppStore((state) => state.tools.detecting)
@@ -123,11 +154,7 @@ export function ProjectSidebar() {
             ) : (
               <SidebarMenu data-testid="project-list">
                 {projects.map((project) => (
-                  <Fragment key={project.root}>
-                    <ProjectItem project={project} />
-                    <ProjectSessions project={project} />
-                    <ProjectWorktrees project={project} />
-                  </Fragment>
+                  <ProjectEntry key={project.root} project={project} />
                 ))}
               </SidebarMenu>
             )}

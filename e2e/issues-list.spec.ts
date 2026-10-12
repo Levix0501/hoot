@@ -1,7 +1,7 @@
 import type { AppDriver } from './support/app'
 import { storedIssues, type SeedIssue } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   createIssue,
   expectList,
   expectShown,
@@ -48,7 +48,7 @@ test.describe('the issue list', () => {
     await app.waitForPrompt(20_000, s)
 
     // The title row, and all of G's issues.
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'all')
     const row = await boxOf(issuesTopRow(app))
     expect(row.top).toBe(0)
@@ -85,7 +85,7 @@ test.describe('the issue list', () => {
     ])
 
     // Each project's list shows the view it showed last, also after a session was shown.
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H, 'all')
     await viewTab(app, 'backlog').click()
     await expect(issueListPage(app).getByTestId('issues-empty')).toContainText(
@@ -93,7 +93,7 @@ test.describe('the issue list', () => {
     )
     await expect(issueListPage(app).getByTestId('issues-empty-create')).toBeVisible()
     await app.selectSession(s)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'backlog')
 
     // Changing views is not recorded in the history.
@@ -110,8 +110,8 @@ test.describe('the issue list', () => {
     await issueGroup(app, 'todo').getByTestId('issue-group-toggle').click()
     await expect(issueGroup(app, 'todo').getByTestId('issue-row')).toHaveCount(0)
     await expect(issueGroup(app, 'todo').getByTestId('issue-group-count')).toHaveText('3')
-    await clickProjectRow(app, H)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, H)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'all')
     await expect(issueGroup(app, 'todo').getByTestId('issue-row')).toHaveCount(0)
     await issueGroup(app, 'todo').getByTestId('issue-group-toggle').click()
@@ -126,9 +126,9 @@ test.describe('the issue list', () => {
     await app.page.getByTestId('quit-confirm').click()
     await app.waitForExit()
     app = await launch()
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H, 'all')
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'all')
     await expect(issueGroup(app, 'done').getByTestId('issue-row')).toHaveCount(1)
   })
@@ -139,7 +139,7 @@ test.describe('the issue list', () => {
   }) => {
     const { G, H } = world.repos
     const app = await launch({ projects: [G, H], issues: issuesOf(G, H) })
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     expect(await openIssueCount(app, G)).toBe(6)
 

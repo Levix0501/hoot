@@ -1,6 +1,6 @@
 import { storedIssues, storedProjects } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   expectList,
   expectShown,
   issueGroup,
@@ -21,7 +21,7 @@ test.describe('the new issue dialog', () => {
     const app = await launch({ projects: [G] })
     const s = await app.startSession(G, 'shell')
     await app.waitForPrompt(20_000, s)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     const dialog = newIssueDialog(app)
     const title = app.page.getByTestId('new-issue-title')

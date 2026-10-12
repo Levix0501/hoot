@@ -59,6 +59,8 @@ export interface IpcDependencies {
   sessions: SessionManager
   quitGuard: QuitGuard
   worktrees: WorktreeService
+  /** The user's home directory, which the window shows as `~` in paths. */
+  homeDirectory: string
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
 
@@ -260,6 +262,8 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     deps.projects.remove(root)
+    // Added again, it is expanded in the sidebar.
+    deps.sidebar.retainProjects(deps.projects.list().map((project) => project.id))
     // Its worktrees, their files and branches stay as they are.
     deps.worktrees.removeProject(root)
     // Removing a project closes its sessions, which have all ended.
@@ -279,11 +283,21 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.getWindowState, (): WindowState => ({
     sidebarOpen: deps.sidebar.open,
+    collapsedProjects: deps.sidebar.collapsedProjects,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
+    homeDirectory: deps.homeDirectory,
   }))
   on(IpcChannel.setSidebarOpen, (open) => {
     const parsed = z.boolean().safeParse(open)
     if (parsed.success) deps.sidebar.setOpen(parsed.data)
+  })
+  on(IpcChannel.setProjectExpanded, (...args) => {
+    const parsed = z.tuple([rowId, z.boolean()]).safeParse(args)
+    if (!parsed.success) return
+    const [id, expanded] = parsed.data
+    // Only a project in the list is kept collapsed.
+    if (!expanded && !deps.projects.list().some((project) => project.id === id)) return
+    deps.sidebar.setProjectCollapsed(id, !expanded)
   })
 
   handle(IpcChannel.listSessions, () => deps.sessions.list())

@@ -20,7 +20,7 @@ import {
 } from './support/database'
 import { snapshotTree } from './support/fs-snapshot'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   deleteShownIssue,
   expectList,
   expectShown,
@@ -299,7 +299,7 @@ test.describe('sending an issue to Claude Code', () => {
     ).toEqual([{ title: hex('Fix\0 login'), description: hex('a\0b') }])
     const app = await launch()
     await expect(app.projectItems()).toHaveCount(2)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await issueListPage(app).getByTestId('issue-row').click()
     await expect(issuePage(app)).toBeVisible()
@@ -472,7 +472,7 @@ test.describe('sending an issue to Claude Code', () => {
     expect(menuBarItems(await app.applicationMenu())).toEqual(MENU_BAR)
 
     // No button on the issue list or in the new issue dialog.
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await expect(app.mainArea().getByText('Claude Code')).toHaveCount(0)
     await expect(app.mainArea().getByTestId('issue-claude-code')).toHaveCount(0)

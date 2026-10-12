@@ -1,4 +1,4 @@
-import { clickProjectRow, expectList, expectShown } from './support/issues'
+import { clickIssuesButton, expectList, expectShown } from './support/issues'
 import { expect, test } from './support/test'
 
 test.describe('sessions beside Issues pages', () => {
@@ -12,7 +12,7 @@ test.describe('sessions beside Issues pages', () => {
     await app.waitForPrompt(20_000, s1)
     const command = 'sleep 2; echo finished'
     await app.run(command, { waitForPrompt: false })
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G)
     await expect(app.session()).toHaveCount(0)
     await app.page.waitForTimeout(3_000)

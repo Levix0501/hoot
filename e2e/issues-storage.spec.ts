@@ -11,7 +11,7 @@ import {
   versionOneDatabase,
 } from './support/database'
 import {
-  clickProjectRow,
+  clickIssuesButton,
   createIssue,
   expectList,
   issuePage,
@@ -59,7 +59,7 @@ test.describe('where issues are kept', () => {
     // 2: everything is back after starting again.
     app = await launch()
     expect(await app.projectRoots()).toEqual([G, H])
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     await expectList(app, G, 'all')
     expect(await listedGroups(app)).toEqual([
       { status: 'todo', count: 1, titles: ['Third'] },
@@ -70,7 +70,7 @@ test.describe('where issues are kept', () => {
     await expect(issuePage(app).getByTestId('issue-status')).toHaveAttribute('data-status', 'done')
     await openIssue(app, G, 'First')
     await expect(issuePage(app).getByTestId('issue-description')).toHaveText('Body one')
-    await clickProjectRow(app, H)
+    await clickIssuesButton(app, H)
     await expectList(app, H, 'all')
     expect(await listedGroups(app)).toEqual([{ status: 'backlog', count: 1, titles: ['Other'] }])
     await app.expectEnglishUi()
@@ -122,7 +122,7 @@ test.describe('where issues are kept', () => {
     const app = await launch()
     await expect(app.projectItems()).toHaveCount(2)
     expect(userVersionOf(databaseFile(world.userData))).toBe(2)
-    await clickProjectRow(app, G)
+    await clickIssuesButton(app, G)
     expect(await listedGroups(app)).toEqual([
       { status: 'todo', count: 2, titles: ['Open two', 'Open one'] },
       { status: 'done', count: 1, titles: ['Closed one'] },

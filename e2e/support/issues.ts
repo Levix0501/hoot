@@ -4,9 +4,14 @@ import { PRIORITY_OPTIONS, STATUS_OPTIONS } from '../../src/renderer/lib/issue-p
 import type { AppDriver } from './app'
 import { storedIssues } from './database'
 
-/** A project row's own button, which shows the project's issue list. */
+/** A project row's own button, which expands and collapses the project. */
 export function projectRowButton(app: AppDriver, root: string): Locator {
   return app.projectItem(root).getByTestId('project-item-button')
+}
+
+/** The Issues button of a project's row, which shows the project's issue list. */
+export function issuesButton(app: AppDriver, root: string): Locator {
+  return app.projectItem(root).getByTestId('project-issues-button')
 }
 
 /** The number of open issues a project's row shows, or `null` when it shows none. */
@@ -15,9 +20,13 @@ export async function openIssueCount(app: AppDriver, root: string): Promise<numb
   return (await count.count()) === 0 ? null : Number(await count.textContent())
 }
 
-/** Clicks the project's name in its row, which shows its issue list. */
-export async function clickProjectRow(app: AppDriver, root: string): Promise<void> {
-  await app.projectItem(root).getByTestId('project-name').click()
+/**
+ * Clicks the Issues button of the project's row, which shows its issue list,
+ * then moves the pointer off the row, before the row's card shows.
+ */
+export async function clickIssuesButton(app: AppDriver, root: string): Promise<void> {
+  await issuesButton(app, root).click()
+  await app.page.mouse.move(1, 1)
 }
 
 export function issueListPage(app: AppDriver): Locator {
@@ -124,9 +133,9 @@ export async function shownIssueId(app: AppDriver): Promise<number> {
   return Number(await issuePage(app).getAttribute('data-issue-id'))
 }
 
-/** Shows a project's issue list by clicking its row, unless it is shown already. */
+/** Shows a project's issue list with its row's Issues button, unless it is shown already. */
 export async function showList(app: AppDriver, root: string): Promise<void> {
-  if ((await shownPage(app)) !== `list:${root}`) await clickProjectRow(app, root)
+  if ((await shownPage(app)) !== `list:${root}`) await clickIssuesButton(app, root)
   await expectList(app, root)
 }
 

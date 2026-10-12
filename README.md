@@ -13,8 +13,17 @@ Hoot supports macOS only for now.
   repository's main worktree, the working directory it was created with. Folders outside Git, bare
   repositories, and folders from which Git cannot tell where the main worktree is (such as a linked
   worktree of a repository whose Git directory is kept elsewhere) are refused. The list is kept
-  across restarts. Click a project to show its [issues](#issues). Right-click a project, or use
-  its `⋯` menu, to remove it from the list (its files and its issues are never touched).
+  across restarts. Right-click a project, or use its `⋯` menu, to remove it from the list (its
+  files and its issues are never touched).
+- **The project row**: a project's row in the sidebar shows its name, and how many of its
+  [issues](#issues) are neither done nor canceled. Click it to expand or collapse the project: its
+  sessions and [worktrees](#worktrees) are listed below it while it is expanded, and slide open and
+  closed as it expands and collapses (or show and hide at once when macOS is set to reduce motion).
+  Each project stays expanded or collapsed as you left it, also after Hoot quits; a project added to
+  the list is expanded. Point at the row, or move the keyboard focus into it, to show its buttons:
+  **Issues** shows the project's issues, `+` starts a session or creates a worktree, and `⋯` removes
+  the project from the list. Rest the pointer on the row to see a card beside it with the project's
+  name and folder, with your home directory written as `~`.
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
@@ -24,11 +33,12 @@ Hoot supports macOS only for now.
   are not installed are shown disabled with an install command, and **Re-detect Tools** checks
   again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
-  or in different ones. Each project lists its sessions below it in the sidebar, in the order they
-  started, with the tool's icon (for Claude Code, its own mark), the session's name and its state:
-  a green dot while it runs, or how it ended. Click a session to show it; the keyboard focus goes
-  to its terminal. Sessions that are not shown keep running, and their output is all there when you
-  come back to them.
+  or in different ones. Each project lists its sessions below it in the sidebar while it is
+  expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the
+  session's name and its state: a green dot while it runs, or how it ended. Click a session to show
+  it; the keyboard focus goes to its terminal. A collapsed project expands when one of its sessions
+  is shown, however it is shown. Sessions that are not shown keep running, and their output is all
+  there when you come back to them.
 - **Names**: a session is named after the title its program gives the terminal (without the ✳, ◐
   or ◑ that Claude Code puts first), or after its tool until there is one. Double-click a session,
   or choose **Rename** from its context menu, to name it yourself: Enter saves, Esc cancels, and an
@@ -46,13 +56,14 @@ Hoot supports macOS only for now.
   back from. A page that is gone leaves the list: a session that closes, an issue that is deleted,
   and the Issues pages of a removed project.
   The list lasts until Hoot quits.
-- **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar, ⌘⇧] and ⌘⇧[ (**Window >
-  Select Next Session** and **Select Previous Session**) the next and previous one, ⌘[ and ⌘] go
-  back and forward, ⌘W closes the shown session, and ⌘B hides or shows the sidebar. They work while
-  a terminal or a text field has the focus and never reach the terminal's program or the field,
-  whereas Ctrl+B reaches the program as usual (in an issue's description, ⌘B makes text bold). On
-  an Issues page, where no session is shown, ⌘W closes nothing. Issues pages have
-  [keys of their own](#issues). The window's close button and ⌘Q quit Hoot.
+- **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar (counting the sessions of
+  collapsed projects too), ⌘⇧] and ⌘⇧[ (**Window > Select Next Session** and **Select Previous
+  Session**) the next and previous one, ⌘[ and ⌘] go back and forward, ⌘W closes the shown
+  session, and ⌘B hides or shows the sidebar. They work while a terminal or a text field has the
+  focus and never reach the terminal's program or the field, whereas Ctrl+B reaches the program as
+  usual (in an issue's description, ⌘B makes text bold). On an Issues page, where no session is
+  shown, ⌘W closes nothing. Issues pages have [keys of their own](#issues). The window's close
+  button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
   current Unicode widths. The shown terminal is drawn with WebGL, so block elements and box drawing
@@ -77,18 +88,19 @@ Note what to do in a project, such as an idea you have or a problem you notice w
 works, as an issue, and come back to it later. Issues are kept on your Mac, in
 [Hoot's database](#architecture).
 
-- **The list**: click a project's row in the sidebar to show its issues, laid out as in Linear;
-  the row shows how many of them are neither done nor canceled, and is selected while one of the
-  project's Issues pages is shown. **All issues**, **Active** (to do or in progress) and
-  **Backlog** show those issues, grouped by status: In Progress, Todo, Backlog, Done and Canceled,
-  the closest to done first. Each group lists its issues by priority, urgent first and those
-  without one last, then newest first; done and canceled issues are listed the most recently
-  completed first. A row shows the issue's priority, its identifier (the first three letters or
-  digits of the project's name and its number, such as `HOO-12`), its status, its title and the
-  day it was created. Click a group's header to collapse or expand it, or its `+` to create an
-  issue with its status. Each project's list shows the view and the collapsed groups as you left
-  them, until Hoot quits. Click an issue to show its page; right-click it to change its status or
-  priority, copy its identifier or title, or delete it.
+- **The list**: the **Issues** button of a project's row in the sidebar, which shows while you point
+  at the row, shows the project's issues, laid out as in Linear; the row shows how many of them are
+  neither done nor canceled, and is selected while one of the project's Issues pages is shown.
+  **All issues**, **Active** (to do or in progress) and **Backlog** show those issues, grouped by
+  status: In Progress, Todo, Backlog, Done and Canceled, the closest to done first. Each group
+  lists its issues by priority, urgent first and those without one last, then newest first; done
+  and canceled issues are listed the most recently completed first. A row shows the issue's
+  priority, its identifier (the first three letters or digits of the project's name and its
+  number, such as `HOO-12`), its status, its title and the day it was created. Click a group's
+  header to collapse or expand it, or its `+` to create an issue with its status. Each project's
+  list shows the view and the collapsed groups as you left them, until Hoot quits. Click an issue
+  to show its page; right-click it to change its status or priority, copy its identifier or title,
+  or delete it.
 - **New issues**: **New issue** at the top right of the list, or C, opens a dialog for the
   project's new issue: a title, which an issue needs, a description, a status (Backlog unless you
   pick another) and a priority. **Create issue** (⌘ Enter) creates it, without the spaces around
@@ -148,7 +160,8 @@ a folder of its own.
   name of a new branch and pick the local branch it starts from. Hoot creates the branch and checks
   it out in a linked worktree in `~/.hoot/worktrees/<project>/<branch>` (with `/` and other
   characters that do not belong in a folder name replaced by `-`). An installed Hoot and one run
-  from its repository use the same folders. Hoot does not start a session in the new worktree.
+  from its repository use the same folders. Hoot does not start a session in the new worktree; it
+  expands the project, if it was collapsed, to show the worktree's row.
 - **Nested repositories**: repositories inside the project that it ignores or does not track (such
   as the `hoot/` repository in Hoot's own workspace) get the same branch, at the same path inside
   the worktree, so that the worktree looks like the project. Each starts from its own base branch:
@@ -308,8 +321,8 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** and **Quit**, and Hoot leaves the file as it is.
-- The permission levels picked in the Agents menu and whether the sidebar is hidden are in
-  `settings.json`.
+- The permission levels picked in the Agents menu, whether the sidebar is hidden, and which
+  projects in it are collapsed are in `settings.json`.
 
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.

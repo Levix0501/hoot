@@ -2,7 +2,7 @@ import Color from 'colorjs.io'
 import { PNG } from 'pngjs'
 import type { AppDriver } from './support/app'
 import { boxOf, type Box } from './support/layout'
-import { rgb, sameColor, Screenshot } from './support/pixels'
+import { colorDifference, rgb, Screenshot } from './support/pixels'
 import {
   appearancePage,
   backgroundColors,
@@ -111,6 +111,9 @@ test('the interface and terminal follow the system appearance while running', as
 const APPEARANCE_NAMES = { system: 'System', light: 'Light', dark: 'Dark' } as const
 type Picked = keyof typeof APPEARANCE_NAMES
 const PICKED: Picked[] = ['system', 'light', 'dark']
+
+/** How far apart, in levels of a channel, two drawings' pixels may be and still be the same. */
+const SAME_DRAWING_TOLERANCE = 6
 
 /** The drawing of a theme preview is 160 × 100 units, its corners rounded by 6. */
 const DRAWING_WIDTH = 160
@@ -364,7 +367,10 @@ test('the Appearance page offers System, Light and Dark as cards that draw Hoot 
       for (let x = 2; x < shot.width - 2; x++) {
         const inCorner =
           (x < corner || x >= shot.width - corner) && (y < corner || y >= shot.height - corner)
-        if (!inCorner && !sameColor(shot.pixel(x, y), before.pixel(x, y)) && changed.length < 5) {
+        // Anti-aliased edges may come out a few levels apart from one drawing to the next;
+        // a color that changed with the window's appearance differs by far more.
+        const apart = colorDifference(shot.pixel(x, y), before.pixel(x, y))
+        if (!inCorner && apart > SAME_DRAWING_TOLERANCE && changed.length < 5) {
           changed.push(`${x},${y}: ${before.pixel(x, y).join(',')} → ${shot.pixel(x, y).join(',')}`)
         }
       }

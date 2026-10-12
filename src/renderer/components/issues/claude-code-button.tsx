@@ -31,8 +31,8 @@ function BlockerNote({ blocker }: { blocker: SendBlocker }) {
  * a new session in the project's main worktree that judges the issue's
  * workload and splits it with Hoot's skill; while that session is in the
  * sidebar, it shows the session instead. Its tooltip says what it does, or
- * every reason it cannot send the issue now. The tooltip's trigger wraps the
- * button, so that it also shows while the button is disabled.
+ * every reason it cannot send the issue now, also while the button is
+ * disabled: the tooltip's trigger wraps the button.
  */
 export function ClaudeCodeButton({ issue }: { issue: Issue }) {
   const sessionId = useAppStore(
@@ -46,9 +46,11 @@ export function ClaudeCodeButton({ issue }: { issue: Issue }) {
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="flex" />}>
+        {/* While it cannot send, it is still what the pointer is on, like any other button. */}
         <Button
           variant="outline"
           size="sm"
+          className="disabled:pointer-events-auto"
           disabled={blockers.length > 0}
           onClick={() =>
             sessionId === null ? sendIssueToClaudeCode(issue.id) : selectSession(sessionId)

@@ -95,18 +95,20 @@ works, as an issue, and come back to it later. Issues are kept on your Mac, in
   and how to split it. **Send to Claude Code**, on an open issue's page, starts Claude Code in a
   new session in the project root (never in a worktree), at the permission level picked in the
   Agents menu, and shows it. The session is named after the issue's title, and its first message
-  hands the issue to the `/hoot:split-issue` skill of Hoot's own Claude Code plugin: Claude reads
-  the code, changing nothing, and judges whether one session can implement the issue and another
-  verify it in full; if not, it splits the issue into ordered issues that can each be accepted on
-  its own, each with a title, a description and the issues it waits on. The answer stays in the
-  conversation, where you can go on with it. The plugin is loaded for that session only, from
-  Hoot's own files: nothing is written to `~/.claude`, `~/.claude.json` or the project. While the
-  session is in the sidebar, the button is **Show Claude Code Session** and shows it; once the
-  session is closed, the button sends the issue again. The button cannot be used while Hoot is
-  still checking whether Claude Code is installed, when it is not installed, or when the issue's
-  title and description are longer than 100,000 characters together (counted in UTF-16 code
-  units, in which most emoji count as two), since the issue reaches Claude Code in its command's
-  arguments; its tooltip says why. NUL characters are left out of what is sent.
+  hands the issue to the `/hoot:split-issue` skill of Hoot's own Claude Code plugin, which asks
+  Claude to read the code without changing anything and to judge whether one session can
+  implement the issue and another verify it in full; if not, to split it into ordered issues that
+  can each be accepted on its own, each with a title, a description and the issues it waits on.
+  Hoot does not enforce that nothing changes: like any other session, this one can change files
+  as far as its permission level lets it. The answer stays in the conversation, where you can go
+  on with it. The plugin is loaded for that session only, from Hoot's own files, without writing
+  anything to `~/.claude`, `~/.claude.json` or the project. While the session is in the sidebar,
+  the button is **Show Claude Code Session** and always shows it; once the session is closed, the
+  button sends the issue again. Sending is not possible while Hoot is still checking whether
+  Claude Code is installed, when it is not installed, or when the issue's title and description
+  are longer than 100,000 characters together (counted in UTF-16 code units, in which most emoji
+  count as two), since the issue reaches Claude Code in its command's arguments; the button's
+  tooltip then says why. NUL characters are left out of what is sent.
 - **Drafts**: what you enter on a new issue page, or while editing an issue, stays while other
   pages are shown, until you create, save or cancel, remove the project, or quit Hoot. Quitting
   does not ask about drafts.

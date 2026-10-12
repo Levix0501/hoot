@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import type { AppDriver } from './support/app'
 import type { SeedIssue } from './support/database'
 import {
@@ -6,9 +7,13 @@ import {
   expectShown,
   issuePage,
   issueRow,
-  issueTab,
   issuesTopRow,
+  newIssueDialog,
+  openIssue,
+  openNewIssueDialog,
+  shownIssueId,
   shownPage,
+  viewTab,
 } from './support/issues'
 import {
   blankPointsOutsideDragArea,
@@ -24,7 +29,7 @@ import {
 import { expect, test } from './support/test'
 
 type SidebarState = 'expanded' | 'collapsed'
-type IssuesPageName = 'list' | 'new' | 'issue' | 'editing'
+type IssuesPageName = 'list' | 'issue'
 
 async function setSidebar(app: AppDriver, state: SidebarState): Promise<void> {
   if ((await app.sidebarState()) !== state) await app.page.keyboard.press('Meta+b')
@@ -36,42 +41,41 @@ const center = (box: Box) => ({ x: (box.left + box.right) / 2, y: (box.top + box
 /** Issues enough to fill more than the smallest window, and one with a long description. */
 function manyIssues(root: string): SeedIssue[] {
   return [
-    ...Array.from({ length: 14 }, (_, index) => ({ root, title: `Issue ${index + 1}` })),
+    ...Array.from({ length: 14 }, (_, index) => ({
+      root,
+      title: `Issue ${index + 1}`,
+      status: index % 2 === 0 ? ('todo' as const) : ('backlog' as const),
+      priority: (index % 5) as SeedIssue['priority'],
+    })),
     { root, title: 'Done', status: 'done' },
     {
       root,
       title: 'Alpha',
+      status: 'in_progress',
       description: Array.from({ length: 30 }, (_, index) => `Paragraph ${index + 1}.`).join('\n\n'),
     },
   ]
 }
 
-/** Shows one of G's Issues pages from the sidebar: its list, its new issue page, or Alpha's page. */
-async function showPage(app: AppDriver, page: IssuesPageName): Promise<void> {
-  const { G } = app.world.repos
-  if ((await shownPage(app)) !== `list:${G}`) await clickProjectRow(app, G)
-  await expectList(app, G)
-  if (page === 'new') {
-    await app.page.getByTestId('new-issue-button').click()
-    await expectShown(app, `new:${G}`)
-  } else if (page === 'issue' || page === 'editing') {
-    await issueRow(app, 'Alpha').click()
-    const shown = issuePage(app)
-    await expect(shown).toBeVisible()
-    if (page === 'editing' && (await shown.getAttribute('data-editing')) !== 'true') {
-      await shown.getByTestId('issue-edit').click()
-    }
-    if (page === 'issue' && (await shown.getAttribute('data-editing')) === 'true') {
-      await shown.getByTestId('issue-cancel-edit').click()
-    }
-    await expect(shown).toHaveAttribute('data-editing', String(page === 'editing'))
-  }
-  // Keep the pointer off the buttons, which hovering colors.
+/** Keeps the pointer off the buttons, which hovering colors. */
+async function movePointerAway(app: AppDriver): Promise<void> {
   const { innerWidth, innerHeight } = await app.page.evaluate(() => ({
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,
   }))
   await app.page.mouse.move(innerWidth - 4, innerHeight - 4)
+}
+
+/** Shows one of G's Issues pages from the sidebar: its list, or Alpha's page. */
+async function showPage(app: AppDriver, page: IssuesPageName): Promise<void> {
+  const { G } = app.world.repos
+  if (page === 'list') {
+    if ((await shownPage(app)) !== `list:${G}`) await clickProjectRow(app, G)
+    await expectList(app, G)
+  } else {
+    await openIssue(app, G, 'Alpha')
+  }
+  await movePointerAway(app)
 }
 
 /** What the title row of the page shown draws. */
@@ -82,8 +86,8 @@ async function titleRowContent(app: AppDriver) {
 
 /**
  * Checks the title row of the page shown: in the top row; its blank parts,
- * and the point midway between what it shows last and the main area's right
- * edge, drag the window; its buttons do not.
+ * such as the space between the breadcrumb and the buttons at its end, drag
+ * the window; its buttons do not.
  */
 async function expectTitleRow(app: AppDriver, state: SidebarState): Promise<void> {
   const row = await boxOf(issuesTopRow(app))
@@ -91,15 +95,12 @@ async function expectTitleRow(app: AppDriver, state: SidebarState): Promise<void
   expect(row.bottom).toBeLessThanOrEqual(TOP_ROW_HEIGHT)
   const content = await titleRowContent(app)
   expect(content.length).toBeGreaterThan(0)
-  const main = await boxOf(app.mainArea())
-  const last = Math.max(...content.map((element) => element.box.right))
-  expect(await inDragArea(app, (last + main.right) / 2, 22)).toBe(true)
   expect(await blankPointsOutsideDragArea(app), state).toEqual([])
-  for (const testId of ['back-to-issues', 'new-issue-button']) {
-    const button = issuesTopRow(app).getByTestId(testId)
-    if ((await button.count()) === 0) continue
+  const buttons = issuesTopRow(app).getByRole('button')
+  expect(await buttons.count()).toBeGreaterThan(0)
+  for (const button of await buttons.all()) {
     const { x, y } = center(await boxOf(button))
-    expect(await inDragArea(app, x, y), testId).toBe(false)
+    expect(await inDragArea(app, x, y), (await button.getAttribute('aria-label')) ?? '').toBe(false)
   }
   // Nothing below the top row drags the window.
   for (const box of await dragElementBoxes(app)) {
@@ -116,21 +117,27 @@ async function expectClearOfNavigation(app: AppDriver): Promise<void> {
 }
 
 /**
- * Checks that each button, field, tab and listed issue of the page shown can
- * be reached: scrolled into view, it is what is at its center.
+ * Checks that each button, field, editor, tab, switch and listed issue in
+ * `scope` can be reached: scrolled into view, it is what is at the center of
+ * the part of it in the window.
  */
-async function expectAllReachable(app: AppDriver): Promise<void> {
-  const controls = app
-    .mainArea()
-    .locator('button, input, textarea, [role="tab"], [data-testid="issue-row"]')
+async function expectAllReachable(scope: Locator): Promise<void> {
+  const controls = scope
+    .locator(
+      // Not the hidden fields that pickers and switches keep for forms.
+      'button, input:not([aria-hidden="true"]), textarea, [role="tab"], [role="switch"], [contenteditable="true"], [data-testid="issue-row"]',
+    )
+    .filter({ visible: true })
   const count = await controls.count()
   expect(count).toBeGreaterThan(0)
   for (let index = 0; index < count; index++) {
     const control = controls.nth(index)
     await control.scrollIntoViewIfNeeded()
     const hit = await control.evaluate((element) => {
-      const { left, top, right, bottom } = element.getBoundingClientRect()
-      const found = document.elementFromPoint((left + right) / 2, (top + bottom) / 2)
+      const rect = element.getBoundingClientRect()
+      const top = Math.max(rect.top, 0)
+      const bottom = Math.min(rect.bottom, window.innerHeight)
+      const found = document.elementFromPoint((rect.left + rect.right) / 2, (top + bottom) / 2)
       return {
         reachable: found !== null && (found === element || element.contains(found)),
         description: `${element.tagName} ${element.getAttribute('data-testid') ?? ''} ${element.textContent?.slice(0, 20) ?? ''}`,
@@ -152,15 +159,16 @@ for (const [width, height] of [
     const { G } = world.repos
     const app = await launch({ projects: [G], issues: manyIssues(G), deviceScaleFactor: 2 })
     await app.resizeWindow(width, height)
-    for (const page of ['list', 'new', 'issue', 'editing'] as const) {
+    for (const page of ['list', 'issue'] as const) {
       // Pages are shown from the sidebar, then looked at with it shown and hidden.
       await setSidebar(app, 'expanded')
       await showPage(app, page)
       for (const state of ['expanded', 'collapsed'] as const) {
         await setSidebar(app, state)
+        await movePointerAway(app)
         await expectTitleRow(app, state)
         if (state === 'collapsed') await expectClearOfNavigation(app)
-        if (width === 720) await expectAllReachable(app)
+        if (width === 720) await expectAllReachable(app.mainArea())
 
         // In full screen.
         await app.emitWindowEvent('enter-full-screen')
@@ -179,19 +187,66 @@ for (const [width, height] of [
       }
     }
 
+    // The new issue dialog stays below the top row, and all of it can be used.
+    for (const state of ['expanded', 'collapsed'] as const) {
+      await setSidebar(app, state)
+      await openNewIssueDialog(app, G)
+      const dialog = newIssueDialog(app)
+      expect((await boxOf(dialog)).top).toBeGreaterThanOrEqual(TOP_ROW_HEIGHT)
+      if (width === 720) await expectAllReachable(dialog)
+      await app.page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+    }
+
     // The title row's buttons do what they say.
     await setSidebar(app, 'expanded')
     await showPage(app, 'list')
     await issuesTopRow(app).getByTestId('new-issue-button').click()
-    await expectShown(app, `new:${G}`)
-    await issuesTopRow(app).getByTestId('back-to-issues').click()
-    await expectList(app, G)
+    await expect(newIssueDialog(app)).toBeVisible()
+    await app.page.keyboard.press('Escape')
+    await expect(newIssueDialog(app)).toBeHidden()
     await issueRow(app, 'Alpha').click()
-    await issuesTopRow(app).getByTestId('back-to-issues').click()
+    const alpha = await shownIssueId(app)
+    await issuesTopRow(app).getByTestId('issue-next').click()
+    await expect.poll(() => shownIssueId(app)).not.toBe(alpha)
+    await issuesTopRow(app).getByTestId('issue-previous').click()
+    await expectShown(app, `issue:${alpha}`)
+    await issuesTopRow(app).getByTestId('issues-breadcrumb-list').click()
     await expectList(app, G)
     await app.expectEnglishUi()
   })
 }
+
+test('the properties of an issue are a row under its title on a narrow page, and a column beside it on a wide one', async ({
+  launch,
+  world,
+}) => {
+  const { G } = world.repos
+  const app = await launch({ projects: [G], issues: manyIssues(G) })
+  await showPage(app, 'issue')
+  for (const [width, sidebar, beside] of [
+    [1200, 'expanded', true],
+    [720, 'collapsed', true],
+    [720, 'expanded', false],
+  ] as const) {
+    await app.resizeWindow(width, 480)
+    await setSidebar(app, sidebar)
+    const box = (testId: string) => boxOf(issuePage(app).getByTestId(testId))
+    const title = await box('issue-title')
+    const status = await box('issue-status')
+    const priority = await box('issue-priority')
+    const description = await box('issue-description')
+    const where = `${width} ${sidebar}`
+    if (beside) {
+      expect(status.left, where).toBeGreaterThan(title.right)
+      expect(priority.top, where).toBeGreaterThan(status.top)
+    } else {
+      expect(status.top, where).toBeGreaterThan(title.bottom)
+      expect(status.bottom, where).toBeLessThan(description.top)
+      expect(priority.top, where).toBe(status.top)
+    }
+  }
+})
 
 test('Issues pages follow the system appearance', async ({ launch, world }) => {
   const { G } = world.repos
@@ -202,9 +257,9 @@ test('Issues pages follow the system appearance', async ({ launch, world }) => {
     await expect
       .poll(() => app.page.evaluate(() => document.documentElement.classList.contains('dark')))
       .toBe(appearance === 'dark')
-    for (const page of ['list', 'new', 'issue'] as const) {
+    for (const page of ['list', 'issue'] as const) {
       await showPage(app, page)
-      const testId = { list: 'issue-list-page', new: 'new-issue-page', issue: 'issue-page' }[page]
+      const testId = { list: 'issue-list-page', issue: 'issue-page' }[page]
       const colors = await app.page.getByTestId(testId).evaluate((element) => ({
         page: getComputedStyle(element).backgroundColor,
         background: getComputedStyle(document.documentElement).getPropertyValue('--background'),
@@ -239,27 +294,30 @@ test.describe('session commands on Issues pages', () => {
     await app.waitForPrompt(20_000, s2)
     const title = app.page.getByTestId('new-issue-title')
 
-    /** Shows G's list with the keyboard focus on its Closed tab, or its new issue page with the focus in its title field. */
+    /**
+     * Shows G's list with the keyboard focus on its Backlog tab, or its new
+     * issue dialog with the focus in its title field.
+     */
     const situations = {
       list: async () => {
         await clickProjectRow(app, G)
         await expectList(app, G)
-        await issueTab(app, 'closed').focus()
-        await expect(issueTab(app, 'closed')).toBeFocused()
+        await viewTab(app, 'backlog').focus()
+        await expect(viewTab(app, 'backlog')).toBeFocused()
       },
-      new: async () => {
-        await clickProjectRow(app, G)
-        await expectList(app, G)
-        await app.page.getByTestId('new-issue-button').click()
-        await expectShown(app, `new:${G}`)
+      dialog: async () => {
+        const dialog = newIssueDialog(app)
+        // Still open after a command that left the page as it was; otherwise gone once it has faded out.
+        if ((await dialog.count()) === 0 || (await dialog.getAttribute('data-closed')) !== null) {
+          await expect(dialog).toHaveCount(0)
+          await openNewIssueDialog(app, G)
+        }
         await title.focus()
         await expect(title).toBeFocused()
       },
     }
 
-    for (const [name, prepare] of Object.entries(situations)) {
-      const page = name === 'list' ? `list:${G}` : `new:${G}`
-
+    for (const prepare of Object.values(situations)) {
       // 1: ⌘W and File > Close Session close nothing.
       for (const command of ['key', 'menu'] as const) {
         await prepare()
@@ -267,7 +325,7 @@ test.describe('session commands on Issues pages', () => {
         else await app.chooseMenuItem('File', 'Close Session')
         await app.page.waitForTimeout(300)
         await expect(app.closeSessionDialog()).toBeHidden()
-        await expectShown(app, page)
+        await expectShown(app, `list:${G}`)
         expect(await app.sessionIds()).toEqual([s1, s2])
         for (const id of [s1, s2]) {
           await expect(app.sessionItem(id)).toHaveAttribute('data-status', 'running')
@@ -282,6 +340,15 @@ test.describe('session commands on Issues pages', () => {
         await prepare()
         await app.page.keyboard.press(keys)
         await expectShown(app, `session:${id}`)
+        // The new issue dialog goes, and the terminal has the focus.
+        await expect(newIssueDialog(app)).toBeHidden()
+        await expect
+          .poll(() =>
+            app.page.evaluate(
+              () => document.activeElement?.classList.contains('xterm-helper-textarea') ?? false,
+            ),
+          )
+          .toBe(true)
       }
 
       // 3: the next and previous session commands show one of the sessions.
@@ -301,8 +368,6 @@ test.describe('session commands on Issues pages', () => {
     }
 
     // 4: nothing was typed into the title field.
-    await situations.new()
-    await expect(title).toHaveValue('')
     for (const keys of [
       'Meta+w',
       'Meta+1',
@@ -310,9 +375,9 @@ test.describe('session commands on Issues pages', () => {
       'Meta+Shift+BracketRight',
       'Meta+Shift+BracketLeft',
     ]) {
-      await situations.new()
+      await situations.dialog()
       await app.page.keyboard.press(keys)
-      await situations.new()
+      await situations.dialog()
       await expect(title, keys).toHaveValue('')
     }
     // The shells received nothing either.

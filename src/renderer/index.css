@@ -4,7 +4,7 @@
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/geist-mono';
 
-/* The look of issue descriptions, rendered from Markdown. */
+/* The look of issue descriptions, edited as they show. */
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:is(.dark *));
@@ -144,4 +144,45 @@
 /* The terminal's own scrollbar: a thin slider with round ends. */
 .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
   border-radius: calc(infinity * 1px);
+}
+
+/* An issue description's editor: what it says while empty, its task lists and its tables. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}
+
+.tiptap ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tiptap ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  padding-left: 0;
+}
+
+.tiptap ul[data-type='taskList'] li > label {
+  flex: none;
+  margin-top: 0.25em;
+}
+
+.tiptap ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tiptap ul[data-type='taskList'] li > div > p {
+  margin: 0;
+}
+
+.tiptap table td,
+.tiptap table th {
+  border: 1px solid var(--border);
+  padding: 0.25em 0.5em;
 }

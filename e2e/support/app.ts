@@ -79,6 +79,8 @@ export class AppDriver {
     readonly world: World,
     /** The main process; kept because Playwright forgets it once the app exits. */
     readonly mainProcess: ChildProcess,
+    /** The user data directory it runs with. */
+    readonly userData: string,
   ) {}
 
   static async launch(world: World, options: LaunchOptions = {}): Promise<AppDriver> {
@@ -120,7 +122,7 @@ export class AppDriver {
     if (options.projects) {
       await expect(page.getByTestId('project-item')).toHaveCount(options.projects.length)
     }
-    return new AppDriver(electronApp, page, world, mainProcess)
+    return new AppDriver(electronApp, page, world, mainProcess, userData)
   }
 
   get mainPid(): number {

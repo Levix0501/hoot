@@ -19,7 +19,6 @@ const page = {
   s2: sessionPage('s2'),
   s3: sessionPage('s3'),
   list1: { kind: 'issue-list', projectId: 1 },
-  new1: { kind: 'new-issue', projectId: 1 },
   issue10: { kind: 'issue', projectId: 1, issueId: 10 },
   issue11: { kind: 'issue', projectId: 1, issueId: 11 },
   list2: { kind: 'issue-list', projectId: 2 },
@@ -39,7 +38,6 @@ const sessions = (...ids: string[]) => {
 }
 
 const ofProject2 = (gone: Page) => gone.kind !== 'session' && gone.projectId === 2
-const isNew = (gone: Page) => gone.kind === 'new-issue' && gone.projectId === 1
 
 /** Steps back or forward, failing when there is no entry that way. */
 function go(from: PageHistory, offset: -1 | 1): PageHistory {
@@ -53,18 +51,13 @@ describe('samePage', () => {
     expect(samePage(page.s1, sessionPage('s1'))).toBe(true)
     expect(samePage(page.s1, page.s2)).toBe(false)
     expect(samePage(page.list1, { kind: 'issue-list', projectId: 1 })).toBe(true)
-    expect(samePage(page.list1, page.new1)).toBe(false)
+    expect(samePage(page.list1, page.issue10)).toBe(false)
     expect(samePage(page.list1, page.list2)).toBe(false)
     expect(samePage(page.issue10, { kind: 'issue', projectId: 1, issueId: 10 })).toBe(true)
     expect(samePage(page.issue10, page.issue11)).toBe(false)
     expect(samePage(null, null)).toBe(true)
     expect(samePage(page.s1, null)).toBe(false)
-    expect([page.s1, page.list1, page.new1, page.issue10].map(isIssuesPage)).toEqual([
-      false,
-      true,
-      true,
-      true,
-    ])
+    expect([page.s1, page.list1, page.issue10].map(isIssuesPage)).toEqual([false, true, true])
   })
 })
 
@@ -177,18 +170,6 @@ describe('going back and forward among pages', () => {
     shown = visit(forget(go(shown, 1), sessions('s3')), page.s1)
     expect(shown).toEqual(history(['s1'], 0))
     expect([canStep(shown, -1), canStep(shown, 1)]).toEqual([false, false])
-  })
-
-  it('takes a new issue out of the history once it is created, like a browser after a form', () => {
-    // A session, the project's list, its new issue page, then Create.
-    let shown = visit(visit(visit(emptyHistory, page.s1), page.list1), page.new1)
-    shown = visit(forget(shown, isNew), page.issue10)
-    expect(shown).toEqual(history(['s1', 'list1', 'issue10'], 2))
-    // Back to the issue, its list again, a new issue page, then Cancel.
-    shown = visit(visit(shown, page.list1), page.new1)
-    shown = visit(forget(shown, isNew), page.list1)
-    expect(shown).toEqual(history(['s1', 'list1', 'issue10', 'list1'], 3))
-    expect(canStep(shown, 1)).toBe(false)
   })
 
   it('leaves the list once when the issue shown between two visits of it is deleted', () => {

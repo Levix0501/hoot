@@ -2,7 +2,17 @@ import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
-import { isIssueOpen, type Issue } from '../../shared/issues'
+import {
+  isCompleted,
+  isIssueOpen,
+  issueIdentifier,
+  issueTitle,
+  type Issue,
+  type IssueChanges,
+  type IssuePriority,
+  type IssueStatus,
+  type IssueView,
+} from '../../shared/issues'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
 import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
@@ -54,16 +64,22 @@ export interface UiSession {
   closing: boolean
 }
 
-/** What is entered for an issue's title and description, before it is saved. */
-export interface IssueDraft {
+/** What is entered in a project's new issue dialog, before the issue is created. */
+export interface NewIssueDraft {
   title: string
+  /** Markdown. */
   description: string
+  status: IssueStatus
+  priority: IssuePriority
 }
 
-export const emptyDraft: IssueDraft = { title: '', description: '' }
-
-/** The issues a project's list shows: those still open, or the done and canceled ones. */
-export type IssueListTab = 'open' | 'closed'
+/** What a project's new issue dialog starts with: an issue in the backlog, without a priority. */
+export const emptyNewIssueDraft: NewIssueDraft = {
+  title: '',
+  description: '',
+  status: 'backlog',
+  priority: 0,
+}
 
 /** The deletion of a worktree, from checking it until it is deleted or cancelled. */
 export interface WorktreeDeletion {
@@ -97,12 +113,21 @@ export interface AppState {
   history: PageHistory
   /** The issues of the projects in the list. */
   issues: Issue[]
-  /** The issues each project's list showed last, by project id; open ones until then. */
-  issueListStates: Record<number, IssueListTab>
-  /** What is entered on each project's new issue page, by project id. */
-  newIssueDrafts: Record<number, IssueDraft>
-  /** The issues whose page is in the edit state, with what is entered, by issue id. */
-  issueEdits: Record<number, IssueDraft>
+  /** The view each project's list showed last, by project id; all its issues until then. */
+  issueViews: Record<number, IssueView>
+  /** The status groups each project's list has collapsed, by project id. */
+  collapsedIssueGroups: Record<number, IssueStatus[]>
+  /**
+   * The project whose new issue dialog is open. The dialog closes when the
+   * page shown changes.
+   */
+  newIssueDialog: { projectId: number } | null
+  /** What is entered in each project's new issue dialog, by project id, until Hoot quits. */
+  newIssueDrafts: Record<number, NewIssueDraft>
+  /** Whether the new issue dialog stays open after it creates an issue, for the next one. */
+  createMore: boolean
+  /** An issue the user asked to delete, while Hoot asks for confirmation. */
+  issueDeletion: number | null
   /** The session whose sidebar row shows the field for renaming it. */
   renamingSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
@@ -127,10 +152,11 @@ export interface AppState {
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
    * Sends an open issue to Claude Code, in a new session in its project's
-   * main worktree, unless it cannot be sent now. While the session it was
-   * sent to before is still in the sidebar, shows that session instead.
+   * main worktree, unless it cannot be sent now; the changes to it made so
+   * far are saved first. While the session it was sent to before is still in
+   * the sidebar, shows that session instead.
    */
-  sendIssueToClaudeCode(issueId: number): void
+  sendIssueToClaudeCode(issueId: number): Promise<void>
   launchSession(id: string, cols: number, rows: number): Promise<void>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
@@ -140,32 +166,48 @@ export interface AppState {
   goBack(): void
   /** Shows the page shown after the current one, if any. */
   goForward(): void
-  /** Shows a project's issue list, with the issues it showed last. */
+  /** Shows a project's issue list, with the view it showed last. */
   showIssueList(projectId: number): void
-  /** Shows a project's open or closed issues in its list. */
-  setIssueListState(projectId: number, state: IssueListTab): void
-  /** Shows a project's new issue page, with what was entered on it before. */
-  showNewIssue(projectId: number): void
+  /** Shows another view of a project's issue list; not recorded in the history. */
+  setIssueView(projectId: number, view: IssueView): void
+  /** Expands or collapses a status group of a project's issue list. */
+  setIssueGroupOpen(projectId: number, status: IssueStatus, open: boolean): void
   showIssue(issueId: number): void
-  updateNewIssueDraft(projectId: number, draft: IssueDraft): void
   /**
-   * Creates an issue from what is entered on the project's new issue page,
-   * then shows it instead of that page, which leaves the history.
+   * Opens a project's new issue dialog, with what was entered in it before;
+   * `preset` sets the status or the priority to start from.
    */
-  createIssue(projectId: number): Promise<void>
-  /** Drops what is entered on the project's new issue page and shows its list instead. */
-  cancelNewIssue(projectId: number): void
-  /** Puts an issue's page in the edit state, with its title and description entered. */
-  startEditingIssue(issueId: number): void
-  updateIssueEdit(issueId: number, draft: IssueDraft): void
-  /** Saves what is entered for an issue, and ends the edit state. */
-  saveIssueEdit(issueId: number): Promise<void>
-  /** Ends an issue's edit state without saving. */
-  cancelIssueEdit(issueId: number): void
-  /** Marks an issue done, or makes it to do again. */
-  setIssueState(issueId: number, state: IssueListTab): Promise<void>
-  /** Deletes an issue for good, then shows its project's list instead of its page. */
+  openNewIssue(
+    projectId: number,
+    preset?: Partial<Pick<NewIssueDraft, 'status' | 'priority'>>,
+  ): void
+  /** Closes the new issue dialog, keeping what is entered in it. */
+  closeNewIssue(): void
+  updateNewIssueDraft(projectId: number, changes: Partial<NewIssueDraft>): void
+  setCreateMore(createMore: boolean): void
+  /**
+   * Creates an issue from what is entered in the project's new issue dialog,
+   * and says so. The dialog closes, unless it is to create more, when it
+   * keeps the status and the priority for the next issue; with `open`, it
+   * shows the new issue instead. Settles with the new issue, or `null` when
+   * none was created.
+   */
+  createIssue(projectId: number, options?: { open?: boolean }): Promise<Issue | null>
+  /**
+   * Changes an issue at once and saves the change in the background, one
+   * save at a time for each issue, so that the latest change is saved last.
+   */
+  updateIssue(issueId: number, changes: IssueChanges): void
+  /** Settles once the changes made to an issue so far are saved, or failed to be. */
+  whenIssueSaved(issueId: number): Promise<void>
+  /** Asks for confirmation before deleting an issue, which cannot be undone. */
+  requestDeleteIssue(issueId: number): void
+  answerDeleteIssue(confirmed: boolean): void
+  /** Deletes an issue for good; its page, if shown, gives way to its project's list. */
   deleteIssue(issueId: number): Promise<void>
+  /** Puts an issue's identifier, such as "HOO-12", on the clipboard. */
+  copyIssueIdentifier(issueId: number): void
+  copyIssueTitle(issueId: number): void
   /** Expands or collapses the sidebar, and saves its state. */
   setSidebarOpen(open: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
@@ -235,6 +277,45 @@ function withoutIds<V>(
  */
 function withIssue(issues: readonly Issue[], issue: Issue): Issue[] {
   return issues.map((entry) => (entry.id === issue.id ? issue : entry))
+}
+
+/** An issue as it is once changes not saved yet are saved, as far as Hoot can tell now. */
+function withChanges(issue: Issue, changes: IssueChanges | undefined): Issue {
+  if (!changes) return issue
+  const status = changes.status ?? issue.status
+  let { completedAt } = issue
+  if (status !== issue.status) completedAt = isCompleted(status) ? Date.now() : null
+  return {
+    ...issue,
+    title: changes.title === undefined ? issue.title : issueTitle(changes.title),
+    description: changes.description ?? issue.description,
+    priority: changes.priority ?? issue.priority,
+    status,
+    completedAt,
+  }
+}
+
+/** Text from the user shown in a message; marked so it is not mistaken for interface text. */
+function userText(text: string): ReactNode {
+  return createElement('span', { 'data-user-text': '' }, text)
+}
+
+/** Puts text on the clipboard, and says so. */
+function copyText(text: string): void {
+  api.writeClipboardText(text)
+  toast.success('Copied to the clipboard.', { description: userText(text) })
+}
+
+/**
+ * Hands what the editors of issues have not passed on yet, such as a
+ * description typed a moment ago, to the store.
+ */
+const issueEditorFlushes = new Set<() => void>()
+
+/** Registers an editor's flush, until the returned function unregisters it. */
+export function onFlushIssueEdits(flush: () => void): () => void {
+  issueEditorFlushes.add(flush)
+  return () => issueEditorFlushes.delete(flush)
 }
 
 /** A file path shown in a message; marked so it is not mistaken for interface text. */
@@ -361,7 +442,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
     getSessionTerminal(currentSessionId(get()))?.terminal.blur()
     // The terminal view of a session takes the focus once it is shown.
-    set((state) => ({ currentPage: page, history: visit(state.history, page) }))
+    set((state) => ({
+      currentPage: page,
+      history: visit(state.history, page),
+      newIssueDialog: null,
+    }))
   }
 
   /**
@@ -400,8 +485,9 @@ export const useAppStore = create<AppState>()((set, get) => {
           sessionShown = currentPage?.kind === 'session'
         }
       }
-      const goneIssue = (issueId: number) =>
-        state.issues.some((issue) => issue.id === issueId && projectIds.has(issue.projectId))
+      const goneIssues = state.issues.filter((issue) => projectIds.has(issue.projectId))
+      for (const issue of goneIssues) unsavedChanges.delete(issue.id)
+      const dialog = state.newIssueDialog
       return {
         projects: projects ?? state.projects,
         sessions: state.sessions.filter((session) => !ids.has(session.id)),
@@ -412,7 +498,13 @@ export const useAppStore = create<AppState>()((set, get) => {
         // What was entered for a removed project's issues goes with it.
         issues: state.issues.filter((issue) => !projectIds.has(issue.projectId)),
         newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => projectIds.has(id)),
-        issueEdits: withoutIds(state.issueEdits, goneIssue),
+        newIssueDialog:
+          dialog === null || projectIds.has(dialog.projectId) || currentPage !== state.currentPage
+            ? null
+            : dialog,
+        issueDeletion: goneIssues.some((issue) => issue.id === state.issueDeletion)
+          ? null
+          : state.issueDeletion,
       }
     })
     // Once the window no longer shows them.
@@ -441,7 +533,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     getSessionTerminal(currentSessionId(get()))?.terminal.blur()
     set((state) => {
       const history = forget(state.history, gone)
-      return { currentPage: page, history: visit(history, page) }
+      return { currentPage: page, history: visit(history, page), newIssueDialog: null }
     })
   }
 
@@ -530,7 +622,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (!stepped || page === null) return
     getSessionTerminal(currentSessionId(get()))?.terminal.blur()
     // The terminal view of a session takes the focus once it is shown.
-    set({ history: stepped, currentPage: page })
+    set({ history: stepped, currentPage: page, newIssueDialog: null })
   }
 
   /**
@@ -564,6 +656,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       ],
       currentPage: sessionPage(id),
       history: visit(state.history, sessionPage(id)),
+      newIssueDialog: null,
     }))
   }
 
@@ -574,6 +667,39 @@ export const useAppStore = create<AppState>()((set, get) => {
     // without a session shown, it closes nothing.
     if (id === null || closeConfirmation !== null || quitConfirmation !== null) return
     get().requestCloseSession(id)
+  }
+
+  /** Changes to issues not sent to the main process yet, by issue id. */
+  const unsavedChanges = new Map<number, IssueChanges>()
+  /** The saving of each issue under way, until all its changes are sent and answered. */
+  const savings = new Map<number, Promise<void>>()
+
+  /** Sends an issue's changes, one batch at a time, until none are left. */
+  const saveIssue = async (issueId: number) => {
+    try {
+      for (
+        let changes = unsavedChanges.get(issueId);
+        changes;
+        changes = unsavedChanges.get(issueId)
+      ) {
+        unsavedChanges.delete(issueId)
+        const result = await api
+          .updateIssue(issueId, changes)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (result.ok) {
+          // Changes made meanwhile still show.
+          const saved = withChanges(result.issue, unsavedChanges.get(issueId))
+          set((state) => ({ issues: withIssue(state.issues, saved) }))
+          continue
+        }
+        toast.error('Could not save the issue.', { description: result.message })
+        // Show the issue as it is saved.
+        const issue = findIssue(issueId)
+        if (issue) loadIssues(issue.projectId)
+      }
+    } finally {
+      savings.delete(issueId)
+    }
   }
 
   /** Changes to issues under way, so that a second click does not repeat one. */
@@ -601,9 +727,12 @@ export const useAppStore = create<AppState>()((set, get) => {
     currentPage: null,
     history: emptyHistory,
     issues: [],
-    issueListStates: {},
+    issueViews: {},
+    collapsedIssueGroups: {},
+    newIssueDialog: null,
     newIssueDrafts: {},
-    issueEdits: {},
+    createMore: false,
+    issueDeletion: null,
     renamingSessionId: null,
     closeConfirmation: null,
     quitConfirmation: null,
@@ -765,17 +894,22 @@ export const useAppStore = create<AppState>()((set, get) => {
       addSession(projectRoot, toolId, worktreePath, null)
     },
 
-    sendIssueToClaudeCode(issueId) {
-      const state = get()
-      const sent = state.sessions.find((session) => session.issueId === issueId)
+    async sendIssueToClaudeCode(issueId) {
+      const sent = get().sessions.find((session) => session.issueId === issueId)
       if (sent) {
         get().selectSession(sent.id)
         return
       }
+      // Claude Code is sent the issue as it is saved.
+      for (const flush of issueEditorFlushes) flush()
+      await get().whenIssueSaved(issueId)
+      const state = get()
       const issue = findIssue(issueId)
       const project = state.projects.find((candidate) => candidate.id === issue?.projectId)
       if (!issue || !project || !isIssueOpen(issue)) return
       if (sendBlockers(state.tools, issue).length > 0) return
+      // Unless it was sent while its changes were saved.
+      if (state.sessions.some((session) => session.issueId === issueId)) return
       addSession(project.root, 'claude', null, issue.id)
     },
 
@@ -879,14 +1013,22 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
     },
 
-    setIssueListState(projectId, state) {
-      set((current) => ({ issueListStates: { ...current.issueListStates, [projectId]: state } }))
+    setIssueView(projectId, view) {
+      set((state) => ({ issueViews: { ...state.issueViews, [projectId]: view } }))
     },
 
-    showNewIssue(projectId) {
-      if (get().projects.some((project) => project.id === projectId)) {
-        showPage({ kind: 'new-issue', projectId })
-      }
+    setIssueGroupOpen(projectId, status, open) {
+      set((state) => {
+        const collapsed = (state.collapsedIssueGroups[projectId] ?? []).filter(
+          (entry) => entry !== status,
+        )
+        return {
+          collapsedIssueGroups: {
+            ...state.collapsedIssueGroups,
+            [projectId]: open ? collapsed : [...collapsed, status],
+          },
+        }
+      })
     },
 
     showIssue(issueId) {
@@ -894,15 +1036,40 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (issue) showPage({ kind: 'issue', projectId: issue.projectId, issueId })
     },
 
-    updateNewIssueDraft(projectId, draft) {
-      set((state) => ({ newIssueDrafts: { ...state.newIssueDrafts, [projectId]: draft } }))
+    openNewIssue(projectId, preset = {}) {
+      if (!get().projects.some((project) => project.id === projectId)) return
+      set((state) => ({
+        newIssueDialog: { projectId },
+        newIssueDrafts: {
+          ...state.newIssueDrafts,
+          [projectId]: { ...(state.newIssueDrafts[projectId] ?? emptyNewIssueDraft), ...preset },
+        },
+      }))
     },
 
-    async createIssue(projectId) {
+    closeNewIssue() {
+      set({ newIssueDialog: null })
+    },
+
+    updateNewIssueDraft(projectId, changes) {
+      set((state) => ({
+        newIssueDrafts: {
+          ...state.newIssueDrafts,
+          [projectId]: { ...(state.newIssueDrafts[projectId] ?? emptyNewIssueDraft), ...changes },
+        },
+      }))
+    },
+
+    setCreateMore(createMore) {
+      set({ createMore })
+    },
+
+    async createIssue(projectId, { open = false } = {}) {
+      let created: Issue | null = null
       await once(`create:${projectId}`, async () => {
-        const draft = get().newIssueDrafts[projectId] ?? emptyDraft
+        const draft = get().newIssueDrafts[projectId] ?? emptyNewIssueDraft
         const result = await api
-          .createIssue({ projectId, ...draft, status: 'backlog', priority: 0 })
+          .createIssue({ projectId, ...draft })
           .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
         if (!result.ok) {
           toast.error('Could not create the issue.', { description: result.message })
@@ -910,87 +1077,66 @@ export const useAppStore = create<AppState>()((set, get) => {
         }
         const { issue } = result
         // Unless the project left the list while the issue was being created.
-        if (!get().projects.some((project) => project.id === projectId)) return
+        const project = get().projects.find((candidate) => candidate.id === projectId)
+        if (!project) return
+        created = issue
+        const more = get().createMore && !open
         set((state) => ({
           issues: [...state.issues, issue],
-          newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => id === projectId),
+          newIssueDrafts: more
+            ? {
+                ...state.newIssueDrafts,
+                [projectId]: {
+                  ...emptyNewIssueDraft,
+                  status: draft.status,
+                  priority: draft.priority,
+                },
+              }
+            : withoutIds(state.newIssueDrafts, (id) => id === projectId),
+          newIssueDialog: more ? state.newIssueDialog : null,
         }))
-        replacePages((page) => page.kind === 'new-issue' && page.projectId === projectId, {
-          kind: 'issue',
-          projectId,
-          issueId: issue.id,
+        if (open) {
+          get().showIssue(issue.id)
+          return
+        }
+        toast.success(`${issueIdentifier(project.name, issue.number)} created`, {
+          description: userText(issue.title),
+          action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
         })
       })
+      return created
     },
 
-    cancelNewIssue(projectId) {
-      set((state) => ({
-        newIssueDrafts: withoutIds(state.newIssueDrafts, (id) => id === projectId),
-      }))
-      replacePages((page) => page.kind === 'new-issue' && page.projectId === projectId, {
-        kind: 'issue-list',
-        projectId,
-      })
-    },
-
-    startEditingIssue(issueId) {
+    updateIssue(issueId, changes) {
       const issue = findIssue(issueId)
-      if (!issue || get().issueEdits[issueId]) return
-      set((state) => ({
-        issueEdits: {
-          ...state.issueEdits,
-          [issueId]: { title: issue.title, description: issue.description },
-        },
-      }))
+      if (!issue) return
+      set((state) => ({ issues: withIssue(state.issues, withChanges(issue, changes)) }))
+      unsavedChanges.set(issueId, { ...unsavedChanges.get(issueId), ...changes })
+      if (!savings.has(issueId)) savings.set(issueId, saveIssue(issueId))
     },
 
-    updateIssueEdit(issueId, draft) {
-      if (!get().issueEdits[issueId]) return
-      set((state) => ({ issueEdits: { ...state.issueEdits, [issueId]: draft } }))
+    whenIssueSaved(issueId) {
+      return savings.get(issueId) ?? Promise.resolve()
     },
 
-    async saveIssueEdit(issueId) {
-      await once(`issue:${issueId}`, async () => {
-        const draft = get().issueEdits[issueId]
-        if (!draft) return
-        const result = await api
-          .updateIssue(issueId, draft)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (!result.ok) {
-          toast.error('Could not save the issue.', { description: result.message })
-          return
-        }
-        set((state) => ({
-          issues: withIssue(state.issues, result.issue),
-          issueEdits: withoutIds(state.issueEdits, (id) => id === issueId),
-        }))
-      })
+    requestDeleteIssue(issueId) {
+      if (findIssue(issueId) && get().issueDeletion === null) set({ issueDeletion: issueId })
     },
 
-    cancelIssueEdit(issueId) {
-      set((state) => ({ issueEdits: withoutIds(state.issueEdits, (id) => id === issueId) }))
-    },
-
-    async setIssueState(issueId, state) {
-      await once(`issue:${issueId}`, async () => {
-        const result = await api
-          .updateIssue(issueId, { status: state === 'closed' ? 'done' : 'todo' })
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (!result.ok) {
-          toast.error(
-            state === 'closed' ? 'Could not close the issue.' : 'Could not reopen the issue.',
-            { description: result.message },
-          )
-          return
-        }
-        set((current) => ({ issues: withIssue(current.issues, result.issue) }))
-      })
+    answerDeleteIssue(confirmed) {
+      const issueId = get().issueDeletion
+      if (issueId === null) return
+      set({ issueDeletion: null })
+      if (confirmed) void get().deleteIssue(issueId)
     },
 
     async deleteIssue(issueId) {
-      await once(`issue:${issueId}`, async () => {
+      await once(`delete:${issueId}`, async () => {
         const issue = findIssue(issueId)
         if (!issue) return
+        // What is still to be saved would only fail to be.
+        unsavedChanges.delete(issueId)
+        await get().whenIssueSaved(issueId)
         const result = await api
           .deleteIssue(issueId)
           .catch((error: unknown) => ({ ok: false, message: errorMessage(error) }))
@@ -998,17 +1144,28 @@ export const useAppStore = create<AppState>()((set, get) => {
           toast.error('Could not delete the issue.', { description: result.message })
           return
         }
-        set((state) => ({
-          issues: state.issues.filter((entry) => entry.id !== issueId),
-          issueEdits: withoutIds(state.issueEdits, (id) => id === issueId),
-        }))
+        set((state) => ({ issues: state.issues.filter((entry) => entry.id !== issueId) }))
         // Its project's pages have gone already if the project left the list meanwhile.
         if (!get().projects.some((project) => project.id === issue.projectId)) return
-        replacePages((page) => page.kind === 'issue' && page.issueId === issueId, {
-          kind: 'issue-list',
-          projectId: issue.projectId,
-        })
+        const gone = (page: Page) => page.kind === 'issue' && page.issueId === issueId
+        const { currentPage } = get()
+        if (currentPage !== null && gone(currentPage)) {
+          replacePages(gone, { kind: 'issue-list', projectId: issue.projectId })
+        } else {
+          set((state) => ({ history: forget(state.history, gone) }))
+        }
       })
+    },
+
+    copyIssueIdentifier(issueId) {
+      const issue = findIssue(issueId)
+      const project = get().projects.find((candidate) => candidate.id === issue?.projectId)
+      if (issue && project) copyText(issueIdentifier(project.name, issue.number))
+    },
+
+    copyIssueTitle(issueId) {
+      const issue = findIssue(issueId)
+      if (issue) copyText(issue.title)
     },
 
     setSidebarOpen(open) {

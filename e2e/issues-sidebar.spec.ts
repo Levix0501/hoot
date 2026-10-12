@@ -11,12 +11,12 @@ import {
   createIssue,
   deleteShownIssue,
   expectList,
-  expectListed,
   expectShown,
-  issueTab,
+  listedGroups,
+  openIssue,
   openIssueCount,
   projectRowButton,
-  setShownIssueState,
+  setShownIssueStatus,
 } from './support/issues'
 import { expect, test } from './support/test'
 
@@ -63,13 +63,19 @@ test.describe('the project row', () => {
     expect(sameCssColor(look.background, look.accent)).toBe(true)
     expect(sameCssColor(look.other, look.accent)).toBe(false)
 
-    // 2: the count follows creating, closing, reopening and deleting.
+    // 2: the count, of the issues neither done nor canceled, follows creating, the status and deleting.
     await createIssue(app, G, 'D')
     await expect.poll(() => openIssueCount(app, G)).toBe(3)
-    await setShownIssueState(app, 'closed')
-    await expect.poll(() => openIssueCount(app, G)).toBe(2)
-    await setShownIssueState(app, 'open')
-    await expect.poll(() => openIssueCount(app, G)).toBe(3)
+    await openIssue(app, G, 'D')
+    for (const [status, count] of [
+      ['done', 2],
+      ['todo', 3],
+      ['canceled', 2],
+      ['in_progress', 3],
+    ] as const) {
+      await setShownIssueStatus(app, status)
+      await expect.poll(() => openIssueCount(app, G), { message: status }).toBe(count)
+    }
     await deleteShownIssue(app)
     await expect.poll(() => openIssueCount(app, G)).toBe(2)
 
@@ -124,11 +130,13 @@ test.describe('removing and adding a project again', () => {
     await expect(app.projectItems()).toHaveCount(2)
     expect(await app.projectRoots()).toEqual([H, G])
     await clickProjectRow(app, G)
-    await expectList(app, G, 'open')
-    await expectListed(app, ['Open one'])
-    await issueTab(app, 'closed').click()
-    await expectListed(app, ['Closed one'])
+    await expectList(app, G, 'all')
+    expect(await listedGroups(app)).toEqual([
+      { status: 'backlog', count: 1, titles: ['Open one'] },
+      { status: 'done', count: 1, titles: ['Closed one'] },
+    ])
     expect(storedProjects(world.userData).find((project) => project.root === G)?.id).toBe(g.id)
+    // Numbers, statuses and times included.
     expect(storedIssues(world.userData)).toEqual(issuesBefore)
 
     // 3: a project in the list is not added twice.

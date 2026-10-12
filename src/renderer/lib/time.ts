@@ -3,6 +3,7 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 const dateFormat = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' })
+const monthDayFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' })
 const dateTimeFormat = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
@@ -27,4 +28,11 @@ export function timeAgo(time: number, now: number): string {
 /** A moment's date and time of day, in the 24-hour clock: "Oct 10, 2026, 22:42". */
 export function dateTime(time: number): string {
   return dateTimeFormat.format(time)
+}
+
+/** A moment's date, the way Linear's lists give it: "Oct 12" in the year of `now`, "Oct 12, 2025" in another. */
+export function shortDate(time: number, now: number): string {
+  return new Date(time).getFullYear() === new Date(now).getFullYear()
+    ? monthDayFormat.format(time)
+    : dateFormat.format(time)
 }

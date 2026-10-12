@@ -1,11 +1,10 @@
 /**
  * What the main area shows: a session, or one of a project's Issues pages
- * (its issue list, its new issue page, or one issue).
+ * (its issue list, or one issue).
  */
 export type Page =
   | { kind: 'session'; sessionId: string }
   | { kind: 'issue-list'; projectId: number }
-  | { kind: 'new-issue'; projectId: number }
   | { kind: 'issue'; projectId: number; issueId: number }
 
 /** One of a project's Issues pages. */
@@ -26,8 +25,7 @@ export function samePage(a: Page | null, b: Page | null): boolean {
     case 'session':
       return b.kind === 'session' && b.sessionId === a.sessionId
     case 'issue-list':
-    case 'new-issue':
-      return b.kind === a.kind && b.projectId === a.projectId
+      return b.kind === 'issue-list' && b.projectId === a.projectId
     case 'issue':
       return b.kind === 'issue' && b.issueId === a.issueId
   }

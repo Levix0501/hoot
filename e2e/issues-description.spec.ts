@@ -1,5 +1,6 @@
+import type { AppDriver } from './support/app'
 import { storedIssues } from './support/database'
-import { clickProjectRow, issuePage, openIssue, shownIssueId, expectShown } from './support/issues'
+import { expectSaved, expectShown, issuePage, openIssue } from './support/issues'
 import { expect, test } from './support/test'
 
 const DESCRIPTION = [
@@ -28,8 +29,13 @@ const DESCRIPTION = [
 /** In the main process: the addresses Hoot asked macOS to open. */
 type Opened = { openedExternally?: string[] }
 
+/** The description of an issue as the database has it. */
+function savedDescription(app: AppDriver, id: number): string | undefined {
+  return storedIssues(app.userData).find((issue) => issue.id === id)?.description
+}
+
 test.describe('an issue’s description', () => {
-  test('is rendered as GitHub Flavored Markdown, without its HTML; only its web links open, in the browser', async ({
+  test('shows its Markdown laid out, runs none of its HTML, and opens only its web links, in the browser', async ({
     launch,
     world,
   }) => {
@@ -59,8 +65,8 @@ test.describe('an issue’s description', () => {
     await expect(description.locator('ul > li', { hasText: 'bullet' })).toHaveCount(1)
     await expect(description.locator('ol > li')).toHaveText(['first'])
     await expect(description.locator('pre > code')).toHaveText(/^let x = 1\s*$/)
-    await expect(description.locator('table thead th')).toHaveText(['a', 'b'])
-    await expect(description.locator('table tbody td')).toHaveText(['1', '2'])
+    await expect(description.locator('table th')).toHaveText(['a', 'b'])
+    await expect(description.locator('table td')).toHaveText(['1', '2'])
     const shownText = await issuePage(app).innerText()
     for (const syntax of ['# Heading', '- [ ]', '- [x]', '| a | b |', '```']) {
       expect(shownText).not.toContain(syntax)
@@ -77,22 +83,15 @@ test.describe('an issue’s description', () => {
       ),
     )
 
-    // 2: the task list's boxes show what is done, and do not change when clicked.
-    const boxes = description.locator('input[type="checkbox"]')
-    await expect(boxes).toHaveCount(2)
-    const checked = async () => [await boxes.nth(0).isChecked(), await boxes.nth(1).isChecked()]
-    expect(await checked()).toEqual([false, true])
-    for (const index of [0, 1]) {
-      const box = (await boxes.nth(index).boundingBox())!
-      await app.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-      await app.page.waitForTimeout(200)
-      expect(await checked()).toEqual([false, true])
-    }
-
-    // 3: its HTML is not HTML: no elements, and no script ran.
-    await expect(description.locator('b')).toHaveCount(0)
+    // 2: HTML for formatting formats; HTML for anything else makes nothing, and no script runs.
+    await expect(description.locator('strong')).toHaveText('bold')
     await expect(description.locator('img')).toHaveCount(0)
-    await expect(description).toContainText('<b>bold</b>')
+
+    // 3: showing it, and going in and out of it, changes nothing.
+    await description.locator('h1').click()
+    await description.blur()
+    await app.page.waitForTimeout(500)
+    expect(savedDescription(app, id)).toBe(DESCRIPTION)
 
     // 4: only the web link opens, in the default browser; the window stays as it is.
     const opened = () =>
@@ -111,7 +110,6 @@ test.describe('an issue’s description', () => {
     expect(
       await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
     ).toBe(1)
-    expect(dialogs).toEqual([])
     await app.expectEnglishUi()
 
     // When macOS cannot open the address, Hoot says so in its log and goes on.
@@ -127,43 +125,59 @@ test.describe('an issue’s description', () => {
       .poll(() => output.join(''))
       .toContain('Could not open https://example.com/path: Error: no browser')
     await expectShown(app, `issue:${id}`)
+    expect(savedDescription(app, id)).toBe(DESCRIPTION)
 
-    // 6: the description's field in the edit state is plain text, with no preview.
-    await issuePage(app).getByTestId('issue-edit').click()
-    const field = issuePage(app).getByTestId('issue-description-input')
-    expect(await field.evaluate((element) => element.tagName)).toBe('TEXTAREA')
-    await expect(field).toHaveValue(DESCRIPTION)
-    await field.fill('# Heading')
-    await expect(field).toHaveValue('# Heading')
-    await expect(app.page.getByRole('heading', { name: 'Heading', exact: true })).toHaveCount(0)
-    await expect(app.mainArea().getByRole('heading')).toHaveCount(0)
-    await expect(app.page.getByRole('tab')).toHaveCount(0)
-    await expect(app.page.getByRole('button', { name: /preview|write/i })).toHaveCount(0)
-    await issuePage(app).getByTestId('issue-cancel-edit').click()
-
-    // And on the new issue page.
-    await clickProjectRow(app, G)
-    await app.page.getByTestId('new-issue-button').click()
-    const draft = app.page.getByTestId('new-issue-description')
-    expect(await draft.evaluate((element) => element.tagName)).toBe('TEXTAREA')
-    await draft.fill('# Heading')
-    await expect(draft).toHaveValue('# Heading')
-    await expect(app.page.getByRole('heading', { name: 'Heading', exact: true })).toHaveCount(0)
-    // The page's own heading is the only one.
-    await expect(app.mainArea().getByRole('heading')).toHaveText(['New Issue'])
-    await expect(app.page.getByRole('button', { name: /preview|write/i })).toHaveCount(0)
+    // 5: a task list's box is ticked where it shows, which is saved.
+    const boxes = description.locator('input[type="checkbox"]')
+    await expect(boxes).toHaveCount(2)
+    const checked = async () => [await boxes.nth(0).isChecked(), await boxes.nth(1).isChecked()]
+    expect(await checked()).toEqual([false, true])
+    await boxes.nth(0).click()
+    expect(await checked()).toEqual([true, true])
+    await expect.poll(() => savedDescription(app, id)).toContain('- [x] todo')
     expect(dialogs).toEqual([])
 
-    // 2: the description is as it was, also after starting again.
+    // 6: as saved, also after starting again.
+    const saved = savedDescription(app, id)
     await app.quit()
     await app.waitForExit()
-    expect(storedIssues(world.userData).find((issue) => issue.id === id)?.description).toBe(
-      DESCRIPTION,
-    )
     app = await launch()
     await openIssue(app, G, 'Markdown')
-    expect(await shownIssueId(app)).toBe(id)
-    await issuePage(app).getByTestId('issue-edit').click()
-    await expect(issuePage(app).getByTestId('issue-description-input')).toHaveValue(DESCRIPTION)
+    await expect(
+      issuePage(app).getByTestId('issue-description').locator('input[type="checkbox"]').first(),
+    ).toBeChecked()
+    expect(savedDescription(app, id)).toBe(saved)
+  })
+
+  test('is formatted as it is typed, and saved as Markdown', async ({ launch, world }) => {
+    const { G } = world.repos
+    const app = await launch({ projects: [G], issues: [{ root: G, title: 'Plan' }] })
+    const id = await openIssue(app, G, 'Plan')
+    const description = issuePage(app).getByTestId('issue-description')
+    await expect(description.locator('p').first()).toHaveAttribute(
+      'data-placeholder',
+      'Add description…',
+    )
+
+    await description.click()
+    await app.page.keyboard.type('# Steps')
+    await app.page.keyboard.press('Enter')
+    await app.page.keyboard.type('- one')
+    await app.page.keyboard.press('Enter')
+    await app.page.keyboard.type('two')
+    await app.page.keyboard.press('Enter')
+    await app.page.keyboard.press('Enter')
+    await app.page.keyboard.type('Done with ')
+    await expect(description.locator('h1')).toHaveText('Steps')
+    await expect(description.locator('ul > li')).toHaveText(['one', 'two'])
+
+    // ⌘B makes text bold here, and leaves the sidebar as it is.
+    await app.page.keyboard.press('Meta+b')
+    await app.page.keyboard.type('bold')
+    await expect(description.locator('strong')).toHaveText('bold')
+    await app.expectSidebar('expanded')
+
+    await description.blur()
+    await expectSaved(app, id, { description: '# Steps\n\n- one\n- two\n\nDone with **bold**' })
   })
 })

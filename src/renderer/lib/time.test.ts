@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dateTime, timeAgo } from './time'
+import { dateTime, shortDate, timeAgo } from './time'
 
 const now = new Date(2026, 9, 10, 22, 42, 30).getTime()
 const ago = (milliseconds: number) => timeAgo(now - milliseconds, now)
@@ -26,5 +26,13 @@ describe('dateTime', () => {
   it('gives the date and the time of day on the 24-hour clock, in plain characters', () => {
     expect(dateTime(now)).toBe('Oct 10, 2026, 22:42')
     expect(dateTime(new Date(2026, 0, 2, 9, 5).getTime())).toBe('Jan 2, 2026, 09:05')
+  })
+})
+
+describe('shortDate', () => {
+  it('gives the month and day in the year of now, and the year as well in another', () => {
+    expect(shortDate(new Date(2026, 0, 2, 9).getTime(), now)).toBe('Jan 2')
+    expect(shortDate(now, now)).toBe('Oct 10')
+    expect(shortDate(new Date(2025, 11, 31, 23).getTime(), now)).toBe('Dec 31, 2025')
   })
 })

@@ -64,6 +64,8 @@ export async function expectClaudeCodeButton(
 
 /** Points at the button, also while it is disabled, and returns what its tooltip says. */
 export async function claudeCodeTooltip(app: AppDriver): Promise<string> {
+  // Above the title: a long description typed at its end scrolls the page away from it.
+  await claudeCodeButton(app).scrollIntoViewIfNeeded()
   const box = await claudeCodeButton(app).boundingBox()
   if (!box) throw new Error('The issue page shows no Claude Code button')
   const tooltip = app.page.getByTestId('issue-claude-code-tooltip')

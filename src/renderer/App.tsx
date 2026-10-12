@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { CloseSessionDialog } from './components/close-session-dialog'
 import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
+import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
+import { NewIssueDialog } from './components/issues/new-issue-dialog'
 import { MainArea } from './components/main-area'
 import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
@@ -62,6 +64,8 @@ export function App() {
       <CloseSessionDialog />
       <NewWorktreeDialog />
       <DeleteWorktreeDialog />
+      <NewIssueDialog />
+      <DeleteIssueDialog />
       <QuitDialog />
       {/* Below the main area's top row, clear of its buttons and of the ended-session bar. */}
       <Toaster position="top-right" offset={{ top: 60, right: 16 }} />

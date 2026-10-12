@@ -1,5 +1,15 @@
 import type { AppDriver } from './support/app'
-import { clickProjectRow, expectList, expectShown, issueRow, shownIssueId } from './support/issues'
+import { storedIssues } from './support/database'
+import {
+  clickProjectRow,
+  expectList,
+  expectShown,
+  issuePage,
+  issueRow,
+  newIssueDialog,
+  openNewIssueDialog,
+  shownIssueId,
+} from './support/issues'
 import { expect, test, type Launch } from './support/test'
 import type { World } from './support/world'
 
@@ -74,7 +84,7 @@ test.describe('going back and forward among pages', () => {
     // 2: showing a page another way drops the pages gone back from.
     await app.backButton().click()
     await expectShown(app, `issue:${x}`)
-    await app.page.getByTestId('back-to-issues').click()
+    await app.page.getByTestId('issues-breadcrumb-list').click()
     await expectList(app, G)
     await expect(app.forwardButton()).toBeDisabled()
     await app.backButton().click()
@@ -162,31 +172,41 @@ test.describe('going back and forward among pages', () => {
     await expectNoWayBackOrForward(app)
   })
 
-  test('8: ⌘[ and ⌘] work in a text field, which they type nothing into', async ({
+  test('8: ⌘[ and ⌘] work in a text field and in an editor, which they type nothing into', async ({
     launch,
     world,
   }) => {
-    const { G } = world.repos
+    const { G, H } = world.repos
     const app = await start(launch, world)
-    await clickProjectRow(app, G)
-    await app.page.getByTestId('new-issue-button').click()
-    await expectShown(app, `new:${G}`)
-    const description = app.page.getByTestId('new-issue-description')
-    await description.click()
+    const x = await showIssue(app, G, 'X')
+    await clickProjectRow(app, H)
+    await expectList(app, H)
+
+    // In the new issue dialog's title: the dialog goes with the page, and keeps what was typed.
+    await openNewIssueDialog(app, H)
+    const title = app.page.getByTestId('new-issue-title')
     await app.page.keyboard.type('abc')
     await app.page.keyboard.press('Meta+BracketLeft')
-    await expectList(app, G)
+    await expectShown(app, `issue:${x}`)
+    await expect(newIssueDialog(app)).toBeHidden()
     await app.page.keyboard.press('Meta+BracketRight')
-    await expectShown(app, `new:${G}`)
-    await expect(description).toHaveValue('abc')
-    // Also with the keyboard focus in the field.
-    await description.focus()
+    await expectList(app, H)
+    await openNewIssueDialog(app, H)
+    await expect(title).toHaveValue('abc')
+    await app.page.keyboard.press('Escape')
+
+    // In an issue's description.
     await app.page.keyboard.press('Meta+BracketLeft')
-    await expectList(app, G)
+    await expectShown(app, `issue:${x}`)
+    const description = issuePage(app).getByTestId('issue-description')
+    await description.click()
     await app.page.keyboard.press('Meta+BracketRight')
-    await expectShown(app, `new:${G}`)
-    await expect(description).toHaveValue('abc')
-    await expect(app.page.getByTestId('new-issue-title')).toHaveValue('')
+    await expectList(app, H)
+    await app.page.keyboard.press('Meta+BracketLeft')
+    await expectShown(app, `issue:${x}`)
+    await app.page.waitForTimeout(500)
+    expect(storedIssues(world.userData).find(({ id }) => id === x)?.description).toBe('')
+    await expect(issuePage(app).getByTestId('issue-title')).toHaveValue('X')
   })
 
   test('9: the Window menu’s Back and Forward', async ({ launch, world }) => {

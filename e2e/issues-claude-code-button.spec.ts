@@ -12,28 +12,21 @@ import {
   sendShownIssue,
   terminalHasFocus,
 } from './support/claude-code'
-import { expectShown, goBack, issuePage, openIssue, setShownIssueState } from './support/issues'
+import {
+  editShownIssueTitle,
+  expectShown,
+  goBack,
+  issuePage,
+  openIssue,
+  setShownIssueDescription,
+  setShownIssueStatus,
+} from './support/issues'
 import type { AppDriver } from './support/app'
 import { quitSubstitute, readRuns, writeSubstitute } from './support/substitutes'
 import { expect, test } from './support/test'
 
 const INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code'
 const SHOW_HINT = 'Show the Claude Code session started from this issue'
-
-/** Changes the title or the description of the issue whose page is shown, with Edit and Save. */
-async function editShownIssue(
-  app: AppDriver,
-  changes: { title?: string; description?: string },
-): Promise<void> {
-  const page = issuePage(app)
-  await page.getByTestId('issue-edit').click()
-  if (changes.title !== undefined) await page.getByTestId('issue-title-input').fill(changes.title)
-  if (changes.description !== undefined) {
-    await page.getByTestId('issue-description-input').fill(changes.description)
-  }
-  await page.getByTestId('issue-save').click()
-  await expect(page).toHaveAttribute('data-editing', 'false')
-}
 
 /** Waits until the new session menu shows Claude Code as available or not installed. */
 async function expectClaudeCodeInMenu(
@@ -49,7 +42,7 @@ async function expectClaudeCodeInMenu(
 }
 
 test.describe('the Claude Code button of an issue', () => {
-  test('comes first among the actions of an open issue, with Claude Code’s icon, and only there', async ({
+  test('is the action above the title of an issue neither done nor canceled, with Claude Code’s icon, and only there', async ({
     launch,
     world,
   }) => {
@@ -64,14 +57,12 @@ test.describe('the Claude Code button of an issue', () => {
     })
     await openIssue(app, G, 'Alpha')
 
-    // First, before Edit, with the icon of Claude Code in the new session menu.
+    // Above the title, with the icon of Claude Code in the new session menu.
     await expectClaudeCodeButton(app, 'send', true)
-    await expect(issueActions(app)).toHaveText([
-      'Send to Claude Code',
-      'Edit',
-      'Close Issue',
-      'Delete',
-    ])
+    await expect(issueActions(app)).toHaveText(['Send to Claude Code'])
+    expect((await claudeCodeButton(app).boundingBox())!.y).toBeLessThan(
+      (await issuePage(app).getByTestId('issue-title').boundingBox())!.y,
+    )
     const icon = (locator: Locator) => locator.locator('svg').evaluate((svg) => svg.innerHTML)
     const buttonIcon = await icon(claudeCodeButton(app))
     await app.openToolMenu(G)
@@ -81,23 +72,21 @@ test.describe('the Claude Code button of an issue', () => {
     expect(await claudeCodeTooltip(app)).toBe(SEND_HINT)
     await app.expectEnglishUi()
 
-    // Not in the edit state.
-    await issuePage(app).getByTestId('issue-edit').click()
-    await expect(issuePage(app)).toHaveAttribute('data-editing', 'true')
-    await expect(claudeCodeButton(app)).toHaveCount(0)
-    await issuePage(app).getByTestId('issue-cancel-edit').click()
-    await expect(issueActions(app).first()).toHaveText('Send to Claude Code')
-    await expect(issueActions(app).nth(1)).toHaveText('Edit')
-
-    // Not on a closed issue's page, until it is reopened.
+    // Not on the page of an issue done or canceled, until it is reopened.
     await openIssue(app, G, 'Beta')
-    await expect(issuePage(app).getByTestId('issue-reopen')).toBeVisible()
+    await expect(issuePage(app).getByTestId('issue-status')).toHaveAttribute('data-status', 'done')
     await expect(claudeCodeButton(app)).toHaveCount(0)
-    await setShownIssueState(app, 'open')
-    await expectClaudeCodeButton(app, 'send', true)
-    await expect(issueActions(app).first()).toHaveText('Send to Claude Code')
-    await setShownIssueState(app, 'closed')
-    await expect(claudeCodeButton(app)).toHaveCount(0)
+    for (const [status, shown] of [
+      ['todo', true],
+      ['canceled', false],
+      ['backlog', true],
+      ['done', false],
+      ['in_progress', true],
+    ] as const) {
+      await setShownIssueStatus(app, status)
+      if (shown) await expectClaudeCodeButton(app, 'send', true)
+      else await expect(claudeCodeButton(app), status).toHaveCount(0)
+    }
   })
 
   test('shows the session an issue was sent to while it is in the sidebar, and only that one', async ({
@@ -151,7 +140,7 @@ test.describe('the Claude Code button of an issue', () => {
     await expect(app.sessionItemName(c1)).toHaveText('Renamed')
     await openIssue(app, G, 'Alpha')
     await expectClaudeCodeButton(app, 'show', true)
-    await editShownIssue(app, { title: 'Alpha 2' })
+    await editShownIssueTitle(app, 'Alpha 2')
     await expectClaudeCodeButton(app, 'show', true)
     await expect(app.sessionItemName(c1)).toHaveText('Renamed')
 
@@ -175,17 +164,17 @@ test.describe('the Claude Code button of an issue', () => {
     await expectShown(app, `issue:${alpha}`)
     await expectClaudeCodeButton(app, 'show', true)
 
-    // Closing the issue hides the button; reopening it brings it back as it was.
-    await setShownIssueState(app, 'closed')
+    // Done, the issue hides the button; reopened, it brings it back as it was.
+    await setShownIssueStatus(app, 'done')
     await expect(claudeCodeButton(app)).toHaveCount(0)
-    await setShownIssueState(app, 'open')
+    await setShownIssueStatus(app, 'todo')
     await expectClaudeCodeButton(app, 'show', true)
 
     // Nothing that keeps an issue from being sent keeps the button from showing its session.
     fs.rmSync(claude)
     await app.page.getByTestId('sidebar-redetect-tools').click()
     await expectClaudeCodeInMenu(app, G, 'Not installed')
-    await editShownIssue(app, { description: 'a'.repeat(100_001 - 'Alpha 2'.length) })
+    await setShownIssueDescription(app, 'a'.repeat(100_001 - 'Alpha 2'.length))
     await expectClaudeCodeButton(app, 'show', true)
     await claudeCodeButton(app).click()
     await expectShown(app, `session:${c2}`)
@@ -283,12 +272,12 @@ test.describe('the Claude Code button of an issue', () => {
     // 100,000 code units can be sent; one more cannot, until it is taken out again.
     await openIssue(app, G, 'U')
     await expectClaudeCodeButton(app, 'send', true)
-    await editShownIssue(app, { description: `${longest}a` })
+    await setShownIssueDescription(app, `${longest}a`)
     await expectClaudeCodeButton(app, 'send', false)
     expect(await claudeCodeTooltip(app)).toBe('This issue is too long to send. Shorten it first.')
     await clickClaudeCodeButton(app)
     await expect(app.sessionItems()).toHaveCount(0)
-    await editShownIssue(app, { description: longest })
+    await setShownIssueDescription(app, longest)
     await expectClaudeCodeButton(app, 'send', true)
 
     // And an issue that long reaches Claude Code whole.

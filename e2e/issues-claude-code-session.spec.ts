@@ -25,11 +25,14 @@ import {
   expectList,
   expectShown,
   goBack,
+  editShownIssueTitle,
   goForward,
   issueListPage,
   issuePage,
+  newIssueDialog,
   openIssue,
-  setShownIssueState,
+  openNewIssueDialog,
+  setShownIssueStatus,
 } from './support/issues'
 import { readRecord, readRuns, say, writeSubstitute } from './support/substitutes'
 import { expect, test } from './support/test'
@@ -373,14 +376,12 @@ test.describe('sending an issue to Claude Code', () => {
     await setTitle(app, c1, pid, '✳ Alpha')
     await expectName(app, c1, 'Alpha')
     await openIssue(app, G, 'Alpha')
-    await issuePage(app).getByTestId('issue-edit').click()
-    await issuePage(app).getByTestId('issue-title-input').fill('Alpha renamed')
-    await issuePage(app).getByTestId('issue-save').click()
-    await expect(issuePage(app).getByTestId('issue-title')).toHaveText('Alpha renamed')
+    await editShownIssueTitle(app, 'Alpha renamed')
+    await expect(issuePage(app).getByTestId('issue-title')).toHaveValue('Alpha renamed')
     await expectName(app, c1, 'Alpha')
 
-    // Closing and deleting the issue leave the session as it is.
-    await setShownIssueState(app, 'closed')
+    // Marking the issue done and deleting it leave the session as it is.
+    await setShownIssueStatus(app, 'done')
     await expect(app.sessionItem(c1)).toHaveAttribute('data-status', 'running')
     await expectName(app, c1, 'Alpha')
     await deleteShownIssue(app)
@@ -470,15 +471,14 @@ test.describe('sending an issue to Claude Code', () => {
     // The menu bar.
     expect(menuBarItems(await app.applicationMenu())).toEqual(MENU_BAR)
 
-    // No button on the issue list or the new issue page.
+    // No button on the issue list or in the new issue dialog.
     await clickProjectRow(app, G)
     await expectList(app, G)
     await expect(app.mainArea().getByText('Claude Code')).toHaveCount(0)
     await expect(app.mainArea().getByTestId('issue-claude-code')).toHaveCount(0)
-    await app.page.getByTestId('new-issue-button').click()
-    await expectShown(app, `new:${G}`)
-    await expect(app.mainArea().getByText('Claude Code')).toHaveCount(0)
-    await expect(app.mainArea().getByTestId('issue-claude-code')).toHaveCount(0)
+    await openNewIssueDialog(app, G)
+    await expect(newIssueDialog(app).getByText('Claude Code')).toHaveCount(0)
+    await expect(newIssueDialog(app).getByTestId('issue-claude-code')).toHaveCount(0)
   })
 })
 

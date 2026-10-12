@@ -1,8 +1,8 @@
 import { expect, type Locator } from '@playwright/test'
+import type { IssuePriority, IssueStatus, IssueView } from '../../src/shared/issues'
+import { PRIORITY_OPTIONS, STATUS_OPTIONS } from '../../src/renderer/lib/issue-properties'
 import type { AppDriver } from './app'
-
-/** A tab of the issue list: the open issues, or the done and canceled ones. */
-type IssueState = 'open' | 'closed'
+import { storedIssues } from './database'
 
 /** A project row's own button, which shows the project's issue list. */
 export function projectRowButton(app: AppDriver, root: string): Locator {
@@ -24,12 +24,12 @@ export function issueListPage(app: AppDriver): Locator {
   return app.page.getByTestId('issue-list-page')
 }
 
-export function newIssuePage(app: AppDriver): Locator {
-  return app.page.getByTestId('new-issue-page')
-}
-
 export function issuePage(app: AppDriver): Locator {
   return app.page.getByTestId('issue-page')
+}
+
+export function newIssueDialog(app: AppDriver): Locator {
+  return app.page.getByTestId('new-issue-dialog')
 }
 
 /** The title row of the Issues page shown. */
@@ -37,32 +37,44 @@ export function issuesTopRow(app: AppDriver): Locator {
   return app.page.getByTestId('issues-top-row')
 }
 
-export function issueTab(app: AppDriver, state: IssueState): Locator {
-  return app.page.getByTestId(`issues-tab-${state}`)
+/** The tab of a view of the issue list. */
+export function viewTab(app: AppDriver, view: IssueView): Locator {
+  return app.page.getByTestId(`issues-view-${view}`)
 }
 
-/** The number an Open or Closed tab of the issue list shows. */
-export async function tabCount(app: AppDriver, state: IssueState): Promise<number> {
-  return Number(await issueTab(app, state).getByTestId('issues-tab-count').textContent())
-}
-
-/** Which tab of the issue list is selected. */
-export async function selectedTab(app: AppDriver): Promise<IssueState | null> {
-  for (const state of ['open', 'closed'] as const) {
-    if ((await issueTab(app, state).getAttribute('aria-selected')) === 'true') return state
+/** Which view the issue list shows. */
+export async function selectedView(app: AppDriver): Promise<IssueView | null> {
+  for (const view of ['all', 'active', 'backlog'] as const) {
+    if ((await viewTab(app, view).getAttribute('aria-selected')) === 'true') return view
   }
   return null
 }
 
-/**
- * The titles of the issues the list shows, in order. Only those on screen:
- * the list of the tab selected before stays a moment while it fades out.
- */
-export async function listedTitles(app: AppDriver): Promise<string[]> {
+/** A status group of the issue list. */
+export function issueGroup(app: AppDriver, status: IssueStatus): Locator {
+  return issueListPage(app).locator(`[data-testid="issue-group"][data-status="${status}"]`)
+}
+
+/** The groups the issue list shows, in order: their statuses, counts, and the titles of their issues. */
+export async function listedGroups(
+  app: AppDriver,
+): Promise<Array<{ status: string; count: number; titles: string[] }>> {
   return issueListPage(app)
-    .getByTestId('issue-row-title')
-    .filter({ visible: true })
-    .allTextContents()
+    .getByTestId('issue-group')
+    .evaluateAll((groups) =>
+      groups.map((group) => ({
+        status: group.getAttribute('data-status') ?? '',
+        count: Number(group.querySelector('[data-testid="issue-group-count"]')?.textContent),
+        titles: Array.from(group.querySelectorAll('[data-testid="issue-row-title"]')).map(
+          (title) => title.textContent ?? '',
+        ),
+      })),
+    )
+}
+
+/** The titles of the issues the list shows, in order. */
+export async function listedTitles(app: AppDriver): Promise<string[]> {
+  return issueListPage(app).getByTestId('issue-row-title').allTextContents()
 }
 
 /** Waits until the list shows these issues, in this order. */
@@ -74,13 +86,12 @@ export async function expectListed(app: AppDriver, titles: string[]): Promise<vo
 export function issueRow(app: AppDriver, title: string): Locator {
   return issueListPage(app)
     .getByTestId('issue-row')
-    .filter({ visible: true })
     .filter({ has: app.page.getByTestId('issue-row-title').getByText(title, { exact: true }) })
 }
 
 /**
  * What the main area shows, in short: `session:<id>`, `list:<root>`,
- * `new:<root>`, `issue:<id>`, or `empty`.
+ * `issue:<id>`, or `empty`.
  */
 export async function shownPage(app: AppDriver): Promise<string> {
   return app.page.evaluate(() => {
@@ -90,7 +101,6 @@ export async function shownPage(app: AppDriver): Promise<string> {
     const session = find('session')
     if (session) return `session:${session.getAttribute('data-session-id')}`
     if (find('issue-list-page')) return `list:${project}`
-    if (find('new-issue-page')) return `new:${project}`
     const issue = find('issue-page')
     if (issue) return `issue:${issue.getAttribute('data-issue-id')}`
     if (find('no-session')) return 'empty'
@@ -103,10 +113,10 @@ export async function expectShown(app: AppDriver, page: string): Promise<void> {
   await expect.poll(() => shownPage(app)).toBe(page)
 }
 
-/** Waits until the main area shows a project's issue list, with its open or closed issues. */
-export async function expectList(app: AppDriver, root: string, state?: IssueState): Promise<void> {
+/** Waits until the main area shows a project's issue list, in one of its views. */
+export async function expectList(app: AppDriver, root: string, view?: IssueView): Promise<void> {
   await expectShown(app, `list:${root}`)
-  if (state) await expect.poll(() => selectedTab(app)).toBe(state)
+  if (view) await expect.poll(() => selectedView(app)).toBe(view)
 }
 
 /** The id of the issue whose page is shown. */
@@ -114,56 +124,180 @@ export async function shownIssueId(app: AppDriver): Promise<number> {
   return Number(await issuePage(app).getAttribute('data-issue-id'))
 }
 
+/** Shows a project's issue list by clicking its row, unless it is shown already. */
+export async function showList(app: AppDriver, root: string): Promise<void> {
+  if ((await shownPage(app)) !== `list:${root}`) await clickProjectRow(app, root)
+  await expectList(app, root)
+}
+
 /**
- * Creates an issue the way the tests' scenarios do: on the project's issue
- * list, shown by clicking its row unless it is shown already, "+ New Issue",
- * the title and description, then Create. Returns the new issue's id, once
- * its page is shown.
+ * Opens a project's new issue dialog from its issue list: with the list's New
+ * issue button, or with C.
+ */
+export async function openNewIssueDialog(
+  app: AppDriver,
+  root: string,
+  via: 'button' | 'key' = 'button',
+): Promise<void> {
+  await showList(app, root)
+  if (via === 'button') await app.page.getByTestId('new-issue-button').click()
+  else await app.page.keyboard.press('c')
+  await expect(newIssueDialog(app)).toBeVisible()
+  await expect(app.page.getByTestId('new-issue-title')).toBeFocused()
+}
+
+/** The label a picker or menu gives a status or a priority. */
+export function optionLabel(value: IssueStatus | IssuePriority): string {
+  const options = [...STATUS_OPTIONS, ...PRIORITY_OPTIONS] as Array<{
+    value: IssueStatus | IssuePriority
+    label: string
+  }>
+  return options.find((option) => option.value === value)!.label
+}
+
+/** The popup of the picker open now. */
+export function openPicker(app: AppDriver): Locator {
+  return app.page.locator('[data-slot="combobox-content"]:visible')
+}
+
+/** Opens a picker with its button, picks a value by clicking it, and waits until the picker is gone. */
+export async function pickWith(
+  app: AppDriver,
+  trigger: Locator,
+  value: IssueStatus | IssuePriority,
+): Promise<void> {
+  await trigger.click()
+  await expect(openPicker(app)).toBeVisible()
+  await openPicker(app).locator(`[role="option"][data-value="${value}"]`).click()
+  await expect(openPicker(app)).toHaveCount(0)
+}
+
+/** Types Markdown into a description's editor in place of what it has, as if pasted. */
+export async function fillDescription(editor: Locator, text: string): Promise<void> {
+  await editor.fill(text)
+}
+
+/**
+ * Creates an issue the way the tests' scenarios do: in the project's new
+ * issue dialog, opened from its issue list, with Create issue (or ⌘⌥ Enter
+ * with `open`). Returns the new issue's id, once the dialog is gone.
  */
 export async function createIssue(
   app: AppDriver,
   root: string,
   title: string,
-  description?: string,
+  options: {
+    description?: string
+    status?: IssueStatus
+    priority?: IssuePriority
+    open?: boolean
+  } = {},
 ): Promise<number> {
-  if ((await shownPage(app)) !== `list:${root}`) await clickProjectRow(app, root)
-  await expectList(app, root)
-  await app.page.getByTestId('new-issue-button').click()
-  await expect(newIssuePage(app)).toBeVisible()
+  const before = new Set(storedIssues(app.userData).map((issue) => issue.id))
+  await openNewIssueDialog(app, root)
   await app.page.getByTestId('new-issue-title').fill(title)
-  if (description !== undefined) {
-    await app.page.getByTestId('new-issue-description').fill(description)
+  if (options.description !== undefined) {
+    await fillDescription(app.page.getByTestId('new-issue-description'), options.description)
   }
-  await app.page.getByTestId('new-issue-create').click()
-  await expect(issuePage(app).getByTestId('issue-title')).toHaveText(title.trim())
-  return shownIssueId(app)
+  if (options.status !== undefined) {
+    await pickWith(app, app.page.getByTestId('new-issue-status'), options.status)
+  }
+  if (options.priority !== undefined) {
+    await pickWith(app, app.page.getByTestId('new-issue-priority'), options.priority)
+  }
+  if (options.open) {
+    await app.page.getByTestId('new-issue-title').press('Meta+Alt+Enter')
+  } else {
+    await app.page.getByTestId('new-issue-create').click()
+  }
+  await expect(newIssueDialog(app)).toBeHidden()
+  let id = 0
+  await expect
+    .poll(() => {
+      id = storedIssues(app.userData).find((issue) => !before.has(issue.id))?.id ?? 0
+      return id
+    })
+    .toBeGreaterThan(0)
+  if (options.open) await expectShown(app, `issue:${id}`)
+  return id
 }
 
-/** Shows a listed issue's page from its project's list, by its title. */
+/**
+ * Shows a listed issue's page from its project's list, by its title: in the
+ * list of all issues, its group expanded.
+ */
 export async function openIssue(app: AppDriver, root: string, title: string): Promise<number> {
-  if ((await shownPage(app)) !== `list:${root}`) await clickProjectRow(app, root)
-  await expectList(app, root)
-  for (const state of ['open', 'closed'] as const) {
-    if ((await issueRow(app, title).count()) > 0) break
-    await issueTab(app, state).click()
+  await showList(app, root)
+  if ((await selectedView(app)) !== 'all') await viewTab(app, 'all').click()
+  for (const group of await issueListPage(app).getByTestId('issue-group').all()) {
+    const toggle = group.getByTestId('issue-group-toggle')
+    if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
   }
   await issueRow(app, title).click()
   await expect(issuePage(app)).toBeVisible()
   return shownIssueId(app)
 }
 
-/** Closes or reopens the issue whose page is shown, and waits until its state says so. */
-export async function setShownIssueState(app: AppDriver, state: IssueState): Promise<void> {
-  await app.page.getByTestId(state === 'closed' ? 'issue-close' : 'issue-reopen').click()
-  await expect(issuePage(app).getByTestId('issue-state')).toHaveAttribute('data-state', state)
+/** Changes the status of the issue whose page is shown with its Status button. */
+export async function setShownIssueStatus(app: AppDriver, status: IssueStatus): Promise<void> {
+  const button = issuePage(app).getByTestId('issue-status')
+  await pickWith(app, button, status)
+  await expect(button).toHaveAttribute('data-status', status)
 }
 
-/** Deletes the issue whose page is shown, confirming, and waits until its list is shown. */
+/** Changes the priority of the issue whose page is shown with its Priority button. */
+export async function setShownIssuePriority(
+  app: AppDriver,
+  priority: IssuePriority,
+): Promise<void> {
+  const button = issuePage(app).getByTestId('issue-priority')
+  await pickWith(app, button, priority)
+  await expect(button).toHaveAttribute('data-priority', String(priority))
+}
+
+/** Waits until the database has an issue as the given fields say. */
+export async function expectSaved(
+  app: AppDriver,
+  id: number,
+  fields: Partial<ReturnType<typeof storedIssues>[number]>,
+): Promise<void> {
+  await expect
+    .poll(() => storedIssues(app.userData).find((issue) => issue.id === id))
+    .toMatchObject(fields)
+}
+
+/** Types a new title for the issue whose page is shown, leaves the field, and waits until it is saved. */
+export async function editShownIssueTitle(app: AppDriver, title: string): Promise<void> {
+  const id = await shownIssueId(app)
+  const field = issuePage(app).getByTestId('issue-title')
+  await field.fill(title)
+  await field.blur()
+  await expectSaved(app, id, { title: title.trim() })
+}
+
+/** Puts a description in place of the shown issue's, leaves the editor, and waits until it is saved. */
+export async function setShownIssueDescription(app: AppDriver, text: string): Promise<void> {
+  const id = await shownIssueId(app)
+  const editor = issuePage(app).getByTestId('issue-description')
+  await fillDescription(editor, text)
+  await editor.blur()
+  await expectSaved(app, id, { description: text })
+}
+
+/** Deletes the issue whose page is shown from its menu, confirming, and waits until its list is shown. */
 export async function deleteShownIssue(app: AppDriver): Promise<void> {
-  await app.page.getByTestId('issue-delete').click()
+  await issuePage(app).getByTestId('issue-menu-button').click()
+  await app.page.getByTestId('issue-menu-delete').click()
   await expect(app.page.getByTestId('delete-issue-dialog')).toBeVisible()
   await app.page.getByTestId('delete-issue-confirm').click()
   await expect(issueListPage(app)).toBeVisible()
+}
+
+/** Opens the context menu of a listed issue's row, once any menu before it has gone. */
+export async function openRowMenu(app: AppDriver, title: string): Promise<void> {
+  await expect(app.page.locator('[role="menu"]')).toHaveCount(0)
+  await issueRow(app, title).click({ button: 'right' })
+  await expect(app.page.getByTestId('issue-menu-status')).toBeVisible()
 }
 
 /** Goes back with the navigation's Back button. */

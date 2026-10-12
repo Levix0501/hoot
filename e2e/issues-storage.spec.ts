@@ -4,21 +4,21 @@ import {
   changeDatabase,
   databaseContents,
   databaseFile,
+  readDatabase,
   storedIssues,
   storedProjects,
   userVersionOf,
+  versionOneDatabase,
 } from './support/database'
 import {
+  clickProjectRow,
   createIssue,
   expectList,
-  expectListed,
-  issueTab,
-  openIssue,
-  selectedTab,
-  setShownIssueState,
-  tabCount,
-  clickProjectRow,
   issuePage,
+  issueRow,
+  listedGroups,
+  openIssue,
+  setShownIssueStatus,
 } from './support/issues'
 import { isAlive } from './support/processes'
 import { expect, test, type Launch } from './support/test'
@@ -43,11 +43,11 @@ test.describe('where issues are kept', () => {
     await expect(app.projectItems()).toHaveCount(1)
     await app.addProject(H)
     await expect(app.projectItems()).toHaveCount(2)
-    await createIssue(app, G, 'First', 'Body one')
+    await createIssue(app, G, 'First', { description: 'Body one' })
     await createIssue(app, G, 'Second')
-    await createIssue(app, G, 'Third')
+    await createIssue(app, G, 'Third', { status: 'todo', priority: 2 })
     await openIssue(app, G, 'Second')
-    await setShownIssueState(app, 'closed')
+    await setShownIssueStatus(app, 'done')
     await createIssue(app, H, 'Other')
     await app.quit()
     await app.waitForExit()
@@ -60,19 +60,19 @@ test.describe('where issues are kept', () => {
     app = await launch()
     expect(await app.projectRoots()).toEqual([G, H])
     await clickProjectRow(app, G)
-    await expectList(app, G, 'open')
-    expect([await tabCount(app, 'open'), await tabCount(app, 'closed')]).toEqual([2, 1])
-    await expectListed(app, ['Third', 'First'])
-    await issueTab(app, 'closed').click()
-    await expectListed(app, ['Second'])
+    await expectList(app, G, 'all')
+    expect(await listedGroups(app)).toEqual([
+      { status: 'todo', count: 1, titles: ['Third'] },
+      { status: 'backlog', count: 1, titles: ['First'] },
+      { status: 'done', count: 1, titles: ['Second'] },
+    ])
     await openIssue(app, G, 'Second')
-    await expect(issuePage(app).getByTestId('issue-state')).toHaveText('Closed')
+    await expect(issuePage(app).getByTestId('issue-status')).toHaveAttribute('data-status', 'done')
     await openIssue(app, G, 'First')
     await expect(issuePage(app).getByTestId('issue-description')).toHaveText('Body one')
     await clickProjectRow(app, H)
-    await expectList(app, H)
-    expect(await selectedTab(app)).toBe('open')
-    await expectListed(app, ['Other'])
+    await expectList(app, H, 'all')
+    expect(await listedGroups(app)).toEqual([{ status: 'backlog', count: 1, titles: ['Other'] }])
     await app.expectEnglishUi()
     await app.quit()
     await app.waitForExit()
@@ -81,11 +81,11 @@ test.describe('where issues are kept', () => {
     // 3: both observations hold the roots and the titles, with the same times.
     for (const observed of [before, after]) {
       expect(observed.projects.map((project) => project.root)).toEqual([G, H])
-      expect(observed.issues.map((issue) => issue.title)).toEqual([
-        'First',
-        'Second',
-        'Third',
-        'Other',
+      expect(observed.issues.map(({ title, number }) => [title, number])).toEqual([
+        ['First', 1],
+        ['Second', 2],
+        ['Third', 3],
+        ['Other', 1],
       ])
     }
     const times = (observed: typeof before) =>
@@ -101,6 +101,55 @@ test.describe('where issues are kept', () => {
     await expect(app.page.getByTestId('no-projects')).toBeVisible()
     await expect(app.projectItems()).toHaveCount(0)
     expect(fs.existsSync(databaseFile(other))).toBe(true)
+  })
+
+  test('a database of the first version is brought up to date: open issues are to do, closed ones done, numbered in the order they were created', async ({
+    launch,
+    world,
+  }) => {
+    const { G, H } = world.repos
+    versionOneDatabase(
+      world.userData,
+      [G, H],
+      [
+        { root: G, title: 'Open one', description: 'a' },
+        { root: H, title: 'Elsewhere' },
+        { root: G, title: 'Closed one', closed: true },
+        { root: G, title: 'Open two' },
+      ],
+    )
+    const before = storedIssuesOfVersionOne(world.userData)
+    const app = await launch()
+    await expect(app.projectItems()).toHaveCount(2)
+    expect(userVersionOf(databaseFile(world.userData))).toBe(2)
+    await clickProjectRow(app, G)
+    expect(await listedGroups(app)).toEqual([
+      { status: 'todo', count: 2, titles: ['Open two', 'Open one'] },
+      { status: 'done', count: 1, titles: ['Closed one'] },
+    ])
+    for (const [title, identifier] of [
+      ['Open one', 'G-1'],
+      ['Closed one', 'G-2'],
+      ['Open two', 'G-3'],
+    ]) {
+      await expect(issueRow(app, title).getByTestId('issue-row-identifier')).toHaveText(identifier)
+    }
+    expect(storedIssues(world.userData)).toEqual(
+      before.map((issue) => ({
+        id: issue.id,
+        project_id: issue.project_id,
+        number: { 'Open one': 1, Elsewhere: 1, 'Closed one': 2, 'Open two': 3 }[issue.title],
+        title: issue.title,
+        description: issue.description,
+        status: issue.state === 'open' ? 'todo' : 'done',
+        priority: 0,
+        created_at: issue.created_at,
+        completed_at: issue.closed_at,
+      })),
+    )
+    // The next issue gets the next number.
+    await createIssue(app, G, 'New')
+    await expect(issueRow(app, 'New').getByTestId('issue-row-identifier')).toHaveText('G-4')
   })
 
   test('projects.json is neither read nor changed', async ({ launch, world }) => {
@@ -122,12 +171,35 @@ test.describe('where issues are kept', () => {
   })
 })
 
+/** The issues of a database whose tables are at their first version, as it keeps them. */
+function storedIssuesOfVersionOne(userData: string) {
+  return readDatabase(databaseFile(userData), (db) =>
+    db
+      .prepare(
+        'SELECT id, project_id, title, description, state, created_at, closed_at FROM issues',
+      )
+      .all()
+      .map(
+        (row) =>
+          ({ ...row }) as {
+            id: number
+            project_id: number
+            title: string
+            description: string
+            state: string
+            created_at: number
+            closed_at: number | null
+          },
+      ),
+  )
+}
+
 /** Prepares a database the way the scenario says, by running Hoot once. */
 async function databaseWithAnIssue(launch: Launch, root: string): Promise<void> {
   const app = await launch()
   await app.addProject(root)
   await expect(app.projectItems()).toHaveCount(1)
-  await createIssue(app, root, 'Kept', 'Its description')
+  await createIssue(app, root, 'Kept', { description: 'Its description' })
   await app.quit()
   await app.waitForExit()
 }
@@ -145,7 +217,7 @@ test.describe('when the database cannot be opened', () => {
       'session',
       'no-session',
       'issue-list-page',
-      'new-issue-page',
+      'new-issue-dialog',
       'issue-page',
     ]) {
       await expect(page.getByTestId(testId)).toHaveCount(0)

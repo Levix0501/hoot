@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import type { IssuePriority, IssueStatus } from '../../src/shared/issues'
 import { databaseFile, openDatabase } from '../../src/main/database/database'
+import { MIGRATIONS } from '../../src/main/database/migrations'
 import { IssueStore } from '../../src/main/issues/issue-store'
 import { ProjectStore } from '../../src/main/projects/project-store'
 
@@ -64,6 +65,52 @@ export function addProjectsBeforeLaunch(
         status: issue.status ?? 'backlog',
         priority: issue.priority ?? 0,
       })
+      time += 1_000
+    }
+  } finally {
+    db.close()
+  }
+}
+
+/** An issue as the first version of Hoot's tables kept it: open or closed. */
+export interface VersionOneIssue {
+  root: string
+  title: string
+  description?: string
+  closed?: boolean
+}
+
+/**
+ * Writes the database of a user data directory as a Hoot whose tables were
+ * at their first version left it: projects in the list, in the order given,
+ * and their issues, created a second apart in the order given, the closed
+ * ones closed half a second after they were created.
+ */
+export function versionOneDatabase(
+  userData: string,
+  roots: readonly string[],
+  issues: readonly VersionOneIssue[],
+): void {
+  const db = openDatabase(databaseFile(userData), MIGRATIONS.slice(0, 1))
+  try {
+    const addProject = db.prepare('INSERT INTO projects (root, list_position) VALUES (?, ?)')
+    roots.forEach((root, index) => addProject.run(root, index + 1))
+    const projectOf = db.prepare('SELECT id FROM projects WHERE root = ?')
+    const addIssue = db.prepare(
+      `INSERT INTO issues (project_id, title, description, state, created_at, closed_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    let time = Date.now() - issues.length * 1_000
+    for (const issue of issues) {
+      const project = projectOf.get(issue.root) as { id: number }
+      addIssue.run(
+        project.id,
+        issue.title,
+        issue.description ?? '',
+        issue.closed ? 'closed' : 'open',
+        time,
+        issue.closed ? time + 500 : null,
+      )
       time += 1_000
     }
   } finally {

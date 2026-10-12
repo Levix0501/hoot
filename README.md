@@ -30,8 +30,8 @@ Hoot supports macOS only for now.
   directly in your login shell environment, with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session an issue is
   [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. Tools that
-  are not installed are shown disabled with an install command, and **Re-detect Tools** checks
-  again at any time.
+  are not installed are shown disabled with an install command, and **Re-detect Tools**, the last
+  item of the new session menu, checks again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
   expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the
@@ -51,19 +51,19 @@ Hoot supports macOS only for now.
   session closes, the next one in the sidebar is shown, or the previous one after the last; when
   it was the only one, the page shown before it, if any.
 - **Back and forward**: like a browser among pages, Hoot goes back and forward among the pages it
-  has shown, sessions and [Issues pages](#issues) alike, with the arrow buttons at the top left, ⌘[
-  and ⌘] (**Window > Back** and **Forward**). Showing a page another way drops the pages you went
-  back from. A page that is gone leaves the list: a session that closes, an issue that is deleted,
-  and the Issues pages of a removed project.
+  has shown, sessions, [Issues pages](#issues) and the [settings](#settings) alike, with the arrow
+  buttons at the top left, ⌘[ and ⌘] (**Window > Back** and **Forward**). Showing a page another
+  way drops the pages you went back from. A page that is gone leaves the list: a session that
+  closes, an issue that is deleted, and the Issues pages of a removed project.
   The list lasts until Hoot quits.
 - **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar (counting the sessions of
   collapsed projects too), ⌘⇧] and ⌘⇧[ (**Window > Select Next Session** and **Select Previous
   Session**) the next and previous one, ⌘[ and ⌘] go back and forward, ⌘W closes the shown
-  session, and ⌘B hides or shows the sidebar. They work while a terminal or a text field has the
-  focus and never reach the terminal's program or the field, whereas Ctrl+B reaches the program as
-  usual (in an issue's description, ⌘B makes text bold). On an Issues page, where no session is
-  shown, ⌘W closes nothing. Issues pages have [keys of their own](#issues). The window's close
-  button and ⌘Q quit Hoot.
+  session, ⌘B hides or shows the sidebar, and ⌘, shows the [settings](#settings). They work while a
+  terminal or a text field has the focus and never reach the terminal's program or the field,
+  whereas Ctrl+B reaches the program as usual (in an issue's description, ⌘B makes text bold). On
+  an Issues page, where no session is shown, ⌘W closes nothing. Issues pages have
+  [keys of their own](#issues). The window's close button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
   current Unicode widths. The shown terminal is drawn with WebGL, so block elements and box drawing
@@ -80,7 +80,26 @@ Hoot supports macOS only for now.
   traffic lights' place); drag the window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
   Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
   it.
-- The interface and the terminal follow the macOS light or dark appearance.
+
+## Settings
+
+**Settings** at the bottom of the sidebar, **Hoot > Settings…** or ⌘, shows the settings in place
+of the sidebar and the shown page: their list on the left, as wide as the sidebar, and their page
+on the right. Back and Forward stay at the top left, where the sidebar button gives way to a blank.
+**Back to app** at the top of the list, Esc (unless you are typing in a field or a dialog is open)
+and Back leave them, showing the page shown before them and the sidebar as you left it; the
+settings are a page among the others for going [back and forward](#features). When no page was shown before
+them, leaving them shows the empty page and takes them out of the list. While they are shown,
+sessions keep running, ⌘1 to ⌘9 and ⌘⇧] and ⌘⇧[ show sessions, **File > Add Project…** adds a
+project, and ⌘W and ⌘B do nothing. Changes apply at once; there is nothing to save.
+
+- **Appearance**: pick **System**, **Light** or **Dark**, each drawn as a small Hoot window. The
+  interface, every terminal (also of the sessions not shown), the window itself, and the menus,
+  dialogs and panels macOS draws for Hoot change to it at once. **System**, until you pick another,
+  follows the macOS light or dark appearance, also when macOS changes it while Hoot runs;
+  **Light** and **Dark** stay as they are whatever appearance macOS uses. Hoot opens in the
+  appearance picked from its first frame, also when it can only show that its database cannot be
+  opened. Click a card, or move to the cards with Tab and pick one with ← and →.
 
 ## Issues
 
@@ -293,7 +312,8 @@ pnpm check         # all of the above
 The end-to-end tests run each scenario in an isolated home directory with stand-in tool commands.
 They never start the real coding tools and never send prompts to a model. While they run they use
 the system clipboard (restoring its text afterwards) and keep the Hoot windows off screen, so they
-never cover or take focus from the apps you are working in.
+never cover or take focus from the apps you are working in. They stand in for the macOS appearance
+within Hoot alone, leaving your Mac's appearance setting as it is.
 
 ## Architecture
 
@@ -321,8 +341,8 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** and **Quit**, and Hoot leaves the file as it is.
-- The permission levels picked in the Agents menu, whether the sidebar is hidden, and which
-  projects in it are collapsed are in `settings.json`.
+- The permission levels picked in the Agents menu, whether the sidebar is hidden, which projects in
+  it are collapsed, and the appearance picked in the settings are in `settings.json`.
 
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.

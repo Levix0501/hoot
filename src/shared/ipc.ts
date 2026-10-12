@@ -1,4 +1,4 @@
-import type { Issue, IssueChanges, IssueResult, IssueState, NewIssue } from './issues'
+import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { SessionInfo } from './session'
 import type { ToolId } from './tools'
@@ -126,8 +126,8 @@ export const IpcChannel = {
   listIssues: 'issues:list',
   createIssue: 'issues:create',
   updateIssue: 'issues:update',
-  setIssueState: 'issues:set-state',
   deleteIssue: 'issues:delete',
+  writeClipboardText: 'clipboard:write-text',
   openExternalLink: 'links:open-external',
 } as const
 
@@ -220,11 +220,15 @@ export interface HootApi {
   /** The issues of a project in the list, in the order they were created. */
   listIssues(projectId: number): Promise<Issue[]>
   createIssue(issue: NewIssue): Promise<IssueResult>
+  /** Changes what `changes` gives of an issue, leaving the rest as it is. */
   updateIssue(id: number, changes: IssueChanges): Promise<IssueResult>
-  /** Closes an issue or opens it again. */
-  setIssueState(id: number, state: IssueState): Promise<IssueResult>
   /** Deletes an issue for good. */
   deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
+  /**
+   * Puts text on the clipboard. Through the main process, which can write it
+   * while the window does not have the focus.
+   */
+  writeClipboardText(text: string): void
   /** Opens an http or https address in the default browser; other addresses are ignored. */
   openExternalLink(url: string): void
 }

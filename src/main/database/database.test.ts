@@ -152,6 +152,101 @@ describe('openDatabase', () => {
   })
 })
 
+describe('migration 2', () => {
+  it('makes open issues to do and closed ones done, numbered in each project in the order they were created', () => {
+    const v1 = openDatabase(file, MIGRATIONS.slice(0, 1))
+    v1.exec(`
+      INSERT INTO projects (id, root, list_position) VALUES (1, '/work/g', 1), (2, '/work/h', NULL);
+      INSERT INTO issues (id, project_id, title, description, state, created_at, closed_at) VALUES
+        (1, 1, 'G open', 'Body', 'open', 100, NULL),
+        (2, 2, 'H closed', '', 'closed', 200, 250),
+        (3, 1, 'G deleted', '', 'open', 300, NULL),
+        (4, 1, 'G closed then reopened', '', 'open', 400, 450),
+        (5, 1, 'G closed', '', 'closed', 500, 550);
+      DELETE FROM issues WHERE id = 3;
+    `)
+    v1.close()
+
+    const db = openDatabase(file)
+    expect(userVersion(db)).toBe(2)
+    expect(db.prepare('SELECT * FROM issues ORDER BY id').all()).toEqual([
+      {
+        id: 1,
+        project_id: 1,
+        number: 1,
+        title: 'G open',
+        description: 'Body',
+        status: 'todo',
+        priority: 0,
+        created_at: 100,
+        completed_at: null,
+      },
+      {
+        id: 2,
+        project_id: 2,
+        number: 1,
+        title: 'H closed',
+        description: '',
+        status: 'done',
+        priority: 0,
+        created_at: 200,
+        completed_at: 250,
+      },
+      {
+        id: 4,
+        project_id: 1,
+        number: 2,
+        title: 'G closed then reopened',
+        description: '',
+        status: 'todo',
+        priority: 0,
+        created_at: 400,
+        completed_at: null,
+      },
+      {
+        id: 5,
+        project_id: 1,
+        number: 3,
+        title: 'G closed',
+        description: '',
+        status: 'done',
+        priority: 0,
+        created_at: 500,
+        completed_at: 550,
+      },
+    ])
+    expect(db.prepare('SELECT id, next_issue_number FROM projects ORDER BY id').all()).toEqual([
+      { id: 1, next_issue_number: 4 },
+      { id: 2, next_issue_number: 2 },
+    ])
+    // The ids of issues deleted before are not given again.
+    db.exec(`INSERT INTO issues (project_id, number, title, description, status, priority,
+      created_at) VALUES (1, 4, 'New', '', 'backlog', 0, 600)`)
+    expect(db.prepare("SELECT id FROM issues WHERE title = 'New'").get()).toEqual({ id: 6 })
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    db.close()
+  })
+
+  it('refuses a status or priority Hoot does not know, and a completion time that does not fit the status', () => {
+    const db = openDatabase(file)
+    db.exec("INSERT INTO projects (id, root, list_position) VALUES (1, '/work/g', 1)")
+    let number = 0
+    const insert = (status: string, priority: number, completedAt: number | null) =>
+      db
+        .prepare(
+          `INSERT INTO issues (project_id, number, title, description, status, priority,
+            created_at, completed_at) VALUES (1, ?, 'T', '', ?, ?, 0, ?)`,
+        )
+        .run(++number, status, priority, completedAt)
+    expect(() => insert('open', 0, null)).toThrow(/CHECK constraint/)
+    expect(() => insert('todo', 5, null)).toThrow(/CHECK constraint/)
+    expect(() => insert('todo', 0, 10)).toThrow(/CHECK constraint/)
+    expect(() => insert('done', 0, null)).toThrow(/CHECK constraint/)
+    expect(insert('done', 4, 10).changes).toBe(1)
+    db.close()
+  })
+})
+
 describe('migrate', () => {
   it('does nothing to a database at the latest version', () => {
     const db = new DatabaseSync(':memory:')

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import type { IssuePriority, IssueStatus } from '../../src/shared/issues'
 import { databaseFile, openDatabase } from '../../src/main/database/database'
 import { IssueStore } from '../../src/main/issues/issue-store'
 import { ProjectStore } from '../../src/main/projects/project-store'
@@ -16,11 +17,13 @@ export interface StoredProject {
 export interface StoredIssue {
   id: number
   project_id: number
+  number: number
   title: string
   description: string
-  state: string
+  status: string
+  priority: number
   created_at: number
-  closed_at: number | null
+  completed_at: number | null
 }
 
 /** An issue to have in a project before Hoot starts. */
@@ -29,15 +32,16 @@ export interface SeedIssue {
   root: string
   title: string
   description?: string
-  closed?: boolean
+  /** Backlog when left out. */
+  status?: IssueStatus
+  priority?: IssuePriority
 }
 
 /**
  * Puts projects in the list, and issues in them, before Hoot starts, as if
  * they had been added and created in it: with Hoot's own code, so that the
  * database is the one it makes. The issues are created a second apart, in
- * the order given, the last a second ago; a closed one is closed right after
- * it is created.
+ * the order given, the last a second ago, with the status they are given.
  */
 export function addProjectsBeforeLaunch(
   userData: string,
@@ -53,12 +57,13 @@ export function addProjectsBeforeLaunch(
     for (const issue of issues) {
       const project = projects.find(issue.root)
       if (!project) throw new Error(`${issue.root} is not in the list`)
-      const created = store.create({
+      store.create({
         projectId: project.id,
         title: issue.title,
         description: issue.description ?? '',
+        status: issue.status ?? 'backlog',
+        priority: issue.priority ?? 0,
       })
-      if (issue.closed) store.setState(created!.id, 'closed')
       time += 1_000
     }
   } finally {
@@ -108,7 +113,8 @@ export function storedIssues(userData: string): StoredIssue[] {
   return readDatabase(databaseFile(userData), (db) =>
     db
       .prepare(
-        'SELECT id, project_id, title, description, state, created_at, closed_at FROM issues ORDER BY id',
+        `SELECT id, project_id, number, title, description, status, priority, created_at,
+           completed_at FROM issues ORDER BY id`,
       )
       .all()
       .map((row) => ({ ...row }) as unknown as StoredIssue),

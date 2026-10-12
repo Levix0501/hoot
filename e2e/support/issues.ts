@@ -1,6 +1,8 @@
 import { expect, type Locator } from '@playwright/test'
-import type { IssueState } from '../../src/shared/issues'
 import type { AppDriver } from './app'
+
+/** A tab of the issue list: the open issues, or the done and canceled ones. */
+type IssueState = 'open' | 'closed'
 
 /** A project row's own button, which shows the project's issue list. */
 export function projectRowButton(app: AppDriver, root: string): Locator {

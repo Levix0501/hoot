@@ -31,7 +31,7 @@ test.describe('the project row', () => {
       issues: [
         { root: G, title: 'A' },
         { root: G, title: 'B' },
-        { root: G, title: 'C', closed: true },
+        { root: G, title: 'C', status: 'done' },
       ],
     })
     const s = await app.startSession(G, 'shell')
@@ -102,7 +102,7 @@ test.describe('removing and adding a project again', () => {
       projects: [G, H],
       issues: [
         { root: G, title: 'Open one', description: 'first' },
-        { root: G, title: 'Closed one', description: 'second', closed: true },
+        { root: G, title: 'Closed one', description: 'second', status: 'done' },
       ],
     })
 

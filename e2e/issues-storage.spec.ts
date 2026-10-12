@@ -89,9 +89,9 @@ test.describe('where issues are kept', () => {
       ])
     }
     const times = (observed: typeof before) =>
-      observed.issues.map(({ created_at, closed_at }) => [created_at, closed_at])
+      observed.issues.map(({ created_at, completed_at }) => [created_at, completed_at])
     expect(times(after)).toEqual(times(before))
-    expect(before.issues.find((issue) => issue.title === 'Second')?.closed_at).toEqual(
+    expect(before.issues.find((issue) => issue.title === 'Second')?.completed_at).toEqual(
       expect.any(Number),
     )
 

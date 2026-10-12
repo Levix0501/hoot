@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
-import type { Issue, IssueState } from '../../shared/issues'
+import { isIssueOpen, type Issue } from '../../shared/issues'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
 import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
@@ -62,6 +62,9 @@ export interface IssueDraft {
 
 export const emptyDraft: IssueDraft = { title: '', description: '' }
 
+/** The issues a project's list shows: those still open, or the done and canceled ones. */
+export type IssueListTab = 'open' | 'closed'
+
 /** The deletion of a worktree, from checking it until it is deleted or cancelled. */
 export interface WorktreeDeletion {
   projectRoot: string
@@ -95,7 +98,7 @@ export interface AppState {
   /** The issues of the projects in the list. */
   issues: Issue[]
   /** The issues each project's list showed last, by project id; open ones until then. */
-  issueListStates: Record<number, IssueState>
+  issueListStates: Record<number, IssueListTab>
   /** What is entered on each project's new issue page, by project id. */
   newIssueDrafts: Record<number, IssueDraft>
   /** The issues whose page is in the edit state, with what is entered, by issue id. */
@@ -140,7 +143,7 @@ export interface AppState {
   /** Shows a project's issue list, with the issues it showed last. */
   showIssueList(projectId: number): void
   /** Shows a project's open or closed issues in its list. */
-  setIssueListState(projectId: number, state: IssueState): void
+  setIssueListState(projectId: number, state: IssueListTab): void
   /** Shows a project's new issue page, with what was entered on it before. */
   showNewIssue(projectId: number): void
   showIssue(issueId: number): void
@@ -159,8 +162,8 @@ export interface AppState {
   saveIssueEdit(issueId: number): Promise<void>
   /** Ends an issue's edit state without saving. */
   cancelIssueEdit(issueId: number): void
-  /** Closes an issue or opens it again. */
-  setIssueState(issueId: number, state: IssueState): Promise<void>
+  /** Marks an issue done, or makes it to do again. */
+  setIssueState(issueId: number, state: IssueListTab): Promise<void>
   /** Deletes an issue for good, then shows its project's list instead of its page. */
   deleteIssue(issueId: number): Promise<void>
   /** Expands or collapses the sidebar, and saves its state. */
@@ -771,7 +774,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       const issue = findIssue(issueId)
       const project = state.projects.find((candidate) => candidate.id === issue?.projectId)
-      if (!issue || !project || issue.state !== 'open') return
+      if (!issue || !project || !isIssueOpen(issue)) return
       if (sendBlockers(state.tools, issue).length > 0) return
       addSession(project.root, 'claude', null, issue.id)
     },
@@ -899,7 +902,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       await once(`create:${projectId}`, async () => {
         const draft = get().newIssueDrafts[projectId] ?? emptyDraft
         const result = await api
-          .createIssue({ projectId, ...draft })
+          .createIssue({ projectId, ...draft, status: 'backlog', priority: 0 })
           .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
         if (!result.ok) {
           toast.error('Could not create the issue.', { description: result.message })
@@ -971,7 +974,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     async setIssueState(issueId, state) {
       await once(`issue:${issueId}`, async () => {
         const result = await api
-          .setIssueState(issueId, state)
+          .updateIssue(issueId, { status: state === 'closed' ? 'done' : 'todo' })
           .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
         if (!result.ok) {
           toast.error(

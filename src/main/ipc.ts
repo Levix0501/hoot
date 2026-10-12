@@ -21,7 +21,9 @@ import {
 } from '../shared/ipc'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
+  ISSUE_PRIORITIES,
   ISSUE_SEND_MAX_LENGTH,
+  ISSUE_STATUSES,
   ISSUE_TITLE_MAX_LENGTH,
   issueSendLength,
   type Issue,
@@ -91,15 +93,23 @@ const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
 const issueTitle = z.string().max(ISSUE_TITLE_MAX_LENGTH)
 const issueDescription = z.string().max(ISSUE_DESCRIPTION_MAX_LENGTH)
+const issueStatus = z.enum(ISSUE_STATUSES)
+const issuePriority = z.literal(ISSUE_PRIORITIES)
 const newIssue = z.object({
   projectId: rowId,
   title: issueTitle,
   description: issueDescription,
+  status: issueStatus,
+  priority: issuePriority,
 }) satisfies z.ZodType<NewIssue>
-const issueChanges = z.object({
-  title: issueTitle,
-  description: issueDescription,
+const issueChanges = z.strictObject({
+  title: issueTitle.optional(),
+  description: issueDescription.optional(),
+  status: issueStatus.optional(),
+  priority: issuePriority.optional(),
 }) satisfies z.ZodType<IssueChanges>
+/** The longest text put on the clipboard, which only ever gets an issue's identifier or title. */
+const clipboardText = z.string().max(ISSUE_TITLE_MAX_LENGTH)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -450,12 +460,6 @@ export function registerIpc(deps: IpcDependencies): void {
     return changeIssue(() => deps.issues.update(...parsed.data), noIssue)
   })
 
-  handle(IpcChannel.setIssueState, (_event, ...args): IssueResult => {
-    const parsed = z.tuple([rowId, z.enum(['open', 'closed'])]).safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
-    return changeIssue(() => deps.issues.setState(...parsed.data), noIssue)
-  })
-
   handle(IpcChannel.deleteIssue, (_event, value) => {
     const parsed = rowId.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
@@ -464,6 +468,11 @@ export function registerIpc(deps: IpcDependencies): void {
     } catch (error) {
       return { ok: false, message: errorMessage(error) }
     }
+  })
+
+  on(IpcChannel.writeClipboardText, (value) => {
+    const parsed = clipboardText.safeParse(value)
+    if (parsed.success) clipboard.writeText(parsed.data)
   })
 
   on(IpcChannel.openExternalLink, (value) => {

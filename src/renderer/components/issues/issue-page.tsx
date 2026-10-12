@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
   ISSUE_TITLE_MAX_LENGTH,
+  isIssueOpen,
   issueTitle,
   type Issue,
 } from '../../../shared/issues'
@@ -28,7 +29,7 @@ import { RelativeTime, useNow } from './relative-time'
 
 /** Open or Closed, the way GitHub shows it. */
 function StateBadge({ issue }: { issue: Issue }) {
-  const open = issue.state === 'open'
+  const open = isIssueOpen(issue)
   return (
     <Badge
       className={
@@ -37,7 +38,7 @@ function StateBadge({ issue }: { issue: Issue }) {
           : 'bg-violet-600 text-white dark:bg-violet-700'
       }
       data-testid="issue-state"
-      data-state={issue.state}
+      data-state={open ? 'open' : 'closed'}
     >
       {open ? <CircleDotIcon /> : <CircleCheckIcon />}
       {open ? 'Open' : 'Closed'}
@@ -162,7 +163,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
                 key="actions"
                 data-testid="issue-actions"
               >
-                {issue.state === 'open' && <ClaudeCodeButton issue={issue} />}
+                {isIssueOpen(issue) && <ClaudeCodeButton issue={issue} />}
                 <Button
                   variant="outline"
                   size="sm"
@@ -172,7 +173,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
                   <PencilIcon />
                   Edit
                 </Button>
-                {issue.state === 'open' ? (
+                {isIssueOpen(issue) ? (
                   <Button
                     variant="outline"
                     size="sm"

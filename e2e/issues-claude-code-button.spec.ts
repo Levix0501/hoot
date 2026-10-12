@@ -59,7 +59,7 @@ test.describe('the Claude Code button of an issue', () => {
       projects: [G, H],
       issues: [
         { root: G, title: 'Alpha' },
-        { root: G, title: 'Beta', closed: true },
+        { root: G, title: 'Beta', status: 'done' },
       ],
     })
     await openIssue(app, G, 'Alpha')

@@ -6,6 +6,7 @@ import {
   Trash2Icon,
 } from 'lucide-react'
 import type { Project } from '../../shared/ipc'
+import { isIssueOpen } from '../../shared/issues'
 import type { ToolId } from '../../shared/tools'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
@@ -63,8 +64,7 @@ export function ProjectItem({ project }: { project: Project }) {
   const showIssueList = useAppStore((state) => state.showIssueList)
   const openIssues = useAppStore(
     (state) =>
-      state.issues.filter((issue) => issue.projectId === project.id && issue.state === 'open')
-        .length,
+      state.issues.filter((issue) => issue.projectId === project.id && isIssueOpen(issue)).length,
   )
   const selected = useAppStore(
     (state) => isIssuesPage(state.currentPage) && state.currentPage.projectId === project.id,

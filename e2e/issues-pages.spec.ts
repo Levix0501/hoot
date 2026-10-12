@@ -170,7 +170,7 @@ test.describe('the new issue page', () => {
     expect(storedIssues(world.userData).find((issue) => issue.id === id)).toMatchObject({
       title: 'Restore sessions',
       description: entered,
-      state: 'open',
+      status: 'backlog',
     })
 
     // 4: the new issue page has left the history.
@@ -372,7 +372,7 @@ test.describe('deleting an issue', () => {
     let app = await launch({
       projects: [G],
       issues: [
-        { root: G, title: 'Doomed', closed: true },
+        { root: G, title: 'Doomed', status: 'done' },
         { root: G, title: 'Kept' },
       ],
     })

@@ -1,4 +1,5 @@
 import type { AppDriver } from './support/app'
+import type { SeedIssue } from './support/database'
 import {
   clickProjectRow,
   expectList,
@@ -33,10 +34,10 @@ async function setSidebar(app: AppDriver, state: SidebarState): Promise<void> {
 const center = (box: Box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 })
 
 /** Issues enough to fill more than the smallest window, and one with a long description. */
-function manyIssues(root: string) {
+function manyIssues(root: string): SeedIssue[] {
   return [
     ...Array.from({ length: 14 }, (_, index) => ({ root, title: `Issue ${index + 1}` })),
-    { root, title: 'Done', closed: true },
+    { root, title: 'Done', status: 'done' },
     {
       root,
       title: 'Alpha',

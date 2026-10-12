@@ -1,14 +1,14 @@
 import { CircleCheckIcon, CircleDotIcon, PlusIcon } from 'lucide-react'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { issuesInState, type Issue, type IssueState } from '../../../shared/issues'
-import { useAppStore } from '../../store/app-store'
+import { isIssueOpen, type Issue } from '../../../shared/issues'
+import { useAppStore, type IssueListTab } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { IssuesTopRow, ProjectName } from './issues-top-row'
 import { RelativeTime, useNow } from './relative-time'
 
-const STATES: ReadonlyArray<{ state: IssueState; label: string }> = [
+const STATES: ReadonlyArray<{ state: IssueListTab; label: string }> = [
   { state: 'open', label: 'Open' },
   { state: 'closed', label: 'Closed' },
 ]
@@ -16,7 +16,7 @@ const STATES: ReadonlyArray<{ state: IssueState; label: string }> = [
 /** An issue in the list: its title, and when an open one was opened. Click it to show its page. */
 function IssueRow({ issue, now }: { issue: Issue; now: number }) {
   const showIssue = useAppStore((state) => state.showIssue)
-  const open = issue.state === 'open'
+  const open = isIssueOpen(issue)
   return (
     <li className="border-b last:border-b-0">
       <button
@@ -25,7 +25,7 @@ function IssueRow({ issue, now }: { issue: Issue; now: number }) {
         onClick={() => showIssue(issue.id)}
         data-testid="issue-row"
         data-issue-id={issue.id}
-        data-state={issue.state}
+        data-state={open ? 'open' : 'closed'}
       >
         {open ? (
           <CircleDotIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-500" />
@@ -60,7 +60,12 @@ export function IssueListPage({ projectId }: { projectId: number }) {
     useShallow((state) => state.issues.filter((issue) => issue.projectId === projectId)),
   )
   const lists = useMemo(
-    () => ({ open: issuesInState(issues, 'open'), closed: issuesInState(issues, 'closed') }),
+    () => ({
+      open: issues.filter(isIssueOpen).toSorted((a, b) => b.createdAt - a.createdAt || b.id - a.id),
+      closed: issues
+        .filter((issue) => !isIssueOpen(issue))
+        .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0) || b.id - a.id),
+    }),
     [issues],
   )
   const now = useNow()
@@ -88,7 +93,7 @@ export function IssueListPage({ projectId }: { projectId: number }) {
       <div className="min-h-0 flex-1 overflow-y-auto" data-testid="issues-scroll">
         <Tabs
           value={shown}
-          onValueChange={(value) => setIssueListState(projectId, value as IssueState)}
+          onValueChange={(value) => setIssueListState(projectId, value as IssueListTab)}
           className="mx-auto w-full max-w-3xl gap-3 px-6 pt-2 pb-6"
         >
           <TabsList aria-label="Issues to show">

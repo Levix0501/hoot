@@ -436,8 +436,8 @@ export async function startWorktreeSession(
   tool: ToolId,
   options: { from?: 'button' | 'context-menu' } = {},
 ): Promise<string> {
-  const before = new Set(await app.sessionIds())
-  const started = async () => (await app.sessionIds()).find((id) => !before.has(id))
+  const before = await app.knownSessionIds()
+  const started = () => app.startedSessionId(before)
   await expect(async () => {
     if (!(await started())) {
       if (!(await app.toolItem(tool).isVisible())) {

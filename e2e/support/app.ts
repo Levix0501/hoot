@@ -342,8 +342,8 @@ export class AppDriver {
     tool: ToolId,
     options: { waitFor?: SessionStart; from?: 'button' | 'context-menu' } = {},
   ): Promise<string> {
-    const before = new Set(await this.sessionIds())
-    const started = async () => (await this.sessionIds()).find((id) => !before.has(id))
+    const before = await this.knownSessionIds()
+    const started = () => this.startedSessionId(before)
     // Retried in case the menu closes before the click lands.
     await expect(async () => {
       if (!(await started())) {
@@ -365,6 +365,25 @@ export class AppDriver {
         .toMatch(/^(running|exited|closed)$/)
     }
     return id
+  }
+
+  /**
+   * The ids of the sessions the sidebar lists, and of the one shown. A
+   * collapsed project lists none of its sessions.
+   */
+  async knownSessionIds(): Promise<ReadonlySet<string>> {
+    const current = await this.currentSessionId()
+    return new Set([...(await this.sessionIds()), ...(current === null ? [] : [current])])
+  }
+
+  /**
+   * The id of a session started since `known` was read: the one shown, as a
+   * new session is at once, or else one the sidebar lists now.
+   */
+  async startedSessionId(known: ReadonlySet<string>): Promise<string | undefined> {
+    const current = await this.currentSessionId()
+    if (current !== null && !known.has(current)) return current
+    return (await this.sessionIds()).find((id) => !known.has(id))
   }
 
   /** The id of the current session, or `null` when there is none. */

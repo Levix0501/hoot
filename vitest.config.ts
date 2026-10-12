@@ -5,5 +5,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     environment: 'node',
     testTimeout: 30_000,
+    // As long for the hooks, which build Git repositories for the worktree tests.
+    hookTimeout: 30_000,
   },
 })

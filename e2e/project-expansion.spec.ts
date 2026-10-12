@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { AppDriver } from './support/app'
 import { clickIssuesButton, expectList, expectShown, projectRowButton } from './support/issues'
+import { boxOf } from './support/layout'
+import { sameColor } from './support/pixels'
 import {
   blur,
   clickProjectRow,
@@ -359,4 +361,38 @@ test('the keyboard expands and collapses a project from its row, as a click does
   await expectProject(app, G, true, [`session:${s}`])
   await blur(app)
   await expectShown(app, `session:${s}`)
+})
+
+test('the rows below a project are cut off only above and below: a session’s close button shows whole, with its focus ring', async ({
+  launch,
+  world,
+}) => {
+  const { G } = world.repos
+  const app = await launch({ projects: [G], deviceScaleFactor: 1 })
+  const s = await app.startSession(G, 'shell')
+  const W = await createWorktree(app, G, 'feature-x')
+  const w = await startWorktreeSession(app, W, 'shell')
+  for (const id of [s, w]) await app.waitForPrompt(20_000, id)
+  await movePointerAway(app)
+  await app.settle()
+
+  // In G's main worktree and in its worktree: the close button reaches a pixel
+  // past the right side of the rows, and its focus ring further.
+  for (const id of [s, w]) {
+    await app.sessionItem(id).getByTestId('session-item-button').focus()
+    await app.page.keyboard.press('Tab')
+    const close = app.sessionItem(id).getByTestId('session-item-close')
+    await expect(close).toBeFocused()
+    const box = await boxOf(close)
+    const screenshot = await app.screenshot()
+    const y = Math.round((box.top + box.bottom) / 2)
+    const ring = {
+      left: screenshot.pixel(Math.round(box.left) - 1, y),
+      right: screenshot.pixel(Math.round(box.right), y),
+      beyond: screenshot.pixel(Math.round(box.right) + 4, y),
+    }
+    const report = JSON.stringify({ id, box, ring })
+    expect(sameColor(ring.right, ring.left), report).toBe(true)
+    expect(sameColor(ring.right, ring.beyond), report).toBe(false)
+  }
 })

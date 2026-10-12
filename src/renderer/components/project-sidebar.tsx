@@ -108,9 +108,14 @@ function ProjectEntry({ project }: { project: Project }) {
       data-project-root={project.root}
     >
       <ProjectItem project={project} expanded={expanded} />
+      {/*
+        Cut off only above and below, where the rows slide: at the sides
+        they show whole, as a session's close button, which reaches a pixel
+        past the right side, and its focus ring do.
+      */}
       <CollapsibleContent
         render={<ul />}
-        className="flex h-(--collapsible-panel-height) min-w-0 flex-col overflow-hidden transition-[height] duration-200 ease-linear data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0"
+        className="flex h-(--collapsible-panel-height) min-w-0 flex-col overflow-y-clip transition-[height] duration-200 ease-linear data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0"
         data-testid="project-rows"
       >
         <ProjectSessions project={project} />

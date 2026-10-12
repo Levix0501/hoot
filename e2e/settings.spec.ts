@@ -1,6 +1,6 @@
 import path from 'node:path'
 import type { AppDriver } from './support/app'
-import { clickIssuesButton, expectList } from './support/issues'
+import { clickIssuesButton, createIssue, expectList, expectShown } from './support/issues'
 import {
   blankPointsOutsideDragArea,
   boxOf,
@@ -366,6 +366,15 @@ test('the settings are a page among the pages shown; session keys and commands w
   await expectSettingsShown(app)
   await backToApp(app).click()
   await expectSessionFocused(app, s1)
+  // Also with the pointer on Back, whose tooltip shows: Esc goes back, not only closes the tooltip.
+  await app.page.keyboard.press('Meta+BracketRight')
+  await expectSettingsShown(app)
+  const { x, y } = center(await boxOf(back))
+  await app.page.mouse.move(x, y)
+  await expect(app.page.locator('[data-slot="tooltip-content"][data-open]')).toContainText('Back')
+  await app.page.keyboard.press('Escape')
+  await expectSessionFocused(app, s1)
+  await app.page.mouse.move(600, 760)
 
   // 4: showing them again while they are shown records nothing.
   await pressSettingsShortcut(app)
@@ -481,6 +490,20 @@ test('pages gone from before the settings leave them in place', async ({ launch,
   await expectSessionFocused(app, s1)
   await app.forwardButton().click()
   await expectSettingsShown(app)
+})
+
+test('the Esc that leaves the settings for an issue’s page stays with the settings', async ({
+  launch,
+  world,
+}) => {
+  const app = await launch({ projects: [world.repos.G] })
+  const issue = await createIssue(app, world.repos.G, 'Alpha', { open: true })
+  await pressSettingsShortcut(app)
+  await app.page.keyboard.press('Escape')
+  await expectAppShown(app)
+  // Esc on an issue's page shows its list, but not with this key press.
+  await app.page.waitForTimeout(300)
+  await expectShown(app, `issue:${issue}`)
 })
 
 test('with nothing before them, the settings give way to the empty page and leave the history', async ({

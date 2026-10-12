@@ -34,11 +34,14 @@ function useEscapeLeavesSettings(): void {
       if (event.key !== 'Escape' || event.isComposing) return
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
       if (focusInField() || overlayOpen()) return
+      // Handled, so that the page shown next leaves this Esc alone.
       event.preventDefault()
       leaveSettings()
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    // In the capture phase: an open tooltip, such as Back's while the pointer
+    // is on it, closes on Esc and stops the key from going any further.
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [leaveSettings])
 }
 

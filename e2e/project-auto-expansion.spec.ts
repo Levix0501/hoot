@@ -1,6 +1,7 @@
 import type { AppDriver } from './support/app'
 import { expectShown } from './support/issues'
 import { isExpanded, movePointerAway, rowsShownBelow, setExpanded } from './support/projects'
+import { backToApp, pressSettingsShortcut } from './support/settings'
 import { expect, test, type Launch } from './support/test'
 import type { World } from './support/world'
 import {
@@ -183,5 +184,26 @@ test.describe('a collapsed project expands when one of its sessions becomes the 
     await movePointerAway(app)
     await expect.poll(() => isExpanded(app, G)).toBe(true)
     await expect(worktreeNamed(app, G, 'y-from-context-menu')).toBeVisible()
+  })
+
+  test('also when the settings give way to it', async ({ launch, world }) => {
+    const sc = await scenario(launch, world)
+    const { app, G, s1 } = sc
+
+    // Back to app, Esc and Back leave the settings for S1, shown before them;
+    // ⌘1 and Select Next Session show S1 from the settings.
+    for (const leave of [
+      () => backToApp(app).click(),
+      () => app.page.keyboard.press('Escape'),
+      () => app.backButton().click(),
+      () => app.page.keyboard.press('Meta+1'),
+      () => app.chooseMenuItem('Window', 'Select Next Session'),
+    ]) {
+      await app.selectSession(s1)
+      await setExpanded(app, G, false)
+      await pressSettingsShortcut(app)
+      await leave()
+      await expectCurrentInG(sc, s1)
+    }
   })
 })

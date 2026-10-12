@@ -177,6 +177,28 @@ test.describe('a project’s row', () => {
       await movePointerAway(app)
       await expect.poll(() => shownButtons(app, G)).toEqual([])
 
+      // 2, at the edges of G's row, with H's row right below it: on G's row along its
+      // bottom edge, below each button, G's buttons show and H's do not, and a click
+      // there collapses G; just right of G's row, none of them show.
+      const gRow = await boxOf(app.projectItem(G))
+      expect(await boxOf(app.projectItem(H))).toMatchObject({ top: gRow.bottom })
+      for (const name of ALL_BUTTONS) {
+        const box = await boxOf(buttons[name]!)
+        await app.page.mouse.move((box.left + box.right) / 2, gRow.bottom - 1)
+        await expect.poll(() => shownButtons(app, G), name).toEqual(ALL_BUTTONS)
+        expect(await shownButtons(app, H), name).toEqual([])
+      }
+      await app.page.mouse.down()
+      await app.page.mouse.up()
+      await expect.poll(() => isExpanded(app, G)).toBe(false)
+      await expect(app.page.locator('[role="menu"]')).toHaveCount(0)
+      await setExpanded(app, G, true)
+      await blur(app)
+      await app.page.mouse.move(gRow.right + 2, (gRow.top + gRow.bottom) / 2)
+      await app.page.waitForTimeout(100)
+      expect(await shownButtons(app, G)).toEqual([])
+      await movePointerAway(app)
+
       // 3: while the keyboard focus is in the row; Issues takes it, and Enter or Space presses it.
       for (const key of ['Enter', 'Space']) {
         await app.selectSession(s)

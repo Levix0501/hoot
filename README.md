@@ -25,9 +25,10 @@ Hoot supports macOS only for now.
   again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar, in the order they
-  started, with the tool's icon, the session's name and its state: a green dot while it runs, or how
-  it ended. Click a session to show it; the keyboard focus goes to its terminal. Sessions that are
-  not shown keep running, and their output is all there when you come back to them.
+  started, with the tool's icon (for Claude Code, its own mark), the session's name and its state:
+  a green dot while it runs, or how it ended. Click a session to show it; the keyboard focus goes
+  to its terminal. Sessions that are not shown keep running, and their output is all there when you
+  come back to them.
 - **Names**: a session is named after the title its program gives the terminal (without the ✳, ◐
   or ◑ that Claude Code puts first), or after its tool until there is one. Double-click a session,
   or choose **Rename** from its context menu, to name it yourself: Enter saves, Esc cancels, and an
@@ -312,3 +313,13 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
 
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.
+
+Icons come from [lucide](https://lucide.dev), except brand marks, which Hoot keeps as SVG files of
+its own in `src/renderer/assets/brand-icons`: Claude Code's is copied from Anthropic's Claude Code
+extension for VS Code, with its color replaced by the color of the text around it.
+
+## License
+
+Hoot is released under the MIT License. The Claude Code icon
+(`src/renderer/assets/brand-icons/claude-code.svg`) is a trademark of Anthropic and is not covered
+by Hoot's MIT License.

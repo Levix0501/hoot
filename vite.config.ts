@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import electron from 'vite-plugin-electron'
+import svgr from 'vite-plugin-svgr'
 
 export default defineConfig({
   resolve: {
@@ -14,6 +15,9 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    // `*.svg?react` imports an SVG file as a React component, whose `title`
+    // prop replaces the file's own title, or leaves it out when empty.
+    svgr({ svgrOptions: { titleProp: true } }),
     electron([
       {
         entry: 'src/main/index.ts',

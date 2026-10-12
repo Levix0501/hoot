@@ -45,11 +45,20 @@ export function say(records: string, command: string, pid: number, text: string)
 }
 
 /**
+ * Makes a running substitute exit with code 0, as a tool does when the user
+ * quits it. The substitute is the run with this pid, see `readRuns`.
+ */
+export function quitSubstitute(pid: number): void {
+  process.kill(pid, 'SIGUSR2')
+}
+
+/**
  * Writes an executable stand-in for a tool command. Every execution appends
  * its arguments and pid to a run log in `records`. It also records the
  * arguments, working directory, environment and terminal size it received
  * (recording the size again whenever it changes), prints a line, and then
- * behaves as `behavior` says. One that stays prints what `say` gives it.
+ * behaves as `behavior` says. One that stays prints what `say` gives it, and
+ * exits with code 0 when `quitSubstitute` tells it to.
  */
 export function writeSubstitute(
   directory: string,
@@ -62,6 +71,7 @@ export function writeSubstitute(
   const runsFile = path.join(records, `${command}.runs.jsonl`)
   const ending = {
     stay: `process.stdout.write('substitute ${command} started\\r\\n')
+process.on('SIGUSR2', () => process.exit(0))
 const sayFile = ${JSON.stringify(sayFilePrefix(records, command))} + process.pid + '.say'
 let said = 0
 setInterval(() => {
@@ -92,10 +102,13 @@ const record = {
   pid: process.pid,
   size: [process.stdout.columns, process.stdout.rows],
 }
-// Replaced in one step so that a reader never sees a partly written record.
+// Replaced in one step so that a reader never sees a partly written record,
+// through a file of this run's own, which another run saving at the same time
+// cannot take away.
+const temporary = ${JSON.stringify(recordFile)} + '.' + process.pid + '.tmp'
 const save = () => {
-  fs.writeFileSync(${JSON.stringify(`${recordFile}.tmp`)}, JSON.stringify(record))
-  fs.renameSync(${JSON.stringify(`${recordFile}.tmp`)}, ${JSON.stringify(recordFile)})
+  fs.writeFileSync(temporary, JSON.stringify(record))
+  fs.renameSync(temporary, ${JSON.stringify(recordFile)})
 }
 save()
 process.stdout.on('resize', () => {

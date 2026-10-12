@@ -24,12 +24,6 @@
   },
   "overrides": [
     {
-      "files": ["e2e/**"],
-      "rules": {
-        "unicorn/consistent-function-scoping": "off"
-      }
-    },
-    {
       "files": ["src/renderer/components/ui/**"],
       "rules": {
         "eslint/no-shadow": "off",

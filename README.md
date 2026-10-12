@@ -305,15 +305,13 @@ pnpm typecheck     # TypeScript 7 (tsc)
 pnpm lint          # oxlint
 pnpm format:check  # oxfmt
 pnpm test          # Vitest unit tests
-pnpm test:e2e      # builds, then runs the Playwright end-to-end tests against Electron
 pnpm check         # all of the above
 ```
 
-The end-to-end tests run each scenario in an isolated home directory with stand-in tool commands.
-They never start the real coding tools and never send prompts to a model. While they run they use
-the system clipboard (restoring its text afterwards) and keep the Hoot windows off screen, so they
-never cover or take focus from the apps you are working in. They stand in for the macOS appearance
-within Hoot alone, leaving your Mac's appearance setting as it is.
+To check a change in the running app, drive the built app with Playwright's Electron support
+(`_electron.launch`). Give it a temporary `--user-data-dir` so that it keeps its own projects,
+issues and settings, and `--background` so that its window stays off screen. With `--test-hooks`
+the page also exposes the sessions' terminals as `window.hootTestHooks`.
 
 ## Architecture
 

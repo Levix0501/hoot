@@ -104,9 +104,9 @@ works, as an issue, and come back to it later. Issues are kept on your Mac, in
   session is in the sidebar, the button is **Show Claude Code Session** and shows it; once the
   session is closed, the button sends the issue again. The button cannot be used while Hoot is
   still checking whether Claude Code is installed, when it is not installed, or when the issue's
-  title and description are longer than 100,000 characters together, since the issue reaches
-  Claude Code in its command's arguments; its tooltip says why. NUL characters are left out of
-  what is sent.
+  title and description are longer than 100,000 characters together (counted in UTF-16 code
+  units, in which most emoji count as two), since the issue reaches Claude Code in its command's
+  arguments; its tooltip says why. NUL characters are left out of what is sent.
 - **Drafts**: what you enter on a new issue page, or while editing an issue, stays while other
   pages are shown, until you create, save or cancel, remove the project, or quit Hoot. Quitting
   does not ask about drafts.

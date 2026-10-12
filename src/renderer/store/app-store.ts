@@ -440,6 +440,16 @@ export function focusAfterOverlay(): HTMLElement | boolean {
   return getSessionTerminal(id)?.terminal.textarea ?? false
 }
 
+/**
+ * Before the settings take the place of the sidebar and the main area, what
+ * has the keyboard focus gives it up as when another page takes it, such as
+ * a session's name being edited, which keeps what was typed. Taken out of the
+ * window with the focus, the name field would lose it.
+ */
+function blurBeforeSettings(): void {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+}
+
 export const useAppStore = create<AppState>()((set, get) => {
   const findSession = (id: string) => get().sessions.find((session) => session.id === id)
   const findIssue = (id: number) => get().issues.find((issue) => issue.id === id)
@@ -678,6 +688,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     const page = stepped && currentEntry(stepped)
     if (!stepped || page === null) return
     getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    if (isSettingsPage(page)) blurBeforeSettings()
     // The terminal view of a session takes the focus once it is shown.
     set({ history: stepped, currentPage: page, newIssueDialog: null })
     expandProjectOf(page)
@@ -1086,9 +1097,7 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     showSettings() {
       if (isSettingsPage(get().currentPage)) return
-      // What has the keyboard focus gives it up as when another page takes
-      // it, such as a session's name being edited, which keeps what was typed.
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      blurBeforeSettings()
       showPage(settingsPage)
     },
 

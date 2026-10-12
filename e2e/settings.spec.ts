@@ -531,6 +531,40 @@ test('the Esc that leaves the settings for an issue’s page stays with the sett
   await expectShown(app, `issue:${issue}`)
 })
 
+test('a session’s new name, typed when Back or Forward shows the settings, is kept', async ({
+  launch,
+  world,
+}) => {
+  const app = await launch({ projects: [world.repos.G] })
+  const s1 = await startShell(app)
+  const field = app.sessionItem(s1).getByTestId('session-rename-input')
+  for (const [index, [settingsAre, show]] of (
+    [
+      ['after', () => app.page.keyboard.press('Meta+BracketRight')],
+      ['after', () => app.forwardButton().click()],
+      ['after', () => app.chooseMenuItem('Window', 'Forward')],
+      ['before', () => app.page.keyboard.press('Meta+BracketLeft')],
+      ['before', () => app.backButton().click()],
+      ['before', () => app.chooseMenuItem('Window', 'Back')],
+    ] as const
+  ).entries()) {
+    // S1 shown, with the settings after it or before it.
+    await pressSettingsShortcut(app)
+    await app.page.keyboard.press(settingsAre === 'after' ? 'Meta+BracketLeft' : 'Meta+1')
+    await expectSessionFocused(app, s1)
+    // Its row, double-clicked, shows S1 again, which leaves the history as it is.
+    await app.sessionItem(s1).getByTestId('session-item-button').dblclick()
+    await expect(field).toBeFocused()
+    await field.fill(`Name ${index}`)
+    await show()
+    await expectSettingsShown(app)
+    await backToApp(app).click()
+    await expectAppShown(app)
+    await expect(field).toHaveCount(0)
+    await expect(app.sessionItemName(s1)).toHaveText(`Name ${index}`)
+  }
+})
+
 test('with nothing before them, the settings give way to the empty page and leave the history', async ({
   launch,
   world,

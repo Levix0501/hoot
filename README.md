@@ -19,7 +19,8 @@ Hoot supports macOS only for now.
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment, with only the arguments of their
-  [permission level](#permission-levels); the shell runs as an interactive login shell. Tools that
+  [permission level](#permission-levels) (a Claude Code session an issue is
+  [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. Tools that
   are not installed are shown disabled with an install command, and **Re-detect Tools** checks
   again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
@@ -90,6 +91,22 @@ works, as an issue, and come back to it later. Issues are kept on your Mac, in
   where they are, with **Save** and **Cancel**; **Close Issue** and **Reopen Issue** close and
   reopen it; **Delete** deletes it for good, after asking. A description is edited as plain
   Markdown text.
+- **Sending to Claude Code**: before handing an issue to an agent, find out whether it is too big
+  and how to split it. **Send to Claude Code**, on an open issue's page, starts Claude Code in a
+  new session in the project root (never in a worktree), at the permission level picked in the
+  Agents menu, and shows it. The session is named after the issue's title, and its first message
+  hands the issue to the `/hoot:split-issue` skill of Hoot's own Claude Code plugin: Claude reads
+  the code, changing nothing, and judges whether one session can implement the issue and another
+  verify it in full; if not, it splits the issue into ordered issues that can each be accepted on
+  its own, each with a title, a description and the issues it waits on. The answer stays in the
+  conversation, where you can go on with it. The plugin is loaded for that session only, from
+  Hoot's own files: nothing is written to `~/.claude`, `~/.claude.json` or the project. While the
+  session is in the sidebar, the button is **Show Claude Code Session** and shows it; once the
+  session is closed, the button sends the issue again. The button cannot be used while Hoot is
+  still checking whether Claude Code is installed, when it is not installed, or when the issue's
+  title and description are longer than 100,000 characters together, since the issue reaches
+  Claude Code in its command's arguments; its tooltip says why. NUL characters are left out of
+  what is sent.
 - **Drafts**: what you enter on a new issue page, or while editing an issue, stays while other
   pages are shown, until you create, save or cancel, remove the project, or quit Hoot. Quitting
   does not ask about drafts.
@@ -248,6 +265,7 @@ never cover or take focus from the apps you are working in.
 | Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                       |
 | Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                      |
 | Shared   | `src/shared`   | Types and messages used by more than one process                                                         |
+| Plugin   | `resources`    | Hoot's own Claude Code plugin, `claude-plugins/hoot`, which only the sessions an issue is sent to load   |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
 node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder:

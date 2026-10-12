@@ -53,6 +53,14 @@ function defaultShell(): string {
 }
 
 const shell = defaultShell()
+/**
+ * Hoot's own Claude Code plugin, `hoot`, which the sessions an issue is sent
+ * to load. Claude Code reads it from the file system, so the packaged app
+ * keeps it among its resources, outside its archive.
+ */
+const claudePlugin = app.isPackaged
+  ? path.join(process.resourcesPath, 'claude-plugins', 'hoot')
+  : path.join(app.getAppPath(), 'resources', 'claude-plugins', 'hoot')
 const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const tools = new ToolService({ shell, baseEnv, cwd: os.homedir() })
@@ -61,7 +69,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd) =>
+  resolveLaunch: (toolId, cwd, issue) =>
     resolveLaunch(
       {
         shell,
@@ -73,9 +81,11 @@ const sessions = new SessionManager({
           }),
         getLoginEnvironment: () => tools.getLoginEnvironment(),
         permissionLevel: (tool) => permissionLevels.level(tool),
+        claudePlugin,
       },
       toolId,
       cwd,
+      issue,
     ),
 })
 

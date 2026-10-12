@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { issuesInState, issueTitle, type Issue } from './issues'
+import { issueSendLength, issuesInState, issueTitle, type Issue } from './issues'
 
 function issue(id: number, changes: Partial<Issue>): Issue {
   return {
@@ -38,5 +38,14 @@ describe('issuesInState', () => {
 
   it('lists closed issues by when they were last closed, the most recent first', () => {
     expect(issuesInState(issues, 'closed').map(({ id }) => id)).toEqual([3, 6, 2])
+  })
+})
+
+describe('issueSendLength', () => {
+  it('counts the title and the description together, in UTF-16 code units', () => {
+    expect(issueSendLength({ title: 'T', description: '' })).toBe(1)
+    expect(issueSendLength({ title: '修复登录', description: 'ab' })).toBe(6)
+    // A character outside the Basic Multilingual Plane is two code units.
+    expect(issueSendLength({ title: 'T', description: `${'a'.repeat(99_997)}😀` })).toBe(100_000)
   })
 })

@@ -21,6 +21,7 @@ import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
+import { ClaudeCodeButton } from './claude-code-button'
 import { IssueDescription } from './issue-description'
 import { BackToIssues, IssuesTopRow, ProjectName } from './issues-top-row'
 import { RelativeTime, useNow } from './relative-time'
@@ -87,9 +88,10 @@ function DeleteIssueDialog({
 
 /**
  * An issue's page: its title, state, when it was opened and its description,
- * with buttons to edit it, close or reopen it and delete it. In the edit
- * state, the title and description are fields in their places, kept as they
- * are while other pages are shown, until Save or Cancel.
+ * with buttons to send it to Claude Code while it is open, edit it, close or
+ * reopen it and delete it. In the edit state, the title and description are
+ * fields in their places, kept as they are while other pages are shown, until
+ * Save or Cancel.
  */
 export function IssuePage({ issueId }: { issueId: number }) {
   const issue = useAppStore((state) => state.issues.find(({ id }) => id === issueId))
@@ -155,7 +157,12 @@ export function IssuePage({ issueId }: { issueId: number }) {
               opened <RelativeTime time={issue.createdAt} now={now} data-testid="issue-created" />
             </span>
             {!editing && (
-              <div className="ml-auto flex flex-wrap gap-2" key="actions">
+              <div
+                className="ml-auto flex flex-wrap gap-2"
+                key="actions"
+                data-testid="issue-actions"
+              >
+                {issue.state === 'open' && <ClaudeCodeButton issue={issue} />}
                 <Button
                   variant="outline"
                   size="sm"

@@ -8,6 +8,7 @@ import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/s
 import { getTool, type ToolId } from '../../shared/tools'
 import type { WorktreeInfo, WorktreeInspection } from '../../shared/worktrees'
 import { api } from '../lib/api'
+import { sendBlockers } from '../lib/issue-sending'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
   createSessionTerminal,
@@ -37,6 +38,8 @@ export interface UiSession {
   /** The root of the worktree it runs in, or `null` for the project's main worktree. */
   worktreePath: string | null
   toolId: ToolId
+  /** The issue sent to Claude Code when the session started, or `null` for any other session. */
+  issueId: number | null
   /**
    * `starting` covers the time until the process runs. A starting session
    * already counts as running.
@@ -119,6 +122,12 @@ export interface AppState {
   redetectTools(): Promise<void>
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
+  /**
+   * Sends an open issue to Claude Code, in a new session in its project's
+   * main worktree, unless it cannot be sent now. While the session it was
+   * sent to before is still in the sidebar, shows that session instead.
+   */
+  sendIssueToClaudeCode(issueId: number): void
   launchSession(id: string, cols: number, rows: number): Promise<void>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
@@ -521,6 +530,40 @@ export const useAppStore = create<AppState>()((set, get) => {
     set({ history: stepped, currentPage: page })
   }
 
+  /**
+   * Adds a session, which is shown at once; its terminal view starts the
+   * process with the size the terminal has on screen.
+   */
+  const addSession = (
+    projectRoot: string,
+    toolId: ToolId,
+    worktreePath: string | null,
+    issueId: number | null,
+  ) => {
+    const id = crypto.randomUUID()
+    openTerminal(id)
+    getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    set((state) => ({
+      sessions: [
+        ...state.sessions,
+        {
+          id,
+          projectRoot,
+          worktreePath,
+          toolId,
+          issueId,
+          status: 'starting',
+          exit: null,
+          title: '',
+          customName: null,
+          closing: false,
+        },
+      ],
+      currentPage: sessionPage(id),
+      history: visit(state.history, sessionPage(id)),
+    }))
+  }
+
   const closeCurrent = () => {
     const { closeConfirmation, quitConfirmation } = get()
     const id = currentSessionId(get())
@@ -716,29 +759,21 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     newSession(projectRoot, toolId, worktreePath = null) {
-      const id = crypto.randomUUID()
-      openTerminal(id)
-      getSessionTerminal(currentSessionId(get()))?.terminal.blur()
-      // The new session is shown at once; its terminal view starts the process
-      // with the size the terminal has on screen.
-      set((state) => ({
-        sessions: [
-          ...state.sessions,
-          {
-            id,
-            projectRoot,
-            worktreePath,
-            toolId,
-            status: 'starting',
-            exit: null,
-            title: '',
-            customName: null,
-            closing: false,
-          },
-        ],
-        currentPage: sessionPage(id),
-        history: visit(state.history, sessionPage(id)),
-      }))
+      addSession(projectRoot, toolId, worktreePath, null)
+    },
+
+    sendIssueToClaudeCode(issueId) {
+      const state = get()
+      const sent = state.sessions.find((session) => session.issueId === issueId)
+      if (sent) {
+        get().selectSession(sent.id)
+        return
+      }
+      const issue = findIssue(issueId)
+      const project = state.projects.find((candidate) => candidate.id === issue?.projectId)
+      if (!issue || !project || issue.state !== 'open') return
+      if (sendBlockers(state.tools, issue).length > 0) return
+      addSession(project.root, 'claude', null, issue.id)
     },
 
     async launchSession(id, cols, rows) {
@@ -749,6 +784,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         projectRoot: session.projectRoot,
         worktreePath: session.worktreePath,
         toolId: session.toolId,
+        issueId: session.issueId,
         cols,
         rows,
       })

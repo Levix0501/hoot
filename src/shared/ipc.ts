@@ -50,6 +50,11 @@ export interface StartSessionRequest {
   /** The root of one of the project's worktrees to run in, or `null` for the main worktree. */
   worktreePath: string | null
   toolId: ToolId
+  /**
+   * The issue a Claude Code session in the project's main worktree is sent
+   * when it starts from the issue's page; `null` for every other session.
+   */
+  issueId: number | null
   cols: number
   rows: number
 }

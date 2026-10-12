@@ -7,6 +7,7 @@ import type { SessionExit, SessionInfo } from '../../shared/session'
 import { isWithin } from '../../shared/worktrees'
 import type { ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
+import type { SentIssue } from './launch'
 
 export interface SessionLaunch {
   file: string
@@ -27,8 +28,11 @@ export interface PtyHost {
 
 export interface SessionManagerOptions {
   host: PtyHost
-  /** Decides what a session runs in its working directory. */
-  resolveLaunch(toolId: ToolId, cwd: string): Promise<SessionLaunch>
+  /**
+   * Decides what a session runs in its working directory, given the issue it
+   * sends Claude Code, if any.
+   */
+  resolveLaunch(toolId: ToolId, cwd: string, issue: SentIssue | null): Promise<SessionLaunch>
   /** Sends a signal to a process group; replaceable for tests. */
   signalProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
   /** How long to wait for a process to exit after SIGHUP before using SIGKILL. */
@@ -128,7 +132,11 @@ export class SessionManager extends EventEmitter<{
     )
   }
 
-  async start(request: StartSessionRequest): Promise<SessionInfo> {
+  /**
+   * Starts a session; `issue` is what it sends Claude Code when it starts from
+   * the page of the issue the request names.
+   */
+  async start(request: StartSessionRequest, issue: SentIssue | null = null): Promise<SessionInfo> {
     if (this.records.has(request.id)) throw new SessionError('The session already exists.')
     const { promise: started, resolve: settle } = Promise.withResolvers<void>()
     const record: SessionRecord = {
@@ -137,6 +145,7 @@ export class SessionManager extends EventEmitter<{
         projectRoot: request.projectRoot,
         worktreePath: request.worktreePath,
         toolId: request.toolId,
+        issueId: request.issueId,
         status: 'running',
         exit: null,
       },
@@ -150,7 +159,7 @@ export class SessionManager extends EventEmitter<{
     // A session in a worktree runs in the worktree's root.
     const cwd = request.worktreePath ?? request.projectRoot
     try {
-      const launch = await this.options.resolveLaunch(request.toolId, cwd)
+      const launch = await this.options.resolveLaunch(request.toolId, cwd, issue)
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {
         record.pid = await this.options.host.spawn({

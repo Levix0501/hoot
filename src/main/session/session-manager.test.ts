@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '../../shared/session'
+import type { SentIssue } from './launch'
 import {
   SessionError,
   SessionManager,
@@ -41,7 +42,7 @@ class FakeHost extends EventEmitter implements PtyHost {
 function setup(
   options: {
     killTimeoutMs?: number
-    resolveLaunch?: (toolId: string, cwd: string) => Promise<SessionLaunch>
+    resolveLaunch?: (toolId: string, cwd: string, issue: SentIssue | null) => Promise<SessionLaunch>
   } = {},
 ) {
   const host = new FakeHost()
@@ -68,11 +69,13 @@ const request = (
   toolId: 'shell' | 'claude' = 'shell',
   projectRoot = '/work/project',
   worktreePath: string | null = null,
+  issueId: number | null = null,
 ) => ({
   id,
   projectRoot,
   worktreePath,
   toolId,
+  issueId,
   cols: 80,
   rows: 24,
 })
@@ -98,6 +101,7 @@ describe('SessionManager', () => {
       projectRoot: '/work/project',
       worktreePath: null,
       toolId: 'claude',
+      issueId: null,
       status: 'running',
       exit: null,
     })
@@ -236,6 +240,26 @@ describe('SessionManager', () => {
     await closed
     expect(host.killed).toEqual([['s1', 'SIGHUP']])
     expect(manager.list()).toEqual([])
+  })
+
+  it('launches a session started from an issue with the issue, and records which issue it was', async () => {
+    const launched: Array<[string, SentIssue | null]> = []
+    const { manager, updates } = setup({
+      resolveLaunch: async (toolId, _cwd, issue) => {
+        launched.push([toolId, issue])
+        return { file: toolId, args: [], env: {} }
+      },
+    })
+    const issue = { title: 'Fix the login bug', description: 'Steps' }
+    const sent = await manager.start(request('c1', 'claude', '/work/project', null, 7), issue)
+    const other = await manager.start(request('c2', 'claude'))
+    expect(launched).toEqual([
+      ['claude', issue],
+      ['claude', null],
+    ])
+    expect([sent.issueId, other.issueId]).toEqual([7, null])
+    expect(manager.list().map((session) => session.issueId)).toEqual([7, null])
+    expect(updates.map((update) => update.issueId)).toEqual([7, null])
   })
 
   it('runs a session in a worktree in its root, and tells its running sessions apart', async () => {

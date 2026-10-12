@@ -1,11 +1,12 @@
 import { RefreshCwIcon } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
-import type { ToolAvailability, ToolsState } from '../../shared/ipc'
+import type { ToolsState } from '../../shared/ipc'
 import {
   permissionLevelOrDefault,
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
-import { TOOLS, type ToolDefinition, type ToolId } from '../../shared/tools'
+import { TOOLS, type ToolId } from '../../shared/tools'
+import { toolStatus } from '../lib/tool-status'
 import { ToolIcon } from './tool-icon'
 
 interface ItemProps {
@@ -33,10 +34,6 @@ interface ToolMenuEntriesProps {
   onRedetect: () => void
 }
 
-function availabilityOf(tools: ToolsState, tool: ToolDefinition): ToolAvailability | undefined {
-  return tools.tools.find((entry) => entry.id === tool.id)
-}
-
 /**
  * The tool choices of a "new session" menu, with the permission level each
  * coding tool starts with, availability and install commands.
@@ -54,9 +51,9 @@ export function ToolMenuEntries({
       <Group>
         <Label>Start a session with</Label>
         {TOOLS.map((tool) => {
-          const availability = availabilityOf(tools, tool)
-          const available = tool.command === null || availability?.available === true
-          const unknown = tool.command !== null && availability === undefined
+          const status = toolStatus(tools, tool)
+          const available = status === 'available'
+          const unknown = status === 'checking'
           const level =
             tool.command !== null && permissionLevels
               ? permissionLevelOrDefault(tool.id, permissionLevels[tool.id])

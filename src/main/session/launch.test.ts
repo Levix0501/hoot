@@ -7,7 +7,7 @@ import {
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
 import type { LoginEnvironment } from '../tools/tool-service'
-import { resolveLaunch, type LaunchContext } from './launch'
+import { resolveLaunch, sentIssueArgs, splitIssuePrompt, type LaunchContext } from './launch'
 import { SessionError } from './session-manager'
 
 let root: string
@@ -43,8 +43,11 @@ function context(
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
+    claudePlugin: '/Applications/Hoot.app/Contents/Resources/claude-plugins/hoot',
   }
 }
+
+const PLUGIN = '--plugin-dir=/Applications/Hoot.app/Contents/Resources/claude-plugins/hoot'
 
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
@@ -103,6 +106,38 @@ describe('resolveLaunch', () => {
     expect((await launching).args).toEqual(['--dangerously-skip-permissions'])
   })
 
+  it('sends Claude Code an issue after the arguments of its permission level', async () => {
+    const levels = { ...highest, claude: 'accept-edits' }
+    const issue = {
+      title: 'Fix the login bug',
+      description: '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
+    }
+    const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
+    expect(launch.file).toBe('claude')
+    expect(launch.args).toEqual([
+      '--permission-mode',
+      'acceptEdits',
+      PLUGIN,
+      '--name=Fix the login bug',
+      '/hoot:split-issue # Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  ',
+    ])
+    // Any other session, Claude Code's included, has only its level's arguments.
+    expect((await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)).args).toEqual([
+      '--permission-mode',
+      'acceptEdits',
+    ])
+  })
+
+  it('sends an issue to Claude Code only', async () => {
+    const issue = { title: 'T', description: '' }
+    await expect(
+      resolveLaunch(context({ PATH: bin }), 'codex', project, issue),
+    ).rejects.toBeInstanceOf(SessionError)
+    await expect(
+      resolveLaunch(context({ PATH: bin }), 'shell', project, issue),
+    ).rejects.toBeInstanceOf(SessionError)
+  })
+
   it('refuses a tool that is not on the login shell PATH', async () => {
     await expect(resolveLaunch(context({ PATH: '/usr/bin' }), 'opencode', project)).rejects.toThrow(
       'OpenCode is not available. Install it with: npm install -g opencode-ai',
@@ -113,5 +148,41 @@ describe('resolveLaunch', () => {
     await expect(
       resolveLaunch(context({ PATH: bin }), 'shell', path.join(root, 'gone')),
     ).rejects.toBeInstanceOf(SessionError)
+  })
+})
+
+describe('the first message and the arguments that send an issue', () => {
+  it('puts the issue after the skill as a heading, with the description below it', () => {
+    expect(splitIssuePrompt({ title: 'Only a title', description: '' })).toBe(
+      '/hoot:split-issue # Only a title',
+    )
+    expect(splitIssuePrompt({ title: 'T', description: 'Line 1\n\nLine 3' })).toBe(
+      '/hoot:split-issue # T\n\nLine 1\n\nLine 3',
+    )
+    // A title that starts with a slash stays the heading's text.
+    expect(splitIssuePrompt({ title: '/other is broken', description: '' })).toBe(
+      '/hoot:split-issue # /other is broken',
+    )
+  })
+
+  it('leaves the NUL characters out of the name and the first message', () => {
+    const issue = { title: 'Fix\0 login', description: 'a\0b' }
+    expect(sentIssueArgs('/plugins/hoot', issue)).toEqual([
+      '--plugin-dir=/plugins/hoot',
+      '--name=Fix login',
+      '/hoot:split-issue # Fix login\n\nab',
+    ])
+    // A description of nothing but NUL characters is an empty one.
+    expect(splitIssuePrompt({ title: 'T', description: '\0\0' })).toBe('/hoot:split-issue # T')
+  })
+
+  it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
+    expect(
+      sentIssueArgs('/plugins/hoot', { title: '--verbose flag broken', description: '' }),
+    ).toEqual([
+      '--plugin-dir=/plugins/hoot',
+      '--name=--verbose flag broken',
+      '/hoot:split-issue # --verbose flag broken',
+    ])
   })
 })

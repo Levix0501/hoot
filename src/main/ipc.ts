@@ -21,7 +21,9 @@ import {
 } from '../shared/ipc'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
+  ISSUE_SEND_MAX_LENGTH,
   ISSUE_TITLE_MAX_LENGTH,
+  issueSendLength,
   type Issue,
   type IssueChanges,
   type IssueResult,
@@ -38,6 +40,7 @@ import type { IssueStore } from './issues/issue-store'
 import type { ProjectRootResult } from './projects/project-root'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
+import type { SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
@@ -59,11 +62,13 @@ export interface IpcDependencies {
 
 const sessionId = z.string().min(1).max(100)
 const terminalDimension = z.number().int().positive().max(9_999)
+const rowId = z.number().int().positive()
 const startSessionRequest = z.object({
   id: sessionId,
   projectRoot: z.string().min(1),
   worktreePath: z.string().min(1).nullable(),
   toolId: z.enum(TOOL_IDS),
+  issueId: rowId.nullable(),
   cols: terminalDimension,
   rows: terminalDimension,
 }) satisfies z.ZodType<StartSessionRequest>
@@ -84,7 +89,6 @@ const submoduleArguments = z.tuple([
 ])
 const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
-const rowId = z.number().int().positive()
 const issueTitle = z.string().max(ISSUE_TITLE_MAX_LENGTH)
 const issueDescription = z.string().max(ISSUE_DESCRIPTION_MAX_LENGTH)
 const newIssue = z.object({
@@ -112,6 +116,32 @@ function changeIssue(change: () => Issue | null, missing: string): IssueResult {
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
+}
+
+/**
+ * What a session started from an issue's page sends Claude Code: the issue's
+ * title and description as they are saved now. Or why it cannot be sent: the
+ * issue is gone, belongs to another project, or is too long for the
+ * arguments of Claude Code's command.
+ */
+function issueToSend(
+  issues: IssueStore,
+  projectId: number,
+  issueId: number,
+): { ok: true; issue: SentIssue } | { ok: false; message: string } {
+  let issue: Issue | null
+  try {
+    issue = issues.get(issueId)
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+  if (issue === null || issue.projectId !== projectId) {
+    return { ok: false, message: 'The issue no longer exists.' }
+  }
+  if (issueSendLength(issue) > ISSUE_SEND_MAX_LENGTH) {
+    return { ok: false, message: 'The issue is too long to send. Shorten it first.' }
+  }
+  return { ok: true, issue: { title: issue.title, description: issue.description } }
 }
 
 /** Registers handlers that accept messages only from the main window. */
@@ -252,8 +282,19 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = startSessionRequest.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid session request.' }
     const request = parsed.data
-    if (!deps.projects.find(request.projectRoot)) {
+    const project = deps.projects.find(request.projectRoot)
+    if (!project) {
       return { ok: false, message: 'The project is not in the list.' }
+    }
+    let issue: SentIssue | null = null
+    if (request.issueId !== null) {
+      // Only Claude Code is sent issues, in the project's main worktree.
+      if (request.toolId !== 'claude' || request.worktreePath !== null) {
+        return { ok: false, message: 'Invalid session request.' }
+      }
+      const sent = issueToSend(deps.issues, project.id, request.issueId)
+      if (!sent.ok) return sent
+      issue = sent.issue
     }
     if (request.worktreePath !== null) {
       // As it is now, which the sidebar then shows: it may be gone or missing since it last did.
@@ -272,7 +313,7 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     try {
-      return { ok: true, session: await deps.sessions.start(request) }
+      return { ok: true, session: await deps.sessions.start(request, issue) }
     } catch (error) {
       if (error instanceof SessionError) return { ok: false, message: error.message }
       throw error

@@ -334,6 +334,31 @@ test('the settings take the place of the sidebar and the main area, below Back a
   await app.expectEnglishUi()
 })
 
+test('the sidebar comes back from the settings scrolled as it was', async ({ launch, world }) => {
+  const app = await launch({ projects: [world.repos.G] })
+  // Sessions enough for the list to scroll in the smallest window.
+  await app.resizeWindow(720, 480)
+  for (let started = 0; started < 12; started++) {
+    await app.startSession(world.repos.G, 'shell', { waitFor: 'started' })
+  }
+  const list = projectSidebar(app).locator('[data-slot="sidebar-content"]')
+  const scrolled = await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    return element.scrollTop
+  })
+  expect(scrolled).toBeGreaterThan(0)
+  for (const leave of [
+    () => app.backButton().click(),
+    () => backToApp(app).click(),
+    () => app.page.keyboard.press('Escape'),
+  ]) {
+    await pressSettingsShortcut(app)
+    await leave()
+    await expectAppShown(app)
+    expect(await list.evaluate((element) => element.scrollTop)).toBe(scrolled)
+  }
+})
+
 test('the settings are a page among the pages shown; session keys and commands work from them', async ({
   launch,
   world,

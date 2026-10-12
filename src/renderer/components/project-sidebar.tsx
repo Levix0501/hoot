@@ -1,5 +1,5 @@
 import { FolderPlusIcon, SettingsIcon } from 'lucide-react'
-import { Fragment, useMemo } from 'react'
+import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
 import { sessionWorktrees, useAppStore } from '../store/app-store'
@@ -125,10 +125,26 @@ function ProjectEntry({ project }: { project: Project }) {
   )
 }
 
+/** How far the project list was scrolled when the sidebar last left the window. */
+let listScrollTop = 0
+
 export function ProjectSidebar() {
   const projects = useAppStore((state) => state.projects)
   const addProject = useAppStore((state) => state.addProject)
   const showSettings = useAppStore((state) => state.showSettings)
+
+  // The sidebar leaves the window while the settings take its place; its
+  // list comes back scrolled as it was, before the window paints it.
+  const listRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    list.scrollTop = listScrollTop
+    // Read before React takes the list out of the window.
+    return () => {
+      listScrollTop = list.scrollTop
+    }
+  }, [])
 
   return (
     // Slides out of the window when collapsed, and back in when expanded.
@@ -139,7 +155,7 @@ export function ProjectSidebar() {
         sidebar's right border, so that the line drags the window too.
       */}
       <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
-      <SidebarContent>
+      <SidebarContent ref={listRef}>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>
           <SidebarGroupAction

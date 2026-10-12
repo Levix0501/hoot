@@ -101,23 +101,21 @@ function frameTime(samples: HeightSample[]): number {
 }
 
 /**
- * How the height went from `from` to `to`: how long from the first frame in
- * which it had changed to the first in which it had arrived, and how many
- * frames showed a height in between.
+ * How the height went from `from` to `to`: how long from the frame in which
+ * it started changing, the last to show `from`, to the first to show `to`,
+ * and how many frames showed a height in between. A height within half a
+ * pixel of another shows as that one.
  */
 function slide(samples: HeightSample[], from: number, to: number) {
-  const changed = samples.findIndex((sample) => Math.abs(sample.height - from) > 0.01)
-  const arrived = samples.findIndex(
-    (sample, index) => index >= changed && Math.abs(sample.height - to) < 0.01,
-  )
-  const [low, high] = [Math.min(from, to), Math.max(from, to)]
-  const between = samples.filter(
-    (sample) => sample.height > low + 0.5 && sample.height < high - 0.5,
-  )
+  const shows = (sample: HeightSample, height: number) => Math.abs(sample.height - height) < 0.5
+  const started = samples.findIndex((sample) => !shows(sample, from)) - 1
+  const arrived = samples.findIndex((sample, index) => index > started && shows(sample, to))
+  const between = samples.filter((sample) => !shows(sample, from) && !shows(sample, to))
   return {
-    changed,
+    started,
     arrived,
-    duration: arrived === -1 ? Infinity : samples[arrived]!.time - samples[changed]!.time,
+    duration:
+      started < 0 || arrived === -1 ? Infinity : samples[arrived]!.time - samples[started]!.time,
     between: between.length,
   }
 }
@@ -258,11 +256,11 @@ test.describe('expanding and collapsing projects', () => {
     ] as const) {
       const samples = await clickAndFollow(app, G)
       const frame = frameTime(samples)
-      const { changed, arrived, duration, between } = slide(samples, from, to)
+      const { started, arrived, duration, between } = slide(samples, from, to)
       const report = JSON.stringify({ from, to, frame, samples })
       expect(samples[0]!.height, report).toBeCloseTo(from, 1)
-      expect(changed, report).toBeGreaterThan(0)
-      expect(arrived, report).toBeGreaterThan(changed)
+      expect(started, report).toBeGreaterThanOrEqual(0)
+      expect(arrived, report).toBeGreaterThan(started + 1)
       expect(between, report).toBeGreaterThan(0)
       expect(Math.abs(duration - SLIDE_MS), report).toBeLessThanOrEqual(frame)
       expect(samples.at(-1)!.height, report).toBeCloseTo(to, 1)

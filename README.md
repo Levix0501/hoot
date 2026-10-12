@@ -43,14 +43,15 @@ Hoot supports macOS only for now.
   has shown, sessions and [Issues pages](#issues) alike, with the arrow buttons at the top left, ⌘[
   and ⌘] (**Window > Back** and **Forward**). Showing a page another way drops the pages you went
   back from. A page that is gone leaves the list: a session that closes, an issue that is deleted,
-  a new issue page left with **Create** or **Cancel**, and the Issues pages of a removed project.
+  and the Issues pages of a removed project.
   The list lasts until Hoot quits.
 - **Shortcuts**: ⌘1 to ⌘9 show the first to ninth session in the sidebar, ⌘⇧] and ⌘⇧[ (**Window >
   Select Next Session** and **Select Previous Session**) the next and previous one, ⌘[ and ⌘] go
   back and forward, ⌘W closes the shown session, and ⌘B hides or shows the sidebar. They work while
   a terminal or a text field has the focus and never reach the terminal's program or the field,
-  whereas Ctrl+B reaches the program as usual. On an Issues page, where no session is shown, ⌘W
-  closes nothing. The window's close button and ⌘Q quit Hoot.
+  whereas Ctrl+B reaches the program as usual (in an issue's description, ⌘B makes text bold). On
+  an Issues page, where no session is shown, ⌘W closes nothing. Issues pages have
+  [keys of their own](#issues). The window's close button and ⌘Q quit Hoot.
 - **Terminal**: xterm.js with 16/256/24-bit color, mouse reporting, copy and paste with ⌘C and ⌘V,
   10,000 lines of scrollback for every session, IME input, and wide characters (including emoji) at
   current Unicode widths. The shown terminal is drawn with WebGL, so block elements and box drawing
@@ -75,45 +76,67 @@ Note what to do in a project, such as an idea you have or a problem you notice w
 works, as an issue, and come back to it later. Issues are kept on your Mac, in
 [Hoot's database](#architecture).
 
-- **The list**: click a project's row in the sidebar to show its issues; the row shows how many of
-  them are open, and is selected while one of the project's Issues pages is shown. **Open** lists
-  the open issues, newest first, with when each was opened, and **Closed** the closed ones, the
-  most recently closed first. Each project's list shows Open or Closed as you left it, until Hoot
-  quits. An issue in the list shows its page when clicked.
-- **New issues**: **+ New Issue** opens a page with a title, which an issue needs, and a
-  description. **Create** saves the issue, without the spaces around its title, and shows it.
-- **An issue's page** shows its title, whether it is open or closed, when it was opened, and its
-  description as GitHub Flavored Markdown: headings, lists, code, task lists, tables and links.
-  HTML in a description shows as the text it is. Links to `http` and `https` addresses open in
-  your default browser; other links open nothing. A task list's boxes show what is done; editing
-  the description changes them.
-- **Changing issues**: on an issue's page, **Edit** turns the title and description into fields
-  where they are, with **Save** and **Cancel**; **Close Issue** and **Reopen Issue** close and
-  reopen it; **Delete** deletes it for good, after asking. A description is edited as plain
-  Markdown text.
+- **The list**: click a project's row in the sidebar to show its issues, laid out as in Linear;
+  the row shows how many of them are neither done nor canceled, and is selected while one of the
+  project's Issues pages is shown. **All issues**, **Active** (to do or in progress) and
+  **Backlog** show those issues, grouped by status: In Progress, Todo, Backlog, Done and Canceled,
+  the closest to done first. Each group lists its issues by priority, urgent first and those
+  without one last, then newest first; done and canceled issues are listed the most recently
+  completed first. A row shows the issue's priority, its identifier (the first three letters or
+  digits of the project's name and its number, such as `HOO-12`), its status, its title and the
+  day it was created. Click a group's header to collapse or expand it, or its `+` to create an
+  issue with its status. Each project's list shows the view and the collapsed groups as you left
+  them, until Hoot quits. Click an issue to show its page; right-click it to change its status or
+  priority, copy its identifier or title, or delete it.
+- **New issues**: **New issue** at the top right of the list, or C, opens a dialog for the
+  project's new issue: a title, which an issue needs, a description, a status (Backlog unless you
+  pick another) and a priority. **Create issue** (⌘ Enter) creates it, without the spaces around
+  its title, and says so, with **View issue** to show it; ⌘⌥ Enter creates it and shows it. With
+  **Create more** on, the dialog stays for the next issue, keeping the status and the priority.
+  An issue's number in its project is never given again, not even after it is deleted.
+- **An issue's page** shows its title and description, with its status and priority beside them
+  (under the title when the window is narrow), and when it was created and completed. Edit the
+  title and the description where they show; they are saved as you type. The description is
+  formatted as you type GitHub Flavored Markdown (`# `, `- `, `1. `, `[ ] `, `**bold**`,
+  `` `code` `` and the like) and kept as Markdown: headings, lists, code, task lists, tables and
+  links. Showing a description never changes it; a description you edit is saved as the editor
+  writes Markdown, which may differ from how it was written (`*` lists become `-` lists, for
+  instance). HTML in a description makes no elements except formatting such as bold, and runs
+  nothing. Links to `http` and `https` addresses open in your default browser when clicked; other
+  links open nothing. Tick a task list's box to change it. In the description, ⌘B makes text bold
+  rather than hiding the sidebar. Click a status or priority to change it, or **Issues** in the
+  title row to go back to the list. The arrows at the top right show the next and previous issue
+  of its list, and the `⋯` menu copies the issue's identifier or title, or deletes the issue for
+  good, after asking.
+- **Keys**: on an Issues page, unless you are typing in a field or the description, or a menu or
+  dialog is open: C opens the new issue dialog; J and K (and on a list ↓ and ↑) move to the next
+  and previous issue; Enter shows the issue moved to on a list; S and P change the status and the
+  priority, in a picker where you can search or press the value's digit; ⌘⌫ deletes, after
+  asking; and Esc on an issue's page goes back to its list.
 - **Sending to Claude Code**: before handing an issue to an agent, find out whether it is too big
-  and how to split it. **Send to Claude Code**, on an open issue's page, starts Claude Code in a
-  new session in the project root (never in a worktree), at the permission level picked in the
-  Agents menu, and shows it. The session is named after the issue's title, and its first message
-  hands the issue to the `/hoot:split-issue` skill of Hoot's own Claude Code plugin, which asks
-  Claude to read the code without changing anything and to judge whether one session can
-  implement the issue and another verify it in full; if not, to split it into ordered issues that
-  can each be accepted on its own, each with a title, a description and the issues it waits on.
-  Hoot does not enforce that nothing changes: like any other session, this one can change files
-  as far as its permission level lets it. The answer stays in the conversation, where you can go
-  on with it. The plugin is loaded for that session only, from Hoot's own files, without writing
-  anything to `~/.claude`, `~/.claude.json` or the project. While the session is in the sidebar,
-  the button is **Show Claude Code Session** and always shows it; once the session is closed, the
-  button sends the issue again. Sending is not possible while Hoot is still checking whether
-  Claude Code is installed, when it is not installed, or when the issue's title and description
-  are longer than 100,000 characters together (counted in UTF-16 code units, in which most emoji
-  count as two), since the issue reaches Claude Code in its command's arguments; the button's
-  tooltip then says why. NUL characters are left out of what is sent.
-- **Drafts**: what you enter on a new issue page, or while editing an issue, stays while other
-  pages are shown, until you create, save or cancel, remove the project, or quit Hoot. Quitting
-  does not ask about drafts.
-- **Removing a project** from the list keeps its issues; they come back, closed ones included,
-  when you add the project again.
+  and how to split it. **Send to Claude Code**, above the title of an issue that is neither done nor
+  canceled, saves what you typed in it, then starts Claude Code in a new session in the project root
+  (never in a worktree), at the permission level picked in the Agents menu, and shows it. The
+  session is named after the issue's title, and its first message hands the issue to the
+  `/hoot:split-issue` skill of Hoot's own Claude Code plugin, which asks Claude to read the code
+  without changing anything and to judge whether one session can implement the issue and another
+  verify it in full; if not, to split it into ordered issues that can each be accepted on its own,
+  each with a title, a description and the issues it waits on. Hoot does not enforce that nothing
+  changes: like any other session, this one can change files as far as its permission level lets it.
+  The answer stays in the conversation, where you can go on with it. The plugin is loaded for that
+  session only, from Hoot's own files, without writing anything to `~/.claude`, `~/.claude.json` or
+  the project. While the session is in the sidebar, the button is **Show Claude Code Session** and
+  always shows it; once the session is closed, the button sends the issue again. Sending is not
+  possible while Hoot is still checking whether Claude Code is installed, when it is not installed,
+  or when the issue's title and description are longer than 100,000 characters together (counted in
+  UTF-16 code units, in which most emoji count as two), since the issue reaches Claude Code in its
+  command's arguments; the button's tooltip then says why. NUL characters are left out of what is
+  sent.
+- **Drafts**: what you enter in a project's new issue dialog stays when the dialog closes (with
+  Esc, its close button, or by showing another page), until you create the issue, remove the
+  project, or quit Hoot. Quitting does not ask about drafts.
+- **Removing a project** from the list keeps its issues; they come back, done and canceled ones
+  included, with their numbers, when you add the project again.
 
 ## Worktrees
 
@@ -277,8 +300,10 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
 - The projects and their issues are in a SQLite database, `data/hoot.db`, which Hoot reads and
   writes with Node's built-in `node:sqlite`, in plain SQL. Its tables' version is its
   `PRAGMA user_version`; on opening it, Hoot applies the migrations in `src/main/database`
-  after that version, all in one transaction. The project list used to be kept in
-  `projects.json`, which is no longer read: add your projects again.
+  after that version, all in one transaction. The second one gave issues Linear's statuses
+  (open issues became to do, closed ones done), priorities and numbers; a Hoot from before it
+  cannot open the database afterwards. The project list used to be kept in `projects.json`, which
+  is no longer read: add your projects again.
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** and **Quit**, and Hoot leaves the file as it is.

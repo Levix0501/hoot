@@ -244,31 +244,45 @@ test('the terminal is laid out again once, after the sidebar has slid into place
 
   const columns: number[] = []
   for (const final of [-SIDEBAR_WIDTH, 0]) {
-    const before = await app.terminalSize()
-    const reported = (await reports()).length
-    const { samples, resizes } = await toggleAndFollow(app, 500)
-    await app.page.waitForTimeout(500)
-    const after = await app.terminalSize()
-    columns.push(after.cols)
-
-    // The grid changes size once, after the sidebar has arrived, and its
-    // program learns of it once, with the grid's new number of columns.
-    expect(resizes).toEqual([{ left: final, ...after }])
-    const gaps = samples.slice(1).map((sample, index) => sample.time - samples[index]!.time)
-    expect(Math.max(...gaps)).toBeLessThanOrEqual(20)
-    let changes = 0
-    samples.forEach((sample, index) => {
-      const size = { cols: sample.cols, rows: sample.rows }
-      if (index > 0 && sample.cols !== samples[index - 1]!.cols) changes++
-      if (size.cols === before.cols && size.rows === before.rows) {
-        expect(changes).toBe(0)
-      } else {
-        expect(size).toEqual(after)
-        expect(sample.left).toBe(final)
+    // The grid is to be read at most 20 ms apart; a reading with longer gaps
+    // cannot tell. A busy Mac can keep the page from reading it for longer
+    // just as the sidebar starts to slide: the sidebar then slides back and
+    // is followed again, a few times at most.
+    let gap = Infinity
+    let finalColumns = 0
+    for (let attempt = 0; attempt < 5 && gap > 20; attempt++) {
+      if (attempt > 0) {
+        const slidBack = (await reports()).length
+        await toggleAndFollow(app, 500)
+        await expect.poll(async () => (await reports()).length).toBe(slidBack + 1)
       }
-    })
-    expect(changes).toBe(1)
-    await expect.poll(async () => (await reports()).slice(reported)).toEqual([after.cols])
+      const before = await app.terminalSize()
+      const reported = (await reports()).length
+      const { samples, resizes } = await toggleAndFollow(app, 500)
+      await app.page.waitForTimeout(500)
+      const after = await app.terminalSize()
+      finalColumns = after.cols
+
+      // The grid changes size once, after the sidebar has arrived, and its
+      // program learns of it once, with the grid's new number of columns.
+      expect(resizes).toEqual([{ left: final, ...after }])
+      let changes = 0
+      samples.forEach((sample, index) => {
+        const size = { cols: sample.cols, rows: sample.rows }
+        if (index > 0 && sample.cols !== samples[index - 1]!.cols) changes++
+        if (size.cols === before.cols && size.rows === before.rows) {
+          expect(changes).toBe(0)
+        } else {
+          expect(size).toEqual(after)
+          expect(sample.left).toBe(final)
+        }
+      })
+      expect(changes).toBe(1)
+      await expect.poll(async () => (await reports()).slice(reported)).toEqual([after.cols])
+      gap = Math.max(...samples.slice(1).map((sample, index) => sample.time - samples[index]!.time))
+    }
+    expect(gap).toBeLessThanOrEqual(20)
+    columns.push(finalColumns)
   }
   expect(columns[0]).toBeGreaterThan(columns[1]!)
 })

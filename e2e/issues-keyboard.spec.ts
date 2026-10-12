@@ -76,6 +76,7 @@ test.describe('the keys of Issues pages', () => {
     await expect.poll(() => focusedRow(app)).toBe('A')
     await app.page.keyboard.press('s')
     await expect(openPicker(app)).toBeVisible()
+    await expect(openPicker(app).getByRole('combobox')).toBeFocused()
     const row = await boxOf(issueRow(app, 'A'))
     const picker = await boxOf(openPicker(app))
     expect(picker.top).toBeGreaterThanOrEqual(row.top)
@@ -88,6 +89,7 @@ test.describe('the keys of Issues pages', () => {
     // P opens the priority picker; Esc closes it without a change.
     await app.page.keyboard.press('p')
     await expect(openPicker(app)).toBeVisible()
+    await expect(openPicker(app).getByRole('combobox')).toBeFocused()
     await app.page.keyboard.press('Escape')
     await expect(openPicker(app)).toHaveCount(0)
     expect(storedIssues(world.userData).find(({ title }) => title === 'A')?.priority).toBe(1)
@@ -149,6 +151,7 @@ test.describe('the keys of Issues pages', () => {
     await blurAll(app)
     await app.page.keyboard.press('s')
     await expect(openPicker(app)).toBeVisible()
+    await expect(openPicker(app).getByRole('combobox')).toBeFocused()
     await app.page.keyboard.type('p')
     await expect(openPicker(app)).toHaveCount(1)
     await expect(openPicker(app).getByRole('combobox')).toHaveValue('p')

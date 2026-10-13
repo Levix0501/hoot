@@ -1,0 +1,149 @@
+# Releases Hoot.
+#
+# On a push to main, once `pnpm check` passes: while there are changesets that
+# no version has taken yet, Changesets opens the Version PR, or updates it.
+# Once it is merged, the version in package.json has no tag yet: Changesets
+# tags it, and the same run builds the installers and drafts a release for the
+# tag with them, marked as a pre-release for a prerelease version. The
+# maintainer checks the draft and publishes it on GitHub: nothing here
+# publishes a release.
+#
+# Run by hand from the Actions page, on any branch, it only checks and builds
+# the installers, which it keeps as the run's artifacts.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run at a time for a branch, so that runs version and tag in order.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  version:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every tag, for Changesets to tell whether the version has one.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # With changesets left, opens or updates the Version PR; in prerelease
+      # mode, Changesets adds the prerelease tag to its title, such as
+      # "(alpha)". Without, tags the version unless it has a tag already, and
+      # reports `published` when it did. It creates no release.
+      - id: changesets
+        uses: changesets/action@v2.1.2
+        with:
+          version-script: pnpm changeset version
+          publish-script: pnpm changeset git-tag
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
+          create-github-releases: false
+          github-token: ${{ github.token }}
+
+  build:
+    needs: [check, version]
+    # By hand, on any branch; on a push, once the version is tagged.
+    if: >-
+      !cancelled() && needs.check.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' || needs.version.outputs.published == 'true')
+    # Xcode 26 compiles the Mac icon.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # notarytool reads the App Store Connect API key from a file.
+      - name: Write the App Store Connect API key to a file
+        run: printf '%s' "$APP_STORE_CONNECT_API_KEY" > "$RUNNER_TEMP/app-store-connect-api-key.p8"
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+      # Builds what `pnpm app:release` builds on a Mac. The Mac apps are signed
+      # with the Developer ID Application certificate, which electron-builder
+      # imports into a keychain of its own, and notarized with the API key,
+      # which electron-builder prefers to the keychain profile the command
+      # names for local builds. The Windows installer is not signed: the empty
+      # WIN_CSC_LINK keeps the Mac certificate from being used for it.
+      - name: Build the installers
+        run: pnpm app:release
+        env:
+          CSC_LINK: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          WIN_CSC_LINK: ''
+          APPLE_API_KEY: ${{ runner.temp }}/app-store-connect-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+            release/*.yml
+            !release/builder-debug.yml
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    if: github.event_name == 'push' && needs.version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          name: installers
+          path: installers
+      # A draft for the tag Changesets pushed, with the version's section of
+      # CHANGELOG.md and how to install Hoot as its text.
+      - name: Draft the release
+        run: |
+          version=$(node -p "require('./package.json').version")
+          node scripts/release-notes.ts "$version" > "$RUNNER_TEMP/release-notes.md"
+          prerelease=()
+          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "v$version" installers/* --draft "${prerelease[@]}" \
+            --title "v$version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

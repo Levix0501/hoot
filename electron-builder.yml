@@ -47,8 +47,10 @@ nsis:
 # Where releases go. electron-builder publishes nothing itself (the release workflow
 # drafts the release); this makes it write the update files that an in-app update can
 # read later: <channel>-mac.yml and <channel>.yml, the channel being the prerelease tag
-# of the version, such as alpha, or latest.
+# of the version, such as alpha, or latest for a version without one. For GitHub,
+# electron-builder takes the channel from the version only when it is set this way.
 publish:
   provider: github
   owner: Levix0501
   repo: hoot
+  channel: ${channel}

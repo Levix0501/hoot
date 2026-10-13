@@ -62,8 +62,6 @@ export interface IpcDependencies {
   sessions: SessionManager
   quitGuard: QuitGuard
   worktrees: WorktreeService
-  /** The user's home directory, which the window shows as `~` in paths. */
-  homeDirectory: string
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
 
@@ -288,7 +286,6 @@ export function registerIpc(deps: IpcDependencies): void {
     sidebarOpen: deps.sidebar.open,
     collapsedProjects: deps.sidebar.collapsedProjects,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
-    homeDirectory: deps.homeDirectory,
   }))
   on(IpcChannel.setSidebarOpen, (open) => {
     const parsed = z.boolean().safeParse(open)

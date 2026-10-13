@@ -69,8 +69,6 @@ export interface WindowState {
   collapsedProjects: number[]
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
-  /** The user's home directory, which paths show as `~`. */
-  homeDirectory: string
 }
 
 /**

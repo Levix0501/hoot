@@ -145,8 +145,6 @@ export interface AppState {
   collapsedProjects: ReadonlySet<number>
   /** Whether the window is in full screen. */
   fullScreen: boolean
-  /** The user's home directory, which paths show as `~`. */
-  homeDirectory: string
   /** The appearance picked in the settings. */
   appearance: Appearance
 
@@ -809,20 +807,20 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarOpen: true,
     collapsedProjects: new Set(),
     fullScreen: false,
-    homeDirectory: '',
     appearance: DEFAULT_APPEARANCE,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
       api.onAppearanceChanged((appearance) => set({ appearance }))
-      const [{ sidebarOpen, collapsedProjects, fullScreen, homeDirectory }, appearance] =
-        await Promise.all([api.getWindowState(), api.getAppearance()])
+      const [{ sidebarOpen, collapsedProjects, fullScreen }, appearance] = await Promise.all([
+        api.getWindowState(),
+        api.getAppearance(),
+      ])
       set({
         sidebarOpen,
         collapsedProjects: new Set(collapsedProjects),
         fullScreen,
-        homeDirectory,
         appearance,
       })
     },

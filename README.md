@@ -22,8 +22,7 @@ Hoot supports macOS only for now.
   Each project stays expanded or collapsed as you left it, also after Hoot quits; a project added to
   the list is expanded. Point at the row, or move the keyboard focus into it, to show its buttons:
   **Issues** shows the project's issues, `+` starts a session or creates a worktree, and `⋯` removes
-  the project from the list. Rest the pointer on the row to see a card beside it with the project's
-  name and folder, with your home directory written as `~`.
+  the project from the list.
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run

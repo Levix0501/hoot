@@ -280,7 +280,6 @@ function startWithDatabase(database: DatabaseSync): void {
     sessions,
     quitGuard,
     worktrees,
-    homeDirectory: os.homedir(),
     resolveProjectRoot: async (directory) =>
       resolveProjectRoot(directory, {
         git: await gitExecutable(),

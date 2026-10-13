@@ -30,7 +30,7 @@ import { WorktreeService } from './worktrees/worktree-service'
 const baseEnv = captureBaseEnv()
 
 const LIGHT_BACKGROUND = '#ffffff'
-const DARK_BACKGROUND = '#0a0a0a'
+const DARK_BACKGROUND = '#181818'
 const SHUTDOWN_TIMEOUT_MS = 4_000
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL

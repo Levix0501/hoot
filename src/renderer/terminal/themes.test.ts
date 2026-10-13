@@ -6,8 +6,8 @@ const ansiColors = (scheme: 'dark' | 'light') =>
 
 describe('terminal themes', () => {
   it('uses Ghostty 1.3.1’s default 16 colors on the dark interface colors', () => {
-    expect(darkTheme.background).toBe('#0a0a0a')
-    expect(darkTheme.foreground).toBe('#fafafa')
+    expect(darkTheme.background).toBe('#181818')
+    expect(darkTheme.foreground).toBe('#ffffff')
     expect(ansiColors('dark')).toEqual([
       '#1d1f21',
       '#cc6666',
@@ -30,7 +30,7 @@ describe('terminal themes', () => {
 
   it('uses Claude Light’s 16 colors on the light interface colors', () => {
     expect(lightTheme.background).toBe('#ffffff')
-    expect(lightTheme.foreground).toBe('#0a0a0a')
+    expect(lightTheme.foreground).toBe('#1a1c1f')
     expect(ansiColors('light')).toEqual([
       '#0a0a0a',
       '#a84b3a',

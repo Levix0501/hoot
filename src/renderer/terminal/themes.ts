@@ -94,8 +94,8 @@ function theme(background: string, foreground: string, ansi: readonly string[]):
   }
 }
 
-export const lightTheme: ITheme = theme('#ffffff', '#0a0a0a', LIGHT_ANSI_COLORS)
-export const darkTheme: ITheme = theme('#0a0a0a', '#fafafa', DARK_ANSI_COLORS)
+export const lightTheme: ITheme = theme('#ffffff', '#1a1c1f', LIGHT_ANSI_COLORS)
+export const darkTheme: ITheme = theme('#181818', '#ffffff', DARK_ANSI_COLORS)
 
 export function terminalTheme(scheme: ColorScheme): ITheme {
   return scheme === 'dark' ? darkTheme : lightTheme

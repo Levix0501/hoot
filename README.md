@@ -29,9 +29,12 @@ projects and starting sessions do not work yet.
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment, with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session an issue is
-  [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. Tools that
-  are not installed are shown disabled with an install command, and **Re-detect Tools**, the last
-  item of the new session menu, checks again at any time.
+  [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. To the
+  environment of each session's process Hoot adds only the terminal's variables (`TERM`,
+  `COLORTERM`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`) and what [`hoot`](#the-hoot-command)
+  needs: the variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder
+  `hoot` is in, first on `PATH`. Tools that are not installed are shown disabled with an install
+  command, and **Re-detect Tools**, the last item of the new session menu, checks again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
   expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the
@@ -173,6 +176,74 @@ works, as an issue, and come back to it later. Issues are kept on your Mac, in
   project, or quit Hoot. Quitting does not ask about drafts.
 - **Removing a project** from the list keeps its issues; they come back, done and canceled ones
   included, with their numbers, when you add the project again.
+
+## The hoot command
+
+In every session Hoot starts, `hoot`, Hoot's command line program, reads and creates the issues of
+the session's project, with commands modeled on `gh issue`. It works with the Hoot that started the
+session and the project the session belongs to (also when it runs in one of the project's
+worktrees), whatever the current folder, and whichever other Hoots run at the same time, such as an
+installed one and one run from its repository.
+
+```sh
+hoot issue view HOO-12         # or by its number: hoot issue view 12
+hoot issue list                # the issues neither done nor canceled
+hoot issue list --status todo --status in-progress
+hoot issue create --title "Fix the login bug" --description-file notes.md --priority high
+```
+
+- **`hoot issue view <issue>`** shows an issue, given its identifier (such as `HOO-12`) or its
+  number (`12`): its identifier and title; then its status, its priority and when it was created
+  (in local time, to the minute); then, if it has a description, a blank line and the description
+  as it is written, in Markdown.
+- **`hoot issue list`** lists the project's issues that are neither done nor canceled, one per
+  line with its identifier, status, priority and title, in the order of the project's **All
+  issues** list. `--all` lists every issue, and `--status <name>`, given once for each status,
+  only the issues with those statuses, done or not.
+- **`hoot issue create --title <title>`** creates an issue in the project, and prints its
+  identifier. Its description is `--description <text>`, or what the UTF-8 file
+  `--description-file <file>` holds (`-` reads standard input), exactly as given, or none; its
+  status is `--status <name>`, `backlog` unless given; its priority `--priority <name>`, `none`
+  unless given. Otherwise it is created as the new issue dialog creates one: without the
+  whitespace around its title, with the project's next number, and completed as it is created
+  when it is done or canceled.
+- **Names**: the statuses are `backlog`, `todo`, `in-progress`, `done` and `canceled`; the
+  priorities `none`, `urgent`, `high`, `medium` and `low`.
+- **`--json`** prints the issue, or the list as an array, as JSON objects with exactly
+  `identifier`, `number`, `title`, `description`, `status`, `priority`, `createdAt` and
+  `completedAt`, the times in UTC in ISO 8601, `completedAt` being `null` while the issue is
+  neither done nor canceled. `hoot --help` and `hoot issue --help` explain all of this.
+- **In the window**, an issue `hoot` creates shows at once: in its project's count in the sidebar,
+  on the project's Issues pages, and among the issues an issue's page steps through. Nothing else
+  changes there: no message pops up, the page, the sidebar and the keyboard focus stay as they
+  are, and so does what you are typing. Hoot does not record that `hoot`, or which session,
+  created an issue.
+- **When it cannot** do what it is asked, `hoot` says why on standard error and exits with code 1,
+  without creating anything: when the issue is not in the project, a name, option or command is
+  wrong, the Hoot that started the session is not running any more, or it does not run in a session
+  Hoot started.
+- **Agents** are not told about `hoot`, and it is not allowed in advance: a coding tool runs it like
+  any other command, at its [permission level](#permission-levels), and Hoot changes no tool's
+  settings for it. At Codex's **Default** and **Read Only** levels, Codex's sandbox may block
+  `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside the sandbox, as Codex
+  offers to with your approval, or pick **Full Access**.
+
+Hoot listens for `hoot` on a Unix domain socket that only you can connect to, `hoot.sock` in its
+[user data folder](#architecture) (or in the system's folder for temporary files when that path is
+too long for a socket). Each session's process gets in its environment:
+
+| Variable          | Value                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `PATH`            | First, the folder `hoot` is in: `Hoot.app/Contents/Resources/bin`, or `resources/bin` in the repository for a Hoot run from it |
+| `HOOT_SOCKET`     | The socket of the Hoot that started the session                                                                                |
+| `HOOT_SESSION_ID` | The session's id, by which that Hoot knows the session's project                                                               |
+| `HOOT_NODE`       | Hoot's own executable, which runs `hoot` as Node.js                                                                            |
+| `HOOT_CLI`        | `hoot`'s script, inside Hoot                                                                                                   |
+
+A login shell may move that folder further down `PATH` (macOS's `/etc/zprofile` and fish put the
+system's folders first); `hoot` is still found by its name, unless another program named `hoot`
+comes before it. On Windows, where Hoot does not run yet, Hoot would listen on a named pipe, and
+cmd and PowerShell would run `hoot.cmd`, and Git Bash `hoot`, both in that folder.
 
 ## Worktrees
 
@@ -415,13 +486,14 @@ it does on Windows: it shows on a Mac whether anything in the row would be cover
 
 ## Architecture
 
-| Part     | Location       | Role                                                                                                     |
-| -------- | -------------- | -------------------------------------------------------------------------------------------------------- |
-| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, session processes, quitting |
-| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                              |
-| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                       |
-| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                      |
-| Shared   | `src/shared`   | Types and messages used by more than one process                                                         |
+| Part     | Location       | Role                                                                                                                       |
+| -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, session processes, quitting, answering `hoot` |
+| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                                                |
+| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                                         |
+| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                                        |
+| Shared   | `src/shared`   | Types and messages used by more than one process                                                                           |
+| hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`     |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
 node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder:

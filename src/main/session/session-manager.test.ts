@@ -42,7 +42,12 @@ class FakeHost extends EventEmitter implements PtyHost {
 function setup(
   options: {
     killTimeoutMs?: number
-    resolveLaunch?: (toolId: string, cwd: string, issue: SentIssue | null) => Promise<SessionLaunch>
+    resolveLaunch?: (
+      toolId: string,
+      cwd: string,
+      issue: SentIssue | null,
+      sessionId: string,
+    ) => Promise<SessionLaunch>
   } = {},
 ) {
   const host = new FakeHost()
@@ -287,6 +292,32 @@ describe('SessionManager', () => {
     expect([sent.issueId, other.issueId]).toEqual([7, null])
     expect(manager.list().map((session) => session.issueId)).toEqual([7, null])
     expect(updates.map((update) => update.issueId)).toEqual([7, null])
+  })
+
+  it("launches each session with its id, and knows its project's root until it is closed", async () => {
+    const launched: string[] = []
+    const launch = pendingLaunch()
+    const { manager, host } = setup({
+      resolveLaunch: async (toolId, _cwd, _issue, sessionId) => {
+        launched.push(sessionId)
+        return launch.resolveLaunch(toolId)
+      },
+    })
+    const starting = manager.start(request('s1', 'shell', '/work/project', '/wt/feat'))
+    // Also while it starts: its process may run hoot before Hoot learns that it runs.
+    await expect.poll(() => launched).toEqual(['s1'])
+    expect(manager.projectRootOf('s1')).toBe('/work/project')
+    launch.release()
+    await starting
+    await manager.start(request('s2', 'claude', '/work/other'))
+    expect(launched).toEqual(['s1', 's2'])
+    expect(manager.projectRootOf('s2')).toBe('/work/other')
+    // Until the session is closed, also once its process has ended.
+    host.emit('exit', 's1', 3, 0)
+    expect(manager.projectRootOf('s1')).toBe('/work/project')
+    await manager.close('s1')
+    expect(manager.projectRootOf('s1')).toBeNull()
+    expect(manager.projectRootOf('unknown')).toBeNull()
   })
 
   it('runs a session in a worktree in its root, and tells its running sessions apart', async () => {

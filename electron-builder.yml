@@ -12,6 +12,11 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
+# The launchers of hoot, the command line program of Hoot's sessions, which
+# Hoot puts first on their PATH: files of their own, which shells can run.
+extraResources:
+  - from: resources/bin
+    to: bin
 # node-pty ships prebuilt Node-API binaries, which Electron loads as they are.
 npmRebuild: false
 # The package's name as the app has it. The Windows installer names Hoot's folder,

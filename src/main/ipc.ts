@@ -21,9 +21,6 @@ import {
   type WindowState,
 } from '../shared/ipc'
 import {
-  ISSUE_DESCRIPTION_MAX_LENGTH,
-  ISSUE_PRIORITIES,
-  ISSUE_STATUSES,
   ISSUE_TITLE_MAX_LENGTH,
   type Issue,
   type IssueChanges,
@@ -37,6 +34,7 @@ import type {
   DeleteWorktreeResult,
   RemoveWorktreeResult,
 } from '../shared/worktrees'
+import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import type { ProjectRootResult } from './projects/project-root'
 import type { ProjectStore } from './projects/project-store'
@@ -92,10 +90,6 @@ const submoduleArguments = z.tuple([
 ])
 const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
-const issueTitle = z.string().max(ISSUE_TITLE_MAX_LENGTH)
-const issueDescription = z.string().max(ISSUE_DESCRIPTION_MAX_LENGTH)
-const issueStatus = z.enum(ISSUE_STATUSES)
-const issuePriority = z.literal(ISSUE_PRIORITIES)
 const newIssue = z.object({
   projectId: rowId,
   title: issueTitle,

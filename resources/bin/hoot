@@ -1,0 +1,13 @@
+#!/bin/sh
+# hoot, Hoot's command line program, for the shells of macOS and for Git Bash
+# on Windows (where cmd and PowerShell run hoot.cmd beside it). Hoot puts this
+# folder first on the PATH of every session it starts, and names in the
+# session's environment its own executable, which runs hoot's script as
+# Node.js, and the script.
+if [ -z "$HOOT_NODE" ] || [ -z "$HOOT_CLI" ]; then
+  echo 'error: hoot works only in the sessions that Hoot starts: HOOT_NODE and HOOT_CLI are not set.' >&2
+  exit 1
+fi
+# Options for the user's own Node.js are not hoot's.
+unset NODE_OPTIONS
+ELECTRON_RUN_AS_NODE=1 exec "$HOOT_NODE" "$HOOT_CLI" "$@"

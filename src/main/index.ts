@@ -13,8 +13,14 @@ import {
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
-import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
+import {
+  fallbackUtf8Locale,
+  type HootCliEnvOptions,
+  type TerminalEnvOptions,
+} from './env/session-env'
 import { gitEnvironment } from './git/git'
+import { hootSocketPath } from './hoot-cli/address'
+import { HootServer } from './hoot-cli/hoot-server'
 import { registerDatabaseErrorIpc, registerIpc } from './ipc'
 import { IssueStore } from './issues/issue-store'
 import { resolveProjectRoot } from './projects/project-root'
@@ -44,6 +50,19 @@ if (userDataOverride) app.setPath('userData', path.resolve(userDataOverride))
 // Runs from the repository keep their own data, apart from an installed Hoot,
 // so that both can run at the same time.
 else if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'Hoot-dev'))
+// What every session needs to run hoot, Hoot's command line program: the
+// folder of its launchers, which goes first on PATH; Hoot's own executable,
+// which runs its script as Node.js; the script; and where this Hoot listens
+// for it, which depends on the user data directory, so that each session's
+// hoot reaches the Hoot that started it.
+const hootCli: Omit<HootCliEnvOptions, 'sessionId'> = {
+  binDirectory: app.isPackaged
+    ? path.join(process.resourcesPath, 'bin')
+    : path.join(app.getAppPath(), 'resources', 'bin'),
+  node: process.execPath,
+  script: path.join(import.meta.dirname, '../cli/index.js'),
+  socket: hootSocketPath(app.getPath('userData')),
+}
 const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.
@@ -80,7 +99,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd, issue) =>
+  resolveLaunch: (toolId, cwd, issue, sessionId) =>
     resolveLaunch(
       {
         shell,
@@ -93,6 +112,7 @@ const sessions = new SessionManager({
         getLoginEnvironment: () => tools.getLoginEnvironment(),
         permissionLevel: (tool) => permissionLevels.level(tool),
         temporaryFolder: app.getPath('temp'),
+        hoot: { ...hootCli, sessionId },
       },
       toolId,
       cwd,
@@ -102,6 +122,9 @@ const sessions = new SessionManager({
 
 let mainWindow: BrowserWindow | null = null
 const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+
+/** Answers hoot in the sessions, once the database is open. */
+let hootServer: HootServer | null = null
 
 /**
  * Brings the window forward so the user can answer a question in it. In the
@@ -253,6 +276,8 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     worktrees.dispose()
     const shutdown = (async () => {
+      // hoot then says that Hoot is not running.
+      await hootServer?.stop()
       await sessions.endAll()
       await ptyHost.stop()
     })()
@@ -282,12 +307,13 @@ if (!app.requestSingleInstanceLock()) {
 /** Starts Hoot with its projects, sessions and issues. */
 function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
+  const issues = new IssueStore(database)
   // Only projects in the list are kept collapsed, so that a project added later is expanded.
   sidebar.retainProjects(projects.list().map((project) => project.id))
   registerIpc({
     getWindow,
     projects,
-    issues: new IssueStore(database),
+    issues,
     tools,
     permissionLevels,
     sidebar,
@@ -300,6 +326,30 @@ function startWithDatabase(database: DatabaseSync): void {
         git: await gitExecutable(),
         env: (await tools.getLoginEnvironment()).env,
       }),
+  })
+
+  hootServer = new HootServer({
+    address: hootCli.socket,
+    sessionProject: (sessionId) => {
+      const root = sessions.projectRootOf(sessionId)
+      if (root === null) {
+        return {
+          ok: false,
+          message:
+            'This session is not open in Hoot: it has been closed, or Hoot has started again since.',
+        }
+      }
+      const project = projects.find(root)
+      return project
+        ? { ok: true, project }
+        : { ok: false, message: "The session's project is no longer in Hoot's list." }
+    },
+    issues,
+    // The window shows it at once, and nothing else changes there.
+    issueCreated: (issue) => getWindow()?.webContents.send(IpcChannel.issueCreated, issue),
+  })
+  hootServer.start().catch((error: unknown) => {
+    console.error(`Could not listen for hoot on ${hootCli.socket}:`, error)
   })
 
   const sendSessionCommand = (command: SessionCommand) =>

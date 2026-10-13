@@ -76,6 +76,7 @@ const api: HootApi = {
   createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),
   deleteIssue: (id) => ipcRenderer.invoke(IpcChannel.deleteIssue, id),
+  onIssueCreated: (listener) => subscribe(IpcChannel.issueCreated, listener),
   writeClipboardText: (text) => ipcRenderer.send(IpcChannel.writeClipboardText, text),
   openExternalLink: (url) => ipcRenderer.send(IpcChannel.openExternalLink, url),
 }

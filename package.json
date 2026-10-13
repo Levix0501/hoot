@@ -52,6 +52,7 @@
     "birpc": "^4.2.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
+    "commander": "^14.0.3",
     "conf": "^15.1.0",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",

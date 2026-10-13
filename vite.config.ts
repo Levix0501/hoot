@@ -52,6 +52,12 @@ export default defineConfig({
           },
         },
       },
+      {
+        // hoot, the command line program of Hoot's sessions, which Hoot's
+        // own executable runs as Node.js.
+        entry: 'src/cli/index.ts',
+        vite: { build: { outDir: 'dist-electron/cli', minify: false } },
+      },
     ]),
   ],
 })

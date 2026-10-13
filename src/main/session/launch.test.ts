@@ -42,6 +42,14 @@ const highest: PermissionLevelSettings = {
   opencode: 'auto-approve',
 }
 
+const hoot = {
+  binDirectory: '/Applications/Hoot.app/Contents/Resources/bin',
+  node: '/Applications/Hoot.app/Contents/MacOS/Hoot',
+  script: '/Applications/Hoot.app/Contents/Resources/app.asar/dist-electron/cli/index.js',
+  socket: '/Users/me/Library/Application Support/Hoot/hoot.sock',
+  sessionId: 'session-1',
+}
+
 function context(
   loginEnv: Record<string, string>,
   levels: PermissionLevelSettings = highest,
@@ -53,7 +61,15 @@ function context(
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
     temporaryFolder: temporary,
+    hoot,
   }
+}
+
+const hootVariables = {
+  HOOT_SOCKET: hoot.socket,
+  HOOT_SESSION_ID: 'session-1',
+  HOOT_NODE: hoot.node,
+  HOOT_CLI: hoot.script,
 }
 
 describe('resolveLaunch', () => {
@@ -61,7 +77,12 @@ describe('resolveLaunch', () => {
     const launch = await resolveLaunch(context({ PATH: `${bin}:/usr/bin` }), 'shell', project)
     expect(launch.file).toBe('/bin/zsh')
     expect(launch.args).toEqual(['-l'])
-    expect(launch.env).toMatchObject({ HOME: '/home/me', PATH: '/usr/bin:/bin', PWD: project })
+    expect(launch.env).toMatchObject({
+      HOME: '/home/me',
+      PATH: `${hoot.binDirectory}:/usr/bin:/bin`,
+      PWD: project,
+      ...hootVariables,
+    })
     expect(launch.env.TERM).toBe('xterm-256color')
   })
 
@@ -70,7 +91,12 @@ describe('resolveLaunch', () => {
     const launch = await resolveLaunch(context(loginEnv), 'codex', project)
     expect(launch.file).toBe('codex')
     expect(launch.args).toEqual(['--dangerously-bypass-approvals-and-sandbox'])
-    expect(launch.env).toMatchObject({ PATH: `${bin}:/usr/bin`, FROM_RC: 'yes', PWD: project })
+    expect(launch.env).toMatchObject({
+      PATH: `${hoot.binDirectory}:${bin}:/usr/bin`,
+      FROM_RC: 'yes',
+      PWD: project,
+      ...hootVariables,
+    })
     expect(launch.env).not.toHaveProperty('SHLVL')
     expect(launch.env).not.toHaveProperty('_')
   })
@@ -208,7 +234,8 @@ describe('the issue, the first message and the arguments that send them', () => 
       'The issue to judge is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
     )
     expect(prompt).toContain('can one fresh agent session implement the whole issue')
-    expect(prompt).not.toMatch(/Claude|Hoot/)
+    // It names no agent, and says nothing of the hoot command.
+    expect(prompt.replace('/tmp/hoot-issue-1/issue.md', '')).not.toMatch(/Claude|hoot/i)
   })
 
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {

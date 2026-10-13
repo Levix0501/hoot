@@ -6,6 +6,24 @@ export type IssueStatus = (typeof ISSUE_STATUSES)[number]
 export const ISSUE_PRIORITIES = [0, 1, 2, 3, 4] as const
 export type IssuePriority = (typeof ISSUE_PRIORITIES)[number]
 
+/** How the interface writes each status. */
+export const STATUS_LABELS: Readonly<Record<IssueStatus, string>> = {
+  backlog: 'Backlog',
+  todo: 'Todo',
+  in_progress: 'In Progress',
+  done: 'Done',
+  canceled: 'Canceled',
+}
+
+/** How the interface writes each priority. */
+export const PRIORITY_LABELS: Readonly<Record<IssuePriority, string>> = {
+  0: 'No priority',
+  1: 'Urgent',
+  2: 'High',
+  3: 'Medium',
+  4: 'Low',
+}
+
 /**
  * The issues a project's list shows: all of them, the active ones (to do or
  * in progress), or those in the backlog.

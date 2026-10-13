@@ -848,6 +848,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       api.onSessionData((id, data) => terminals.get(id)?.terminal.write(data))
       api.onProjectsChanged(applyProjects)
+      // An issue created by hoot in a session joins its project's issues, and
+      // so shows wherever they show; nothing else changes.
+      api.onIssueCreated((issue) =>
+        set((state) =>
+          state.projects.some((project) => project.id === issue.projectId) &&
+          !state.issues.some((entry) => entry.id === issue.id)
+            ? { issues: [...state.issues, issue] }
+            : state,
+        ),
+      )
       api.onToolsChanged((tools) => set({ tools }))
       api.onPermissionLevelsChanged((permissionLevels) => set({ permissionLevels }))
       api.onSessionUpdated((info) => {

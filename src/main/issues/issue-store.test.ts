@@ -101,6 +101,24 @@ describe('IssueStore', () => {
     expect(start().issues.create(newIssue(g.id, 'G four'))?.number).toBe(4)
   })
 
+  it('finds an issue by its number in its project, while the project is in the list', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const gOne = issues.create(newIssue(g.id, 'G one'))!
+    const gTwo = issues.create(newIssue(g.id, 'G two'))!
+    const hOne = issues.create(newIssue(h.id, 'H one'))!
+    expect(issues.byNumber(g.id, 1)).toEqual(gOne)
+    expect(issues.byNumber(g.id, 2)).toEqual(gTwo)
+    expect(issues.byNumber(h.id, 1)).toEqual(hOne)
+    expect(issues.byNumber(h.id, 2)).toBeNull()
+    expect(issues.byNumber(g.id, 0)).toBeNull()
+    issues.delete(gTwo.id)
+    expect(issues.byNumber(g.id, 2)).toBeNull()
+    projects.remove('/work/g')
+    expect(issues.byNumber(g.id, 1)).toBeNull()
+  })
+
   it('changes only what it is given', () => {
     const { projects, issues } = start()
     const project = projects.add('/work/alpha').project

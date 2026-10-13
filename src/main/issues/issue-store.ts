@@ -66,6 +66,9 @@ export class IssueStore {
         `SELECT ${COLUMNS} FROM issues WHERE project_id = ? AND ${LISTED} ORDER BY id`,
       ),
       get: db.prepare(`SELECT ${COLUMNS} FROM issues WHERE id = ? AND ${LISTED}`),
+      byNumber: db.prepare(
+        `SELECT ${COLUMNS} FROM issues WHERE project_id = ? AND number = ? AND ${LISTED}`,
+      ),
       nextNumber: db.prepare(
         'SELECT next_issue_number FROM projects WHERE id = ? AND list_position IS NOT NULL',
       ),
@@ -92,6 +95,12 @@ export class IssueStore {
 
   get(id: number): Issue | null {
     const row = this.statements.get.get(id) as IssueRow | undefined
+    return row ? issueFromRow(row) : null
+  }
+
+  /** The issue with this number in a project in the list, if any. */
+  byNumber(projectId: number, number: number): Issue | null {
+    const row = this.statements.byNumber.get(projectId, number) as IssueRow | undefined
     return row ? issueFromRow(row) : null
   }
 

@@ -136,6 +136,7 @@ export const IpcChannel = {
   createIssue: 'issues:create',
   updateIssue: 'issues:update',
   deleteIssue: 'issues:delete',
+  issueCreated: 'issues:created',
   writeClipboardText: 'clipboard:write-text',
   openExternalLink: 'links:open-external',
 } as const
@@ -245,6 +246,8 @@ export interface HootApi {
   updateIssue(id: number, changes: IssueChanges): Promise<IssueResult>
   /** Deletes an issue for good. */
   deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
+  /** An issue was created other than from the window: by hoot, in a session. */
+  onIssueCreated(listener: (issue: Issue) => void): () => void
   /**
    * Puts text on the clipboard. Through the main process, which can write it
    * while the window does not have the focus.

@@ -5,7 +5,11 @@ import type { Issue } from '../../shared/issues'
 import type { PermissionLevel } from '../../shared/permission-levels'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
-import { buildSessionEnv, type TerminalEnvOptions } from '../env/session-env'
+import {
+  buildSessionEnv,
+  type HootCliEnvOptions,
+  type TerminalEnvOptions,
+} from '../env/session-env'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { findCommand } from '../tools/find-command'
 import { SessionError, type SessionLaunch } from './session-manager'
@@ -24,6 +28,8 @@ export interface LaunchContext {
    * issue's file: the system's folder for temporary files.
    */
   temporaryFolder: string
+  /** What the session's process needs to run hoot, Hoot's command line program. */
+  hoot: HootCliEnvOptions
 }
 
 /** What a session started from an issue sends Claude Code: the issue's title and description. */
@@ -126,7 +132,8 @@ async function checkFolder(cwd: string): Promise<void> {
  * directly, with the login shell environment and with exactly the arguments
  * of its permission level; Claude Code, when it is sent an issue, also with
  * the arguments that send it, once the issue's file is written; the launch's
- * cleanup removes the file's folder.
+ * cleanup removes the file's folder. Either environment also has what hoot
+ * needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -143,7 +150,7 @@ export async function resolveLaunch(
     return {
       file: context.shell,
       args: ['-l'],
-      env: buildSessionEnv(context.baseEnv, { ...context.terminal(), cwd }),
+      env: buildSessionEnv(context.baseEnv, { ...context.terminal(), cwd, hoot: context.hoot }),
     }
   }
 
@@ -158,7 +165,7 @@ export async function resolveLaunch(
       `${tool.label} is not available. Install it with: ${tool.installCommand}`,
     )
   }
-  const env = buildSessionEnv(login.env, { ...context.terminal(), cwd })
+  const env = buildSessionEnv(login.env, { ...context.terminal(), cwd, hoot: context.hoot })
   if (issue === null) return { file: tool.command, args: [...level.args], env }
   // Written last, so that a launch that fails leaves nothing behind.
   const issueFolder = await writeIssueFolder(context.temporaryFolder, issue)

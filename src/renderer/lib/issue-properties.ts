@@ -1,4 +1,10 @@
-import type { IssuePriority, IssueStatus, IssueView } from '../../shared/issues'
+import {
+  PRIORITY_LABELS,
+  STATUS_LABELS,
+  type IssuePriority,
+  type IssueStatus,
+  type IssueView,
+} from '../../shared/issues'
 
 /** A value of an issue's property, as pickers and menus offer it. */
 export interface PropertyOption<T> {
@@ -10,28 +16,28 @@ export interface PropertyOption<T> {
 
 /** The statuses, in the order of their workflow, numbered as Linear numbers them. */
 export const STATUS_OPTIONS: ReadonlyArray<PropertyOption<IssueStatus>> = [
-  { value: 'backlog', label: 'Backlog', shortcut: '1' },
-  { value: 'todo', label: 'Todo', shortcut: '2' },
-  { value: 'in_progress', label: 'In Progress', shortcut: '3' },
-  { value: 'done', label: 'Done', shortcut: '4' },
-  { value: 'canceled', label: 'Canceled', shortcut: '5' },
+  { value: 'backlog', label: STATUS_LABELS.backlog, shortcut: '1' },
+  { value: 'todo', label: STATUS_LABELS.todo, shortcut: '2' },
+  { value: 'in_progress', label: STATUS_LABELS.in_progress, shortcut: '3' },
+  { value: 'done', label: STATUS_LABELS.done, shortcut: '4' },
+  { value: 'canceled', label: STATUS_LABELS.canceled, shortcut: '5' },
 ]
 
 /** The priorities, none first, each picked by its own number. */
 export const PRIORITY_OPTIONS: ReadonlyArray<PropertyOption<IssuePriority>> = [
-  { value: 0, label: 'No priority', shortcut: '0' },
-  { value: 1, label: 'Urgent', shortcut: '1' },
-  { value: 2, label: 'High', shortcut: '2' },
-  { value: 3, label: 'Medium', shortcut: '3' },
-  { value: 4, label: 'Low', shortcut: '4' },
+  { value: 0, label: PRIORITY_LABELS[0], shortcut: '0' },
+  { value: 1, label: PRIORITY_LABELS[1], shortcut: '1' },
+  { value: 2, label: PRIORITY_LABELS[2], shortcut: '2' },
+  { value: 3, label: PRIORITY_LABELS[3], shortcut: '3' },
+  { value: 4, label: PRIORITY_LABELS[4], shortcut: '4' },
 ]
 
 export function statusLabel(status: IssueStatus): string {
-  return STATUS_OPTIONS.find((option) => option.value === status)!.label
+  return STATUS_LABELS[status]
 }
 
 export function priorityLabel(priority: IssuePriority): string {
-  return PRIORITY_OPTIONS.find((option) => option.value === priority)!.label
+  return PRIORITY_LABELS[priority]
 }
 
 /** The option of the digit typed while a picker of the property is open, if any. */

@@ -99,6 +99,22 @@ describe("hoot's launchers on Windows", () => {
     expect(sh).toContain('ELECTRON_RUN_AS_NODE=1 exec "$HOOT_NODE" "$HOOT_CLI" "$@"')
   })
 
+  it('keeps the line endings each launcher needs in any checkout, also one on Windows', async () => {
+    // Git for Windows checks text files out with Windows line endings by
+    // default, unless their attributes say otherwise: sh, Git Bash's too,
+    // cannot run a script with them, and cmd needs them.
+    const { stdout } = await run('git', ['check-attr', 'text', 'eol', '--', 'hoot', 'hoot.cmd'], {
+      cwd: bin,
+    })
+    expect(stdout.split('\n')).toEqual([
+      'hoot: text: set',
+      'hoot: eol: lf',
+      'hoot.cmd: text: set',
+      'hoot.cmd: eol: crlf',
+      '',
+    ])
+  })
+
   it("runs hoot's script with Hoot's executable as Node.js from cmd and PowerShell, and ends as it does", () => {
     const lines = cmd.split('\r\n')
     // cmd finds the labels of a batch file reliably only with Windows line endings.

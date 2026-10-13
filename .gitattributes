@@ -1,2 +1,5 @@
 # cmd reads batch files with Windows line endings.
 *.cmd text eol=crlf
+# sh, Git Bash's too, cannot run a script with Windows line endings, which
+# Git for Windows checks text files out with by default.
+resources/bin/hoot text eol=lf

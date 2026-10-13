@@ -419,15 +419,16 @@ Hoot keeps the version it started with. Quitting ends its sessions, and they are
 ## Releasing
 
 Every change that users of Hoot would notice comes with a changeset: a Markdown file in
-`.changeset/` that says how it changes the version (`patch`, `minor` or `major`) and what changed,
-for users. Write it with
+`.changeset/` that says how it changes the version (`patch`, `minor` or `major`) and, in one
+sentence, what changed for users. Write it with
 
 ```sh
 pnpm changeset
 ```
 
-which asks for the kind of change and its summary, and commit it with the change. Its summary
-becomes the change's entry in `CHANGELOG.md` and in the release's text. Hoot is in Changesets'
+which asks for the kind of change and its summary, or add the file yourself, and commit it in the
+same commit as the change. Its summary becomes the change's entry in `CHANGELOG.md` and in the
+release's text, linked to the commit that added the changeset. Hoot is in Changesets'
 prerelease mode, so versions are alpha prereleases (`0.1.0-alpha.0`, then `0.1.0-alpha.1` and so
 on) until `pnpm changeset pre exit`.
 

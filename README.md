@@ -131,9 +131,10 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   show its page; right-click it to change its status, priority or project, copy its identifier or
   title, or delete it.
 - **The Project dropdown**, at the right end of the row of views, picks whose issues the list
-  shows: check any of **No project** and the projects (in the sidebar's order) to show only the
-  issues without a project and those of the projects checked; with nothing checked, which it says
-  as **All projects**, the list shows every issue. It names what is checked, or says how many
+  shows. Check any of its choices, **No project** and the projects (in the sidebar's order), to
+  show only the issues of those checked: the issues without a project while **No project** is
+  checked, and those of each project checked. With nothing checked, which it says as
+  **All projects**, the list shows every issue. It names what is checked, or says how many
   (such as **2 projects**); type in its search field to list only the choices whose names match.
   A project removed from the list leaves it. The view and the collapsed groups are the same
   whatever is checked; they and what is checked stay as you left them until Hoot quits, which

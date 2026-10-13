@@ -14,6 +14,11 @@ files:
   - dist-electron/**/*
 # node-pty ships prebuilt Node-API binaries, which Electron loads as they are.
 npmRebuild: false
+# The package's name as the app has it. The Windows installer names Hoot's folder,
+# %LOCALAPPDATA%\Programs\Hoot, after it; Electron takes the app's name from
+# productName instead.
+extraMetadata:
+  name: Hoot
 mac:
   category: public.app-category.developer-tools
   # Made with Icon Composer. It is compiled into the app for macOS 26 and later, and

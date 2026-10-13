@@ -100,7 +100,7 @@ export interface WorktreeDeletion {
 export interface AppState {
   initialized: boolean
   projects: Project[]
-  /** Each project's worktrees as Git lists them, by project root. */
+  /** Each project's worktrees as Git lists them, by project root, once they have been read. */
   worktrees: Record<string, WorktreeInfo[]>
   /** The last known state of every worktree listed since Hoot started, by root. */
   knownWorktrees: Record<string, WorktreeInfo>

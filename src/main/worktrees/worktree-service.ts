@@ -51,6 +51,8 @@ interface ProjectState {
   discovering: Promise<void> | null
   /** The worktrees as they were last read. */
   worktrees: WorktreeInfo[]
+  /** Whether `changed` has reported them, as it does once they are first read. */
+  reported: boolean
   refreshing: Promise<void> | null
   refreshAgain: boolean
   /** Settles once the worktrees have been read for the first time. */
@@ -103,7 +105,8 @@ function sameWorktrees(a: readonly WorktreeInfo[], b: readonly WorktreeInfo[]): 
  * or deletes one, and before a session starts in one or one is deleted or
  * removed. Inner repositories are looked for when a project is added, when
  * the new worktree dialog opens, and before a worktree is checked, deleted
- * or removed. `changed` reports a project's worktrees whenever they change.
+ * or removed. `changed` reports a project's worktrees once they are first
+ * read, also when there are none, and then whenever they change.
  */
 export class WorktreeService extends EventEmitter<{
   changed: [projectRoot: string, worktrees: WorktreeInfo[]]
@@ -129,6 +132,7 @@ export class WorktreeService extends EventEmitter<{
       inner: null,
       discovering: null,
       worktrees: [],
+      reported: false,
       refreshing: null,
       refreshAgain: false,
       ready: Promise.resolve(),
@@ -702,8 +706,9 @@ export class WorktreeService extends EventEmitter<{
         state.refreshAgain = false
         const worktrees = await this.readWorktrees(state)
         if (state.removed) return
-        if (!sameWorktrees(worktrees, state.worktrees)) {
+        if (!state.reported || !sameWorktrees(worktrees, state.worktrees)) {
           state.worktrees = worktrees
+          state.reported = true
           this.emit('changed', state.root, worktrees)
         }
       } while (state.refreshAgain)

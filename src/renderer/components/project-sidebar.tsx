@@ -92,13 +92,19 @@ function ProjectWorktrees({ project }: { project: Project }) {
 
 /**
  * A project in the sidebar: its row, with the rows of its sessions and
- * worktrees below it while it is expanded. They slide open and closed as the
- * sidebar itself slides, or show and hide at once when the system reduces
- * motion.
+ * worktrees below it while it is expanded, or a line saying it has none. They
+ * slide open and closed as the sidebar itself slides, or show and hide at once
+ * when the system reduces motion.
  */
 function ProjectEntry({ project }: { project: Project }) {
   const expanded = useAppStore((state) => !state.collapsedProjects.has(project.id))
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
+  // Whether nothing is listed below its row: known once its worktrees have been read.
+  const empty = useAppStore(
+    (state) =>
+      state.worktrees[project.root]?.length === 0 &&
+      !state.sessions.some((session) => session.projectRoot === project.root),
+  )
   return (
     <Collapsible
       render={<li />}
@@ -118,8 +124,20 @@ function ProjectEntry({ project }: { project: Project }) {
         className="flex h-(--collapsible-panel-height) min-w-0 flex-col overflow-y-clip transition-[height] duration-200 ease-linear data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0"
         data-testid="project-rows"
       >
-        <ProjectSessions project={project} />
-        <ProjectWorktrees project={project} />
+        {empty ? (
+          <li
+            // Lined up with the project's name.
+            className="flex h-8 items-center pl-8 text-sm text-muted-foreground"
+            data-testid="no-sessions"
+          >
+            No sessions
+          </li>
+        ) : (
+          <>
+            <ProjectSessions project={project} />
+            <ProjectWorktrees project={project} />
+          </>
+        )}
       </CollapsibleContent>
     </Collapsible>
   )

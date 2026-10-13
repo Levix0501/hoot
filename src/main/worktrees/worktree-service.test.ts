@@ -118,6 +118,18 @@ describe('WorktreeService', () => {
     expect(await service.isWorktreeOf(project, project)).toBe(false)
   })
 
+  it('reports the worktrees it first reads, also when there are none, and then only changes', async () => {
+    const changes: [string, WorktreeInfo[]][] = []
+    service.on('changed', (changedRoot, worktrees) => changes.push([changedRoot, worktrees]))
+    service.addProject(project)
+    expect(await listed()).toEqual([])
+    expect(changes).toEqual([[project, []]])
+
+    // Read again, as before a session starts in a worktree: nothing changed.
+    expect(await service.currentWorktree(project, path.join(W, 'project', 'none'))).toBeNull()
+    expect(changes).toEqual([[project, []]])
+  })
+
   it('shows what changed outside Hoot only once the worktrees are read again', async () => {
     await start()
     const created = await service.create({

@@ -18,11 +18,11 @@ Hoot supports macOS only for now.
 - **The project row**: a project's row in the sidebar shows its name, and how many of its
   [issues](#issues) are neither done nor canceled. Click it to expand or collapse the project: its
   sessions and [worktrees](#worktrees) are listed below it while it is expanded, and slide open and
-  closed as it expands and collapses (or show and hide at once when macOS is set to reduce motion).
-  Each project stays expanded or collapsed as you left it, also after Hoot quits; a project added to
-  the list is expanded. Point at the row, or move the keyboard focus into it, to show its buttons:
-  **Issues** shows the project's issues, `+` starts a session or creates a worktree, and `⋯` removes
-  the project from the list.
+  closed as it expands and collapses (or show and hide at once when macOS is set to reduce motion);
+  a project with neither shows **No sessions** instead. Each project stays expanded or collapsed as
+  you left it, also after Hoot quits; a project added to the list is expanded. Point at the row, or
+  move the keyboard focus into it, to show its buttons: **Issues** shows the project's issues, `+`
+  starts a session or creates a worktree, and `⋯` removes the project from the list.
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run

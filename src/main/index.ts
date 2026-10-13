@@ -13,14 +13,10 @@ import {
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
-import {
-  fallbackUtf8Locale,
-  type HootCliEnvOptions,
-  type TerminalEnvOptions,
-} from './env/session-env'
+import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
 import { gitEnvironment } from './git/git'
-import { hootSocketPath } from './hoot-cli/address'
 import { HootServer } from './hoot-cli/hoot-server'
+import { hootCliSetup } from './hoot-cli/setup'
 import { registerDatabaseErrorIpc, registerIpc } from './ipc'
 import { IssueStore } from './issues/issue-store'
 import { resolveProjectRoot } from './projects/project-root'
@@ -50,19 +46,15 @@ if (userDataOverride) app.setPath('userData', path.resolve(userDataOverride))
 // Runs from the repository keep their own data, apart from an installed Hoot,
 // so that both can run at the same time.
 else if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'Hoot-dev'))
-// What every session needs to run hoot, Hoot's command line program: the
-// folder of its launchers, which goes first on PATH; Hoot's own executable,
-// which runs its script as Node.js; the script; and where this Hoot listens
-// for it, which depends on the user data directory, so that each session's
-// hoot reaches the Hoot that started it.
-const hootCli: Omit<HootCliEnvOptions, 'sessionId'> = {
-  binDirectory: app.isPackaged
-    ? path.join(process.resourcesPath, 'bin')
-    : path.join(app.getAppPath(), 'resources', 'bin'),
-  node: process.execPath,
-  script: path.join(import.meta.dirname, '../cli/index.js'),
-  socket: hootSocketPath(app.getPath('userData')),
-}
+// What every session needs to run hoot, Hoot's command line program.
+const hootCli = hootCliSetup({
+  userData: app.getPath('userData'),
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  executable: process.execPath,
+  mainDirectory: import.meta.dirname,
+})
 const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.

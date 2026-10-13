@@ -1,5 +1,5 @@
 import { ChevronDownIcon, PlusIcon } from 'lucide-react'
-import type { IssueGroup as Group } from '../../../shared/issues'
+import type { IssueGroup as Group, IssueStatus } from '../../../shared/issues'
 import { statusLabel } from '../../lib/issue-properties'
 import { useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
@@ -13,28 +13,28 @@ import { IssueRow } from './issue-row'
  * and adds an issue with the status, as Linear's lists group issues.
  */
 export function IssueGroup({
-  projectId,
   group,
   collapsed,
   identifierWidth,
   now,
   onHover,
+  onAdd,
 }: {
-  projectId: number
   group: Group
   collapsed: boolean
   identifierWidth: number
   now: number
   onHover(issueId: number): void
+  /** Opens the new issue dialog for an issue with a status. */
+  onAdd(status: IssueStatus): void
 }) {
   const setIssueGroupOpen = useAppStore((state) => state.setIssueGroupOpen)
-  const openNewIssue = useAppStore((state) => state.openNewIssue)
   const label = statusLabel(group.status)
 
   return (
     <Collapsible
       open={!collapsed}
-      onOpenChange={(open) => setIssueGroupOpen(projectId, group.status, open)}
+      onOpenChange={(open) => setIssueGroupOpen(group.status, open)}
       data-testid="issue-group"
       data-status={group.status}
     >
@@ -58,7 +58,7 @@ export function IssueGroup({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={`Add issue to ${label}`}
-                onClick={() => openNewIssue(projectId, { status: group.status })}
+                onClick={() => onAdd(group.status)}
                 data-testid="issue-group-add"
               />
             }

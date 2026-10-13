@@ -37,12 +37,20 @@ describe('toolStatus', () => {
 })
 
 describe('sendBlockers', () => {
-  it('has none once Claude Code is found', () => {
-    expect(sendBlockers(detected(true))).toEqual([])
+  const inProject = { projectId: 1 }
+  const withoutProject = { projectId: null }
+
+  it('has none once Claude Code is found, for an issue in a project', () => {
+    expect(sendBlockers(detected(true), inProject)).toEqual([])
   })
 
   it('says Claude Code is still being checked for, or is not installed', () => {
-    expect(sendBlockers(firstDetection)).toEqual(['checking'])
-    expect(sendBlockers(detected(false))).toEqual(['not-installed'])
+    expect(sendBlockers(firstDetection, inProject)).toEqual(['checking'])
+    expect(sendBlockers(detected(false), inProject)).toEqual(['not-installed'])
+  })
+
+  it('says an issue without a project has none to start the session in', () => {
+    expect(sendBlockers(detected(true), withoutProject)).toEqual(['no-project'])
+    expect(sendBlockers(detected(false), withoutProject)).toEqual(['not-installed', 'no-project'])
   })
 })

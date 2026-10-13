@@ -1,4 +1,5 @@
-import { useState, type ComponentProps, type ComponentType, type ReactNode } from 'react'
+import { FolderIcon, FolderXIcon } from 'lucide-react'
+import { useMemo, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react'
 import type { IssuePriority, IssueStatus } from '../../../shared/issues'
 import {
   optionOfDigit,
@@ -6,6 +7,9 @@ import {
   STATUS_OPTIONS,
   type PropertyOption,
 } from '../../lib/issue-properties'
+import { projectOptions, type ProjectChoice } from '../../lib/project-choices'
+import { cn } from '../../lib/utils'
+import { useAppStore } from '../../store/app-store'
 import {
   Combobox,
   ComboboxContent,
@@ -37,7 +41,7 @@ interface PickerProps<T> {
 
 /**
  * A picker of one of an issue's properties, as Linear's: a search field over
- * the values, each with its icon and the digit that picks it at once.
+ * the values, each with its icon and the digit, if any, that picks it at once.
  */
 function PropertyPicker<T>({
   options,
@@ -101,8 +105,8 @@ function PropertyPicker<T>({
           {(option: PropertyOption<T>) => (
             <ComboboxItem key={String(option.value)} value={option} data-value={option.value}>
               <Icon value={option.value} />
-              <span className="flex-1">{option.label}</span>
-              <Kbd>{option.shortcut}</Kbd>
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              {option.shortcut !== undefined && <Kbd>{option.shortcut}</Kbd>}
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -139,6 +143,33 @@ export function PriorityPicker(props: PickerProps<IssuePriority>) {
       placeholder="Set priority…"
       label="Priority"
       Icon={PriorityOptionIcon}
+    />
+  )
+}
+
+/** The icon of a project, or of no project. */
+export function ProjectOptionIcon({
+  value,
+  className,
+}: {
+  value: ProjectChoice
+  className?: string
+}) {
+  const Icon = value === null ? FolderXIcon : FolderIcon
+  return <Icon aria-hidden className={cn('size-4 shrink-0 text-muted-foreground', className)} />
+}
+
+/** A picker of the project an issue belongs to: no project, or one of the list's, in its order. */
+export function ProjectPicker(props: PickerProps<ProjectChoice>) {
+  const projects = useAppStore((state) => state.projects)
+  const options = useMemo(() => projectOptions(projects), [projects])
+  return (
+    <PropertyPicker
+      {...props}
+      options={options}
+      placeholder="Set project…"
+      label="Project"
+      Icon={ProjectOptionIcon}
     />
   )
 }

@@ -4,9 +4,8 @@ import { issueJson, issueListText, issueText, localMinute } from './format'
 import { PRIORITY_NAME_LIST, STATUS_NAME_LIST, priorityNamed, statusNamed } from './names'
 
 const issue: Issue = {
-  id: 40,
+  id: 12,
   projectId: 3,
-  number: 12,
   title: 'Restore sessions',
   description: '',
   status: 'in_progress',
@@ -17,8 +16,8 @@ const issue: Issue = {
 
 describe('issueJson', () => {
   it('has the identifier, number, title, description, status and priority names, and the times in UTC', () => {
-    expect(issueJson('hoot', issue)).toStrictEqual({
-      identifier: 'HOO-12',
+    expect(issueJson(issue)).toStrictEqual({
+      identifier: 'ISS-12',
       number: 12,
       title: 'Restore sessions',
       description: '',
@@ -28,7 +27,7 @@ describe('issueJson', () => {
       completedAt: null,
     })
     expect(
-      issueJson('hoot', { ...issue, status: 'canceled', completedAt: Date.UTC(2026, 9, 13) }),
+      issueJson({ ...issue, status: 'canceled', completedAt: Date.UTC(2026, 9, 13) }),
     ).toMatchObject({ status: 'canceled', completedAt: '2026-10-13T00:00:00.000Z' })
   })
 })
@@ -36,11 +35,11 @@ describe('issueJson', () => {
 describe('issueText', () => {
   it('ends the description with a line break, without adding a second one', () => {
     const created = `Created ${localMinute(issue.createdAt)}`
-    expect(issueText('hoot', { ...issue, description: 'One\n\nTwo' })).toBe(
-      `HOO-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n\nTwo\n`,
+    expect(issueText({ ...issue, description: 'One\n\nTwo' })).toBe(
+      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n\nTwo\n`,
     )
-    expect(issueText('hoot', { ...issue, description: 'One\n' })).toBe(
-      `HOO-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n`,
+    expect(issueText({ ...issue, description: 'One\n' })).toBe(
+      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n`,
     )
   })
 })
@@ -69,12 +68,12 @@ describe('localMinute', () => {
 describe('issueListText', () => {
   it('lines the columns up, and prints nothing for no issues', () => {
     expect(
-      issueListText('hoot', [
-        { ...issue, number: 9, status: 'todo', priority: 0, title: 'Nine' },
-        { ...issue, number: 10, status: 'backlog', priority: 1, title: 'Ten' },
+      issueListText([
+        { ...issue, id: 9, status: 'todo', priority: 0, title: 'Nine' },
+        { ...issue, id: 10, status: 'backlog', priority: 1, title: 'Ten' },
       ]),
-    ).toBe('HOO-9   Todo     No priority  Nine\nHOO-10  Backlog  Urgent       Ten\n')
-    expect(issueListText('hoot', [])).toBe('')
+    ).toBe('ISS-9   Todo     No priority  Nine\nISS-10  Backlog  Urgent       Ten\n')
+    expect(issueListText([])).toBe('')
   })
 })
 

@@ -53,6 +53,8 @@ const issue = { title: 'New', description: '', status: 'backlog', priority: 0 } 
 describe('HootServer', () => {
   it("answers with the session's project and its issues", async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const other = hoot.issues.create({ projectId: hoot.hotel.id, ...issue, title: 'Other' })!
+    const loose = hoot.issues.create({ projectId: null, ...issue, title: 'Loose' })!
     expect(await request('GET', '/issues')).toEqual({
       status: 200,
       answer: { ok: true, project: { name: 'gamma' }, issues: [alpha] },
@@ -61,17 +63,23 @@ describe('HootServer', () => {
       status: 200,
       answer: { ok: true, project: { name: 'gamma' }, issue: alpha },
     })
-    expect((await request('GET', '/issues/2')).answer).toEqual({
-      ok: true,
-      project: { name: 'gamma' },
-      issue: null,
-    })
+    // Not the issues of another project or of none, nor numbers no issue has.
+    for (const number of [other.id, loose.id, 99]) {
+      expect((await request('GET', `/issues/${number}`)).answer).toEqual({
+        ok: true,
+        project: { name: 'gamma' },
+        issue: null,
+      })
+    }
     expect((await request('GET', `/issues/${'9'.repeat(40)}`)).answer.issue).toBeNull()
     expect((await request('GET', '/issues/1', { session: 'hotel-session' })).answer).toEqual({
       ok: true,
       project: { name: 'hotel' },
       issue: null,
     })
+    expect(
+      (await request('GET', `/issues/${other.id}`, { session: 'hotel-session' })).answer,
+    ).toEqual({ ok: true, project: { name: 'hotel' }, issue: other })
   })
 
   it('creates an issue in the project, and reports it once it is saved', async () => {
@@ -79,7 +87,7 @@ describe('HootServer', () => {
       body: JSON.stringify({ ...issue, title: ' Gamma ', status: 'done', priority: 3 }),
     })
     expect(status).toBe(201)
-    const saved = hoot.issues.byNumber(hoot.gamma.id, 1)
+    const saved = hoot.issues.getInProject(hoot.gamma.id, 1)
     expect(saved).toMatchObject({ title: 'Gamma', status: 'done', priority: 3 })
     expect(answer).toEqual({ ok: true, project: { name: 'gamma' }, issue: saved })
     expect(hoot.created).toEqual([saved])
@@ -91,7 +99,7 @@ describe('HootServer', () => {
     })
     expect(status).toBe(201)
     expect(answer).toMatchObject({ ok: true, issue: { title: 'Fix the login bug' } })
-    expect(hoot.issues.byNumber(hoot.gamma.id, 1)?.title).toBe('Fix the login bug')
+    expect(hoot.issues.getInProject(hoot.gamma.id, 1)?.title).toBe('Fix the login bug')
   })
 
   it('creates nothing from a request it cannot take, and says why', async () => {
@@ -109,8 +117,7 @@ describe('HootServer', () => {
         answer: { ok: false, message },
       })
     }
-    expect(hoot.issues.list(hoot.gamma.id)).toEqual([])
-    expect(hoot.issues.list(hoot.hotel.id)).toEqual([])
+    expect(hoot.issues.list()).toEqual([])
     expect(hoot.created).toEqual([])
   })
 

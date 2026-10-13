@@ -8,7 +8,6 @@ import {
   issueTitle,
   listOrder,
   oneLineTitle,
-  projectKey,
   type Issue,
 } from './issues'
 
@@ -16,7 +15,6 @@ function issue(id: number, changes: Partial<Issue>): Issue {
   return {
     id,
     projectId: 1,
-    number: id,
     title: `#${id}`,
     description: '',
     status: 'backlog',
@@ -113,20 +111,10 @@ describe('issueGroups', () => {
   })
 })
 
-describe('projectKey and issueIdentifier', () => {
-  it('take the first three ASCII letters or digits of the project name, in capitals', () => {
-    expect(projectKey('hoot')).toBe('HOO')
-    expect(projectKey('earn-haitu')).toBe('EAR')
-    expect(projectKey('a.b-c_d')).toBe('ABC')
-    expect(projectKey('my app')).toBe('MYA')
-    expect(projectKey('42go')).toBe('42G')
-    expect(projectKey('ab')).toBe('AB')
-    expect(issueIdentifier('hoot', 12)).toBe('HOO-12')
-  })
-
-  it('fall back to ISS for a name without such characters', () => {
-    expect(projectKey('项目')).toBe('ISS')
-    expect(projectKey('')).toBe('ISS')
-    expect(issueIdentifier('项目', 3)).toBe('ISS-3')
+describe('issueIdentifier', () => {
+  it('is ISS- and the number, in decimal digits without leading zeros', () => {
+    expect(issueIdentifier(1)).toBe('ISS-1')
+    expect(issueIdentifier(12)).toBe('ISS-12')
+    expect(issueIdentifier(1_000_000)).toBe('ISS-1000000')
   })
 })

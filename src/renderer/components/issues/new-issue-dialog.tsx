@@ -1,9 +1,9 @@
-import { ChevronRightIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react'
+import { FolderIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { issueTitle } from '../../../shared/issues'
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
 import { cn } from '../../lib/utils'
-import { emptyNewIssueDraft, focusAfterOverlay, useAppStore } from '../../store/app-store'
+import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTitle } from '../ui/dialog'
 import { Kbd } from '../ui/kbd'
@@ -12,29 +12,24 @@ import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { DescriptionEditor, type DescriptionEditorHandle } from './description-editor'
 import { PriorityIcon, StatusIcon } from './issue-icons'
-import { PriorityPicker, StatusPicker } from './property-picker'
+import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
 import { TitleField } from './title-field'
 
 /** The small rounded buttons of the properties, under the description. */
 const PROPERTY_CHIP = 'rounded-full'
 
 /**
- * Linear's new issue dialog, for the project of the Issues page shown: a
- * title, a description, a status and a priority. What is entered stays when
- * the dialog closes, until the issue is created. ⌘ Enter creates the issue
- * and ⌘⌥ Enter creates it and shows it; with Create more on, the dialog
- * stays for the next issue.
+ * Linear's new issue dialog: a title, a description, a status, a priority
+ * and a project, or none. There is one draft, wherever the dialog opens: what
+ * is entered stays when the dialog closes, until the issue is created. ⌘
+ * Enter creates the issue and ⌘⌥ Enter creates it and shows it; with Create
+ * more on, the dialog stays for the next issue.
  */
 export function NewIssueDialog() {
-  const dialog = useAppStore((state) => state.newIssueDialog)
-  // Kept while the dialog fades out.
-  const [projectId, setProjectId] = useState<number | null>(null)
-  if (dialog !== null && dialog.projectId !== projectId) setProjectId(dialog.projectId)
-  const project = useAppStore((state) => state.projects.find(({ id }) => id === projectId))
-  const draft = useAppStore((state) =>
-    projectId === null
-      ? emptyNewIssueDraft
-      : (state.newIssueDrafts[projectId] ?? emptyNewIssueDraft),
+  const open = useAppStore((state) => state.newIssueDialogOpen)
+  const draft = useAppStore((state) => state.newIssueDraft)
+  const project = useAppStore((state) =>
+    state.projects.find(({ id }) => id === state.newIssueDraft.projectId),
   )
   const createMore = useAppStore((state) => state.createMore)
   const setCreateMore = useAppStore((state) => state.setCreateMore)
@@ -49,18 +44,14 @@ export function NewIssueDialog() {
   const description = useRef<DescriptionEditorHandle>(null)
   const canCreate = issueTitle(draft.title) !== '' && !creating
 
-  const update = (changes: Parameters<typeof updateNewIssueDraft>[1]) => {
-    if (projectId !== null) updateNewIssueDraft(projectId, changes)
-  }
-
-  const create = async (open: boolean) => {
-    if (projectId === null || !canCreate) return
+  const create = async (andShow: boolean) => {
+    if (!canCreate) return
     // What was typed into the description a moment ago.
     description.current?.flush()
     setCreating(true)
     try {
-      const created = await createIssue(projectId, { open })
-      if (created !== null && useAppStore.getState().newIssueDialog !== null) {
+      const created = await createIssue({ open: andShow })
+      if (created !== null && useAppStore.getState().newIssueDialogOpen) {
         setEditorKey((key) => key + 1)
         title.current?.focus()
       }
@@ -71,9 +62,9 @@ export function NewIssueDialog() {
 
   return (
     <Dialog
-      open={dialog !== null}
-      onOpenChange={(open) => {
-        if (!open) closeNewIssue()
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) closeNewIssue()
       }}
     >
       <DialogContent
@@ -95,20 +86,10 @@ export function NewIssueDialog() {
           }
         }}
         data-testid="new-issue-dialog"
-        data-project-id={projectId ?? undefined}
       >
         <div className="flex items-center gap-1 px-4 pt-3">
-          <DialogTitle className="flex min-w-0 items-center gap-1.5 text-sm font-normal">
-            <span
-              className="min-w-0 truncate rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
-              title={project?.root}
-              data-path=""
-              data-testid="new-issue-project"
-            >
-              {project?.name}
-            </span>
-            <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="shrink-0">New issue</span>
+          <DialogTitle className="min-w-0 text-sm font-normal" data-testid="new-issue-heading">
+            New issue
           </DialogTitle>
           <div className="flex-1" />
           <Tooltip>
@@ -149,7 +130,7 @@ export function NewIssueDialog() {
           <TitleField
             ref={title}
             value={draft.title}
-            onChange={(value) => update({ title: value })}
+            onChange={(value) => updateNewIssueDraft({ title: value })}
             onEnter={() => description.current?.focus()}
             placeholder="Issue title"
             aria-label="Title"
@@ -158,10 +139,10 @@ export function NewIssueDialog() {
             data-testid="new-issue-title"
           />
           <DescriptionEditor
-            key={`${projectId}-${editorKey}`}
+            key={editorKey}
             ref={description}
             markdown={draft.description}
-            onChange={(markdown) => update({ description: markdown })}
+            onChange={(markdown) => updateNewIssueDraft({ description: markdown })}
             className={expanded ? '[&_.tiptap]:min-h-64' : '[&_.tiptap]:min-h-16'}
             testId="new-issue-description"
           />
@@ -169,7 +150,7 @@ export function NewIssueDialog() {
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
           <StatusPicker
             value={draft.status}
-            onChange={(status) => update({ status })}
+            onChange={(status) => updateNewIssueDraft({ status })}
             triggerProps={{
               render: (
                 <Button
@@ -188,7 +169,7 @@ export function NewIssueDialog() {
           </StatusPicker>
           <PriorityPicker
             value={draft.priority}
-            onChange={(priority) => update({ priority })}
+            onChange={(priority) => updateNewIssueDraft({ priority })}
             triggerProps={{
               render: (
                 <Button
@@ -205,6 +186,27 @@ export function NewIssueDialog() {
             <PriorityIcon priority={draft.priority} className="size-3.5" />
             {draft.priority === 0 ? 'Priority' : priorityLabel(draft.priority)}
           </PriorityPicker>
+          <ProjectPicker
+            value={project ? project.id : null}
+            onChange={(projectId) => updateNewIssueDraft({ projectId })}
+            triggerProps={{
+              render: (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className={cn(PROPERTY_CHIP, 'max-w-48')}
+                  aria-label={`Project: ${project?.name ?? 'No project'}`}
+                  data-testid="new-issue-project"
+                  data-project-id={project?.id}
+                />
+              ),
+            }}
+          >
+            <FolderIcon className="size-3.5 text-muted-foreground" />
+            <span className="min-w-0 truncate" data-path={project ? '' : undefined}>
+              {project ? project.name : 'Project'}
+            </span>
+          </ProjectPicker>
         </div>
         <DialogFooter className="m-0 flex-row items-center justify-end gap-4 px-4 py-3 sm:flex-row">
           <div className="flex items-center gap-2">

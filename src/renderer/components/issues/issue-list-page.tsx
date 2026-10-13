@@ -8,6 +8,7 @@ import {
   type IssueView,
 } from '../../../shared/issues'
 import { VIEW_OPTIONS } from '../../lib/issue-properties'
+import { isOnList, listProject } from '../../lib/project-choices'
 import { useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../ui/empty'
@@ -16,11 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { IssueGroup } from './issue-group'
 import { IssuesBreadcrumb, IssuesTopRow } from './issues-top-row'
+import { ProjectFilter } from './project-filter'
 import { PriorityPicker, StatusPicker } from './property-picker'
 import { useNow } from './relative-time'
 import { useIssueShortcuts } from './use-issue-shortcuts'
-
-const NO_GROUPS: readonly IssueStatus[] = []
 
 const EMPTY_VIEW: Record<IssueView, string> = {
   all: 'No issues yet.',
@@ -39,18 +39,20 @@ function issueIdOf(row: Element): number {
 }
 
 /**
- * A project's issues as Linear lists them: one of its views (all, active or
- * backlog), grouped by status, the closest to done first. J and K (or the
- * arrow keys) move through the issues, Enter shows one, S and P change the
- * status and the priority of the one with the focus or the pointer, and C
- * creates an issue.
+ * The issue list, as Linear lists issues: the issues of the projects checked
+ * in its Project filter (all of them while nothing is checked), in one of its
+ * views (all, active or backlog), grouped by status, the closest to done
+ * first. J and K (or the arrow keys) move through the issues, Enter shows
+ * one, S and P change the status and the priority of the one with the focus
+ * or the pointer, and C creates an issue: for the project checked, when that
+ * is all that is checked.
  */
-export function IssueListPage({ projectId }: { projectId: number }) {
-  const project = useAppStore((state) => state.projects.find(({ id }) => id === projectId))
-  const view = useAppStore((state) => state.issueViews[projectId] ?? 'all')
-  const collapsed = useAppStore((state) => state.collapsedIssueGroups[projectId] ?? NO_GROUPS)
+export function IssueListPage() {
+  const view = useAppStore((state) => state.issueView)
+  const collapsed = useAppStore((state) => state.collapsedIssueGroups)
+  const checked = useAppStore((state) => state.checkedProjects)
   const issues = useAppStore(
-    useShallow((state) => state.issues.filter((issue) => issue.projectId === projectId)),
+    useShallow((state) => state.issues.filter((issue) => isOnList(issue, state.checkedProjects))),
   )
   const setIssueView = useAppStore((state) => state.setIssueView)
   const openNewIssue = useAppStore((state) => state.openNewIssue)
@@ -58,11 +60,12 @@ export function IssueListPage({ projectId }: { projectId: number }) {
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
   const groups = useMemo(() => issueGroups(issues, view), [issues, view])
   const identifierWidth = useMemo(() => {
-    const longest = Math.max(0, ...issues.map((issue) => String(issue.number).length))
-    const keyLength = project ? issueIdentifier(project.name, 0).length - 1 : 3
+    const longest = Math.max(0, ...issues.map((issue) => issueIdentifier(issue.id).length))
     // Capitals are wider than digits, which `ch` measures.
-    return Math.ceil((keyLength + 1 + longest) * 1.2)
-  }, [issues, project])
+    return Math.ceil(longest * 1.2)
+  }, [issues])
+  const newIssue = (status?: IssueStatus) =>
+    openNewIssue(listProject(checked), status === undefined ? {} : { status })
   const now = useNow()
   const listRef = useRef<HTMLDivElement>(null)
   const hovered = useRef<number | null>(null)
@@ -98,7 +101,7 @@ export function IssueListPage({ projectId }: { projectId: number }) {
   useIssueShortcuts('list', (shortcut) => {
     switch (shortcut.kind) {
       case 'new-issue':
-        openNewIssue(projectId)
+        newIssue()
         return true
       case 'move':
         moveFocus(shortcut.offset)
@@ -138,10 +141,9 @@ export function IssueListPage({ projectId }: { projectId: number }) {
     <div
       className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
       data-testid="issue-list-page"
-      data-project-id={projectId}
     >
       <IssuesTopRow>
-        <IssuesBreadcrumb projectId={projectId} />
+        <IssuesBreadcrumb />
         <div className="min-w-2 flex-1" />
         <Tooltip>
           <TooltipTrigger
@@ -151,7 +153,7 @@ export function IssueListPage({ projectId }: { projectId: number }) {
                 size="icon-sm"
                 className="shrink-0 [app-region:no-drag]"
                 aria-label="New issue"
-                onClick={() => openNewIssue(projectId)}
+                onClick={() => newIssue()}
                 data-testid="new-issue-button"
               />
             }
@@ -166,10 +168,10 @@ export function IssueListPage({ projectId }: { projectId: number }) {
       </IssuesTopRow>
       <Tabs
         value={view}
-        onValueChange={(value) => setIssueView(projectId, value as IssueView)}
+        onValueChange={(value) => setIssueView(value as IssueView)}
         className="min-h-0 flex-1 gap-0"
       >
-        <div className="flex shrink-0 items-center px-3 pb-2">
+        <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
           <TabsList aria-label="Issues to show">
             {VIEW_OPTIONS.map((option) => (
               <TabsTrigger
@@ -182,6 +184,8 @@ export function IssueListPage({ projectId }: { projectId: number }) {
               </TabsTrigger>
             ))}
           </TabsList>
+          <div className="flex-1" />
+          <ProjectFilter />
         </div>
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="issues-scroll">
           {VIEW_OPTIONS.map((option) => (
@@ -203,7 +207,7 @@ export function IssueListPage({ projectId }: { projectId: number }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => openNewIssue(projectId)}
+                      onClick={() => newIssue()}
                       data-testid="issues-empty-create"
                     >
                       Create issue
@@ -215,7 +219,6 @@ export function IssueListPage({ projectId }: { projectId: number }) {
                 groups.map((group) => (
                   <IssueGroup
                     key={group.status}
-                    projectId={projectId}
                     group={group}
                     collapsed={collapsed.includes(group.status)}
                     identifierWidth={identifierWidth}
@@ -223,6 +226,7 @@ export function IssueListPage({ projectId }: { projectId: number }) {
                     onHover={(issueId) => {
                       hovered.current = issueId
                     }}
+                    onAdd={newIssue}
                   />
                 ))
               )}

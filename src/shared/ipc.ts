@@ -239,8 +239,11 @@ export interface HootApi {
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void
-  /** The issues of a project in the list, in the order they were created. */
-  listIssues(projectId: number): Promise<Issue[]>
+  /**
+   * The issues without a project and those of the projects in the list, in
+   * the order they were created.
+   */
+  listIssues(): Promise<Issue[]>
   createIssue(issue: NewIssue): Promise<IssueResult>
   /** Changes what `changes` gives of an issue, leaving the rest as it is. */
   updateIssue(id: number, changes: IssueChanges): Promise<IssueResult>

@@ -25,19 +25,22 @@ export const PRIORITY_LABELS: Readonly<Record<IssuePriority, string>> = {
 }
 
 /**
- * The issues a project's list shows: all of them, the active ones (to do or
- * in progress), or those in the backlog.
+ * The issues the list shows: all of them, the active ones (to do or in
+ * progress), or those in the backlog.
  */
 export const ISSUE_VIEWS = ['all', 'active', 'backlog'] as const
 export type IssueView = (typeof ISSUE_VIEWS)[number]
 
-/** A note kept for a project: what to do, or what went wrong. */
+/** A note of what to do, or of what went wrong, in a project or in none yet. */
 export interface Issue {
+  /**
+   * Also its number, as in `ISS-12`: from 1 in the order the issues were
+   * created. Never given again, not even once the issue is deleted, and the
+   * same whichever project the issue is in.
+   */
   id: number
-  /** The id of the project it belongs to. */
-  projectId: number
-  /** Its number in its project, from 1 in the order they were created. Never reused. */
-  number: number
+  /** The id of the project it belongs to, or `null` for none. */
+  projectId: number | null
   title: string
   /** Markdown; may be empty. */
   description: string
@@ -64,7 +67,8 @@ export function oneLineTitle(text: string): string {
 }
 
 export interface NewIssue {
-  projectId: number
+  /** The project it is to belong to, which must be in the list, or `null` for none. */
+  projectId: number | null
   /** As entered; saved without the whitespace around it, and must not be empty then. */
   title: string
   description: string
@@ -74,9 +78,12 @@ export interface NewIssue {
 
 /**
  * What changes about an issue; what is left out stays as it is. A title is
- * saved without the whitespace around it, and must not be empty then.
+ * saved without the whitespace around it, and must not be empty then; a
+ * project must be in the list, and `null` takes the issue out of its project.
  */
-export type IssueChanges = Partial<Pick<Issue, 'title' | 'description' | 'status' | 'priority'>>
+export type IssueChanges = Partial<
+  Pick<Issue, 'title' | 'description' | 'status' | 'priority' | 'projectId'>
+>
 
 export type IssueResult = { ok: true; issue: Issue } | { ok: false; message: string }
 
@@ -91,9 +98,8 @@ export function isIssueOpen(issue: Pick<Issue, 'status'>): boolean {
 }
 
 /**
- * The statuses of a project's issue list, in the order it shows them, as
- * Linear's lists do: the closest to done first, then the done and the
- * canceled issues.
+ * The statuses of the issue list, in the order it shows them, as Linear's
+ * lists do: the closest to done first, then the done and the canceled issues.
  */
 export const STATUS_GROUP_ORDER: readonly IssueStatus[] = [
   'in_progress',
@@ -153,19 +159,7 @@ export function listOrder(issues: readonly Issue[], view: IssueView): Issue[] {
   return issueGroups(issues, view).flatMap((group) => group.issues)
 }
 
-/**
- * What a project's issue identifiers start with: the first three ASCII
- * letters or digits of its name, in capitals, or "ISS" without any.
- */
-export function projectKey(projectName: string): string {
-  const key = projectName
-    .replace(/[^A-Za-z0-9]/g, '')
-    .slice(0, 3)
-    .toUpperCase()
-  return key === '' ? 'ISS' : key
-}
-
-/** How an issue is referred to, as in Linear: its project's key and its number, such as "HOO-12". */
-export function issueIdentifier(projectName: string, number: number): string {
-  return `${projectKey(projectName)}-${number}`
+/** How an issue is referred to: `ISS-` and its number, such as `ISS-12`. */
+export function issueIdentifier(id: number): string {
+  return `ISS-${id}`
 }

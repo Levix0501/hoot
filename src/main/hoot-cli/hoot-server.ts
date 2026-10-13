@@ -37,7 +37,7 @@ export interface HootServerOptions {
   platform?: NodeJS.Platform
   /** The project of the session with this id, which hoot runs in. */
   sessionProject(sessionId: string): SessionProject
-  issues: Pick<IssueStore, 'list' | 'byNumber' | 'create'>
+  issues: Pick<IssueStore, 'listInProject' | 'getInProject' | 'create'>
   /** Called with each issue hoot creates, once it is saved. */
   issueCreated(issue: Issue): void
 }
@@ -163,7 +163,7 @@ export class HootServer {
       const answer: IssueListAnswer = {
         ok: true,
         project,
-        issues: this.options.issues.list(projectId),
+        issues: this.options.issues.listInProject(projectId),
       }
       return { status: 200, answer }
     }
@@ -176,7 +176,7 @@ export class HootServer {
         ok: true,
         project,
         issue: Number.isSafeInteger(number)
-          ? this.options.issues.byNumber(projectId, number)
+          ? this.options.issues.getInProject(projectId, number)
           : null,
       }
       return { status: 200, answer }

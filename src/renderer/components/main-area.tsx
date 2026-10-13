@@ -17,7 +17,7 @@ export function MainArea() {
     case 'session':
       return session ? <SessionPane session={session} /> : <NoSession />
     case 'issue-list':
-      return <IssueListPage key={`list-${page.projectId}`} projectId={page.projectId} />
+      return <IssueListPage />
     case 'issue':
       return <IssuePage key={`issue-${page.issueId}`} issueId={page.issueId} />
     case 'settings':

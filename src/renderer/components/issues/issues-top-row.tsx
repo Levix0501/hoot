@@ -32,42 +32,31 @@ export function IssuesTopRow({ children }: { children: ReactNode }) {
 }
 
 /**
- * Where an Issues page is, as Linear's breadcrumb says it: the project (its
- * path shows on hover), its issues, and on an issue's page the issue. On an
- * issue's page, Issues shows the project's list.
+ * Where an Issues page is, as Linear's breadcrumb says it: Issues, and on an
+ * issue's page the issue, where Issues shows the issue list.
  */
-export function IssuesBreadcrumb({ projectId, issue }: { projectId: number; issue?: Issue }) {
-  const project = useAppStore((state) => state.projects.find(({ id }) => id === projectId))
+export function IssuesBreadcrumb({ issue }: { issue?: Issue }) {
   const showIssueList = useAppStore((state) => state.showIssueList)
   return (
     <Breadcrumb className="min-w-0">
       <BreadcrumbList className="flex-nowrap text-foreground">
         <BreadcrumbItem className="shrink-0">
-          <span
-            className="font-medium [app-region:no-drag]"
-            title={project?.root}
-            data-path=""
-            data-testid="issues-project-name"
-          >
-            {project?.name}
-          </span>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem className="shrink-0">
           {issue ? (
             <BreadcrumbLink
               render={<button type="button" />}
               className="[app-region:no-drag]"
-              onClick={() => showIssueList(projectId)}
+              onClick={() => showIssueList()}
               data-testid="issues-breadcrumb-list"
             >
               Issues
             </BreadcrumbLink>
           ) : (
-            <BreadcrumbPage>Issues</BreadcrumbPage>
+            <BreadcrumbPage className="font-medium" data-testid="issues-title">
+              Issues
+            </BreadcrumbPage>
           )}
         </BreadcrumbItem>
-        {issue && project && (
+        {issue && (
           <>
             <BreadcrumbSeparator />
             <BreadcrumbItem className="min-w-0">
@@ -77,9 +66,7 @@ export function IssuesBreadcrumb({ projectId, issue }: { projectId: number; issu
                 data-user-text=""
                 data-testid="issues-breadcrumb-issue"
               >
-                <span className="text-muted-foreground">
-                  {issueIdentifier(project.name, issue.number)}
-                </span>{' '}
+                <span className="text-muted-foreground">{issueIdentifier(issue.id)}</span>{' '}
                 {issue.title}
               </BreadcrumbPage>
             </BreadcrumbItem>

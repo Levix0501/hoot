@@ -1,19 +1,26 @@
 /**
- * What the window shows: in its main area a session or one of a project's
- * Issues pages (its issue list, or one issue), or in place of the sidebar and
- * the main area the settings.
+ * What the window shows: in its main area a session or an Issues page (the
+ * issue list, whatever projects its filter shows, or one issue), or in place
+ * of the sidebar and the main area the settings.
  */
 export type Page =
   | { kind: 'session'; sessionId: string }
-  | { kind: 'issue-list'; projectId: number }
-  | { kind: 'issue'; projectId: number; issueId: number }
+  | { kind: 'issue-list' }
+  | { kind: 'issue'; issueId: number }
   | { kind: 'settings' }
 
-/** One of a project's Issues pages. */
+/** One of the Issues pages: the issue list, or an issue's page. */
 export type IssuesPage = Extract<Page, { kind: 'issue-list' | 'issue' }>
 
 export function sessionPage(sessionId: string): Page {
   return { kind: 'session', sessionId }
+}
+
+/** The issue list, one page whichever projects its filter shows. */
+export const issueListPage: Page = { kind: 'issue-list' }
+
+export function issuePage(issueId: number): Page {
+  return { kind: 'issue', issueId }
 }
 
 export const settingsPage: Page = { kind: 'settings' }
@@ -33,7 +40,7 @@ export function samePage(a: Page | null, b: Page | null): boolean {
     case 'session':
       return b.kind === 'session' && b.sessionId === a.sessionId
     case 'issue-list':
-      return b.kind === 'issue-list' && b.projectId === a.projectId
+      return b.kind === 'issue-list'
     case 'issue':
       return b.kind === 'issue' && b.issueId === a.issueId
     case 'settings':

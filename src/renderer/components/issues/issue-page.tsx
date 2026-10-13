@@ -9,7 +9,8 @@ import {
 } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { isIssueOpen, issueTitle, listOrder, type Issue } from '../../../shared/issues'
+import { isIssueOpen, issueTitle, type Issue } from '../../../shared/issues'
+import { issuePageOrder, isOnList } from '../../lib/project-choices'
 import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import {
@@ -156,17 +157,17 @@ function IssueTitle({ issue, onEnter }: { issue: Issue; onEnter(): void }) {
  * activity, with the properties beside them on a wide page or under the
  * title on a narrow one. The title and the description are edited where
  * they show, and saved as they change. J and K show the next and previous
- * issue of its list, S and P change the status and priority, and Esc goes
- * back to the list.
+ * issue of the issue list, S and P change the status and priority, and Esc
+ * goes back to the list.
  */
 export function IssuePage({ issueId }: { issueId: number }) {
   const issue = useAppStore((state) => state.issues.find(({ id }) => id === issueId))
-  const projectId = issue?.projectId ?? null
-  const view = useAppStore((state) =>
-    projectId === null ? 'all' : (state.issueViews[projectId] ?? 'all'),
-  )
-  const projectIssues = useAppStore(
-    useShallow((state) => state.issues.filter((candidate) => candidate.projectId === projectId)),
+  const view = useAppStore((state) => state.issueView)
+  const issues = useAppStore((state) => state.issues)
+  const listed = useAppStore(
+    useShallow((state) =>
+      state.issues.filter((candidate) => isOnList(candidate, state.checkedProjects)),
+    ),
   )
   const showIssue = useAppStore((state) => state.showIssue)
   const showIssueList = useAppStore((state) => state.showIssueList)
@@ -177,12 +178,12 @@ export function IssuePage({ issueId }: { issueId: number }) {
   const [priorityOpen, setPriorityOpen] = useState(false)
   const description = useRef<DescriptionEditorHandle>(null)
 
-  // The issues in the order of the list it is in: the view its project's
-  // list shows, or all of them when that view does not show it.
-  const order = useMemo(() => {
-    const shown = listOrder(projectIssues, view)
-    return shown.some(({ id }) => id === issueId) ? shown : listOrder(projectIssues, 'all')
-  }, [projectIssues, view, issueId])
+  // The issues in the order of the issue list as it is, or of every issue
+  // when the list does not show this one.
+  const order = useMemo(
+    () => issuePageOrder(issueId, listed, issues, view),
+    [issueId, listed, issues, view],
+  )
   const position = order.findIndex(({ id }) => id === issueId)
 
   const step = (offset: 1 | -1) => {
@@ -209,7 +210,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
         requestDeleteIssue(issue.id)
         return true
       case 'back-to-list':
-        showIssueList(issue.projectId)
+        showIssueList()
         return true
     }
   })
@@ -223,7 +224,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
       data-issue-id={issue.id}
     >
       <IssuesTopRow>
-        <IssuesBreadcrumb projectId={issue.projectId} issue={issue} />
+        <IssuesBreadcrumb issue={issue} />
         <IssueMenu issue={issue} />
         <div className="min-w-2 flex-1" />
         {position !== -1 && (

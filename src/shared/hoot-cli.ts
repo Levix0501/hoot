@@ -4,7 +4,8 @@
  * domain socket (a named pipe on Windows) that only that Hoot listens on:
  *
  * - `GET /issues`: every issue of the session's project.
- * - `GET /issues/<number>`: the issue with this number in the project, or `null`.
+ * - `GET /issues/<number>`: the issue with this number, as in `ISS-12`, if it is in the
+ *   project; `null` when it is not.
  * - `POST /issues`: creates an issue in the project, from a `NewHootIssue`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
@@ -29,7 +30,7 @@ export const SESSION_HEADER = 'hoot-session-id'
 
 /** The project of the session hoot runs in. */
 export interface HootProject {
-  /** Its name, the last segment of its root, which its issues' identifiers start from. */
+  /** Its name, the last segment of its root. */
   name: string
 }
 

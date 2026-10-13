@@ -1,9 +1,12 @@
-import { FolderPlusIcon, SettingsIcon } from 'lucide-react'
+import { CircleDotIcon, FolderPlusIcon, SettingsIcon } from 'lucide-react'
 import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
+import { isIssueOpen } from '../../shared/issues'
 import { sessionWorktrees, useAppStore } from '../store/app-store'
+import { isIssuesPage } from '../store/page-history'
 import { worktreeRows } from '../store/worktree-rows'
+import { OpenIssueCount } from './open-issue-count'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
 import { WorktreeItem } from './worktree-item'
@@ -143,6 +146,32 @@ function ProjectEntry({ project }: { project: Project }) {
   )
 }
 
+/**
+ * The sidebar's Issues row, above the projects: it shows the issue list, with
+ * what is checked in its Project filter as it is, and how many of the issues
+ * the window shows are open. It is selected while an Issues page is shown.
+ */
+function IssuesItem() {
+  const showIssueList = useAppStore((state) => state.showIssueList)
+  const openIssues = useAppStore((state) => state.issues.filter(isIssueOpen).length)
+  const selected = useAppStore((state) => isIssuesPage(state.currentPage))
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          isActive={selected}
+          onClick={() => showIssueList()}
+          data-testid="sidebar-issues"
+        >
+          <CircleDotIcon className="text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate font-medium">Issues</span>
+          <OpenIssueCount count={openIssues} testId="sidebar-open-issues" />
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  )
+}
+
 /** How far the project list was scrolled when the sidebar last left the window. */
 let listScrollTop = 0
 
@@ -174,6 +203,9 @@ export function ProjectSidebar() {
       */}
       <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
       <SidebarContent ref={listRef}>
+        <SidebarGroup className="pb-0">
+          <IssuesItem />
+        </SidebarGroup>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>
           <SidebarGroupAction

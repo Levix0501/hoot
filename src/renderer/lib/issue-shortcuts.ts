@@ -5,15 +5,15 @@
  */
 export type IssueShortcut =
   | { kind: 'new-issue' }
-  /** On a list, the next (1) or previous (-1) issue in it; on an issue's page, the next or previous issue of its list. */
+  /** On the list, the next (1) or previous (-1) issue in it; on an issue's page, the next or previous issue of the list. */
   | { kind: 'move'; offset: 1 | -1 }
   | { kind: 'status' }
   | { kind: 'priority' }
   | { kind: 'delete' }
-  /** On an issue's page: its project's list. */
+  /** On an issue's page: the issue list. */
   | { kind: 'back-to-list' }
 
-/** Which Issues page has the keyboard: a project's issue list, or one issue. */
+/** Which Issues page has the keyboard: the issue list, or one issue. */
 export type IssuesPageKind = 'list' | 'issue'
 
 type IssueKeyEvent = Pick<
@@ -25,7 +25,7 @@ type IssueKeyEvent = Pick<
  * The command of a key press on an Issues page: C creates an issue, J and K
  * (and on a list ↓ and ↑) move to the next and previous issue, S and P change
  * the status and the priority, ⌘⌫ deletes, and Esc on an issue's page goes
- * back to its list. Letters are matched by the character they type, in
+ * back to the list. Letters are matched by the character they type, in
  * either case, without Shift; held keys repeat only the moves.
  */
 export function issueShortcut(event: IssueKeyEvent, page: IssuesPageKind): IssueShortcut | null {

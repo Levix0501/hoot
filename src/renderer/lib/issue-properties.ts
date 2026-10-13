@@ -10,8 +10,8 @@ import {
 export interface PropertyOption<T> {
   value: T
   label: string
-  /** The digit that picks it while a picker or menu of the property is open. */
-  shortcut: string
+  /** The digit that picks it while a picker or menu of the property is open, if any. */
+  shortcut?: string
 }
 
 /** The statuses, in the order of their workflow, numbered as Linear numbers them. */
@@ -48,7 +48,7 @@ export function optionOfDigit<T>(
   return options.find((option) => option.shortcut === key) ?? null
 }
 
-/** The views of an issue list, in the order its tabs show them. */
+/** The views of the issue list, in the order its tabs show them. */
 export const VIEW_OPTIONS: ReadonlyArray<{ value: IssueView; label: string }> = [
   { value: 'all', label: 'All issues' },
   { value: 'active', label: 'Active' },

@@ -11,7 +11,7 @@ import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
 import type { ToolId } from '../../shared/tools'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
-import { isIssuesPage } from '../store/page-history'
+import { OpenIssueCount } from './open-issue-count'
 import { CollapsibleTrigger } from './ui/collapsible'
 import {
   ContextMenu,
@@ -53,11 +53,11 @@ export const contextComponents: ToolMenuComponents = {
 
 /**
  * A project's row in the sidebar: click it to expand or collapse the project.
- * It shows the project's name, and how many of its issues are open; it is
- * selected while one of its Issues pages is shown. Pointing at it, or moving
- * the keyboard focus into it, shows its buttons: Issues shows the project's
- * issue list, and `+`, `⋯` and its context menu start sessions, create
- * worktrees and remove the project.
+ * It shows the project's name, and how many of its issues are open. Pointing
+ * at it, or moving the keyboard focus into it, shows its buttons: Issues
+ * shows the issue list with only the project checked in its Project filter,
+ * and `+`, `⋯` and its context menu start sessions, create worktrees and
+ * remove the project.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const tools = useAppStore((state) => state.tools)
@@ -66,13 +66,10 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
   const removeProject = useAppStore((state) => state.removeProject)
   const redetectTools = useAppStore((state) => state.redetectTools)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
-  const showIssueList = useAppStore((state) => state.showIssueList)
+  const showProjectIssues = useAppStore((state) => state.showProjectIssues)
   const openIssues = useAppStore(
     (state) =>
       state.issues.filter((issue) => issue.projectId === project.id && isIssueOpen(issue)).length,
-  )
-  const selected = useAppStore(
-    (state) => isIssuesPage(state.currentPage) && state.currentPage.projectId === project.id,
   )
   // A project cannot be removed while one of its sessions runs, in any of its worktrees.
   const runningHere = useAppStore((state) =>
@@ -97,7 +94,6 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
         <CollapsibleTrigger
           render={
             <SidebarMenuButton
-              isActive={selected}
               // Highlighted also while the pointer is on one of the buttons over it.
               className="cursor-default group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
               data-testid="project-item-button"
@@ -108,15 +104,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           <span className="min-w-0 flex-1 truncate font-medium" data-testid="project-name">
             {project.name}
           </span>
-          {openIssues > 0 && (
-            <span
-              className="shrink-0 rounded-full bg-sidebar-foreground/10 px-1.5 text-xs font-medium tabular-nums"
-              title={openIssues === 1 ? '1 open issue' : `${openIssues} open issues`}
-              data-testid="project-open-issues"
-            >
-              {openIssues}
-            </span>
-          )}
+          <OpenIssueCount count={openIssues} testId="project-open-issues" />
           {/* Room for the row's buttons while they show, right of the open issue count. */}
           <span
             className="-ml-2 w-0 shrink-0 group-focus-within/menu-item:w-18 group-hover/menu-item:w-18 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-18"
@@ -128,7 +116,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
         <SidebarMenuAction
           showOnHover
           className="right-13 hover:bg-sidebar-foreground/10"
-          onClick={() => showIssueList(project.id)}
+          onClick={() => showProjectIssues(project.id)}
           aria-label={`Issues of ${project.name}`}
           title="Issues"
           data-testid="project-issues-button"

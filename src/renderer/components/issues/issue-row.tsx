@@ -1,5 +1,5 @@
 import { CopyIcon, DeleteIcon, LinkIcon, Trash2Icon } from 'lucide-react'
-import { useState, type ComponentType, type KeyboardEvent } from 'react'
+import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
 import {
   optionOfDigit,
@@ -7,6 +7,7 @@ import {
   STATUS_OPTIONS,
   type PropertyOption,
 } from '../../lib/issue-properties'
+import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
 import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import {
@@ -23,10 +24,13 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
-import { PriorityOptionIcon, StatusOptionIcon } from './property-picker'
+import { PriorityOptionIcon, ProjectOptionIcon, StatusOptionIcon } from './property-picker'
 
-/** A submenu of a property's values; a digit typed in it picks the value with that digit. */
-function PropertySubmenu<T extends string | number>({
+/**
+ * A submenu of a property's values, the issue's marked; a digit typed in it
+ * picks the value with that digit, if any.
+ */
+function PropertySubmenu<T extends string | number | null>({
   label,
   Icon,
   options,
@@ -64,14 +68,16 @@ function PropertySubmenu<T extends string | number>({
         <ContextMenuRadioGroup value={value} onValueChange={(next: T) => pick(next)}>
           {options.map((option) => (
             <ContextMenuRadioItem
-              key={option.value}
+              key={String(option.value)}
               value={option.value}
               closeOnClick
-              data-value={option.value}
+              data-value={String(option.value)}
             >
               <Icon value={option.value} />
-              {option.label}
-              <ContextMenuShortcut>{option.shortcut}</ContextMenuShortcut>
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              {option.shortcut !== undefined && (
+                <ContextMenuShortcut>{option.shortcut}</ContextMenuShortcut>
+              )}
             </ContextMenuRadioItem>
           ))}
         </ContextMenuRadioGroup>
@@ -81,9 +87,10 @@ function PropertySubmenu<T extends string | number>({
 }
 
 /**
- * An issue in a list, as Linear shows it: its priority, its identifier, its
- * status, its title and when it was created. Click it to show its page;
- * right-click it to change its status or priority, copy it or delete it.
+ * An issue in the list, as Linear shows it: its priority, its identifier, its
+ * status, its title, its project if any, and when it was created. Click it to
+ * show its page; right-click it to change its status, priority or project,
+ * copy it or delete it.
  */
 export function IssueRow({
   issue,
@@ -98,14 +105,15 @@ export function IssueRow({
   /** Called with the issue when the pointer moves onto the row. */
   onHover(issueId: number): void
 }) {
-  const project = useAppStore((state) => state.projects.find(({ id }) => id === issue.projectId))
+  const projects = useAppStore((state) => state.projects)
+  const project = projects.find(({ id }) => id === issue.projectId)
+  const projectChoices = useMemo(() => projectOptions(projects), [projects])
   const showIssue = useAppStore((state) => state.showIssue)
   const updateIssue = useAppStore((state) => state.updateIssue)
   const copyIssueIdentifier = useAppStore((state) => state.copyIssueIdentifier)
   const copyIssueTitle = useAppStore((state) => state.copyIssueTitle)
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
   const [menuOpen, setMenuOpen] = useState(false)
-  const identifier = project ? issueIdentifier(project.name, issue.number) : ''
 
   return (
     <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -126,7 +134,7 @@ export function IssueRow({
             style={{ width: `${identifierWidth}ch` }}
             data-testid="issue-row-identifier"
           >
-            {identifier}
+            {issueIdentifier(issue.id)}
           </span>
           <StatusIcon status={issue.status} />
           <span
@@ -136,6 +144,16 @@ export function IssueRow({
           >
             {issue.title}
           </span>
+          {project && (
+            <span
+              className="max-w-[30%] shrink-0 truncate text-xs text-muted-foreground"
+              title={project.root}
+              data-path=""
+              data-testid="issue-row-project"
+            >
+              {project.name}
+            </span>
+          )}
           <time
             className="shrink-0 text-xs text-muted-foreground"
             dateTime={new Date(issue.createdAt).toISOString()}
@@ -161,6 +179,14 @@ export function IssueRow({
           options={PRIORITY_OPTIONS}
           value={issue.priority}
           onChange={(priority) => updateIssue(issue.id, { priority })}
+          close={() => setMenuOpen(false)}
+        />
+        <PropertySubmenu
+          label="Project"
+          Icon={ProjectOptionIcon}
+          options={projectChoices}
+          value={issue.projectId}
+          onChange={(projectId) => updateIssue(issue.id, { projectId })}
           close={() => setMenuOpen(false)}
         />
         <ContextMenuSeparator />

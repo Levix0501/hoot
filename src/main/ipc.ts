@@ -91,7 +91,7 @@ const submoduleArguments = z.tuple([
 const writeArguments = z.tuple([sessionId, z.string(), z.boolean().optional()])
 const resizeArguments = z.tuple([sessionId, terminalDimension, terminalDimension])
 const newIssue = z.object({
-  projectId: rowId,
+  projectId: rowId.nullable(),
   title: issueTitle,
   description: issueDescription,
   status: issueStatus,
@@ -102,6 +102,7 @@ const issueChanges = z.strictObject({
   description: issueDescription.optional(),
   status: issueStatus.optional(),
   priority: issuePriority.optional(),
+  projectId: rowId.nullable().optional(),
 }) satisfies z.ZodType<IssueChanges>
 /** The longest text put on the clipboard, which only ever gets an issue's identifier or title. */
 const clipboardText = z.string().max(ISSUE_TITLE_MAX_LENGTH)
@@ -126,7 +127,7 @@ function changeIssue(change: () => Issue | null, missing: string): IssueResult {
 /**
  * What a session started from an issue's page sends Claude Code: the issue's
  * title and description as they are saved now. Or why it cannot be sent: the
- * issue is gone, or belongs to another project.
+ * issue is gone, or belongs to another project or to none.
  */
 function issueToSend(
   issues: IssueStore,
@@ -139,8 +140,9 @@ function issueToSend(
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
-  if (issue === null || issue.projectId !== projectId) {
-    return { ok: false, message: 'The issue no longer exists.' }
+  if (issue === null) return { ok: false, message: 'The issue no longer exists.' }
+  if (issue.projectId !== projectId) {
+    return { ok: false, message: 'The issue is no longer in this project.' }
   }
   return { ok: true, issue: { title: issue.title, description: issue.description } }
 }
@@ -452,10 +454,7 @@ export function registerIpc(deps: IpcDependencies): void {
 
   const noIssue = 'The issue no longer exists.'
 
-  handle(IpcChannel.listIssues, (_event, value) => {
-    const parsed = rowId.safeParse(value)
-    return parsed.success ? deps.issues.list(parsed.data) : []
-  })
+  handle(IpcChannel.listIssues, () => deps.issues.list())
 
   handle(IpcChannel.createIssue, (_event, value): IssueResult => {
     const parsed = newIssue.safeParse(value)

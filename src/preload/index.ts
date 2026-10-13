@@ -72,7 +72,7 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.copyWorktreePath, projectRoot, worktreePath),
-  listIssues: (projectId) => ipcRenderer.invoke(IpcChannel.listIssues, projectId),
+  listIssues: () => ipcRenderer.invoke(IpcChannel.listIssues),
   createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),
   deleteIssue: (id) => ipcRenderer.invoke(IpcChannel.deleteIssue, id),

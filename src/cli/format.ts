@@ -3,9 +3,9 @@ import { PRIORITY_NAMES, STATUS_NAMES } from './names'
 
 /** An issue as hoot prints it with `--json`. */
 export interface IssueJson {
-  /** Such as "HOO-12". */
+  /** Such as "ISS-12". */
   identifier: string
-  /** Its number in its project. */
+  /** Its number, as in its identifier: 12 for ISS-12. */
   number: number
   title: string
   /** Markdown; empty when it has none. */
@@ -20,10 +20,10 @@ export interface IssueJson {
   completedAt: string | null
 }
 
-export function issueJson(projectName: string, issue: Issue): IssueJson {
+export function issueJson(issue: Issue): IssueJson {
   return {
-    identifier: issueIdentifier(projectName, issue.number),
-    number: issue.number,
+    identifier: issueIdentifier(issue.id),
+    number: issue.id,
     title: issue.title,
     description: issue.description,
     status: STATUS_NAMES[issue.status],
@@ -54,9 +54,9 @@ export function localMinute(time: number): string {
  * status, priority and creation time; and its description as it is saved,
  * after a blank line, when it has one.
  */
-export function issueText(projectName: string, issue: Issue): string {
+export function issueText(issue: Issue): string {
   const lines = [
-    `${issueIdentifier(projectName, issue.number)} ${issue.title}`,
+    `${issueIdentifier(issue.id)} ${issue.title}`,
     [
       STATUS_LABELS[issue.status],
       PRIORITY_LABELS[issue.priority],
@@ -75,9 +75,9 @@ export function issueText(projectName: string, issue: Issue): string {
  * Issues as `hoot issue list` prints them, one line each, in columns: the
  * identifier, the status, the priority and the title.
  */
-export function issueListText(projectName: string, issues: readonly Issue[]): string {
+export function issueListText(issues: readonly Issue[]): string {
   const rows = issues.map((issue) => ({
-    identifier: issueIdentifier(projectName, issue.number),
+    identifier: issueIdentifier(issue.id),
     status: STATUS_LABELS[issue.status],
     priority: PRIORITY_LABELS[issue.priority],
     title: issue.title,

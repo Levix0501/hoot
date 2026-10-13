@@ -43,7 +43,9 @@ function addIssue(
   priority: IssuePriority = 0,
   description = '',
 ): Issue {
-  hoot.setClock(Date.UTC(2026, 9, 12, 6, 3) + hoot.issues.list(hoot.gamma.id).length * 60_000)
+  hoot.setClock(
+    Date.UTC(2026, 9, 12, 6, 3) + hoot.issues.listInProject(hoot.gamma.id).length * 60_000,
+  )
   return hoot.issues.create({ projectId: hoot.gamma.id, title, description, status, priority })!
 }
 
@@ -68,7 +70,7 @@ const identifiers = (stdout: string) =>
     .map((line) => line.split(' ')[0])
 
 /** The issues of gamma, as saved. */
-const saved = () => hoot.issues.list(hoot.gamma.id)
+const saved = () => hoot.issues.listInProject(hoot.gamma.id)
 
 describe('hoot issue view', () => {
   beforeEach(() => {
@@ -79,14 +81,14 @@ describe('hoot issue view', () => {
   })
 
   it('shows an issue by its identifier or its number: identifier and title, then its properties, then its description', async () => {
-    const byIdentifier = await run(['issue', 'view', 'GAM-1'])
+    const byIdentifier = await run(['issue', 'view', 'ISS-1'])
     const byNumber = await run(['issue', 'view', '1'])
     expect(byIdentifier).toEqual(byNumber)
     expect(byIdentifier.code).toBe(0)
     expect(byIdentifier.stderr).toBe('')
-    const created = hoot.issues.byNumber(hoot.gamma.id, 1)!.createdAt
+    const created = hoot.issues.get(1)!.createdAt
     expect(byIdentifier.stdout).toBe(
-      `GAM-1 Alpha\nTodo · High · Created ${localMinute(created)}\n\n${STEPS}\n`,
+      `ISS-1 Alpha\nTodo · High · Created ${localMinute(created)}\n\n${STEPS}\n`,
     )
   })
 
@@ -94,18 +96,18 @@ describe('hoot issue view', () => {
     const { code, stdout } = await run(['issue', 'view', '2'])
     expect(code).toBe(0)
     const lines = stdout.split('\n')
-    expect(lines[0]).toBe('GAM-2 Beta')
+    expect(lines[0]).toBe('ISS-2 Beta')
     expect(lines[1]).toContain('Done')
     expect(lines[1]).toContain('No priority')
     expect(lines.slice(2)).toEqual([''])
   })
 
   it('prints the issue as a JSON object with --json', async () => {
-    const alpha = hoot.issues.byNumber(hoot.gamma.id, 1)!
-    const { code, stdout } = await run(['issue', 'view', 'GAM-1', '--json'])
+    const alpha = hoot.issues.get(1)!
+    const { code, stdout } = await run(['issue', 'view', 'ISS-1', '--json'])
     expect(code).toBe(0)
     expect(JSON.parse(stdout)).toStrictEqual({
-      identifier: 'GAM-1',
+      identifier: 'ISS-1',
       number: 1,
       title: 'Alpha',
       description: STEPS,
@@ -124,20 +126,36 @@ describe('hoot issue view', () => {
     })
   })
 
-  it('says that the project has no such issue, for a number it has not given or a key of another project', async () => {
-    for (const reference of ['99', 'HOT-1', 'GAM-99', 'gam-1', '0']) {
+  it('says that the project has no such issue, for an issue of another project or of none, or a number no issue has', async () => {
+    const other = hoot.issues.create({
+      projectId: hoot.hotel.id,
+      title: 'Hotel issue',
+      description: '',
+      status: 'todo',
+      priority: 0,
+    })!
+    const loose = hoot.issues.create({
+      projectId: null,
+      title: 'Loose issue',
+      description: '',
+      status: 'todo',
+      priority: 0,
+    })!
+    for (const reference of [`ISS-${other.id}`, `${loose.id}`, '99', 'ISS-99', '0']) {
       const { code, stdout, stderr } = await run(['issue', 'view', reference])
       expect(code).toBe(1)
       expect(stdout).toBe('')
-      expect(stderr).toMatch(/^error: There is no issue \S+ in this session's project, gamma\.\n$/)
+      expect(stderr).toMatch(
+        /^error: There is no issue ISS-\d+ in this session's project, gamma\.\n$/,
+      )
     }
-    expect((await run(['issue', 'view', '99'])).stderr).toContain('GAM-99')
-    expect((await run(['issue', 'view', 'HOT-1'])).stderr).toContain('HOT-1')
+    expect((await run(['issue', 'view', `${other.id}`])).stderr).toContain(`ISS-${other.id} `)
+    expect((await run(['issue', 'view', '99'])).stderr).toContain('ISS-99')
     expect((await run(['issue', 'view', '123456789012345678901234567890'])).code).toBe(1)
   })
 
   it('refuses what is neither an identifier nor a number', async () => {
-    for (const reference of ['abc', 'GAM-', '1.5', 'GAM-1-2', 'GAM 1', '']) {
+    for (const reference of ['abc', 'ISS-', '1.5', 'ISS-1-2', 'ISS 1', 'iss-1', 'GAM-1', '']) {
       const { code, stdout, stderr } = await run(['issue', 'view', reference])
       expect(code).toBe(1)
       expect(stdout).toBe('')
@@ -153,13 +171,20 @@ describe('hoot issue view', () => {
       status: 'todo',
       priority: 0,
     })
-    expect((await run(['issue', 'view', 'HOT-1'], { session: 'hotel-session' })).stdout).toMatch(
-      /^HOT-1 Hotel issue\n/,
+    expect((await run(['issue', 'view', 'ISS-3'], { session: 'hotel-session' })).stdout).toMatch(
+      /^ISS-3 Hotel issue\n/,
     )
-    expect((await run(['issue', 'view', '1'], { session: 'hotel-session' })).stdout).toMatch(
-      /^HOT-1 Hotel issue\n/,
+    expect((await run(['issue', 'view', '3'], { session: 'hotel-session' })).stdout).toMatch(
+      /^ISS-3 Hotel issue\n/,
     )
-    expect((await run(['issue', 'view', '1'])).stdout).toMatch(/^GAM-1 Alpha\n/)
+    expect((await run(['issue', 'view', '1'], { session: 'hotel-session' })).code).toBe(1)
+    expect((await run(['issue', 'view', '1'])).stdout).toMatch(/^ISS-1 Alpha\n/)
+    // An issue that moves to another project is read in that project's sessions.
+    hoot.issues.update(1, { projectId: hoot.hotel.id })
+    expect((await run(['issue', 'view', 'ISS-1'], { session: 'hotel-session' })).stdout).toMatch(
+      /^ISS-1 Alpha\n/,
+    )
+    expect((await run(['issue', 'view', 'ISS-1'])).code).toBe(1)
   })
 })
 
@@ -178,6 +203,13 @@ describe('hoot issue list', () => {
       status: 'todo',
       priority: 0,
     })
+    hoot.issues.create({
+      projectId: null,
+      title: 'Loose issue',
+      description: '',
+      status: 'todo',
+      priority: 0,
+    })
   })
 
   it('lists the issues neither done nor canceled, in the order of the Issues page, one line each', async () => {
@@ -186,10 +218,10 @@ describe('hoot issue list', () => {
     expect(stderr).toBe('')
     expect(stdout).toBe(
       [
-        'GAM-3  In Progress  Urgent       Three',
-        'GAM-1  Todo         High         One',
-        'GAM-6  Todo         No priority  Six',
-        'GAM-4  Backlog      No priority  Four',
+        'ISS-3  In Progress  Urgent       Three',
+        'ISS-1  Todo         High         One',
+        'ISS-6  Todo         No priority  Six',
+        'ISS-4  Backlog      No priority  Four',
         '',
       ].join('\n'),
     )
@@ -198,31 +230,32 @@ describe('hoot issue list', () => {
   it('lists every issue with --all', async () => {
     const { code, stdout } = await run(['issue', 'list', '--all'])
     expect(code).toBe(0)
-    expect(identifiers(stdout)).toEqual(['GAM-3', 'GAM-1', 'GAM-6', 'GAM-4', 'GAM-2', 'GAM-5'])
+    expect(identifiers(stdout)).toEqual(['ISS-3', 'ISS-1', 'ISS-6', 'ISS-4', 'ISS-2', 'ISS-5'])
   })
 
   it('lists the issues of the statuses given, done or not, whatever --all says', async () => {
     expect(identifiers((await run(['issue', 'list', '--status', 'done'])).stdout)).toEqual([
-      'GAM-2',
+      'ISS-2',
     ])
     expect(
       identifiers(
         (await run(['issue', 'list', '--status', 'done', '--status', 'canceled'])).stdout,
       ),
-    ).toEqual(['GAM-2', 'GAM-5'])
+    ).toEqual(['ISS-2', 'ISS-5'])
     expect(identifiers((await run(['issue', 'list', '--status', 'todo', '--all'])).stdout)).toEqual(
-      ['GAM-1', 'GAM-6'],
+      ['ISS-1', 'ISS-6'],
     )
   })
 
   it('prints a JSON array of the issues with --json', async () => {
     const all = JSON.parse((await run(['issue', 'list', '--json'])).stdout) as unknown[]
     expect(all.map((issue) => (issue as { identifier: string }).identifier)).toEqual([
-      'GAM-3',
-      'GAM-1',
-      'GAM-6',
-      'GAM-4',
+      'ISS-3',
+      'ISS-1',
+      'ISS-6',
+      'ISS-4',
     ])
+    expect(all.map((issue) => (issue as { number: number }).number)).toEqual([3, 1, 6, 4])
     for (const issue of all) {
       expect(Object.keys(issue as object)).toEqual([
         'identifier',
@@ -239,7 +272,7 @@ describe('hoot issue list', () => {
       (await run(['issue', 'list', '--status', 'in-progress', '--json'])).stdout,
     )
     expect(started).toEqual([
-      expect.objectContaining({ identifier: 'GAM-3', status: 'in-progress' }),
+      expect.objectContaining({ identifier: 'ISS-3', status: 'in-progress' }),
     ])
   })
 
@@ -257,9 +290,11 @@ describe('hoot issue list', () => {
   })
 
   it("lists only the session's project's issues", async () => {
-    expect((await run(['issue', 'list', '--all'])).stdout).not.toContain('Hotel issue')
+    const gamma = (await run(['issue', 'list', '--all'])).stdout
+    expect(gamma).not.toContain('Hotel issue')
+    expect(gamma).not.toContain('Loose issue')
     expect((await run(['issue', 'list'], { session: 'hotel-session' })).stdout).toBe(
-      'HOT-1  Todo  No priority  Hotel issue\n',
+      'ISS-7  Todo  No priority  Hotel issue\n',
     )
   })
 
@@ -278,12 +313,11 @@ describe('hoot issue create', () => {
     const now = Date.UTC(2026, 9, 14, 9, 30)
     hoot.setClock(now)
     const { code, stdout, stderr } = await run(['issue', 'create', '--title', '  Gamma  '])
-    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: 'GAM-2\n', stderr: '' })
+    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: 'ISS-2\n', stderr: '' })
     const created = saved().at(-1)!
     expect(created).toEqual({
-      id: expect.any(Number),
+      id: 2,
       projectId: hoot.gamma.id,
-      number: 2,
       title: 'Gamma',
       description: '',
       status: 'backlog',
@@ -297,15 +331,15 @@ describe('hoot issue create', () => {
 
   it('saves the title on one line, as the title field of the new issue dialog takes it', async () => {
     const { code, stdout } = await run(['issue', 'create', '--title', ' Fix\r\nthe\nlogin\rbug\n'])
-    expect({ code, stdout }).toEqual({ code: 0, stdout: 'GAM-1\n' })
+    expect({ code, stdout }).toEqual({ code: 0, stdout: 'ISS-1\n' })
     expect(saved().map((issue) => issue.title)).toEqual(['Fix the login bug'])
     expect(hoot.created.map((issue) => issue.title)).toEqual(['Fix the login bug'])
     // So that each issue stays on a line of its own.
     expect((await run(['issue', 'list'])).stdout).toBe(
-      'GAM-1  Backlog  No priority  Fix the login bug\n',
+      'ISS-1  Backlog  No priority  Fix the login bug\n',
     )
     expect((await run(['issue', 'view', '1'])).stdout.split('\n')[0]).toBe(
-      'GAM-1 Fix the login bug',
+      'ISS-1 Fix the login bug',
     )
     const json = JSON.parse(
       (await run(['issue', 'create', '--title', 'Two\nlines', '--json'])).stdout,
@@ -313,10 +347,17 @@ describe('hoot issue create', () => {
     expect(json.title).toBe('Two lines')
   })
 
-  it('takes the next number of the project, which is never given again', async () => {
+  it('takes the next number of all the issues, which is never given again', async () => {
     const doomed = addIssue('Doomed')
     hoot.issues.delete(doomed.id)
-    expect((await run(['issue', 'create', '--title', 'After'])).stdout).toBe('GAM-2\n')
+    hoot.issues.create({
+      projectId: hoot.hotel.id,
+      title: 'Hotel issue',
+      description: '',
+      status: 'todo',
+      priority: 0,
+    })
+    expect((await run(['issue', 'create', '--title', 'After'])).stdout).toBe('ISS-3\n')
   })
 
   it('takes the description, status and priority given', async () => {
@@ -366,7 +407,7 @@ describe('hoot issue create', () => {
     ])
     expect(code).toBe(0)
     expect(JSON.parse(stdout)).toStrictEqual({
-      identifier: 'GAM-1',
+      identifier: 'ISS-1',
       number: 1,
       title: 'Eta',
       description: '',
@@ -432,8 +473,8 @@ describe('hoot issue create', () => {
     const { stdout } = await run(['issue', 'create', '--title', 'Third'], {
       session: 'hotel-session',
     })
-    expect(stdout).toBe('HOT-1\n')
-    expect(hoot.issues.list(hoot.hotel.id).map((issue) => issue.title)).toEqual(['Third'])
+    expect(stdout).toBe('ISS-1\n')
+    expect(hoot.issues.listInProject(hoot.hotel.id).map((issue) => issue.title)).toEqual(['Third'])
     expect(saved()).toEqual([])
   })
 })
@@ -451,7 +492,7 @@ describe('hoot --help and hoot issue --help', () => {
       'list',
       'create',
       '<issue>',
-      'HOO-12',
+      'ISS-12',
       '--all',
       '--status <name>',
       '--title <title>',

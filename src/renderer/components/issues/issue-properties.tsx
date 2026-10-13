@@ -1,10 +1,11 @@
+import { FolderIcon } from 'lucide-react'
 import type { Issue } from '../../../shared/issues'
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { PriorityIcon, StatusIcon } from './issue-icons'
-import { PriorityPicker, StatusPicker } from './property-picker'
+import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
 
 /**
  * The buttons of the properties: a row of them under the title on a narrow
@@ -14,8 +15,9 @@ const PROPERTY_BUTTON =
   'justify-start @max-2xl/issue:rounded-full @max-2xl/issue:border-border @2xl/issue:w-full'
 
 /**
- * An issue's status and priority, each a button that opens its picker. The
- * pickers also open with S and P, through `open` and `onOpenChange`.
+ * An issue's status, priority and project, each a button that opens its
+ * picker. The status and priority pickers also open with S and P, through
+ * `open` and `onOpenChange`.
  */
 export function IssueProperties({
   issue,
@@ -33,6 +35,9 @@ export function IssueProperties({
   className?: string
 }) {
   const updateIssue = useAppStore((state) => state.updateIssue)
+  const project = useAppStore((state) =>
+    state.projects.find((candidate) => candidate.id === issue.projectId),
+  )
   return (
     <section
       aria-label="Properties"
@@ -89,6 +94,31 @@ export function IssueProperties({
           {issue.priority === 0 ? 'Set priority' : priorityLabel(issue.priority)}
         </span>
       </PriorityPicker>
+      <ProjectPicker
+        value={issue.projectId}
+        onChange={(projectId) => updateIssue(issue.id, { projectId })}
+        triggerProps={{
+          render: (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={PROPERTY_BUTTON}
+              aria-label={`Project: ${project?.name ?? 'No project'}`}
+              data-testid="issue-project"
+              data-project-id={issue.projectId ?? undefined}
+            />
+          ),
+        }}
+      >
+        <FolderIcon className="text-muted-foreground" />
+        <span
+          className={cn('min-w-0 flex-1 truncate text-left', !project && 'text-muted-foreground')}
+          data-path={project ? '' : undefined}
+          data-testid="issue-project-name"
+        >
+          {project ? project.name : 'Add to project'}
+        </span>
+      </ProjectPicker>
     </section>
   )
 }

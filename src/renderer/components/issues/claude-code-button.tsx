@@ -21,14 +21,17 @@ function BlockerNote({ blocker }: { blocker: SendBlocker }) {
           <code className="font-mono break-all">{getTool('claude').installCommand}</code>
         </p>
       )
+    case 'no-project':
+      return <p>Set a Project for this issue first: Claude Code starts in the project's root.</p>
   }
 }
 
 /**
  * The first of an open issue's actions. It sends the issue to Claude Code, in
- * a new session in the project's main worktree that judges the issue's
- * workload and splits it as Hoot's instructions say; while that session is in
- * the sidebar, it shows the session instead. Its tooltip says what it does,
+ * a new session in the main worktree of the project the issue belongs to,
+ * which judges the issue's workload and splits it as Hoot's instructions say;
+ * while that session is in the sidebar, it shows the session instead,
+ * whatever project the issue belongs to now. Its tooltip says what it does,
  * or why it cannot send the issue now, also while the button is disabled: the
  * tooltip's trigger wraps the button.
  */
@@ -39,7 +42,7 @@ export function ClaudeCodeButton({ issue }: { issue: Issue }) {
   const tools = useAppStore((state) => state.tools)
   const selectSession = useAppStore((state) => state.selectSession)
   const sendIssueToClaudeCode = useAppStore((state) => state.sendIssueToClaudeCode)
-  const blockers = sessionId === null ? sendBlockers(tools) : []
+  const blockers = sessionId === null ? sendBlockers(tools, issue) : []
 
   return (
     <Tooltip>

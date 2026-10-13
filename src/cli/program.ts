@@ -7,7 +7,6 @@ import {
   issueIdentifier,
   issueTitle,
   listOrder,
-  projectKey,
 } from '../shared/issues'
 import { CliError, HootClient } from './client'
 import { issueJson, issueListText, issueText, jsonText } from './format'
@@ -25,18 +24,13 @@ export interface CliIo {
   readFile(path: string): Promise<Uint8Array>
 }
 
-/** An issue as given on the command line: its number, and its project's key with an identifier. */
-export interface IssueReference {
-  /** The key an identifier starts with, such as "HOO"; `null` for a bare number. */
-  key: string | null
-  /** The number, in decimal digits as given. */
-  digits: string
-}
-
-/** Reads an identifier, such as "HOO-12", or a number, such as "12"; `null` for anything else. */
-export function parseIssueReference(text: string): IssueReference | null {
-  const match = /^(?:([A-Za-z0-9]+)-)?(\d+)$/.exec(text)
-  return match ? { key: match[1] ?? null, digits: match[2]! } : null
+/**
+ * The number of an issue as given on the command line, in decimal digits as
+ * given, from an identifier, such as "ISS-12", or a number, such as "12";
+ * `null` for anything else.
+ */
+export function issueNumberDigits(text: string): string | null {
+  return /^(?:ISS-)?(\d+)$/.exec(text)?.[1] ?? null
 }
 
 const quantity = new Intl.NumberFormat('en-US')
@@ -113,24 +107,23 @@ export function hootProgram(io: CliIo): Command {
     .description(
       'Show an issue: its identifier and title; its status, priority and creation time; and its description',
     )
-    .argument('<issue>', "the issue's identifier, such as HOO-12, or its number, such as 12")
+    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option('--json', 'print the issue as a JSON object')
     .action(async (text: string, options: { json?: boolean }) => {
-      const reference = parseIssueReference(text)
-      if (reference === null) {
+      const digits = issueNumberDigits(text)
+      if (digits === null) {
         throw new CliError(
-          `"${text}" is neither an issue's identifier, such as HOO-12, nor its number, such as 12.`,
+          `"${text}" is neither an issue's identifier, such as ISS-12, nor its number, such as 12.`,
         )
       }
-      const { project, issue: found } = answered(await connect().issue(reference.digits))
-      const key = projectKey(project.name)
-      if (found === null || (reference.key !== null && reference.key !== key)) {
-        const asked = reference.key === null ? `${key}-${reference.digits}` : text
-        throw new CliError(`There is no issue ${asked} in this session's project, ${project.name}.`)
+      // Hoot answers only with an issue of the session's project.
+      const { project, issue: found } = answered(await connect().issue(digits))
+      if (found === null) {
+        throw new CliError(
+          `There is no issue ISS-${digits} in this session's project, ${project.name}.`,
+        )
       }
-      io.write(
-        options.json ? jsonText(issueJson(project.name, found)) : issueText(project.name, found),
-      )
+      io.write(options.json ? jsonText(issueJson(found)) : issueText(found))
     })
 
   issueCommand
@@ -154,18 +147,14 @@ export function hootProgram(io: CliIo): Command {
     )
     .option('--json', 'print the issues as a JSON array of objects')
     .action(async (options: { all?: boolean; status?: string[]; json?: boolean }) => {
-      const { project, issues } = answered(await connect().listIssues())
+      const { issues } = answered(await connect().listIssues())
       const statuses = options.status?.map((name) => statusNamed(name))
       const listed = listOrder(issues, 'all').filter((issue) =>
         statuses === undefined
           ? options.all === true || isIssueOpen(issue)
           : statuses.includes(issue.status),
       )
-      io.write(
-        options.json
-          ? jsonText(listed.map((issue) => issueJson(project.name, issue)))
-          : issueListText(project.name, listed),
-      )
+      io.write(options.json ? jsonText(listed.map(issueJson)) : issueListText(listed))
     })
 
   issueCommand
@@ -218,7 +207,7 @@ export function hootProgram(io: CliIo): Command {
               `Hoot saves descriptions of up to ${quantity.format(ISSUE_DESCRIPTION_MAX_LENGTH)}.`,
           )
         }
-        const { project, issue: created } = answered(
+        const { issue: created } = answered(
           await connect().createIssue({
             title,
             description,
@@ -226,11 +215,7 @@ export function hootProgram(io: CliIo): Command {
             priority: priorityNamed(options.priority)!,
           }),
         )
-        io.write(
-          options.json
-            ? jsonText(issueJson(project.name, created))
-            : `${issueIdentifier(project.name, created.number)}\n`,
-        )
+        io.write(options.json ? jsonText(issueJson(created)) : `${issueIdentifier(created.id)}\n`)
       },
     )
 

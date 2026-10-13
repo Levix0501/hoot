@@ -107,7 +107,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           <OpenIssueCount count={openIssues} testId="project-open-issues" />
           {/* Room for the row's buttons while they show, right of the open issue count. */}
           <span
-            className="-ml-2 w-0 shrink-0 group-focus-within/menu-item:w-18 group-hover/menu-item:w-18 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-18"
+            className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-18 group-has-focus-visible/menu-item:w-18 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-18"
             aria-hidden
           />
         </CollapsibleTrigger>

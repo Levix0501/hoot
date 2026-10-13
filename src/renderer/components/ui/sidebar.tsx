@@ -553,8 +553,10 @@ function SidebarMenuAction({
           // breakpoint (see isMobile). Nor does it get the larger target that
           // windows narrower than `md:` give it, which reaches past its row:
           // only its own row shows it, and a click beside it goes to the row.
+          // The keyboard focus in its row shows it too, but not a click's,
+          // which stays in the row after the pointer has left it.
           showOnHover &&
-            'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 opacity-0 after:hidden',
+            'group-has-focus-visible/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 opacity-0 after:hidden',
           className,
         ),
       },

@@ -5,7 +5,7 @@ import { canStep, isSettingsPage } from '../store/page-history'
 import { Button } from './ui/button'
 import { Kbd } from './ui/kbd'
 import { SidebarTrigger, useSidebar } from './ui/sidebar'
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
 /**
  * Where the navigation starts, in CSS pixels from the window's left edge: past
@@ -20,6 +20,19 @@ const BUTTON_GAP = 4
 const NAVIGATION_WIDTH = 3 * BUTTON_WIDTH + 2 * BUTTON_GAP
 /** Space between the navigation and the content of the main area's top row. */
 const HEADER_GAP = 12
+/**
+ * The buttons have half-strength icons that keep their color while pointed
+ * at, over a faint highlight.
+ */
+const BUTTON_CLASS =
+  'text-foreground/50 hover:bg-foreground/5 hover:text-foreground/50 disabled:opacity-40 dark:hover:bg-foreground/6'
+/**
+ * Their tooltips are a pill with a faint border, white in the light
+ * appearance and, in the dark one, the popover color mixed with 13% white.
+ * They have no arrow, and show and hide at once.
+ */
+const TOOLTIP_CLASS =
+  'gap-2 rounded-2xl border border-foreground/8 bg-popover px-2 py-1.5 text-[13px]/[18px] text-popover-foreground animate-none! has-data-[slot=kbd]:pr-2 **:data-[slot=kbd]:rounded-md dark:bg-[color-mix(in_srgb,var(--popover),white_13%)] [&>[data-side]]:hidden'
 
 /**
  * How far the main area's part of the top row (a session's header, or an
@@ -36,10 +49,11 @@ export function useTopRowInset(): number | undefined {
 }
 
 /**
- * A navigation button with a tooltip giving its name and shortcut. The
- * tooltip's trigger wraps the button, so that it also shows while the button
- * is disabled, and keeps the keyboard focus where it is (in a terminal, say)
- * when the button is clicked, as the window's own title bar would.
+ * A navigation button with a tooltip below it giving its name and shortcut.
+ * The tooltip's trigger wraps the button, so that it also shows while the
+ * button is disabled, and keeps the keyboard focus where it is (in a
+ * terminal, say) when the button is clicked, as the window's own title bar
+ * would.
  */
 function NavigationButton({
   label,
@@ -60,9 +74,11 @@ function NavigationButton({
       >
         {children}
       </TooltipTrigger>
-      <TooltipContent side="bottom">
+      <TooltipContent side="bottom" sideOffset={2} className={TOOLTIP_CLASS}>
         {label}
-        <Kbd>{shortcut}</Kbd>
+        <Kbd className="h-4 px-1.5 font-normal in-data-[slot=tooltip-content]:bg-current/10 in-data-[slot=tooltip-content]:text-current dark:in-data-[slot=tooltip-content]:bg-current/10">
+          {shortcut}
+        </Kbd>
       </TooltipContent>
     </Tooltip>
   )
@@ -76,7 +92,9 @@ function NavigationButton({
  * Entering or leaving full screen moves it the way the content of the main
  * area's top row moves then, so that the two never overlap. While the
  * settings are shown there is no sidebar to show or hide: Back and Forward
- * stay where they are, and the trigger's place is left blank.
+ * stay where they are, and the trigger's place is left blank. A button's
+ * tooltip shows once the pointer has rested on it for 700 ms, and at once
+ * when the pointer comes from another button's within 300 ms.
  */
 export function WindowNavigation() {
   const settingsShown = useAppStore((state) => isSettingsPage(state.currentPage))
@@ -94,40 +112,44 @@ export function WindowNavigation() {
       data-testid="window-navigation"
       data-full-screen={fullScreen}
     >
-      {!settingsShown && (
-        <NavigationButton label="Toggle Sidebar" shortcut="⌘B">
-          <SidebarTrigger data-testid="toggle-sidebar" />
+      <TooltipProvider delay={700} timeout={300}>
+        {!settingsShown && (
+          <NavigationButton label="Toggle sidebar" shortcut="⌘B">
+            <SidebarTrigger className={BUTTON_CLASS} data-testid="toggle-sidebar" />
+          </NavigationButton>
+        )}
+        <NavigationButton
+          label="Back"
+          shortcut="⌘["
+          // A margin, not a blank element, keeps the trigger's place in the drag area.
+          style={settingsShown ? { marginLeft: BUTTON_WIDTH + BUTTON_GAP } : undefined}
+        >
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={BUTTON_CLASS}
+            disabled={!canGoBack}
+            onClick={goBack}
+            aria-label="Back"
+            data-testid="go-back"
+          >
+            <ArrowLeftIcon />
+          </Button>
         </NavigationButton>
-      )}
-      <NavigationButton
-        label="Back"
-        shortcut="⌘["
-        // A margin, not a blank element, keeps the trigger's place in the drag area.
-        style={settingsShown ? { marginLeft: BUTTON_WIDTH + BUTTON_GAP } : undefined}
-      >
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={!canGoBack}
-          onClick={goBack}
-          aria-label="Back"
-          data-testid="go-back"
-        >
-          <ArrowLeftIcon />
-        </Button>
-      </NavigationButton>
-      <NavigationButton label="Forward" shortcut="⌘]">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={!canGoForward}
-          onClick={goForward}
-          aria-label="Forward"
-          data-testid="go-forward"
-        >
-          <ArrowRightIcon />
-        </Button>
-      </NavigationButton>
+        <NavigationButton label="Forward" shortcut="⌘]">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={BUTTON_CLASS}
+            disabled={!canGoForward}
+            onClick={goForward}
+            aria-label="Forward"
+            data-testid="go-forward"
+          >
+            <ArrowRightIcon />
+          </Button>
+        </NavigationButton>
+      </TooltipProvider>
     </nav>
   )
 }

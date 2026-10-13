@@ -1,5 +1,6 @@
 onlyBuiltDependencies:
   - node-pty
-# Its install script only prepares Windows installers, which Hoot does not build.
+# Its install script only prepares Squirrel.Windows installers; Hoot's Windows installer is
+# built with NSIS.
 ignoredBuiltDependencies:
   - electron-winstaller

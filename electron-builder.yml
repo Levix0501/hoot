@@ -1,5 +1,8 @@
-# Packages Hoot as a macOS app: `pnpm app:package` builds it in release/, and
-# `pnpm app:install` also installs it in /Applications.
+# Packages Hoot. `pnpm app:release` builds what a release ships, in release/: a DMG and
+# a zip of Hoot.app for Apple Silicon and for Intel Macs, signed and notarized, the
+# Windows installer, and the update files that list them. `pnpm app:package` builds only
+# a Hoot.app for the Mac it runs on, and `pnpm app:install` also installs it in
+# /Applications.
 appId: dev.hootcode.app
 productName: Hoot
 directories:
@@ -9,18 +12,38 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
-# Package the Electron that `pnpm install` has already downloaded.
-electronDist: node_modules/electron/dist
 # node-pty ships prebuilt Node-API binaries, which Electron loads as they are.
 npmRebuild: false
 mac:
-  target: dir
   category: public.app-category.developer-tools
   # Made with Icon Composer. It is compiled into the app for macOS 26 and later, and
   # turned into an .icns for earlier versions, which needs Xcode 26 or later.
   icon: build/icon.icon
-  # The app is signed with a "Developer ID Application" identity from the keychain
-  # when there is one. It is not notarized: it is meant for the Mac that built it.
-  notarize: false
+  # The app is signed with a "Developer ID Application" certificate: the one CSC_LINK
+  # gives, or the keychain's. `pnpm app:release` also notarizes it, with the
+  # credentials named in package.json; `pnpm app:package` does not.
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
 win:
   icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+# Installs Hoot for the current user only, in %LOCALAPPDATA%\Programs\Hoot, without
+# options to pick and without asking for administrator rights. It is not signed.
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: ${productName}-Setup-${version}.${ext}
+# Where releases go. electron-builder publishes nothing itself (the release workflow
+# drafts the release); this makes it write the update files that an in-app update can
+# read later: <channel>-mac.yml and <channel>.yml, the channel being the prerelease tag
+# of the version, such as alpha, or latest.
+publish:
+  provider: github
+  owner: Levix0501
+  repo: hoot

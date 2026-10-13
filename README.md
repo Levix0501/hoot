@@ -242,8 +242,8 @@ too long for a socket). Each session's process gets in its environment:
 
 A login shell may move that folder further down `PATH` (macOS's `/etc/zprofile` and fish put the
 system's folders first); `hoot` is still found by its name, unless another program named `hoot`
-comes before it. On Windows, where Hoot does not run yet, Hoot would listen on a named pipe, and
-cmd and PowerShell would run `hoot.cmd`, and Git Bash `hoot`, both in that folder.
+comes before it. On Windows, where Hoot cannot start sessions yet, Hoot would listen on a named
+pipe, and cmd and PowerShell would run `hoot.cmd`, and Git Bash `hoot`, both in that folder.
 
 ## Worktrees
 

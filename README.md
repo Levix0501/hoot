@@ -30,11 +30,11 @@ projects and starting sessions do not work yet.
   directly in your login shell environment, with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session an issue is
   [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. To the
-  environment of each session's process Hoot adds only the terminal's variables (`TERM`,
-  `COLORTERM`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`) and what [`hoot`](#the-hoot-command)
-  needs: the variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder
-  `hoot` is in, first on `PATH`. Tools that are not installed are shown disabled with an install
-  command, and **Re-detect Tools**, the last item of the new session menu, checks again at any time.
+  environment of each session's process Hoot adds the terminal's variables (`TERM`, `COLORTERM`,
+  `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`), and what [`hoot`](#the-hoot-command) needs: the
+  variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder `hoot` is
+  in, first on `PATH`. Tools that are not installed are shown disabled with an install command, and
+  **Re-detect Tools**, the last item of the new session menu, checks again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
   expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the

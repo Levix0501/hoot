@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react'
-import { ISSUE_TITLE_MAX_LENGTH } from '../../../shared/issues'
+import { ISSUE_TITLE_MAX_LENGTH, oneLineTitle } from '../../../shared/issues'
 import { cn } from '../../lib/utils'
 import { Textarea } from '../ui/textarea'
 
@@ -27,7 +27,7 @@ export function TitleField({
       value={value}
       maxLength={ISSUE_TITLE_MAX_LENGTH}
       spellCheck={false}
-      onChange={(event) => onChange(event.target.value.replace(/\r\n?|\n/g, ' '))}
+      onChange={(event) => onChange(oneLineTitle(event.target.value))}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing) return
         if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) {

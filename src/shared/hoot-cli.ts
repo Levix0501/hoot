@@ -33,7 +33,10 @@ export interface HootProject {
   name: string
 }
 
-/** An issue to create, with its title as entered. */
+/**
+ * An issue to create, with its title as entered, which Hoot saves as the new
+ * issue dialog does: on one line, without the whitespace around it.
+ */
 export interface NewHootIssue {
   title: string
   description: string

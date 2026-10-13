@@ -204,9 +204,9 @@ hoot issue create --title "Fix the login bug" --description-file notes.md --prio
   identifier. Its description is `--description <text>`, or what the UTF-8 file
   `--description-file <file>` holds (`-` reads standard input), exactly as given, or none; its
   status is `--status <name>`, `backlog` unless given; its priority `--priority <name>`, `none`
-  unless given. Otherwise it is created as the new issue dialog creates one: without the
-  whitespace around its title, with the project's next number, and completed as it is created
-  when it is done or canceled.
+  unless given. Otherwise it is created as the new issue dialog creates one: its title on one
+  line, each line break a space, and without the whitespace around it; with the project's next
+  number; and completed as it is created when it is done or canceled.
 - **Names**: the statuses are `backlog`, `todo`, `in-progress`, `done` and `canceled`; the
   priorities `none`, `urgent`, `high`, `medium` and `low`.
 - **`--json`** prints the issue, or the list as an array, as JSON objects with exactly

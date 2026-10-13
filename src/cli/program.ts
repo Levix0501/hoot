@@ -171,7 +171,10 @@ export function hootProgram(io: CliIo): Command {
   issueCommand
     .command('create')
     .description("Create an issue in the session's project, and print its identifier")
-    .requiredOption('--title <title>', 'the title, saved without the whitespace around it')
+    .requiredOption(
+      '--title <title>',
+      'the title, saved on one line, each line break a space, and without the whitespace around it',
+    )
     .addOption(
       new Option('--description <text>', 'the description, in Markdown').conflicts(
         'descriptionFile',

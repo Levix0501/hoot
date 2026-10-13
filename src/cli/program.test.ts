@@ -295,6 +295,24 @@ describe('hoot issue create', () => {
     expect(hoot.created).toEqual([created])
   })
 
+  it('saves the title on one line, as the title field of the new issue dialog takes it', async () => {
+    const { code, stdout } = await run(['issue', 'create', '--title', ' Fix\r\nthe\nlogin\rbug\n'])
+    expect({ code, stdout }).toEqual({ code: 0, stdout: 'GAM-1\n' })
+    expect(saved().map((issue) => issue.title)).toEqual(['Fix the login bug'])
+    expect(hoot.created.map((issue) => issue.title)).toEqual(['Fix the login bug'])
+    // So that each issue stays on a line of its own.
+    expect((await run(['issue', 'list'])).stdout).toBe(
+      'GAM-1  Backlog  No priority  Fix the login bug\n',
+    )
+    expect((await run(['issue', 'view', '1'])).stdout.split('\n')[0]).toBe(
+      'GAM-1 Fix the login bug',
+    )
+    const json = JSON.parse(
+      (await run(['issue', 'create', '--title', 'Two\nlines', '--json'])).stdout,
+    ) as { title: string }
+    expect(json.title).toBe('Two lines')
+  })
+
   it('takes the next number of the project, which is never given again', async () => {
     const doomed = addIssue('Doomed')
     hoot.issues.delete(doomed.id)

@@ -58,6 +58,11 @@ export function issueTitle(entered: string): string {
   return entered.trim()
 }
 
+/** A title as the title fields take it, typed or pasted: on one line, each line break a space. */
+export function oneLineTitle(text: string): string {
+  return text.replace(/\r\n?|\n/g, ' ')
+}
+
 export interface NewIssue {
   projectId: number
   /** As entered; saved without the whitespace around it, and must not be empty then. */

@@ -11,7 +11,7 @@ import {
   type NewHootIssue,
 } from '../../shared/hoot-cli'
 import type { Project } from '../../shared/ipc'
-import type { Issue } from '../../shared/issues'
+import { oneLineTitle, type Issue } from '../../shared/issues'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from '../issues/issue-schemas'
 import type { IssueStore } from '../issues/issue-store'
 
@@ -187,7 +187,12 @@ export class HootServer {
       if (!parsed.success) return failure(400, 'Invalid issue.')
       let issue: Issue | null
       try {
-        issue = this.options.issues.create({ projectId, ...parsed.data })
+        // As the new issue dialog creates it, whose title field takes the title on one line.
+        issue = this.options.issues.create({
+          projectId,
+          ...parsed.data,
+          title: oneLineTitle(parsed.data.title),
+        })
       } catch (error) {
         // Such as a title of nothing but whitespace.
         return failure(400, errorMessage(error))

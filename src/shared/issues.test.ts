@@ -7,6 +7,7 @@ import {
   issueIdentifier,
   issueTitle,
   listOrder,
+  oneLineTitle,
   projectKey,
   type Issue,
 } from './issues'
@@ -31,6 +32,14 @@ describe('issueTitle', () => {
     expect(issueTitle('  Restore sessions  ')).toBe('Restore sessions')
     expect(issueTitle('\t a  b \n')).toBe('a  b')
     expect(issueTitle(' \t \t')).toBe('')
+  })
+})
+
+describe('oneLineTitle', () => {
+  it('puts a title on one line, each line break a space, and keeps everything else', () => {
+    expect(oneLineTitle('Fix\r\nthe\nlogin\rbug')).toBe('Fix the login bug')
+    expect(oneLineTitle('\n a\tb \r\n\r\n')).toBe('  a\tb   ')
+    expect(oneLineTitle('Restore sessions')).toBe('Restore sessions')
   })
 })
 

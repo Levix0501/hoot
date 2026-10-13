@@ -85,6 +85,15 @@ describe('HootServer', () => {
     expect(hoot.created).toEqual([saved])
   })
 
+  it('saves the title on one line, as the new issue dialog does', async () => {
+    const { status, answer } = await request('POST', '/issues', {
+      body: JSON.stringify({ ...issue, title: 'Fix\r\nthe\nlogin\rbug' }),
+    })
+    expect(status).toBe(201)
+    expect(answer).toMatchObject({ ok: true, issue: { title: 'Fix the login bug' } })
+    expect(hoot.issues.byNumber(hoot.gamma.id, 1)?.title).toBe('Fix the login bug')
+  })
+
   it('creates nothing from a request it cannot take, and says why', async () => {
     const refused: Array<[string, Record<string, unknown>, number, string]> = [
       ['not JSON', {}, 400, 'The request is not JSON.'],

@@ -160,7 +160,8 @@ export function IssueListPage() {
           >
             <SquarePenIcon />
           </TooltipTrigger>
-          <TooltipContent side="bottom">
+          {/* Beside the button: below it, it would cover the Project dropdown. */}
+          <TooltipContent side="left">
             New issue
             <Kbd>C</Kbd>
           </TooltipContent>

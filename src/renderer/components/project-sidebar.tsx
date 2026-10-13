@@ -129,8 +129,10 @@ function ProjectEntry({ project }: { project: Project }) {
       >
         {empty ? (
           <li
-            // Lined up with the project's name.
-            className="flex h-8 items-center pl-8 text-sm text-muted-foreground"
+            // Lined up with the project's name. It keeps its height while the
+            // list is measured closed, before it slides open: shrunk to its
+            // text there, the list would slide open short and then jump.
+            className="flex h-8 shrink-0 items-center pl-8 text-sm text-muted-foreground"
             data-testid="no-sessions"
           >
             No sessions

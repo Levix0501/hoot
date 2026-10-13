@@ -84,9 +84,9 @@ Hoot supports macOS only for now.
 
 **Settings** at the bottom of the sidebar, **Hoot > Settings…** or ⌘, shows the settings in place
 of the sidebar and the shown page: their list on the left, as wide as the sidebar, and their page
-on the right. Back and Forward stay at the top left, where the sidebar button gives way to a blank.
-**Back to app** at the top of the list, Esc (unless you are typing in a field or a dialog is open)
-and Back leave them, showing the page shown before them and the sidebar as you left it; the
+on the right. The sidebar button and Back and Forward are not at the top left then: **Back to app**
+at the top of the list, Esc (unless you are typing in a field or a dialog is open) and ⌘[ leave
+them, showing the page shown before them and the sidebar as you left it; the
 settings are a page among the others for going [back and forward](#features). When no page was shown before
 them, leaving them shows the empty page and takes them out of the list. While they are shown,
 sessions keep running, ⌘1 to ⌘9 and ⌘⇧] and ⌘⇧[ show sessions, **File > Add Project…** adds a

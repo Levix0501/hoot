@@ -1,7 +1,7 @@
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useAppStore } from '../store/app-store'
-import { canStep, isSettingsPage } from '../store/page-history'
+import { canStep } from '../store/page-history'
 import { Button } from './ui/button'
 import { Kbd } from './ui/kbd'
 import { SidebarTrigger, useSidebar } from './ui/sidebar'
@@ -58,18 +58,16 @@ export function useTopRowInset(): number | undefined {
 function NavigationButton({
   label,
   shortcut,
-  style,
   children,
 }: {
   label: string
   shortcut: string
-  style?: React.CSSProperties
   children: ReactNode
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<span className="flex" style={style} />}
+        render={<span className="flex" />}
         onMouseDown={(event) => event.preventDefault()}
       >
         {children}
@@ -90,14 +88,12 @@ function NavigationButton({
  * shown. It stays in place while the sidebar slides in and out. Its blank
  * parts are part of the area that drags the window; its buttons are not.
  * Entering or leaving full screen moves it the way the content of the main
- * area's top row moves then, so that the two never overlap. While the
- * settings are shown there is no sidebar to show or hide: Back and Forward
- * stay where they are, and the trigger's place is left blank. A button's
- * tooltip shows once the pointer has rested on it for 700 ms, and at once
- * when the pointer comes from another button's within 300 ms.
+ * area's top row moves then, so that the two never overlap. The settings,
+ * which have Back to app, leave it out. A button's tooltip shows once the
+ * pointer has rested on it for 700 ms, and at once when the pointer comes
+ * from another button's within 300 ms.
  */
 export function WindowNavigation() {
-  const settingsShown = useAppStore((state) => isSettingsPage(state.currentPage))
   const fullScreen = useAppStore((state) => state.fullScreen)
   const canGoBack = useAppStore((state) => canStep(state.history, -1))
   const canGoForward = useAppStore((state) => canStep(state.history, 1))
@@ -113,17 +109,10 @@ export function WindowNavigation() {
       data-full-screen={fullScreen}
     >
       <TooltipProvider delay={700} timeout={300}>
-        {!settingsShown && (
-          <NavigationButton label="Toggle sidebar" shortcut="⌘B">
-            <SidebarTrigger className={BUTTON_CLASS} data-testid="toggle-sidebar" />
-          </NavigationButton>
-        )}
-        <NavigationButton
-          label="Back"
-          shortcut="⌘["
-          // A margin, not a blank element, keeps the trigger's place in the drag area.
-          style={settingsShown ? { marginLeft: BUTTON_WIDTH + BUTTON_GAP } : undefined}
-        >
+        <NavigationButton label="Toggle sidebar" shortcut="⌘B">
+          <SidebarTrigger className={BUTTON_CLASS} data-testid="toggle-sidebar" />
+        </NavigationButton>
+        <NavigationButton label="Back" shortcut="⌘[">
           <Button
             variant="ghost"
             size="icon-sm"

@@ -52,8 +52,9 @@ export function App() {
     <TooltipProvider>
       {/*
         ⌘B, the sidebar's trigger and View > Hide Sidebar collapse and expand
-        the sidebar. The settings take the place of the sidebar and the main
-        area, which come back as they were when the settings are left.
+        the sidebar. The settings take the place of the sidebar, the main area
+        and the navigation, which come back as they were when the settings are
+        left.
       */}
       <SidebarProvider
         open={sidebarOpen}
@@ -69,10 +70,10 @@ export function App() {
             <SidebarInset className="min-w-0 overflow-hidden">
               <MainArea />
             </SidebarInset>
+            {/* Last, so that its buttons are cut out of the drag area of what lies under them. */}
+            <WindowNavigation />
           </>
         )}
-        {/* Last, so that its buttons are cut out of the drag area of what lies under them. */}
-        <WindowNavigation />
       </SidebarProvider>
       <CloseSessionDialog />
       <NewWorktreeDialog />

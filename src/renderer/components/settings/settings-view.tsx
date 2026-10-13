@@ -38,8 +38,8 @@ function useEscapeLeavesSettings(): void {
       event.preventDefault()
       leaveSettings()
     }
-    // In the capture phase: an open tooltip, such as Back's while the pointer
-    // is on it, closes on Esc and stops the key from going any further.
+    // In the capture phase, so that an open tooltip, which closes on Esc and
+    // stops the key from going any further, cannot keep the settings shown.
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [leaveSettings])
@@ -57,8 +57,8 @@ function SettingsNavigation() {
     >
       {/*
         Its part of the window's top row, which drags the window. The traffic
-        lights and the navigation sit on it. It reaches over the right border,
-        so that the line drags the window too.
+        lights sit on it. It reaches over the right border, so that the line
+        drags the window too.
       */}
       <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
       <SidebarContent>

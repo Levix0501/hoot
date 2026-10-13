@@ -153,7 +153,8 @@ export function WorktreeItem({
             render={
               <SidebarMenuButton
                 render={<div />}
-                className="cursor-default pl-4 group-has-data-[sidebar=menu-action]/menu-item:pr-14"
+                // Highlighted also while the pointer is on one of the buttons over it.
+                className="cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-14"
                 data-testid="worktree-row"
               />
             }
@@ -183,7 +184,8 @@ export function WorktreeItem({
             disabled={worktree.missing}
             render={
               <SidebarMenuAction
-                className="right-7 disabled:pointer-events-none disabled:opacity-50"
+                // The button pointed at stands out on the highlighted row.
+                className="right-7 hover:bg-sidebar-foreground/10 disabled:pointer-events-none disabled:opacity-50"
                 aria-label={`New session in ${worktree.displayName}`}
                 title="New Session"
                 // Its label names the branch.
@@ -213,6 +215,7 @@ export function WorktreeItem({
           <DropdownMenuTrigger
             render={
               <SidebarMenuAction
+                className="hover:bg-sidebar-foreground/10"
                 aria-label={`More actions for ${worktree.displayName}`}
                 title="More Actions"
                 data-user-text=""

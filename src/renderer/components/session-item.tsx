@@ -70,7 +70,7 @@ function RenameField({ session }: { session: UiSession }) {
   }
 
   return (
-    <div className="flex h-7 min-w-0 flex-1 items-center gap-2 px-2">
+    <div className="flex h-7 items-center gap-2 px-2">
       <ToolIcon toolId={session.toolId} className="size-4 shrink-0" />
       <Input
         ref={inputRef}
@@ -116,7 +116,7 @@ export function SessionItem({ session }: { session: UiSession }) {
     <ContextMenu>
       <ContextMenuTrigger
         render={<SidebarMenuSubItem />}
-        className={cn('flex items-center gap-0.5', session.closing && 'opacity-60')}
+        className={cn(session.closing && 'opacity-60')}
         data-testid="session-item"
         data-session-id={session.id}
         data-status={session.status}
@@ -129,7 +129,9 @@ export function SessionItem({ session }: { session: UiSession }) {
           <SidebarMenuSubButton
             render={<button type="button" />}
             isActive={current}
-            className="min-w-0 flex-1 cursor-default text-left"
+            // Room at its right end for the close button, which lies over it; highlighted also
+            // while the pointer is on that button.
+            className="w-full cursor-default pr-8.5 text-left group-hover/menu-sub-item:bg-sidebar-accent group-hover/menu-sub-item:text-sidebar-accent-foreground"
             onClick={() => selectSession(session.id)}
             onDoubleClick={() => startRenaming(session.id)}
             data-testid="session-item-button"
@@ -149,7 +151,7 @@ export function SessionItem({ session }: { session: UiSession }) {
         {!renaming && (
           <button
             type="button"
-            className="invisible flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden group-focus-within/menu-sub-item:visible group-hover/menu-sub-item:visible hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 [&>svg]:size-3.5"
+            className="invisible absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden group-focus-within/menu-sub-item:visible group-hover/menu-sub-item:visible hover:bg-sidebar-foreground/10 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 [&>svg]:size-3.5"
             disabled={session.closing}
             onClick={() => requestCloseSession(session.id)}
             aria-label="Close Session"

@@ -98,7 +98,8 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           render={
             <SidebarMenuButton
               isActive={selected}
-              className="cursor-default group-has-data-[sidebar=menu-action]/menu-item:pr-2"
+              // Highlighted also while the pointer is on one of the buttons over it.
+              className="cursor-default group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
               data-testid="project-item-button"
             />
           }
@@ -123,9 +124,10 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           />
         </CollapsibleTrigger>
 
+        {/* The button pointed at stands out on the highlighted row. */}
         <SidebarMenuAction
           showOnHover
-          className="right-13"
+          className="right-13 hover:bg-sidebar-foreground/10"
           onClick={() => showIssueList(project.id)}
           aria-label={`Issues of ${project.name}`}
           title="Issues"
@@ -139,7 +141,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             render={
               <SidebarMenuAction
                 showOnHover
-                className="right-7"
+                className="right-7 hover:bg-sidebar-foreground/10"
                 aria-label={`New session in ${project.name}`}
                 title="New Session"
                 data-testid="new-session-button"
@@ -173,6 +175,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             render={
               <SidebarMenuAction
                 showOnHover
+                className="hover:bg-sidebar-foreground/10"
                 aria-label={`More actions for ${project.name}`}
                 title="More Actions"
                 data-testid="project-actions-button"

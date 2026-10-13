@@ -110,8 +110,8 @@ function ProjectEntry({ project }: { project: Project }) {
       <ProjectItem project={project} expanded={expanded} />
       {/*
         Cut off only above and below, where the rows slide: at the sides
-        they show whole, as a session's close button, which reaches a pixel
-        past the right side, and its focus ring do.
+        they show whole, as the focus rings of a session's row and of its
+        close button, which reach past the right side, do.
       */}
       <CollapsibleContent
         render={<ul />}

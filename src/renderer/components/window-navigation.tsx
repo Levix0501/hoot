@@ -1,5 +1,6 @@
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { api } from '../lib/api'
 import { useAppStore } from '../store/app-store'
 import { canStep } from '../store/page-history'
 import { Button } from './ui/button'
@@ -10,9 +11,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 /**
  * Where the navigation starts, in CSS pixels from the window's left edge: past
  * the traffic lights, which take x 15–75 at the position the main process
- * gives them, or near the edge in full screen, where macOS hides them.
+ * gives them, or near the edge where there are none: in full screen, where
+ * macOS hides them, and on Windows, whose buttons are at the other end.
  */
-const NAVIGATION_START = { windowed: 84, fullScreen: 8 }
+const NAVIGATION_START = { pastTrafficLights: 84, nearEdge: 8 }
 /** The width of an `icon-sm` button, and the space between two buttons (`gap-1`). */
 const BUTTON_WIDTH = 28
 const BUTTON_GAP = 4
@@ -34,6 +36,14 @@ const BUTTON_CLASS =
 const TOOLTIP_CLASS =
   'gap-2 rounded-2xl border border-foreground/8 bg-popover px-2 py-1.5 text-[13px]/[18px] text-popover-foreground animate-none! has-data-[slot=kbd]:pr-2 **:data-[slot=kbd]:rounded-md dark:bg-[color-mix(in_srgb,var(--popover),white_13%)] [&>[data-side]]:hidden'
 
+/** Where the navigation starts now. */
+function useNavigationStart(): number {
+  const fullScreen = useAppStore((store) => store.fullScreen)
+  return fullScreen || api.windowControls === 'overlay'
+    ? NAVIGATION_START.nearEdge
+    : NAVIGATION_START.pastTrafficLights
+}
+
 /**
  * How far the main area's part of the top row (a session's header, or an
  * Issues page's title row) keeps its content from the main area's left edge:
@@ -42,9 +52,8 @@ const TOOLTIP_CLASS =
  */
 export function useTopRowInset(): number | undefined {
   const { state } = useSidebar()
-  const fullScreen = useAppStore((store) => store.fullScreen)
+  const start = useNavigationStart()
   if (state === 'expanded') return undefined
-  const start = fullScreen ? NAVIGATION_START.fullScreen : NAVIGATION_START.windowed
   return start + NAVIGATION_WIDTH + HEADER_GAP
 }
 
@@ -83,10 +92,11 @@ function NavigationButton({
 }
 
 /**
- * The window's navigation, in its top row right of the traffic lights: the
- * sidebar's trigger, and buttons that go back and forward among the pages
- * shown. It stays in place while the sidebar slides in and out. Its blank
- * parts are part of the area that drags the window; its buttons are not.
+ * The window's navigation, in its top row right of the traffic lights (on
+ * Windows, at the row's left end): the sidebar's trigger, and buttons that go
+ * back and forward among the pages shown. It stays in place while the sidebar
+ * slides in and out. Its blank parts are part of the area that drags the
+ * window; its buttons are not.
  * Entering or leaving full screen moves it the way the content of the main
  * area's top row moves then, so that the two never overlap. The settings,
  * which have Back to app, leave it out. A button's tooltip shows once the
@@ -95,6 +105,7 @@ function NavigationButton({
  */
 export function WindowNavigation() {
   const fullScreen = useAppStore((state) => state.fullScreen)
+  const start = useNavigationStart()
   const canGoBack = useAppStore((state) => canStep(state.history, -1))
   const canGoForward = useAppStore((state) => canStep(state.history, 1))
   const goBack = useAppStore((state) => state.goBack)
@@ -104,7 +115,7 @@ export function WindowNavigation() {
     <nav
       aria-label="Navigation"
       className="fixed top-0 left-0 z-20 flex h-11 items-center gap-1 transition-[padding] duration-200 ease-linear [app-region:drag] *:[app-region:no-drag]"
-      style={{ paddingLeft: fullScreen ? NAVIGATION_START.fullScreen : NAVIGATION_START.windowed }}
+      style={{ paddingLeft: start }}
       data-testid="window-navigation"
       data-full-screen={fullScreen}
     >

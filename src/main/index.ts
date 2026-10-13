@@ -5,6 +5,11 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme } from 'electron'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
+import {
+  WINDOWS_LAYOUT_SWITCH,
+  windowControlsArgument,
+  windowControlsFor,
+} from '../shared/window-controls'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
@@ -23,14 +28,13 @@ import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
+import { titleBarOverlay, windowBackground } from './window-colors'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
 
 // Captured before anything else can change it: sessions inherit this environment.
 const baseEnv = captureBaseEnv()
 
-const LIGHT_BACKGROUND = '#ffffff'
-const DARK_BACKGROUND = '#181818'
 const SHUTDOWN_TIMEOUT_MS = 4_000
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
@@ -44,6 +48,12 @@ const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.
 const openInBackground = app.commandLine.hasSwitch('background')
+// The window's own buttons: macOS's traffic lights, or those Windows draws.
+// With --windows-layout, macOS also leaves the room of the latter empty.
+const windowControls = windowControlsFor(
+  process.platform,
+  app.commandLine.hasSwitch(WINDOWS_LAYOUT_SWITCH),
+)
 
 function defaultShell(): string {
   const candidates = [baseEnv.SHELL, os.userInfo().shell, '/bin/zsh']
@@ -155,18 +165,26 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
     title: 'Hoot',
     // No title bar: the page takes the whole window. The traffic lights
     // (x 15–75, y 15–29) sit in the middle of the page's 44px top row, which
-    // leaves them room.
+    // leaves them room. On Windows, Windows draws its minimize, maximize and
+    // close buttons over the right end of the row instead, and a window
+    // without a title bar has no menu bar either.
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 15, y: 15 },
+    ...(windowControls === 'overlay'
+      ? { titleBarOverlay: titleBarOverlay(nativeTheme.shouldUseDarkColors) }
+      : {}),
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? DARK_BACKGROUND : LIGHT_BACKGROUND,
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: path.join(import.meta.dirname, '../preload/index.cjs'),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
-      additionalArguments: testHooks ? ['--hoot-test-hooks'] : [],
+      additionalArguments: [
+        ...(testHooks ? ['--hoot-test-hooks'] : []),
+        windowControlsArgument(windowControls),
+      ],
     },
   })
   // A window that is never shown still renders, so unattended runs can use it.
@@ -190,11 +208,16 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   return window
 }
 
-// Also when macOS changes its appearance while Hoot follows it.
+// The window's colors follow the appearance in effect, also when macOS
+// changes its appearance while Hoot follows it: its background, and on
+// Windows the buttons Windows draws.
 nativeTheme.on('updated', () => {
-  getWindow()?.setBackgroundColor(
-    nativeTheme.shouldUseDarkColors ? DARK_BACKGROUND : LIGHT_BACKGROUND,
-  )
+  const window = getWindow()
+  if (!window) return
+  window.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors))
+  if (windowControls === 'overlay') {
+    window.setTitleBarOverlay(titleBarOverlay(nativeTheme.shouldUseDarkColors))
+  }
 })
 
 /**

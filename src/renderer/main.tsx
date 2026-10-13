@@ -5,6 +5,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { DatabaseErrorPage } from './components/database-error-page'
+import { WindowControlsPlaceholder } from './components/window-controls-placeholder'
 import { api } from './lib/api'
 import { useAppStore } from './store/app-store'
 import { loadTerminalFont } from './terminal/terminal-font'
@@ -20,10 +21,14 @@ function render(content: ReactNode): void {
       */}
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {content}
+        <WindowControlsPlaceholder />
       </ThemeProvider>
     </StrictMode>,
   )
 }
+
+// The top row leaves room at its right end for the window's own buttons (index.css).
+document.documentElement.dataset.windowControls = api.windowControls
 
 const startup = await api.getStartupState()
 if (startup.kind === 'database-error') {

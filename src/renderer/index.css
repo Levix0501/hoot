@@ -128,6 +128,26 @@
   --sidebar-ring: oklch(0.626 0.188 259.456);
 }
 
+/*
+ * The room the page leaves at the right end of the window's top row for the
+ * window's own buttons (src/shared/window-controls.ts): as wide as the buttons
+ * Windows draws there, or 140px, about as wide, on macOS started with
+ * --windows-layout. The content of the row stops short of it.
+ */
+:root {
+  --window-controls-width: 0px;
+}
+
+:root[data-window-controls='overlay'] {
+  --window-controls-width: calc(
+    100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 140px))
+  );
+}
+
+:root[data-window-controls='placeholder'] {
+  --window-controls-width: 140px;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

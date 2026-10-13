@@ -3,6 +3,7 @@ import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { SessionInfo } from './session'
 import type { ToolId } from './tools'
+import type { WindowControls } from './window-controls'
 import type {
   CreateWorktreeRequest,
   CreateWorktreeResult,
@@ -154,6 +155,8 @@ export type SessionCommand =
 /** API exposed to the renderer by the preload script as `window.hoot`. */
 export interface HootApi {
   testHooks: boolean
+  /** The window's own buttons, and the room the page leaves for them in its top row. */
+  windowControls: WindowControls
   getStartupState(): Promise<StartupState>
   /** Shows the database file, or the nearest folder of it there is, in Finder. */
   revealDatabase(): void

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IpcChannel, type HootApi } from '../shared/ipc'
+import { windowControlsFromArguments } from '../shared/window-controls'
 
 function subscribe<Args extends unknown[]>(
   channel: string,
@@ -14,6 +15,7 @@ function subscribe<Args extends unknown[]>(
 
 const api: HootApi = {
   testHooks: process.argv.includes('--hoot-test-hooks'),
+  windowControls: windowControlsFromArguments(process.argv),
   getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),
   revealDatabase: () => ipcRenderer.send(IpcChannel.revealDatabase),
   quit: () => ipcRenderer.send(IpcChannel.quit),

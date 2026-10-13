@@ -70,10 +70,11 @@ export function SessionPane({ session }: { session: UiSession }) {
         The main area's part of the window's top row. Its blank parts drag the
         window; the names, which show their full text on hover, and the close
         button do not. While the sidebar slides, its left padding changes in
-        step, keeping its content clear of the navigation.
+        step, keeping its content clear of the navigation. At its right end it
+        leaves room for the window's buttons on Windows.
       */}
       <header
-        className="flex h-11 shrink-0 items-center gap-3 px-4 transition-[padding] duration-200 ease-linear [app-region:drag]"
+        className="flex h-11 shrink-0 items-center gap-3 pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4 transition-[padding] duration-200 ease-linear [app-region:drag]"
         style={{ paddingLeft: inset }}
       >
         <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />

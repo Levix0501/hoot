@@ -15,13 +15,14 @@ import { useTopRowInset } from '../window-navigation'
  * An Issues page's title row: the main area's part of the window's top row.
  * Its blank parts drag the window; its buttons and the names with a tooltip
  * do not. While the sidebar slides, its left padding changes in step,
- * keeping its content clear of the navigation.
+ * keeping its content clear of the navigation. At its right end it leaves
+ * room for the window's buttons on Windows.
  */
 export function IssuesTopRow({ children }: { children: ReactNode }) {
   const inset = useTopRowInset()
   return (
     <header
-      className="flex h-11 shrink-0 items-center gap-2 px-4 text-sm transition-[padding] duration-200 ease-linear [app-region:drag]"
+      className="flex h-11 shrink-0 items-center gap-2 pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4 text-sm transition-[padding] duration-200 ease-linear [app-region:drag]"
       style={{ paddingLeft: inset }}
       data-testid="issues-top-row"
     >

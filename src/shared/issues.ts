@@ -35,19 +35,6 @@ export interface Issue {
 export const ISSUE_TITLE_MAX_LENGTH = 10_000
 export const ISSUE_DESCRIPTION_MAX_LENGTH = 1_000_000
 
-/**
- * The longest issue that can be sent to Claude Code: its title and
- * description together, in UTF-16 code units. The issue reaches Claude Code
- * in its command's arguments, which macOS limits to about 1 MB together with
- * the environment; this stays well below that, whatever the characters.
- */
-export const ISSUE_SEND_MAX_LENGTH = 100_000
-
-/** How long an issue is when it is sent: its title and description together, in UTF-16 code units. */
-export function issueSendLength(issue: Pick<Issue, 'title' | 'description'>): number {
-  return issue.title.length + issue.description.length
-}
-
 /** The title saved for what was entered: without whitespace around it. Empty when there is none. */
 export function issueTitle(entered: string): string {
   return entered.trim()

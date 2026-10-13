@@ -23,10 +23,8 @@ import {
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
   ISSUE_PRIORITIES,
-  ISSUE_SEND_MAX_LENGTH,
   ISSUE_STATUSES,
   ISSUE_TITLE_MAX_LENGTH,
-  issueSendLength,
   type Issue,
   type IssueChanges,
   type IssueResult,
@@ -134,8 +132,7 @@ function changeIssue(change: () => Issue | null, missing: string): IssueResult {
 /**
  * What a session started from an issue's page sends Claude Code: the issue's
  * title and description as they are saved now. Or why it cannot be sent: the
- * issue is gone, belongs to another project, or is too long for the
- * arguments of Claude Code's command.
+ * issue is gone, or belongs to another project.
  */
 function issueToSend(
   issues: IssueStore,
@@ -150,9 +147,6 @@ function issueToSend(
   }
   if (issue === null || issue.projectId !== projectId) {
     return { ok: false, message: 'The issue no longer exists.' }
-  }
-  if (issueSendLength(issue) > ISSUE_SEND_MAX_LENGTH) {
-    return { ok: false, message: 'The issue is too long to send. Shorten it first.' }
   }
   return { ok: true, issue: { title: issue.title, description: issue.description } }
 }

@@ -37,20 +37,12 @@ describe('toolStatus', () => {
 })
 
 describe('sendBlockers', () => {
-  const short = { title: 'Fix the login bug', description: 'Steps' }
-  const longest = { title: 'T', description: `${'a'.repeat(99_997)}😀` }
-  const tooLong = { title: 'T', description: `${'a'.repeat(99_997)}😀a` }
-
-  it('has none once Claude Code is found, for an issue up to 100,000 code units long', () => {
-    expect(sendBlockers(detected(true), short)).toEqual([])
-    expect(sendBlockers(detected(true), longest)).toEqual([])
+  it('has none once Claude Code is found', () => {
+    expect(sendBlockers(detected(true))).toEqual([])
   })
 
-  it('lists every reason that holds', () => {
-    expect(sendBlockers(firstDetection, short)).toEqual(['checking'])
-    expect(sendBlockers(detected(false), short)).toEqual(['not-installed'])
-    expect(sendBlockers(detected(true), tooLong)).toEqual(['too-long'])
-    expect(sendBlockers(detected(false), tooLong)).toEqual(['not-installed', 'too-long'])
-    expect(sendBlockers(firstDetection, tooLong)).toEqual(['checking', 'too-long'])
+  it('says Claude Code is still being checked for, or is not installed', () => {
+    expect(sendBlockers(firstDetection)).toEqual(['checking'])
+    expect(sendBlockers(detected(false))).toEqual(['not-installed'])
   })
 })

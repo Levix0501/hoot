@@ -147,22 +147,25 @@ works, as an issue, and come back to it later. Issues are kept on your Mac, in
 - **Sending to Claude Code**: before handing an issue to an agent, find out whether it is too big
   and how to split it. **Send to Claude Code**, above the title of an issue that is neither done nor
   canceled, saves what you typed in it, then starts Claude Code in a new session in the project root
-  (never in a worktree), at the permission level picked in the Agents menu, and shows it. The
-  session is named after the issue's title, and its first message hands the issue to the
-  `/hoot:split-issue` skill of Hoot's own Claude Code plugin, which asks Claude to read the code
-  without changing anything and to judge whether one session can implement the issue and another
-  verify it in full; if not, to split it into ordered issues that can each be accepted on its own,
-  each with a title, a description and the issues it waits on. Hoot does not enforce that nothing
-  changes: like any other session, this one can change files as far as its permission level lets it.
-  The answer stays in the conversation, where you can go on with it. The plugin is loaded for that
-  session only, from Hoot's own files, without writing anything to `~/.claude`, `~/.claude.json` or
+  (never in a worktree), at the permission level picked in the Agents menu, and shows it. Hoot
+  writes the issue, its title as a heading and its description below it, to `issue.md` in a new
+  folder of the session's own in the system's temporary folder, and adds that folder to Claude
+  Code's working directories (`--add-dir`), so that Claude Code reads the file without asking at
+  any permission level. The session is named after the issue's title, and its first message is
+  Hoot's instructions, which point to the file: they ask the agent to read the code without
+  changing anything and to judge whether one fresh agent session can implement the issue and
+  another verify it in full; if not, to split it into ordered issues that can each be accepted on
+  its own, each with a title, a description and the issues it waits on. The instructions would do
+  for any agent, and the issue stays out of the message, where an agent could take some of its text
+  for a command or a mention. Hoot does not enforce that nothing changes: like any other session,
+  this one can change files as far as its permission level lets it. The answer stays in the
+  conversation, where you can go on with it. Hoot removes the issue's folder once the session's
+  process has ended, or when it could not start; if Hoot stops without quitting, the folder stays
+  until macOS clears its temporary files. Nothing is written to `~/.claude`, `~/.claude.json` or
   the project. While the session is in the sidebar, the button is **Show Claude Code Session** and
   always shows it; once the session is closed, the button sends the issue again. Sending is not
-  possible while Hoot is still checking whether Claude Code is installed, when it is not installed,
-  or when the issue's title and description are longer than 100,000 characters together (counted in
-  UTF-16 code units, in which most emoji count as two), since the issue reaches Claude Code in its
-  command's arguments; the button's tooltip then says why. NUL characters are left out of what is
-  sent.
+  possible while Hoot is still checking whether Claude Code is installed, or when it is not
+  installed; the button's tooltip then says why. NUL characters are left out of what is sent.
 - **Drafts**: what you enter in a project's new issue dialog stays when the dialog closes (with
   Esc, its close button, or by showing another page), until you create the issue, remove the
   project, or quit Hoot. Quitting does not ask about drafts.
@@ -321,7 +324,6 @@ the page also exposes the sessions' terminals as `window.hootTestHooks`.
 | Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                       |
 | Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                      |
 | Shared   | `src/shared`   | Types and messages used by more than one process                                                         |
-| Plugin   | `resources`    | Hoot's own Claude Code plugin, `claude-plugins/hoot`, which only the sessions an issue is sent to load   |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
 node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder:

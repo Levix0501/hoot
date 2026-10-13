@@ -5,7 +5,6 @@ import {
   isIssueOpen,
   issueGroups,
   issueIdentifier,
-  issueSendLength,
   issueTitle,
   listOrder,
   projectKey,
@@ -120,14 +119,5 @@ describe('projectKey and issueIdentifier', () => {
     expect(projectKey('项目')).toBe('ISS')
     expect(projectKey('')).toBe('ISS')
     expect(issueIdentifier('项目', 3)).toBe('ISS-3')
-  })
-})
-
-describe('issueSendLength', () => {
-  it('counts the title and the description together, in UTF-16 code units', () => {
-    expect(issueSendLength({ title: 'T', description: '' })).toBe(1)
-    expect(issueSendLength({ title: '修复登录', description: 'ab' })).toBe(6)
-    // A character outside the Basic Multilingual Plane is two code units.
-    expect(issueSendLength({ title: 'T', description: `${'a'.repeat(99_997)}😀` })).toBe(100_000)
   })
 })

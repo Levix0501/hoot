@@ -92,6 +92,33 @@ function pendingLaunch() {
   }
 }
 
+/**
+ * Launches for the sessions s1, s2 and s3, started in that order, whose
+ * cleanup counts its runs per session. They can be held back, and their
+ * cleanup can fail.
+ */
+function cleanedLaunches(options: { held?: Promise<void>; failing?: boolean } = {}) {
+  const runs = new Map<string, number>()
+  let next = 0
+  const ids = ['s1', 's2', 's3']
+  return {
+    runs,
+    resolveLaunch: async (toolId: string): Promise<SessionLaunch> => {
+      const id = ids[next++]
+      await options.held
+      return {
+        file: toolId,
+        args: [],
+        env: {},
+        cleanup: () => {
+          runs.set(id, (runs.get(id) ?? 0) + 1)
+          if (options.failing) throw new Error('EACCES')
+        },
+      }
+    },
+  }
+}
+
 describe('SessionManager', () => {
   it('starts a session in the project root with the launch command', async () => {
     const { host, manager } = setup()
@@ -360,6 +387,76 @@ describe('SessionManager', () => {
     await expect(manager.start(request('s1'))).rejects.toThrow(/posix_spawnp failed/)
     expect(manager.list()).toEqual([])
     expect(manager.hasRunningSession()).toBe(false)
+  })
+})
+
+describe("the cleanup of a session's launch", () => {
+  it('runs once, when the process ends, and not again when the session is closed', async () => {
+    const launches = cleanedLaunches()
+    const { manager, host } = setup({ resolveLaunch: launches.resolveLaunch })
+    await manager.start(request('s1', 'claude'))
+    expect(launches.runs.get('s1')).toBeUndefined()
+    host.emit('exit', 's1', 0, 0)
+    expect(launches.runs.get('s1')).toBe(1)
+    await manager.close('s1')
+    expect(launches.runs.get('s1')).toBe(1)
+  })
+
+  it('runs when a running session is closed, and when Hoot quits', async () => {
+    const launches = cleanedLaunches()
+    const { manager } = setup({ resolveLaunch: launches.resolveLaunch })
+    await manager.start(request('s1', 'claude'))
+    await manager.start(request('s2', 'claude'))
+    await manager.close('s1')
+    expect([...launches.runs]).toEqual([['s1', 1]])
+    await manager.endAll()
+    expect([...launches.runs]).toEqual([
+      ['s1', 1],
+      ['s2', 1],
+    ])
+  })
+
+  it('runs when the process does not report its exit, once its session is closed', async () => {
+    const launches = cleanedLaunches()
+    const { manager, host } = setup({ resolveLaunch: launches.resolveLaunch })
+    host.kill = (id, signal) => host.killed.push([id, signal])
+    await manager.start(request('s1', 'claude'))
+    await manager.close('s1')
+    expect(launches.runs.get('s1')).toBe(1)
+    expect(manager.list()).toEqual([])
+  })
+
+  it('runs when the process cannot start, or its session is closed before it starts', async () => {
+    const failed = cleanedLaunches()
+    const first = setup({ resolveLaunch: failed.resolveLaunch })
+    first.host.failSpawn = new Error('posix_spawnp failed')
+    await expect(first.manager.start(request('s1', 'claude'))).rejects.toThrow(
+      /posix_spawnp failed/,
+    )
+    expect(failed.runs.get('s1')).toBe(1)
+
+    const { promise: held, resolve: release } = Promise.withResolvers<void>()
+    const closedEarly = cleanedLaunches({ held })
+    const second = setup({ resolveLaunch: closedEarly.resolveLaunch })
+    const started = second.manager.start(request('s1', 'claude'))
+    const closed = second.manager.close('s1')
+    release()
+    await expect(started).rejects.toBeInstanceOf(SessionError)
+    await closed
+    expect(closedEarly.runs.get('s1')).toBe(1)
+    expect(second.host.spawned).toEqual([])
+  })
+
+  it('leaves the session as it is when the cleanup fails', async () => {
+    const launches = cleanedLaunches({ failing: true })
+    const { manager, host, updates } = setup({ resolveLaunch: launches.resolveLaunch })
+    await manager.start(request('s1', 'claude'))
+    host.emit('exit', 's1', 3, 0)
+    expect(launches.runs.get('s1')).toBe(1)
+    expect(manager.list()).toMatchObject([{ id: 's1', status: 'exited', exit: { code: 3 } }])
+    expect(updates.at(-1)).toMatchObject({ id: 's1', status: 'exited' })
+    await manager.close('s1')
+    expect(manager.list()).toEqual([])
   })
 })
 

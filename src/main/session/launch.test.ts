@@ -7,19 +7,28 @@ import {
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
 import type { LoginEnvironment } from '../tools/tool-service'
-import { resolveLaunch, sentIssueArgs, splitIssuePrompt, type LaunchContext } from './launch'
+import {
+  issueFileText,
+  resolveLaunch,
+  sentIssueArgs,
+  splitIssuePrompt,
+  type LaunchContext,
+} from './launch'
 import { SessionError } from './session-manager'
 
 let root: string
 let project: string
 let bin: string
+let temporary: string
 
 beforeAll(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
   project = path.join(root, 'project')
   bin = path.join(root, 'bin')
+  temporary = path.join(root, 'tmp')
   fs.mkdirSync(project)
   fs.mkdirSync(bin)
+  fs.mkdirSync(temporary)
   for (const command of ['claude', 'codex']) {
     fs.writeFileSync(path.join(bin, command), '#!/bin/sh\n', { mode: 0o755 })
   }
@@ -43,11 +52,9 @@ function context(
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
-    claudePlugin: '/Applications/Hoot.app/Contents/Resources/claude-plugins/hoot',
+    temporaryFolder: temporary,
   }
 }
-
-const PLUGIN = '--plugin-dir=/Applications/Hoot.app/Contents/Resources/claude-plugins/hoot'
 
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
@@ -113,22 +120,31 @@ describe('resolveLaunch', () => {
       description: '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
     }
     const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
+    // The issue is written in a folder of the session's own, in the temporary folder.
+    const [folderName] = fs.readdirSync(temporary)
+    expect(folderName).toMatch(/^hoot-issue-/)
+    const folder = path.join(temporary, folderName)
+    expect(fs.readFileSync(path.join(folder, 'issue.md'), 'utf8')).toBe(
+      '# Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  \n',
+    )
     expect(launch.file).toBe('claude')
     expect(launch.args).toEqual([
       '--permission-mode',
       'acceptEdits',
-      PLUGIN,
+      `--add-dir=${folder}`,
       '--name=Fix the login bug',
-      '/hoot:split-issue # Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  ',
+      splitIssuePrompt(path.join(folder, 'issue.md')),
     ])
+    launch.cleanup?.()
+    expect(fs.readdirSync(temporary)).toEqual([])
     // Any other session, Claude Code's included, has only its level's arguments.
-    expect((await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)).args).toEqual([
-      '--permission-mode',
-      'acceptEdits',
-    ])
+    const other = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)
+    expect(other.args).toEqual(['--permission-mode', 'acceptEdits'])
+    expect(other.cleanup).toBeUndefined()
+    expect(fs.readdirSync(temporary)).toEqual([])
   })
 
-  it('sends an issue to Claude Code only', async () => {
+  it('sends an issue to Claude Code only, and writes it only when the launch can go ahead', async () => {
     const issue = { title: 'T', description: '' }
     await expect(
       resolveLaunch(context({ PATH: bin }), 'codex', project, issue),
@@ -136,6 +152,24 @@ describe('resolveLaunch', () => {
     await expect(
       resolveLaunch(context({ PATH: bin }), 'shell', project, issue),
     ).rejects.toBeInstanceOf(SessionError)
+    await expect(
+      resolveLaunch(context({ PATH: '/usr/bin' }), 'claude', project, issue),
+    ).rejects.toThrow('Claude Code is not available.')
+    await expect(
+      resolveLaunch(context({ PATH: bin }), 'claude', path.join(root, 'gone'), issue),
+    ).rejects.toBeInstanceOf(SessionError)
+    expect(fs.readdirSync(temporary)).toEqual([])
+  })
+
+  it('says why the issue could not be written', async () => {
+    const launching = resolveLaunch(
+      { ...context({ PATH: bin }), temporaryFolder: path.join(root, 'missing') },
+      'claude',
+      project,
+      { title: 'T', description: '' },
+    )
+    await expect(launching).rejects.toBeInstanceOf(SessionError)
+    await expect(launching).rejects.toThrow("Could not write the issue's file:")
   })
 
   it('refuses a tool that is not on the login shell PATH', async () => {
@@ -151,38 +185,39 @@ describe('resolveLaunch', () => {
   })
 })
 
-describe('the first message and the arguments that send an issue', () => {
-  it('puts the issue after the skill as a heading, with the description below it', () => {
-    expect(splitIssuePrompt({ title: 'Only a title', description: '' })).toBe(
-      '/hoot:split-issue # Only a title',
-    )
-    expect(splitIssuePrompt({ title: 'T', description: 'Line 1\n\nLine 3' })).toBe(
-      '/hoot:split-issue # T\n\nLine 1\n\nLine 3',
-    )
-    // A title that starts with a slash stays the heading's text.
-    expect(splitIssuePrompt({ title: '/other is broken', description: '' })).toBe(
-      '/hoot:split-issue # /other is broken',
+describe('the issue, the first message and the arguments that send them', () => {
+  it('writes the issue with its title as a heading and its description, if any, below it', () => {
+    expect(issueFileText({ title: 'Only a title', description: '' })).toBe('# Only a title\n')
+    expect(issueFileText({ title: 'T', description: 'Line 1\n\nLine 3' })).toBe(
+      '# T\n\nLine 1\n\nLine 3\n',
     )
   })
 
-  it('leaves the NUL characters out of the name and the first message', () => {
-    const issue = { title: 'Fix\0 login', description: 'a\0b' }
-    expect(sentIssueArgs('/plugins/hoot', issue)).toEqual([
-      '--plugin-dir=/plugins/hoot',
-      '--name=Fix login',
-      '/hoot:split-issue # Fix login\n\nab',
-    ])
+  it('leaves the NUL characters out of the issue and the name', () => {
+    expect(issueFileText({ title: 'Fix\0 login', description: 'a\0b' })).toBe('# Fix login\n\nab\n')
     // A description of nothing but NUL characters is an empty one.
-    expect(splitIssuePrompt({ title: 'T', description: '\0\0' })).toBe('/hoot:split-issue # T')
+    expect(issueFileText({ title: 'T', description: '\0\0' })).toBe('# T\n')
+    expect(sentIssueArgs('/tmp/hoot-issue-1', { title: 'Fix\0 login', description: '' })[1]).toBe(
+      '--name=Fix login',
+    )
+  })
+
+  it("starts the first message with the instructions, which point to the issue's file", () => {
+    const prompt = splitIssuePrompt('/tmp/hoot-issue-1/issue.md')
+    expect(prompt.split('\n')[0]).toBe(
+      'The issue to judge is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
+    )
+    expect(prompt).toContain('can one fresh agent session implement the whole issue')
+    expect(prompt).not.toMatch(/Claude|Hoot/)
   })
 
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
     expect(
-      sentIssueArgs('/plugins/hoot', { title: '--verbose flag broken', description: '' }),
+      sentIssueArgs('/tmp/hoot-issue-1', { title: '--verbose flag broken', description: '' }),
     ).toEqual([
-      '--plugin-dir=/plugins/hoot',
+      '--add-dir=/tmp/hoot-issue-1',
       '--name=--verbose flag broken',
-      '/hoot:split-issue # --verbose flag broken',
+      splitIssuePrompt('/tmp/hoot-issue-1/issue.md'),
     ])
   })
 })

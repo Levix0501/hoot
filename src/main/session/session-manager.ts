@@ -13,6 +13,11 @@ export interface SessionLaunch {
   file: string
   args: string[]
   env: Env
+  /**
+   * Removes what the launch made for the session, such as the file of the
+   * issue it sends, once the session's process has ended or did not start.
+   */
+  cleanup?: () => void
 }
 
 /** The subset of the pty host client the session manager depends on. */
@@ -51,6 +56,8 @@ interface SessionRecord {
   /** Set once the session is being closed; settles when it is gone. */
   closing: Promise<void> | null
   exitWaiters: Array<() => void>
+  /** The launch's cleanup, until it has run. */
+  cleanup: (() => void) | null
 }
 
 export function signalName(signal: number): string {
@@ -154,12 +161,14 @@ export class SessionManager extends EventEmitter<{
       pid: null,
       closing: null,
       exitWaiters: [],
+      cleanup: null,
     }
     this.records.set(request.id, record)
     // A session in a worktree runs in the worktree's root.
     const cwd = request.worktreePath ?? request.projectRoot
     try {
       const launch = await this.options.resolveLaunch(request.toolId, cwd, issue)
+      record.cleanup = launch.cleanup ?? null
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {
         record.pid = await this.options.host.spawn({
@@ -181,6 +190,7 @@ export class SessionManager extends EventEmitter<{
       this.emit('updated', info)
       return info
     } catch (error) {
+      cleanUp(record)
       if (this.records.get(request.id) === record) this.records.delete(request.id)
       throw error
     } finally {
@@ -214,6 +224,8 @@ export class SessionManager extends EventEmitter<{
       await record.started
       if (this.records.get(id) !== record) return
       if (record.info.status === 'running') await this.terminate(record)
+      // Also when the process did not report its exit in time.
+      cleanUp(record)
       this.records.delete(id)
     })()
     return record.closing
@@ -271,6 +283,7 @@ export class SessionManager extends EventEmitter<{
     const record = this.records.get(id)
     if (!record || record.info.status !== 'running') return
     record.info = { ...record.info, status: 'exited', exit }
+    cleanUp(record)
     for (const resolve of record.exitWaiters.splice(0)) resolve()
     // A session that is still starting reports its state once the start completes.
     if (!record.starting) this.emit('updated', { ...record.info })
@@ -293,4 +306,15 @@ export class SessionManager extends EventEmitter<{
 
 function isRunning(record: SessionRecord): boolean {
   return record.starting || record.info.status === 'running'
+}
+
+/** Runs the launch's cleanup once. A cleanup that fails leaves the session as it is. */
+function cleanUp(record: SessionRecord): void {
+  const cleanup = record.cleanup
+  record.cleanup = null
+  try {
+    cleanup?.()
+  } catch {
+    // What it could not remove stays behind.
+  }
 }

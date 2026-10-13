@@ -6,7 +6,7 @@ import { ToolIcon } from '../tool-icon'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
-const SEND_HINT = "Judge the workload and split the issue with Hoot's built-in skill"
+const SEND_HINT = "Judge the workload and split the issue with Hoot's built-in instructions"
 const SHOW_HINT = 'Show the Claude Code session started from this issue'
 
 /** What the tooltip of a send button that cannot be used says about one of the reasons. */
@@ -21,18 +21,16 @@ function BlockerNote({ blocker }: { blocker: SendBlocker }) {
           <code className="font-mono break-all">{getTool('claude').installCommand}</code>
         </p>
       )
-    case 'too-long':
-      return <p>This issue is too long to send. Shorten it first.</p>
   }
 }
 
 /**
  * The first of an open issue's actions. It sends the issue to Claude Code, in
  * a new session in the project's main worktree that judges the issue's
- * workload and splits it with Hoot's skill; while that session is in the
- * sidebar, it shows the session instead. Its tooltip says what it does, or
- * every reason it cannot send the issue now, also while the button is
- * disabled: the tooltip's trigger wraps the button.
+ * workload and splits it as Hoot's instructions say; while that session is in
+ * the sidebar, it shows the session instead. Its tooltip says what it does,
+ * or why it cannot send the issue now, also while the button is disabled: the
+ * tooltip's trigger wraps the button.
  */
 export function ClaudeCodeButton({ issue }: { issue: Issue }) {
   const sessionId = useAppStore(
@@ -41,7 +39,7 @@ export function ClaudeCodeButton({ issue }: { issue: Issue }) {
   const tools = useAppStore((state) => state.tools)
   const selectSession = useAppStore((state) => state.selectSession)
   const sendIssueToClaudeCode = useAppStore((state) => state.sendIssueToClaudeCode)
-  const blockers = sessionId === null ? sendBlockers(tools, issue) : []
+  const blockers = sessionId === null ? sendBlockers(tools) : []
 
   return (
     <Tooltip>

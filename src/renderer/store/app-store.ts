@@ -990,7 +990,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       const issue = findIssue(issueId)
       const project = state.projects.find((candidate) => candidate.id === issue?.projectId)
       if (!issue || !project || !isIssueOpen(issue)) return
-      if (sendBlockers(state.tools, issue).length > 0) return
+      if (sendBlockers(state.tools).length > 0) return
       // Unless it was sent while its changes were saved.
       if (state.sessions.some((session) => session.issueId === issueId)) return
       addSession(project.root, 'claude', null, issue.id)

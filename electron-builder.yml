@@ -9,11 +9,6 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
-# Hoot's own Claude Code plugin, which Claude Code reads from the file system:
-# it goes in Contents/Resources beside the app's archive, not into it.
-extraResources:
-  - from: resources/claude-plugins
-    to: claude-plugins
 # Package the Electron that `pnpm install` has already downloaded.
 electronDist: node_modules/electron/dist
 # node-pty ships prebuilt Node-API binaries, which Electron loads as they are.

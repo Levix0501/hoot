@@ -4,7 +4,8 @@ Hoot is a desktop app for developers who use coding CLIs such as Claude Code, Co
 OpenCode. Add local Git projects, then run coding tools and shells for them in terminals embedded in
 the Hoot window, as many at a time as you like.
 
-Hoot supports macOS only for now.
+Hoot supports macOS. Hoot for Windows is a preview: for now it only opens its window, and adding
+projects and starting sessions do not work yet.
 
 ## Features
 
@@ -78,7 +79,8 @@ Hoot supports macOS only for now.
   and the session's header or the Issues page's title (in full screen, the buttons take the
   traffic lights' place); drag the window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
   Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
-  it.
+  it. On Windows, the sidebar button, Back and Forward start the row, and the window's minimize,
+  maximize and close buttons end it, in the colors of the appearance in effect.
 
 ## Settings
 
@@ -284,6 +286,19 @@ an [installed](#installing) Hoot, so both can run at the same time.
 
 ## Installing
 
+Download Hoot from the [releases](https://github.com/Levix0501/hoot/releases) on GitHub. Its
+versions are prereleases for now.
+
+- **Mac**: take the DMG for your Mac's chip, `arm64` for Apple Silicon or `x64` for Intel. Open it
+  and drag Hoot to Applications. Hoot is signed and notarized, so it opens like any other app.
+- **Windows**: Hoot for Windows is a preview. For now it only opens its window: adding projects and
+  starting sessions do not work yet. Run the installer (`Hoot-Setup-<version>.exe`): it installs
+  Hoot for you alone, in `%LOCALAPPDATA%\Programs\Hoot`, without asking anything. The installer is
+  not signed, so Microsoft Defender SmartScreen may say "Windows protected your PC": click **More
+  info**, then **Run anyway**. It cannot be installed on a PC with Smart App Control turned on.
+
+### From source
+
 ```sh
 pnpm app:install
 ```
@@ -300,6 +315,85 @@ notarized, so it is meant for the Mac that built it.
 To update, run `pnpm app:install` again, then quit Hoot and open it again. Until then, a running
 Hoot keeps the version it started with. Quitting ends its sessions, and they are not restored.
 
+## Releasing
+
+Every change that users of Hoot would notice comes with a changeset: a Markdown file in
+`.changeset/` that says how it changes the version (`patch`, `minor` or `major`) and what changed,
+for users. Write it with
+
+```sh
+pnpm changeset
+```
+
+which asks for the kind of change and its summary, and commit it with the change. Its summary
+becomes the change's entry in `CHANGELOG.md` and in the release's text. Hoot is in Changesets'
+prerelease mode, so versions are alpha prereleases (`0.1.0-alpha.0`, then `0.1.0-alpha.1` and so
+on) until `pnpm changeset pre exit`.
+
+A release takes these steps:
+
+1. Push to `main`. The release workflow (`.github/workflows/release.yml`) runs `pnpm check` and,
+   while there are changesets that no version has taken yet, opens a pull request named
+   "chore(release): version packages (alpha)", or updates it. It holds the new version in
+   `package.json` and its section in `CHANGELOG.md`.
+2. Merge that pull request. The workflow tags the merge `v<version>`, builds the installers, signed
+   and notarized for the Mac, and drafts a release for the tag with them: marked as a pre-release
+   for a prerelease version, with the version's section of `CHANGELOG.md` and how to install Hoot
+   as its text.
+3. Check the draft on GitHub's Releases page and publish it. The workflow never publishes a
+   release.
+
+The workflow uses only the token GitHub gives each run, which may open pull requests once
+**Settings > Actions > General > Allow GitHub Actions to create and approve pull requests** is on.
+It signs and notarizes the Mac apps with these repository secrets:
+
+| Secret                              | What it holds                                                                    |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `DEVELOPER_ID_CERTIFICATE_BASE64`   | Your "Developer ID Application" certificate and its key, as a base64 `.p12` file |
+| `DEVELOPER_ID_CERTIFICATE_PASSWORD` | The password the `.p12` file was exported with                                   |
+| `APP_STORE_CONNECT_API_KEY`         | The contents of an App Store Connect API key's `.p8` file                        |
+| `APP_STORE_CONNECT_API_KEY_ID`      | That key's Key ID                                                                |
+| `APP_STORE_CONNECT_API_ISSUER_ID`   | Its Issuer ID                                                                    |
+
+- **The certificate**: in Keychain Access, under **My Certificates**, select "Developer ID
+  Application: …" with its private key, choose **File > Export Items…**, save it as a `.p12` file
+  and give it a password.
+- **The API key**: in App Store Connect, under **Users and Access > Integrations > App Store Connect
+  API**, generate a team key (the Developer role is enough). Download its `.p8` file, which can be
+  downloaded only once, and note its Key ID and the Issuer ID above the list of keys.
+
+Store them with the GitHub CLI:
+
+```sh
+base64 -i DeveloperID.p12 | gh secret set DEVELOPER_ID_CERTIFICATE_BASE64
+gh secret set DEVELOPER_ID_CERTIFICATE_PASSWORD
+gh secret set APP_STORE_CONNECT_API_KEY < AuthKey_<Key ID>.p8
+gh secret set APP_STORE_CONNECT_API_KEY_ID --body "<Key ID>"
+gh secret set APP_STORE_CONNECT_API_ISSUER_ID --body "<Issuer ID>"
+```
+
+To try a build without releasing anything, run the workflow from the repository's **Actions** page:
+choose **Release**, then **Run workflow** and a branch. It checks and builds the installers, which
+the run keeps as its artifacts, and changes nothing else: no tag, release, pull request or commit.
+
+### Building the installers on a Mac
+
+```sh
+pnpm app:release
+```
+
+builds in `release/` what a release ships: a DMG and a zip of Hoot for Apple Silicon (`arm64`) and
+for Intel (`x64`), signed and notarized; the Windows installer; and the update files that list them
+(`<channel>-mac.yml` and `<channel>.yml`, the channel being the version's prerelease tag, such as
+`alpha`). It needs Xcode 26 or later, which compiles the Mac icon, and a "Developer ID Application"
+certificate in your keychain. It notarizes with the credentials stored in your keychain under the
+profile `hoot-notary` (another profile can be named in `APPLE_KEYCHAIN_PROFILE`). Store them once,
+for example with an App Store Connect API key:
+
+```sh
+xcrun notarytool store-credentials hoot-notary --key AuthKey_<Key ID>.p8 --key-id "<Key ID>" --issuer "<Issuer ID>"
+```
+
 ## Checks
 
 ```sh
@@ -314,6 +408,10 @@ To check a change in the running app, drive the built app with Playwright's Elec
 (`_electron.launch`). Give it a temporary `--user-data-dir` so that it keeps its own projects,
 issues and settings, and `--background` so that its window stays off screen. With `--test-hooks`
 the page also exposes the sessions' terminals as `window.hootTestHooks`.
+
+With `--windows-layout` (for example `pnpm start --windows-layout`), Hoot leaves an empty area as
+wide as the window's buttons on Windows, 140 pixels, at the right end of the window's top row, as
+it does on Windows: it shows on a Mac whether anything in the row would be covered there.
 
 ## Architecture
 

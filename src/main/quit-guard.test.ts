@@ -44,6 +44,7 @@ function setup(options: {
     await options.stopped
     operations = []
   })
+  const resumeAgentOperations = vi.fn<() => void>(() => calls.push('resume operations'))
   const guard = new QuitGuard({
     getWindow: () => options.window,
     presentWindow,
@@ -51,12 +52,22 @@ function setup(options: {
     endSessions,
     agentOperations: () => operations,
     stopAgentOperations,
+    resumeAgentOperations,
     onCancel,
   })
   const setRunning = (count: number) => {
     running = count
   }
-  return { guard, presentWindow, onCancel, endSessions, stopAgentOperations, setRunning, calls }
+  return {
+    guard,
+    presentWindow,
+    onCancel,
+    endSessions,
+    stopAgentOperations,
+    resumeAgentOperations,
+    setRunning,
+    calls,
+  }
 }
 
 const updating: AgentOperationSummary = { label: 'Claude Code', kind: 'update', waiting: false }
@@ -273,6 +284,35 @@ describe('QuitGuard with agents being installed or updated', () => {
     const { event, preventDefault } = quitEvent()
     guard.intercept(event)
     expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('lets them run again when restarting into the update fails, after stopping them', async () => {
+    const { window } = fakeWindow()
+    const { guard, calls } = setup({ running: 0, window, operations: [updating] })
+    const install = vi.fn<() => void>(() => calls.push('install'))
+    guard.restartToUpdate(install)
+    await guard.answer(true)
+    guard.updateFailed()
+    expect(calls).toEqual(['stop operations', 'end sessions', 'install', 'resume operations'])
+  })
+
+  it('keeps them stopped while quitting, or waiting to, when an update fails then', async () => {
+    const { window } = fakeWindow()
+    const stopped = Promise.withResolvers<void>()
+    const { guard, resumeAgentOperations } = setup({
+      running: 0,
+      window,
+      operations: [updating],
+      stopped: stopped.promise,
+    })
+    guard.intercept(quitEvent().event)
+    const answered = guard.answer(true)
+    guard.updateFailed()
+    stopped.resolve()
+    await answered
+    guard.updateFailed()
+    expect(resumeAgentOperations).not.toHaveBeenCalled()
+    expect(electron.app.quit).toHaveBeenCalledTimes(1)
   })
 
   it('names them in the native dialog when there is no window', async () => {

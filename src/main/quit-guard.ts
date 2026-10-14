@@ -20,9 +20,12 @@ export interface QuitGuardOptions {
   /**
    * Stops them: those waiting never run, and the command of the one running
    * is sent SIGTERM; settles once its process has ended, and none is left
-   * running or waiting.
+   * running or waiting. Those asked for afterwards never run either, until
+   * `resumeAgentOperations`.
    */
   stopAgentOperations(): Promise<void>
+  /** Lets agents be installed and updated again, once Hoot keeps running after stopping them. */
+  resumeAgentOperations(): void
   /** Called when the user chose to keep Hoot running. */
   onCancel(): void
 }
@@ -34,7 +37,8 @@ export interface QuitGuardOptions {
  * running one's process to end, then ends the sessions and quits; cancelling
  * keeps Hoot, every session and every operation running. Restarting into an
  * update asks the same way. Until that process has ended, nothing else quits
- * Hoot, closes its window or restarts it.
+ * Hoot, closes its window or restarts it; and once confirmed, no install or
+ * update runs, unless restarting into the update fails.
  */
 export class QuitGuard {
   private allowQuit = false
@@ -112,6 +116,16 @@ export class QuitGuard {
     this.allowQuit = true
     await this.options.endSessions()
     app.quit()
+  }
+
+  /**
+   * Call when downloading or installing an update failed. Should Hoot have
+   * stopped the agents' operations to restart into it, it keeps running, and
+   * they can run again; not while it quits, or waits to.
+   */
+  updateFailed(): void {
+    if (this.allowQuit || this.stopping) return
+    this.options.resumeAgentOperations()
   }
 
   private needsAnswer(): boolean {

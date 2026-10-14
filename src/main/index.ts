@@ -183,6 +183,7 @@ const quitGuard = new QuitGuard({
   endSessions: () => sessions.endAll(),
   agentOperations: () => agents.pendingOperations(),
   stopAgentOperations: () => agents.stopAll(),
+  resumeAgentOperations: () => agents.resume(),
   // Keeping a running session must not leave Hoot without a window.
   onCancel: () => {
     if (!getWindow()) mainWindow = createMainWindow({ reveal: !openInBackground })
@@ -199,6 +200,9 @@ const updates = new UpdateService({
       : null,
   restart: (install) => quitGuard.restartToUpdate(install),
 })
+// Should restarting into the update fail, Hoot keeps running, and installs
+// and updates of agents, stopped for the restart, can run again.
+updates.on('failed', () => quitGuard.updateFailed())
 
 // Only said on Windows, where PATH is what it was when Hoot started: there is
 // no login shell to read it from again, so a git installed since is found

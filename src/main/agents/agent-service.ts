@@ -169,6 +169,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   /** The operations waiting, in the order they were asked for. */
   private queue: AgentRecord[] = []
   private running: AgentRecord | null = null
+  /**
+   * Set once every operation is stopped for quitting, until `resume`: an
+   * operation asked for meanwhile runs no command and ends cancelled at once,
+   * since Hoot, which is quitting, would not wait for its command to end.
+   */
+  private quitting = false
   private progressTimer: NodeJS.Timeout | null = null
 
   constructor(private readonly options: AgentServiceOptions) {
@@ -263,9 +269,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    * Stops every operation, for quitting: those waiting never run their
    * command, and the command of the one running is sent SIGTERM. Settles once
    * that one has ended: once its process has or, when its command had
-   * already ended, once it has read the agent again for its result.
+   * already ended, once it has read the agent again for its result. Those
+   * asked for afterwards, also while it waits, never run their command
+   * either, until `resume`.
    */
   async stopAll(): Promise<void> {
+    this.quitting = true
     for (const record of this.queue.splice(0)) {
       const operation = record.operation
       if (!operation) continue
@@ -283,6 +292,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     }
     this.changed()
     await operation?.ended.promise
+  }
+
+  /**
+   * Lets operations run again after `stopAll`, for a Hoot that keeps running
+   * after all, as when restarting into an update fails.
+   */
+  resume(): void {
+    this.quitting = false
   }
 
   private record(id: CodingToolId): AgentRecord {
@@ -425,7 +442,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   private enqueue(id: CodingToolId, kind: AgentOperationKind): void {
     const record = this.record(id)
     if (isPending(record.operation)) return
-    record.operation = {
+    const operation: Operation = {
       kind,
       state: { kind, status: 'waiting' },
       cancelled: false,
@@ -434,6 +451,17 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       terminated: false,
       commandDone: false,
       ended: Promise.withResolvers<void>(),
+    }
+    record.operation = operation
+    if (this.quitting) {
+      // Hoot quits without waiting for a command started now.
+      operation.cancelled = true
+      operation.stopped = true
+      operation.commandDone = true
+      operation.state = { kind, status: 'cancelled' }
+      operation.ended.resolve()
+      this.changed()
+      return
     }
     this.queue.push(record)
     this.changed()

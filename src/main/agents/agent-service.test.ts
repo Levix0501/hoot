@@ -749,6 +749,36 @@ describe('AgentService queue and cancelling', () => {
     expect(started()).toHaveLength(1)
   })
 
+  it('runs nothing asked for once it stops every operation for quitting, until it resumes', async () => {
+    write(path.join(root, 'npm-script'), SLOW_NPM)
+    const { service, agent, ended } = setup()
+    await service.detect()
+    service.install('claude')
+    await vi.waitFor(() => expect(started()).toHaveLength(1))
+    const stopping = service.stopAll()
+    // Asked for while Hoot waits for the running one to end, and after.
+    service.install('codex')
+    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    await stopping
+    service.install('opencode')
+    expect(agent('opencode').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(service.pendingOperations()).toEqual([])
+    expect(started()).toEqual(['started @anthropic-ai/claude-code'])
+    expect(npmRuns().filter((run) => / -g (@openai|opencode-ai)/.test(run))).toEqual([])
+
+    // Hoot keeps running after all, as when restarting into an update fails.
+    service.resume()
+    fs.writeFileSync(path.join(root, 'go'), '')
+    service.install('codex')
+    await ended('codex')
+    expect(agent('codex').operation).toEqual({
+      kind: 'install',
+      status: 'succeeded',
+      message: '✓ Installed 2.0.0',
+    })
+  })
+
   it('keeps the result of a command that has ended, cancelled while the agent is read again', async () => {
     const { service, agent, ended, reads, hold, release } = heldSetup()
     await service.detect()

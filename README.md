@@ -87,8 +87,9 @@ sessions does not yet.
 - **Quitting**: closing the window or quitting while sessions run, or while agents are being
   [installed or updated](#agents) or wait to be, asks first, and says how many sessions run and
   which agent is being installed or updated; confirming stops those installs and updates (the one
-  running is sent SIGTERM, and Hoot waits for it to end), then ends the sessions. A project cannot
-  be removed from the list while one of its sessions runs; removing it closes its other sessions.
+  running is sent SIGTERM, and Hoot waits for it to end; any asked for after that is cancelled at
+  once), then ends the sessions. A project cannot be removed from the list while one of its
+  sessions runs; removing it closes its other sessions.
 - **Window**: the window has no title bar. The sidebar and the shown page reach up to its top
   edge, where one row holds the window's traffic lights, the sidebar button, Back and Forward,
   and the session's header or the Issues page's title (in full screen, the buttons take the

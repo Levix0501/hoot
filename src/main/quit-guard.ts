@@ -33,11 +33,17 @@ export interface QuitGuardOptions {
  * updated, saying which. Confirming stops those operations, waiting for the
  * running one's process to end, then ends the sessions and quits; cancelling
  * keeps Hoot, every session and every operation running. Restarting into an
- * update asks the same way.
+ * update asks the same way. Until that process has ended, nothing else quits
+ * Hoot, closes its window or restarts it.
  */
 export class QuitGuard {
   private allowQuit = false
   private awaitingAnswer = false
+  /**
+   * Set while a confirmed quit or restart waits for the agents' operations to
+   * stop, which can take as long as npm needs to finish the step under way.
+   */
+  private stopping = false
   /** Installs the update that the open question asks to restart into. */
   private install: (() => void) | null = null
 
@@ -51,6 +57,13 @@ export class QuitGuard {
   /** Call from the window `close` and app `before-quit` events. */
   intercept(event: Electron.Event): void {
     if (this.allowQuit) return
+    // Hoot quits or restarts once the command it stopped has ended. Quitting
+    // before would leave that command running without Hoot, which would not
+    // wait for it.
+    if (this.stopping) {
+      event.preventDefault()
+      return
+    }
     if (!this.needsAnswer()) return
     event.preventDefault()
     this.ask('quit')
@@ -61,9 +74,11 @@ export class QuitGuard {
    * Hoot: at once while no session runs and no agent is being installed or
    * updated, otherwise once the user confirms, after stopping those
    * operations and ending the sessions. While Hoot already asks whether to
-   * quit, the answer to that question stands.
+   * quit, the answer to that question stands, as does a quit or restart the
+   * user confirmed, which waits for the operations to stop.
    */
   restartToUpdate(install: () => void): void {
+    if (this.stopping) return
     if (!this.needsAnswer()) {
       install()
       return
@@ -76,21 +91,25 @@ export class QuitGuard {
     this.awaitingAnswer = false
     const install = this.install
     this.install = null
-    if (this.allowQuit) return
+    if (this.allowQuit || this.stopping) return
     if (!confirmed) {
       this.options.onCancel()
       return
     }
+    this.stopping = true
+    try {
+      await this.options.stopAgentOperations()
+    } finally {
+      this.stopping = false
+    }
     if (install) {
       // With no session left, the window closes for the update without
       // asking again; should the update fail, quitting still asks.
-      await this.options.stopAgentOperations()
       await this.options.endSessions()
       install()
       return
     }
     this.allowQuit = true
-    await this.options.stopAgentOperations()
     await this.options.endSessions()
     app.quit()
   }

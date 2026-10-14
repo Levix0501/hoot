@@ -27,6 +27,8 @@ function setup(options: {
   running: number
   window: BrowserWindow | null
   operations?: AgentOperationSummary[]
+  /** Settles when stopping the operations is done; at once without it. */
+  stopped?: Promise<void>
 }) {
   let running = options.running
   let operations = options.operations ?? []
@@ -39,6 +41,7 @@ function setup(options: {
   })
   const stopAgentOperations = vi.fn<() => Promise<void>>(async () => {
     calls.push('stop operations')
+    await options.stopped
     operations = []
   })
   const guard = new QuitGuard({
@@ -198,6 +201,78 @@ describe('QuitGuard with agents being installed or updated', () => {
     expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'update', [updating])
     await guard.answer(true)
     expect(calls).toEqual(['stop operations', 'end sessions', 'install'])
+  })
+
+  it('holds every other quit and close while it waits for them to stop, then quits once', async () => {
+    const { window, send } = fakeWindow()
+    const stopped = Promise.withResolvers<void>()
+    const { guard, calls } = setup({
+      running: 0,
+      window,
+      operations: [updating],
+      stopped: stopped.promise,
+    })
+    guard.intercept(quitEvent().event)
+    const answered = guard.answer(true)
+    expect(calls).toEqual(['stop operations'])
+    // Quitting again, or closing the window, while npm finishes its step.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { event, preventDefault } = quitEvent()
+      guard.intercept(event)
+      expect(preventDefault).toHaveBeenCalled()
+    }
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(electron.app.quit).not.toHaveBeenCalled()
+
+    stopped.resolve()
+    await answered
+    expect(calls).toEqual(['stop operations', 'end sessions'])
+    expect(electron.app.quit).toHaveBeenCalledTimes(1)
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('holds quitting and restarting again while a confirmed restart waits for them to stop', async () => {
+    const { window, send } = fakeWindow()
+    const stopped = Promise.withResolvers<void>()
+    const { guard, calls } = setup({
+      running: 0,
+      window,
+      operations: [updating],
+      stopped: stopped.promise,
+    })
+    const install = vi.fn<() => void>(() => calls.push('install'))
+    guard.restartToUpdate(install)
+    const answered = guard.answer(true)
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).toHaveBeenCalled()
+    const again = vi.fn<() => void>()
+    guard.restartToUpdate(again)
+    expect(send).toHaveBeenCalledTimes(1)
+
+    stopped.resolve()
+    await answered
+    expect(calls).toEqual(['stop operations', 'end sessions', 'install'])
+    expect(again).not.toHaveBeenCalled()
+    expect(electron.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('still quits without asking on SIGTERM while it waits for them to stop', () => {
+    const { window } = fakeWindow()
+    const { guard } = setup({
+      running: 0,
+      window,
+      operations: [updating],
+      stopped: new Promise<void>(() => {}),
+    })
+    guard.intercept(quitEvent().event)
+    void guard.answer(true)
+    guard.allow()
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).not.toHaveBeenCalled()
   })
 
   it('names them in the native dialog when there is no window', async () => {

@@ -540,7 +540,8 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
   is no longer read: add your projects again.
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
-  where the file is, with **Show in Finder** and **Quit**, and Hoot leaves the file as it is.
+  where the file is, with **Show in Finder** (**Show in File Explorer** on Windows) and **Quit**,
+  and Hoot leaves the file as it is.
 - The permission levels picked in the Agents menu, whether the sidebar is hidden, which projects in
   it are collapsed, and the appearance picked in the settings are in `settings.json`.
 

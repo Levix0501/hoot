@@ -176,7 +176,8 @@ function trustedIpc(getWindow: () => BrowserWindow | null) {
 
 /**
  * The messages the window can send while the database cannot be opened: it
- * learns why, and can show the file in Finder or quit.
+ * learns why, and can show the file in Finder (File Explorer on Windows) or
+ * quit.
  */
 export function registerDatabaseErrorIpc(options: {
   getWindow(): BrowserWindow | null

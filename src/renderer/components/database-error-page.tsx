@@ -12,8 +12,8 @@ import {
 
 /**
  * What the window shows, and all it shows, when Hoot cannot open its
- * database: why, where the file is, and buttons to show it in Finder or to
- * quit. Hoot leaves the file as it is.
+ * database: why, where the file is, and buttons to show it in Finder (File
+ * Explorer on Windows) or to quit. Hoot leaves the file as it is.
  */
 export function DatabaseErrorPage({ message, path }: { message: string; path: string }) {
   return (
@@ -54,7 +54,7 @@ export function DatabaseErrorPage({ message, path }: { message: string; path: st
               data-testid="database-error-reveal"
             >
               <FolderSearchIcon />
-              Show in Finder
+              Show in {api.fileManager}
             </Button>
             <Button onClick={() => api.quit()} data-testid="database-error-quit">
               Quit

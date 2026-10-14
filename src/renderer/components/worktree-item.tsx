@@ -93,8 +93,8 @@ function WorktreeTooltip({ worktree }: { worktree: WorktreeRow }) {
  * worktree's branch (or abbreviated commit) and whether it is missing or
  * locked; pointing at it shows its root's path and its inner members. Its
  * `+` starts a session in the worktree; its `⋯` menu and its context menu
- * reveal it in Finder, copy its path or delete it, or for a missing worktree
- * remove it. Clicking the row itself does nothing.
+ * reveal it in Finder (File Explorer on Windows), copy its path or delete it,
+ * or for a missing worktree remove it. Clicking the row itself does nothing.
  */
 export function WorktreeItem({
   projectRoot,
@@ -247,7 +247,7 @@ export function WorktreeItem({
               <>
                 <DropdownMenuItem onClick={reveal} data-testid="worktree-reveal">
                   <FolderOpenIcon />
-                  Reveal in Finder
+                  Reveal in {api.fileManager}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={copyPath} data-testid="worktree-copy-path">
                   <CopyIcon />
@@ -303,7 +303,7 @@ export function WorktreeItem({
             </ContextMenuSub>
             <ContextMenuItem onClick={reveal} data-testid="worktree-context-reveal">
               <FolderOpenIcon />
-              Reveal in Finder
+              Reveal in {api.fileManager}
             </ContextMenuItem>
             <ContextMenuItem onClick={copyPath} data-testid="worktree-context-copy-path">
               <CopyIcon />

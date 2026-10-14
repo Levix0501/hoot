@@ -158,8 +158,13 @@ export interface HootApi {
   testHooks: boolean
   /** The window's own buttons, and the room the page leaves for them in its top row. */
   windowControls: WindowControls
+  /** The app that shows files and folders: Finder, or File Explorer on Windows. */
+  fileManager: string
   getStartupState(): Promise<StartupState>
-  /** Shows the database file, or the nearest folder of it there is, in Finder. */
+  /**
+   * Shows the database file, or the nearest folder of it there is, in Finder
+   * (File Explorer on Windows).
+   */
   revealDatabase(): void
   quit(): void
   listProjects(): Promise<Project[]>

@@ -379,8 +379,8 @@ function startWithDatabase(database: DatabaseSync): void {
 
 /**
  * Starts Hoot without its database, which could not be opened: the window
- * only says why and where the file is, and offers to show it in Finder or to
- * quit. Nothing else starts, and the file is left as it is. It shows in the
+ * only says why and where the file is, and offers to show it in Finder (File
+ * Explorer on Windows) or to quit. Nothing else starts, and the file is left as it is. It shows in the
  * appearance picked in the settings, which cannot be changed until Hoot
  * starts with its database.
  */

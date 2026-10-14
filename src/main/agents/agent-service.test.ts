@@ -562,6 +562,37 @@ describe('AgentService queue and cancelling', () => {
     await ended('codex')
   })
 
+  it('sends SIGTERM only once, however often it is cancelled, also when Hoot quits then', async () => {
+    // Like npm, which ends only once the step under way has, after SIGTERM.
+    write(
+      path.join(root, 'npm-script'),
+      [
+        `trap 'echo TERM >> "$root/signals.log"; stopping=1' TERM`,
+        'echo "started $spec" >> "$root/started.log"',
+        'stopping=',
+        'i=0',
+        'while [ $i -lt 200 ] && [ ! -f "$root/go" ]; do sleep 0.05; i=$((i+1)); done',
+        '[ -n "$stopping" ] && exit 1',
+        '',
+      ].join('\n'),
+    )
+    const { service, agent } = setup()
+    await service.detect()
+    service.install('claude')
+    await vi.waitFor(() => expect(started()).toHaveLength(1))
+    service.cancel('claude')
+    expect(agent('claude').operation).toMatchObject({ status: 'running', cancelling: true })
+    service.cancel('claude')
+    const stopped = service.stopAll()
+    await vi.waitFor(() => expect(fs.existsSync(path.join(root, 'signals.log'))).toBe(true))
+    // Still running: it has not ended its step.
+    expect(agent('claude').operation?.status).toBe('running')
+    fs.writeFileSync(path.join(root, 'go'), '')
+    await stopped
+    expect(fs.readFileSync(path.join(root, 'signals.log'), 'utf8')).toBe('TERM\n')
+    expect(agent('claude').operation).toEqual({ kind: 'install', status: 'cancelled' })
+  })
+
   it('stops every operation for quitting, once the running process has ended', async () => {
     write(path.join(root, 'npm-script'), SLOW_NPM)
     const { service, agent } = setup()

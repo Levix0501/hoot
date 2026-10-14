@@ -255,11 +255,14 @@ function AgentRow({
   const status = agentRowStatus(agent)
   const id = tool.id
   const statusId = `agent-status-${id}`
+  // Once clicked, it waits for the command to end, which npm does once it has
+  // put back what it changed.
   const cancelButton = (
     <Button
       variant="outline"
       size="sm"
       onClick={() => cancel(id)}
+      disabled={agent.operation?.status === 'running' && agent.operation.cancelling}
       data-testid={`agent-cancel-${id}`}
     >
       Cancel

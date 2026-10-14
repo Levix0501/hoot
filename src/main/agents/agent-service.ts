@@ -76,6 +76,8 @@ interface Operation {
   stopped: boolean
   /** Its command's process, while it runs. */
   process: RunningProcess | null
+  /** Whether its command's process has been sent SIGTERM. */
+  terminated: boolean
   /** Settles once its command's process has ended, or it is known to start none. */
   commandEnded: PromiseWithResolvers<void>
 }
@@ -109,6 +111,25 @@ function summary(record: AgentRecord, waiting: boolean): AgentOperationSummary[]
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Sends a cancelled operation's command SIGTERM, once its process has
+ * started, and only once: npm puts back what it changed when it gets SIGTERM,
+ * once the step under way has ended (a download, for example), but a second
+ * SIGTERM ends it at once, before it has, leaving the agent half replaced.
+ */
+function terminate(operation: Operation): void {
+  if (operation.terminated || !operation.process) return
+  operation.terminated = true
+  operation.process.signal('SIGTERM')
+}
+
+/** A running operation's state, as cancelling it shows. */
+function cancelling(operation: Operation): void {
+  if (operation.state.status === 'running') {
+    operation.state = { ...operation.state, cancelling: true }
+  }
 }
 
 /**
@@ -197,8 +218,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   /**
    * Cancels an agent's operation: one that waits leaves the queue and runs
-   * nothing; the command of one that runs is sent SIGTERM, and the operation
-   * ends once its process has.
+   * nothing; the command of one that runs is sent SIGTERM, once, and the
+   * operation ends once its process has.
    */
   cancel(id: CodingToolId): void {
     const record = this.record(id)
@@ -213,9 +234,11 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       void this.readInstallations([record])
       return
     }
-    if (operation.state.status === 'running') {
+    if (operation.state.status === 'running' && !operation.cancelled) {
       operation.cancelled = true
-      operation.process?.signal('SIGTERM')
+      cancelling(operation)
+      terminate(operation)
+      this.changed()
     }
   }
 
@@ -245,7 +268,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     if (operation) {
       operation.cancelled = true
       operation.stopped = true
-      operation.process?.signal('SIGTERM')
+      cancelling(operation)
+      terminate(operation)
     }
     this.changed()
     await operation?.commandEnded.promise
@@ -397,6 +421,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       cancelled: false,
       stopped: false,
       process: null,
+      terminated: false,
       commandEnded: Promise.withResolvers<void>(),
     }
     this.queue.push(record)
@@ -418,7 +443,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   private async perform(record: AgentRecord, operation: Operation): Promise<void> {
     const { kind } = operation
-    operation.state = { kind, status: 'running', lastLine: '' }
+    operation.state = { kind, status: 'running', lastLine: '', cancelling: false }
     this.changed()
     const before = record.installation
     const sessionsBefore = kind === 'update' ? this.options.runningSessions(record.tool.id) : []
@@ -435,13 +460,13 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         const process = startProcess(plan.command, (text) => {
           void output.write(text).then(() => {
             if (operation.state.status !== 'running') return
-            operation.state = { kind, status: 'running', lastLine: output.lastLine() }
+            operation.state = { ...operation.state, lastLine: output.lastLine() }
             this.changedSoon()
           })
         })
         operation.process = process
         // Cancelled while it started.
-        if (operation.cancelled) process.signal('SIGTERM')
+        if (operation.cancelled) terminate(operation)
         end = await process.ended
         operation.process = null
         await output.settled()

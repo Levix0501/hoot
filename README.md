@@ -160,7 +160,8 @@ npm uses; Hoot asks registry.npmjs.org only then, never in the background.
 - **Progress and results**: while it runs, the row shows **Installing…** or **Updating…** and the
   last line the command wrote. Installs and updates run one at a time, in the order you clicked
   them: the others say **Waiting…**. **Cancel** takes a waiting one off the list, or sends the
-  running command SIGTERM and waits for it to end (npm then leaves the agent as it was). The result
+  running command SIGTERM, once, and waits for it to end: npm first finishes the step under way,
+  such as a download, then puts back what it changed, leaving the agent as it was. The result
   stays in the row until the agent's next install or update, or until Hoot quits: **✓ Installed**
   or **✓ Updated to** and the version, **Cancelled**, or why it failed, with the last lines the
   command wrote and **Show output** for all of them. Installing succeeds when the command exits

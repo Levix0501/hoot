@@ -26,7 +26,11 @@ describe('agentRowStatus', () => {
       agentRowStatus(agent({ checking: true, operation: { kind: 'update', status: 'waiting' } })),
     ).toEqual({ kind: 'waiting' })
     expect(
-      agentRowStatus(agent({ operation: { kind: 'install', status: 'running', lastLine: '' } })),
+      agentRowStatus(
+        agent({
+          operation: { kind: 'install', status: 'running', lastLine: '', cancelling: false },
+        }),
+      ),
     ).toEqual({ kind: 'running', operation: 'install' })
   })
 

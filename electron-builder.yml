@@ -35,6 +35,10 @@ mac:
       to: node
     - from: node_modules/npm
       to: npm
+    # electron-builder leaves out the node_modules folder at the top of what it
+    # copies, which holds the packages npm needs to run.
+    - from: node_modules/npm/node_modules
+      to: npm/node_modules
   # Made with Icon Composer. It is compiled into the app for macOS 26 and later, and
   # turned into an .icns for earlier versions, which needs Xcode 26 or later.
   icon: build/icon.icon

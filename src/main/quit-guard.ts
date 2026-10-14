@@ -1,6 +1,11 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import { IpcChannel } from '../shared/ipc'
-import { describeRunningSessions, quitConfirmationLabel } from '../shared/session'
+import {
+  describeRunningSessions,
+  quitConfirmationLabel,
+  quitQuestion,
+  type QuitReason,
+} from '../shared/session'
 
 export interface QuitGuardOptions {
   getWindow(): BrowserWindow | null
@@ -13,16 +18,17 @@ export interface QuitGuardOptions {
   onCancel(): void
 }
 
-const QUIT_MESSAGE = 'Quit Hoot?'
-
 /**
  * Asks for confirmation before the window closes or the app quits while
  * sessions are running, saying how many. Confirming ends them and quits;
- * cancelling keeps Hoot and every session running.
+ * cancelling keeps Hoot and every session running. Restarting into an update
+ * asks the same way.
  */
 export class QuitGuard {
   private allowQuit = false
   private awaitingAnswer = false
+  /** Installs the update that the open question asks to restart into. */
+  private install: (() => void) | null = null
 
   constructor(private readonly options: QuitGuardOptions) {}
 
@@ -37,14 +43,39 @@ export class QuitGuard {
     const running = this.options.runningSessionCount()
     if (running === 0) return
     event.preventDefault()
-    this.ask(running)
+    this.ask(running, 'quit')
+  }
+
+  /**
+   * Restarts Hoot into a downloaded update by calling `install`, which quits
+   * Hoot: at once while no session runs, otherwise once the user confirms,
+   * after ending the sessions. While Hoot already asks whether to quit, the
+   * answer to that question stands.
+   */
+  restartToUpdate(install: () => void): void {
+    const running = this.options.runningSessionCount()
+    if (running === 0) {
+      install()
+      return
+    }
+    if (!this.awaitingAnswer) this.install = install
+    this.ask(running, 'update')
   }
 
   async answer(confirmed: boolean): Promise<void> {
     this.awaitingAnswer = false
+    const install = this.install
+    this.install = null
     if (this.allowQuit) return
     if (!confirmed) {
       this.options.onCancel()
+      return
+    }
+    if (install) {
+      // With no session left, the window closes for the update without
+      // asking again; should the update fail, quitting still asks.
+      await this.options.endSessions()
+      install()
       return
     }
     this.allowQuit = true
@@ -52,7 +83,7 @@ export class QuitGuard {
     app.quit()
   }
 
-  private ask(running: number): void {
+  private ask(running: number, reason: QuitReason): void {
     if (this.awaitingAnswer) {
       const window = this.options.getWindow()
       if (window) this.options.presentWindow(window)
@@ -65,9 +96,9 @@ export class QuitGuard {
       void dialog
         .showMessageBox({
           type: 'warning',
-          message: QUIT_MESSAGE,
-          detail: describeRunningSessions(running),
-          buttons: [quitConfirmationLabel(running), 'Cancel'],
+          message: quitQuestion(reason),
+          detail: describeRunningSessions(running, reason),
+          buttons: [quitConfirmationLabel(running, reason), 'Cancel'],
           defaultId: 0,
           cancelId: 1,
         })
@@ -75,6 +106,6 @@ export class QuitGuard {
       return
     }
     this.options.presentWindow(window)
-    window.webContents.send(IpcChannel.confirmQuit, running)
+    window.webContents.send(IpcChannel.confirmQuit, running, reason)
   }
 }

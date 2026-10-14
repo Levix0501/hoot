@@ -52,6 +52,10 @@ const api: HootApi = {
   onAppearanceChanged: (listener) => subscribe(IpcChannel.appearanceChanged, listener),
   onConfirmQuit: (listener) => subscribe(IpcChannel.confirmQuit, listener),
   respondToQuit: (confirmed) => ipcRenderer.send(IpcChannel.quitResponse, confirmed),
+  getUpdateState: () => ipcRenderer.invoke(IpcChannel.getUpdateState),
+  onUpdateStateChanged: (listener) => subscribe(IpcChannel.updateStateChanged, listener),
+  installUpdate: () => ipcRenderer.send(IpcChannel.installUpdate),
+  onUpdateFailed: (listener) => subscribe(IpcChannel.updateFailed, listener),
   listWorktrees: () => ipcRenderer.invoke(IpcChannel.listWorktrees),
   currentWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.currentWorktree, projectRoot, worktreePath),

@@ -36,7 +36,10 @@ function setup(options: { running: number; window: BrowserWindow | null }) {
     endSessions,
     onCancel,
   })
-  return { guard, presentWindow, onCancel, endSessions }
+  const setRunning = (count: number) => {
+    running = count
+  }
+  return { guard, presentWindow, onCancel, endSessions, setRunning }
 }
 
 const quitEvent = () => {
@@ -66,7 +69,7 @@ describe('QuitGuard', () => {
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
     expect(presentWindow).toHaveBeenCalledWith(window)
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2)
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'quit')
 
     // Asking again while the question is open only brings the window back.
     guard.intercept(quitEvent().event)
@@ -133,5 +136,89 @@ describe('QuitGuard', () => {
     guard.intercept(event)
     expect(preventDefault).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
+  })
+})
+
+describe('QuitGuard.restartToUpdate', () => {
+  it('installs at once when no session runs', () => {
+    const { window, send } = fakeWindow()
+    const { guard, endSessions } = setup({ running: 0, window })
+    const install = vi.fn<() => void>()
+    guard.restartToUpdate(install)
+    expect(install).toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(endSessions).not.toHaveBeenCalled()
+  })
+
+  it('asks in the window about restarting, then ends the sessions and installs', async () => {
+    const { window, send } = fakeWindow()
+    const { guard, presentWindow, endSessions } = setup({ running: 2, window })
+    const install = vi.fn<() => void>()
+    guard.restartToUpdate(install)
+    expect(presentWindow).toHaveBeenCalledWith(window)
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'update')
+    expect(install).not.toHaveBeenCalled()
+
+    await guard.answer(true)
+    expect(endSessions).toHaveBeenCalled()
+    expect(install).toHaveBeenCalled()
+    expect(electron.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('keeps every session when the user cancels, and quitting still asks after', async () => {
+    const { window, send } = fakeWindow()
+    const { guard, endSessions } = setup({ running: 1, window })
+    const install = vi.fn<() => void>()
+    guard.restartToUpdate(install)
+    await guard.answer(false)
+    expect(install).not.toHaveBeenCalled()
+    expect(endSessions).not.toHaveBeenCalled()
+
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(send).toHaveBeenLastCalledWith(IpcChannel.confirmQuit, 1, 'quit')
+  })
+
+  it('still asks before quitting after it ended the sessions to install', async () => {
+    const { window } = fakeWindow()
+    const { guard, setRunning } = setup({ running: 1, window })
+    guard.restartToUpdate(vi.fn<() => void>())
+    await guard.answer(true)
+
+    // The update failed to install, and a session started since.
+    setRunning(1)
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).toHaveBeenCalled()
+  })
+
+  it('lets an open question about quitting stand', async () => {
+    const { window, send } = fakeWindow()
+    const { guard, presentWindow } = setup({ running: 1, window })
+    guard.intercept(quitEvent().event)
+    const install = vi.fn<() => void>()
+    guard.restartToUpdate(install)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(presentWindow).toHaveBeenCalledTimes(2)
+
+    await guard.answer(true)
+    expect(install).not.toHaveBeenCalled()
+    expect(electron.app.quit).toHaveBeenCalled()
+  })
+
+  it('asks with a native dialog when there is no window', async () => {
+    electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
+    const { guard } = setup({ running: 1, window: null })
+    const install = vi.fn<() => void>()
+    guard.restartToUpdate(install)
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Restart to Update?',
+        detail: '1 session is still running. Restarting will end it.',
+        buttons: ['End Session and Restart', 'Cancel'],
+      }),
+    )
+    await vi.waitFor(() => expect(install).toHaveBeenCalled())
   })
 })

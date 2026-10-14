@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { describeRunningSessions, quitConfirmationLabel } from '../../shared/session'
-import { focusAfterOverlay, useAppStore } from '../store/app-store'
+import { describeRunningSessions, quitConfirmationLabel, quitQuestion } from '../../shared/session'
+import { focusAfterOverlay, useAppStore, type AppState } from '../store/app-store'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,9 +17,15 @@ export function QuitDialog() {
   const answerQuit = useAppStore((state) => state.answerQuit)
   const open = confirmation !== null
   // Kept while the dialog fades out after the answer.
-  const [runningSessions, setRunningSessions] = useState(1)
-  if (confirmation && confirmation.runningSessions !== runningSessions) {
-    setRunningSessions(confirmation.runningSessions)
+  const [shown, setShown] = useState<NonNullable<AppState['quitConfirmation']>>({
+    runningSessions: 1,
+    reason: 'quit',
+  })
+  if (
+    confirmation &&
+    (confirmation.runningSessions !== shown.runningSessions || confirmation.reason !== shown.reason)
+  ) {
+    setShown(confirmation)
   }
   const answered = useRef(false)
   useEffect(() => {
@@ -41,9 +47,9 @@ export function QuitDialog() {
     >
       <AlertDialogContent data-testid="quit-dialog" finalFocus={focusAfterOverlay}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Quit Hoot?</AlertDialogTitle>
+          <AlertDialogTitle>{quitQuestion(shown.reason)}</AlertDialogTitle>
           <AlertDialogDescription data-testid="quit-dialog-description">
-            {describeRunningSessions(runningSessions)}
+            {describeRunningSessions(shown.runningSessions, shown.reason)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -53,7 +59,7 @@ export function QuitDialog() {
             onClick={() => answer(true)}
             data-testid="quit-confirm"
           >
-            {quitConfirmationLabel(runningSessions)}
+            {quitConfirmationLabel(shown.runningSessions, shown.reason)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

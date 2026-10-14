@@ -82,14 +82,27 @@ export function sessionName(session: {
   return session.customName ?? defaultSessionName(session.toolId, session.title)
 }
 
+/**
+ * Why Hoot is about to quit while sessions are running: the user quits it, or
+ * it restarts into a newer version of itself.
+ */
+export type QuitReason = 'quit' | 'update'
+
+/** The question the quit confirmation asks. */
+export function quitQuestion(reason: QuitReason): string {
+  return reason === 'quit' ? 'Quit Hoot?' : 'Restart to Update?'
+}
+
 /** What the quit confirmation says about the sessions that are still running. */
-export function describeRunningSessions(count: number): string {
+export function describeRunningSessions(count: number, reason: QuitReason): string {
+  const ending = reason === 'quit' ? 'Quitting' : 'Restarting'
   return count === 1
-    ? '1 session is still running. Quitting will end it.'
-    : `${count} sessions are still running. Quitting will end them.`
+    ? `1 session is still running. ${ending} will end it.`
+    : `${count} sessions are still running. ${ending} will end them.`
 }
 
 /** The label of the button that confirms quitting. */
-export function quitConfirmationLabel(count: number): string {
-  return count === 1 ? 'End Session and Quit' : 'End Sessions and Quit'
+export function quitConfirmationLabel(count: number, reason: QuitReason): string {
+  const action = reason === 'quit' ? 'Quit' : 'Restart'
+  return count === 1 ? `End Session and ${action}` : `End Sessions and ${action}`
 }

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
 import {
   WINDOWS_LAYOUT_SWITCH,
@@ -30,6 +31,7 @@ import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
+import { UpdateService } from './updates/update-service'
 import { titleBarOverlay, windowBackground } from './window-colors'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
@@ -149,6 +151,17 @@ const quitGuard = new QuitGuard({
   onCancel: () => {
     if (!getWindow()) mainWindow = createMainWindow({ reveal: !openInBackground })
   },
+})
+
+// Only a Hoot installed from a release updates itself: electron-builder puts
+// the file that says where the releases are only in the apps its installers
+// hold, not in the one `pnpm app:package` builds.
+const updates = new UpdateService({
+  updater:
+    app.isPackaged && fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))
+      ? autoUpdater
+      : null,
+  restart: (install) => quitGuard.restartToUpdate(install),
 })
 
 async function gitExecutable(): Promise<string> {
@@ -312,6 +325,7 @@ function startWithDatabase(database: DatabaseSync): void {
     appearance,
     sessions,
     quitGuard,
+    updates,
     worktrees,
     resolveProjectRoot: async (directory) =>
       resolveProjectRoot(directory, {
@@ -374,6 +388,7 @@ function startWithDatabase(database: DatabaseSync): void {
     app.on('activate', showMainWindow)
     void tools.detect()
     worktrees.setProjects(projects.list().map((project) => project.root))
+    updates.start()
   })
 }
 

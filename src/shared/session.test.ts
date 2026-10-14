@@ -7,6 +7,7 @@ import {
   describeRunningSessions,
   isNormalExit,
   quitConfirmationLabel,
+  quitQuestion,
   sessionName,
   type SessionExit,
 } from './session'
@@ -86,9 +87,26 @@ describe('sessionName', () => {
 
 describe('quit confirmation', () => {
   it('says how many sessions are running', () => {
-    expect(describeRunningSessions(1)).toBe('1 session is still running. Quitting will end it.')
-    expect(describeRunningSessions(2)).toBe('2 sessions are still running. Quitting will end them.')
-    expect(quitConfirmationLabel(1)).toBe('End Session and Quit')
-    expect(quitConfirmationLabel(3)).toBe('End Sessions and Quit')
+    expect(quitQuestion('quit')).toBe('Quit Hoot?')
+    expect(describeRunningSessions(1, 'quit')).toBe(
+      '1 session is still running. Quitting will end it.',
+    )
+    expect(describeRunningSessions(2, 'quit')).toBe(
+      '2 sessions are still running. Quitting will end them.',
+    )
+    expect(quitConfirmationLabel(1, 'quit')).toBe('End Session and Quit')
+    expect(quitConfirmationLabel(3, 'quit')).toBe('End Sessions and Quit')
+  })
+
+  it('speaks of restarting before an update', () => {
+    expect(quitQuestion('update')).toBe('Restart to Update?')
+    expect(describeRunningSessions(1, 'update')).toBe(
+      '1 session is still running. Restarting will end it.',
+    )
+    expect(describeRunningSessions(2, 'update')).toBe(
+      '2 sessions are still running. Restarting will end them.',
+    )
+    expect(quitConfirmationLabel(1, 'update')).toBe('End Session and Restart')
+    expect(quitConfirmationLabel(2, 'update')).toBe('End Sessions and Restart')
   })
 })

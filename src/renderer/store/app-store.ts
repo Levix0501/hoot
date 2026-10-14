@@ -15,8 +15,14 @@ import {
   type IssueView,
 } from '../../shared/issues'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
-import { isNormalExit, type SessionExit, type SessionInfo } from '../../shared/session'
+import {
+  isNormalExit,
+  type QuitReason,
+  type SessionExit,
+  type SessionInfo,
+} from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
+import type { UpdateState } from '../../shared/updates'
 import type { WorktreeInfo, WorktreeInspection } from '../../shared/worktrees'
 import { api } from '../lib/api'
 import { sendBlockers } from '../lib/issue-sending'
@@ -151,8 +157,13 @@ export interface AppState {
   renamingSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
-  /** While Hoot asks whether to quit: how many sessions are running. */
-  quitConfirmation: { runningSessions: number } | null
+  /**
+   * While Hoot asks whether to quit, or to restart into an update: how many
+   * sessions are running, and which of the two it asks.
+   */
+  quitConfirmation: { runningSessions: number; reason: QuitReason } | null
+  /** Where Hoot is with a newer version of itself, which an Update button beside Settings offers. */
+  update: UpdateState
   /** Whether the sidebar is expanded, also while the settings are shown in its place. */
   sidebarOpen: boolean
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
@@ -267,6 +278,8 @@ export interface AppState {
   /** Ends renaming; `null` keeps the name as it was. */
   finishRenaming(id: string, name: string | null): void
   answerQuit(confirmed: boolean): void
+  /** Downloads the newer version, unless it is downloaded already, then restarts Hoot into it. */
+  installUpdate(): void
   openNewWorktreeDialog(projectRoot: string): void
   closeNewWorktreeDialog(): void
   /**
@@ -848,6 +861,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     renamingSessionId: null,
     closeConfirmation: null,
     quitConfirmation: null,
+    update: { kind: 'none' },
     sidebarOpen: true,
     collapsedProjects: new Set(),
     fullScreen: false,
@@ -920,7 +934,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       api.onSessionCommand((command) => get().runMenuCommand(command))
       api.onShowSettingsRequested(() => get().showSettings())
-      api.onConfirmQuit((runningSessions) => set({ quitConfirmation: { runningSessions } }))
+      api.onConfirmQuit((runningSessions, reason) =>
+        set({ quitConfirmation: { runningSessions, reason } }),
+      )
+      api.onUpdateStateChanged((update) => set({ update }))
+      api.onUpdateFailed((message) => {
+        toast.error('Could not update Hoot.', { description: message })
+      })
+      // Set as soon as it arrives, not with the reads below: a change
+      // reported after it is newer, and must not be overwritten by it.
+      void api.getUpdateState().then((update) => set({ update }))
       api.onAddProjectRequested(() => void get().addProject())
       // Changes reported while the list is read are newer than the list.
       const changedWorktrees = new Set<string>()
@@ -1402,6 +1425,10 @@ export const useAppStore = create<AppState>()((set, get) => {
     answerQuit(confirmed) {
       set({ quitConfirmation: null })
       api.respondToQuit(confirmed)
+    },
+
+    installUpdate() {
+      api.installUpdate()
     },
 
     openNewWorktreeDialog(projectRoot) {

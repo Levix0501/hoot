@@ -50,10 +50,13 @@ nsis:
   perMachine: false
   artifactName: ${productName}-Setup-${version}.${ext}
 # Where releases go. electron-builder publishes nothing itself (the release workflow
-# drafts the release); this makes it write the update files that an in-app update can
-# read later: <channel>-mac.yml and <channel>.yml, the channel being the prerelease tag
-# of the version, such as alpha, or latest for a version without one. For GitHub,
-# electron-builder takes the channel from the version only when it is set this way.
+# drafts the release); this makes it write the files Hoot reads to update itself:
+# <channel>-mac.yml and <channel>.yml, which list a release's files, the channel being
+# the prerelease tag of the version, such as alpha, or latest for a version without
+# one; and app-update.yml, which says where the releases are, in the apps that the DMG,
+# the zip and the Windows installer hold. The app `pnpm app:package` builds has none, so
+# it does not update itself. For GitHub, electron-builder takes the channel from the
+# version only when it is set this way.
 publish:
   provider: github
   owner: Levix0501

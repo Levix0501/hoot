@@ -45,6 +45,7 @@ import type { AppearanceStore } from './settings/appearance-store'
 import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
+import type { UpdateService } from './updates/update-service'
 import type { WorktreeService } from './worktrees/worktree-service'
 
 export interface IpcDependencies {
@@ -57,6 +58,7 @@ export interface IpcDependencies {
   appearance: AppearanceStore
   sessions: SessionManager
   quitGuard: QuitGuard
+  updates: UpdateService
   worktrees: WorktreeService
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
@@ -366,6 +368,11 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.quitResponse, (confirmed) => {
     void deps.quitGuard.answer(z.literal(true).safeParse(confirmed).success)
   })
+
+  handle(IpcChannel.getUpdateState, () => deps.updates.state)
+  on(IpcChannel.installUpdate, () => void deps.updates.install())
+  deps.updates.on('changed', (state) => send(IpcChannel.updateStateChanged, state))
+  deps.updates.on('failed', (message) => send(IpcChannel.updateFailed, message))
 
   handle(IpcChannel.listWorktrees, () => deps.worktrees.listAll())
   handle(IpcChannel.currentWorktree, (_event, ...args) => {

@@ -9,6 +9,7 @@ import { worktreeRows } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
+import { UpdateButton } from './update-button'
 import { WorktreeItem } from './worktree-item'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
 import {
@@ -235,11 +236,17 @@ export function ProjectSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
-          <SidebarMenuItem>
+          {/*
+            While a newer version of Hoot is out, its button stands at the
+            right of Settings, as far from the row's right end as from its
+            top and bottom.
+          */}
+          <SidebarMenuItem className="flex items-center gap-2">
             <SidebarMenuButton onClick={showSettings} data-testid="sidebar-settings">
               <SettingsIcon />
               <span>Settings</span>
             </SidebarMenuButton>
+            <UpdateButton className="mr-1.5" />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

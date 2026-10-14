@@ -1,8 +1,9 @@
 import type { Appearance } from './appearance'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
-import type { SessionInfo } from './session'
+import type { QuitReason, SessionInfo } from './session'
 import type { ToolId } from './tools'
+import type { UpdateState } from './updates'
 import type { WindowControls } from './window-controls'
 import type {
   CreateWorktreeRequest,
@@ -119,6 +120,10 @@ export const IpcChannel = {
   appearanceChanged: 'appearance:changed',
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
+  getUpdateState: 'updates:get-state',
+  updateStateChanged: 'updates:state-changed',
+  installUpdate: 'updates:install',
+  updateFailed: 'updates:failed',
   listWorktrees: 'worktrees:list',
   currentWorktree: 'worktrees:current',
   worktreesChanged: 'worktrees:changed',
@@ -205,9 +210,19 @@ export interface HootApi {
   /** Picks an appearance, which applies at once and is saved for the next start. */
   setAppearance(appearance: Appearance): void
   onAppearanceChanged(listener: (appearance: Appearance) => void): () => void
-  /** Quitting needs confirmation because `runningSessions` sessions are running. */
-  onConfirmQuit(listener: (runningSessions: number) => void): () => void
+  /**
+   * Quitting, or restarting into an update, needs confirmation because
+   * `runningSessions` sessions are running.
+   */
+  onConfirmQuit(listener: (runningSessions: number, reason: QuitReason) => void): () => void
   respondToQuit(confirmed: boolean): void
+  /** Where Hoot is with a newer version of itself. */
+  getUpdateState(): Promise<UpdateState>
+  onUpdateStateChanged(listener: (state: UpdateState) => void): () => void
+  /** Downloads the newer version, unless it is downloaded already, then restarts Hoot into it. */
+  installUpdate(): void
+  /** Downloading or installing the newer version failed, for this reason. */
+  onUpdateFailed(listener: (message: string) => void): () => void
   /** The worktrees of every project in the list, by project root. */
   listWorktrees(): Promise<Record<string, WorktreeInfo[]>>
   /**

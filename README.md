@@ -398,6 +398,15 @@ versions are prereleases for now.
   not signed, so Microsoft Defender SmartScreen may say "Windows protected your PC": click **More
   info**, then **Run anyway**. It cannot be installed on a PC with Smart App Control turned on.
 
+### Updating
+
+Hoot looks for a newer version when it starts and every hour after, among the releases published
+on GitHub. When there is one, a blue button with a download icon appears at the right of
+**Settings**, at the bottom of the sidebar, and says **Update** under the pointer. Clicking it
+downloads the new version, the button showing how much of it has arrived, then restarts Hoot with
+it. Restarting ends the sessions, and they are not restored: while some are running, Hoot asks
+first, and **Cancel** keeps them, with the button there for later.
+
 ### From source
 
 ```sh
@@ -413,8 +422,9 @@ macOS keeps the permissions you grant Hoot (such as access to your Desktop folde
 it. The first signing may ask you to allow `codesign` to use the certificate's key. The app is not
 notarized, so it is meant for the Mac that built it.
 
-To update, run `pnpm app:install` again, then quit Hoot and open it again. Until then, a running
-Hoot keeps the version it started with. Quitting ends its sessions, and they are not restored.
+This Hoot does not look for newer versions. To update it, run `pnpm app:install` again, then quit
+Hoot and open it again. Until then, a running Hoot keeps the version it started with. Quitting
+ends its sessions, and they are not restored.
 
 ## Releasing
 
@@ -443,7 +453,8 @@ A release takes these steps:
    for a prerelease version, with the version's section of `CHANGELOG.md` and how to install Hoot
    as its text.
 3. Check the draft on GitHub's Releases page and publish it. The workflow never publishes a
-   release.
+   release. Once it is published, the Hoot of an earlier release offers the version (see
+   [Updating](#updating)); a draft is offered to no one.
 
 The workflow uses only the token GitHub gives each run, which may open pull requests once
 **Settings > Actions > General > Allow GitHub Actions to create and approve pull requests** is on.

@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import {
   agentPaths,
@@ -85,5 +87,43 @@ describe('paths as they are on disk and as Hoot shows them', () => {
     expect(isInside('/a/b/c', '/a/b')).toBe(true)
     expect(isInside('/a/b', '/a/b')).toBe(false)
     expect(isInside('/a/bc', '/a/b')).toBe(false)
+  })
+})
+
+describe("Hoot's node", () => {
+  const node = path.join(import.meta.dirname, '../../../resources/node/node')
+  const run = promisify(execFile)
+
+  it("runs Hoot's executable, which the environment names, as Node.js, with the arguments given", async () => {
+    // Stands in for Hoot's executable: says what it was run with.
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-node-'))
+    try {
+      const hoot = path.join(directory, 'Hoot')
+      fs.writeFileSync(
+        hoot,
+        '#!/bin/sh\nprintf "ELECTRON_RUN_AS_NODE=%s\\n" "$ELECTRON_RUN_AS_NODE"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
+        { mode: 0o755 },
+      )
+      const { stdout } = await run(node, ['-e', 'a "b"  c'], {
+        env: { PATH: '/usr/bin:/bin', HOOT_NODE: hoot },
+      })
+      expect(stdout).toBe('ELECTRON_RUN_AS_NODE=1\n[-e]\n[a "b"  c]\n')
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('gives the version of the Node.js it runs as', async () => {
+    const { stdout } = await run(node, ['-v'], {
+      env: { PATH: '/usr/bin:/bin', HOOT_NODE: process.execPath },
+    })
+    expect(stdout.trim()).toBe(process.version)
+  })
+
+  it('says that it works only where Hoot runs it, elsewhere', async () => {
+    await expect(run(node, ['-v'], { env: { PATH: '/usr/bin:/bin' } })).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('this node works only where Hoot runs it'),
+    })
   })
 })

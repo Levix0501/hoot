@@ -93,7 +93,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd, issue, sessionId) =>
+  resolveLaunch: (toolId, cwd, issue, sessionId, permissionLevel) =>
     resolveLaunch(
       {
         shell,
@@ -111,6 +111,7 @@ const sessions = new SessionManager({
       toolId,
       cwd,
       issue,
+      permissionLevel,
     ),
 })
 

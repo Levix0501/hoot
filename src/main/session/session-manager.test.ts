@@ -47,6 +47,7 @@ function setup(
       cwd: string,
       issue: SentIssue | null,
       sessionId: string,
+      permissionLevel: string | null,
     ) => Promise<SessionLaunch>
   } = {},
 ) {
@@ -275,19 +276,23 @@ describe('SessionManager', () => {
   })
 
   it('launches a session started from an issue with the issue, and records which issue it was', async () => {
-    const launched: Array<[string, SentIssue | null]> = []
+    const launched: Array<[string, string, SentIssue | null, string | null]> = []
     const { manager, updates } = setup({
-      resolveLaunch: async (toolId, _cwd, issue) => {
-        launched.push([toolId, issue])
+      resolveLaunch: async (toolId, cwd, issue, _sessionId, permissionLevel) => {
+        launched.push([toolId, cwd, issue, permissionLevel])
         return { file: toolId, args: [], env: {} }
       },
     })
-    const issue = { title: 'Fix the login bug', description: 'Steps' }
-    const sent = await manager.start(request('c1', 'claude', '/work/project', null, 7), issue)
+    const issue = { title: 'Fix the login bug', description: 'Steps', branch: 'iss-7-fix' }
+    const worktree = '/home/.hoot/worktrees/project/iss-7-fix'
+    const sent = await manager.start(
+      { ...request('c1', 'claude', '/work/project', worktree, 7), permissionLevel: 'plan' },
+      issue,
+    )
     const other = await manager.start(request('c2', 'claude'))
     expect(launched).toEqual([
-      ['claude', issue],
-      ['claude', null],
+      ['claude', worktree, issue, 'plan'],
+      ['claude', '/work/project', null, null],
     ])
     expect([sent.issueId, other.issueId]).toEqual([7, null])
     expect(manager.list().map((session) => session.issueId)).toEqual([7, null])

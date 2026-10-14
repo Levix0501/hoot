@@ -6,6 +6,7 @@ import type { ToolId } from './tools'
 import type { UpdateState } from './updates'
 import type { WindowControls } from './window-controls'
 import type {
+  CreateIssueWorktreeResult,
   CreateWorktreeRequest,
   CreateWorktreeResult,
   DeleteWorktreeResult,
@@ -56,10 +57,17 @@ export interface StartSessionRequest {
   worktreePath: string | null
   toolId: ToolId
   /**
-   * The issue a Claude Code session in the project's main worktree is sent
-   * when it starts from the issue's page; `null` for every other session.
+   * The issue whose start button started the session, a Claude Code session
+   * in one of the project's worktrees, which is sent the issue; `null` for
+   * every other session.
    */
   issueId: number | null
+  /**
+   * The id of the permission level the tool starts at, as it was picked when
+   * the session was asked for; without it, the level picked when the session
+   * starts.
+   */
+  permissionLevel?: string
   cols: number
   rows: number
 }
@@ -134,6 +142,8 @@ export const IpcChannel = {
   previewWorktreePath: 'worktrees:preview-path',
   worktreeSubmodules: 'worktrees:submodules',
   createWorktree: 'worktrees:create',
+  createIssueWorktree: 'worktrees:create-for-issue',
+  readWorktrees: 'worktrees:read',
   inspectWorktree: 'worktrees:inspect',
   deleteWorktree: 'worktrees:delete',
   removeWorktree: 'worktrees:remove',
@@ -252,6 +262,18 @@ export interface HootApi {
     participants: Array<{ relativePath: string; base: string }>,
   ): Promise<string[]>
   createWorktree(request: CreateWorktreeRequest): Promise<CreateWorktreeResult>
+  /**
+   * Creates the worktree of an issue of the project, as its start button
+   * does: a new branch named after the issue, from the branch checked out in
+   * the main worktree, with the inner repositories the new worktree dialog
+   * includes by default.
+   */
+  createIssueWorktree(projectRoot: string, issueId: number): Promise<CreateIssueWorktreeResult>
+  /**
+   * Reads a project's worktrees again, which `onWorktreesChanged` then
+   * reports, and returns them; `null` when the project is not in the list.
+   */
+  readWorktrees(projectRoot: string): Promise<WorktreeInfo[] | null>
   /** Checks what deleting a worktree would delete and lose. */
   inspectWorktree(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult>
   /** Deletes a worktree; with `discard` false, only one with nothing to lose. */

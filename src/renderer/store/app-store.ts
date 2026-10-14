@@ -3,11 +3,13 @@ import { toast } from 'sonner'
 import { create } from 'zustand'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
+import { issueWorktree } from '../../shared/issue-worktrees'
 import {
   isCompleted,
   isIssueOpen,
   issueIdentifier,
   issueTitle,
+  statusOnceStarted,
   type Issue,
   type IssueChanges,
   type IssuePriority,
@@ -23,9 +25,13 @@ import {
 } from '../../shared/session'
 import { getTool, type ToolId } from '../../shared/tools'
 import type { UpdateState } from '../../shared/updates'
-import type { WorktreeInfo, WorktreeInspection } from '../../shared/worktrees'
+import type {
+  CreateIssueWorktreeResult,
+  WorktreeInfo,
+  WorktreeInspection,
+} from '../../shared/worktrees'
 import { api } from '../lib/api'
-import { sendBlockers } from '../lib/issue-sending'
+import { startState } from '../lib/issue-start'
 import type { ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
@@ -61,8 +67,16 @@ export interface UiSession {
   /** The root of the worktree it runs in, or `null` for the project's main worktree. */
   worktreePath: string | null
   toolId: ToolId
-  /** The issue sent to Claude Code when the session started, or `null` for any other session. */
+  /**
+   * The issue whose start button started the session, which Claude Code is
+   * sent when it starts; `null` for any other session.
+   */
   issueId: number | null
+  /**
+   * The id of the permission level its tool is to start at, as it was picked
+   * when the session was asked for; `null` for the one picked when it starts.
+   */
+  permissionLevel: string | null
   /**
    * `starting` covers the time until the process runs. A starting session
    * already counts as running.
@@ -126,6 +140,11 @@ export interface AppState {
   permissionLevels: PermissionLevelSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
+  /**
+   * The issues whose start button is creating a worktree for them, until
+   * their session shows or creating it fails.
+   */
+  startingIssues: readonly number[]
   /** What the window shows; `null` for the empty page. */
   currentPage: Page | null
   /** The pages shown one after another, for going back and forward. */
@@ -186,13 +205,16 @@ export interface AppState {
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
-   * Sends an open issue to Claude Code, in a new session in the main worktree
-   * of the project it belongs to now, unless it cannot be sent now, as
-   * without a project; the changes to it made so far are saved first. While
-   * the session it was sent to before is still in the sidebar, shows that
-   * session instead, whatever project the issue belongs to now.
+   * Starts work on an open issue, as its start button does. While a session
+   * started from the issue is in the sidebar, shows that session, whatever
+   * project the issue belongs to since. Otherwise, unless Claude Code or the
+   * issue's project is missing, saves the changes to the issue made so far,
+   * then starts Claude Code, at the permission level picked now, in the
+   * issue's worktree in the project it belongs to, after creating one when it
+   * has none; the session is shown once it is added, whatever page is shown
+   * by then, and is sent the issue.
    */
-  sendIssueToClaudeCode(issueId: number): Promise<void>
+  startIssue(issueId: number): Promise<void>
   launchSession(id: string, cols: number, rows: number): Promise<void>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
@@ -416,7 +438,59 @@ export function isSessionRunning(session: UiSession): boolean {
 }
 
 function fromInfo(info: SessionInfo): UiSession {
-  return { ...info, title: '', customName: null, closing: false }
+  return { ...info, permissionLevel: null, title: '', customName: null, closing: false }
+}
+
+/**
+ * The worktree of an issue: among the worktrees of the project it belongs to
+ * now, as Hoot last read them, the first on one of its branches whose folder
+ * exists, in the sidebar's order; `null` without one, as for an issue
+ * without a project.
+ */
+export function issueWorktreeOf(
+  state: Pick<AppState, 'projects' | 'worktrees'>,
+  issue: Pick<Issue, 'id' | 'projectId'>,
+): WorktreeInfo | null {
+  const project = state.projects.find((candidate) => candidate.id === issue.projectId)
+  return project ? issueWorktree(state.worktrees[project.root] ?? [], issue.id) : null
+}
+
+/** Says why the worktree of an issue could not be created, with Git's own words in its font. */
+function failToCreateIssueWorktree(
+  issueId: number,
+  { reason, message }: Extract<CreateIssueWorktreeResult, { ok: false }>,
+): void {
+  toast.error(`Could not create a worktree for ${issueIdentifier(issueId)}.`, {
+    description:
+      reason === 'failed'
+        ? createElement(
+            'pre',
+            {
+              className: 'max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap',
+              'data-path': '',
+              'data-testid': 'issue-worktree-error',
+            },
+            message,
+          )
+        : createElement('span', { 'data-testid': 'issue-worktree-error' }, message),
+    duration: 15_000,
+  })
+}
+
+/** Says that Git created a worktree but reported a problem, with what Git said. */
+export function warnAboutWorktree(warning: string): void {
+  toast.warning('The worktree was created, but Git reported a problem.', {
+    description: createElement(
+      'pre',
+      {
+        className: 'max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap',
+        'data-path': '',
+        'data-testid': 'worktree-warning',
+      },
+      warning,
+    ),
+    duration: 15_000,
+  })
 }
 
 /** The worktree rows of a project: its worktrees, and those its sessions run in. */
@@ -757,7 +831,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     projectRoot: string,
     toolId: ToolId,
     worktreePath: string | null,
-    issueId: number | null,
+    issueId: number | null = null,
+    permissionLevel: string | null = null,
   ) => {
     const id = crypto.randomUUID()
     openTerminal(id)
@@ -771,6 +846,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           worktreePath,
           toolId,
           issueId,
+          permissionLevel,
           status: 'starting',
           exit: null,
           title: '',
@@ -826,6 +902,21 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
   }
 
+  /** The issues whose start is under way, so that a second click does not start another. */
+  const issueStarts = new Set<number>()
+
+  /** Shows on an issue's start button whether a worktree is being created for it. */
+  const setStarting = (issueId: number, starting: boolean) => {
+    set((state) => {
+      if (state.startingIssues.includes(issueId) === starting) return state
+      return {
+        startingIssues: starting
+          ? [...state.startingIssues, issueId]
+          : state.startingIssues.filter((id) => id !== issueId),
+      }
+    })
+  }
+
   /** Changes to issues under way, so that a second click does not repeat one. */
   const issueRequests = new Set<string>()
   const once = async (key: string, request: () => Promise<void>) => {
@@ -848,6 +939,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     tools: { detecting: true, tools: [], error: null },
     permissionLevels: null,
     sessions: [],
+    startingIssues: [],
     currentPage: null,
     history: emptyHistory,
     issues: [],
@@ -1049,25 +1141,75 @@ export const useAppStore = create<AppState>()((set, get) => {
       addSession(projectRoot, toolId, worktreePath, null)
     },
 
-    async sendIssueToClaudeCode(issueId) {
-      const sent = get().sessions.find((session) => session.issueId === issueId)
-      if (sent) {
-        get().selectSession(sent.id)
+    async startIssue(issueId) {
+      const started = get().sessions.find((session) => session.issueId === issueId)
+      if (started) {
+        get().selectSession(started.id)
         return
       }
-      // Claude Code is sent the issue as it is saved.
-      for (const flush of issueEditorFlushes) flush()
-      await get().whenIssueSaved(issueId)
+      // Clicking again while the issue's session is being started does nothing.
+      if (issueStarts.has(issueId)) return
       const state = get()
       const issue = findIssue(issueId)
       if (!issue || !isIssueOpen(issue)) return
-      if (sendBlockers(state.tools, issue).length > 0) return
-      // In the project it belongs to now.
-      const project = state.projects.find((candidate) => candidate.id === issue.projectId)
-      if (!project) return
-      // Unless it was sent while its changes were saved.
-      if (state.sessions.some((session) => session.issueId === issueId)) return
-      addSession(project.root, 'claude', null, issue.id)
+      const expected = startState(issue, {
+        sessionId: null,
+        tools: state.tools,
+        worktreePath: issueWorktreeOf(state, issue)?.path ?? null,
+      })
+      if (expected.kind !== 'worktree' && expected.kind !== 'new-worktree') return
+      // The session starts at the level picked at the click, also when that
+      // changes while its worktree is created.
+      const permissionLevel = state.permissionLevels?.claude ?? null
+      issueStarts.add(issueId)
+      // Creating a worktree takes a while, which the button shows from the click.
+      if (expected.kind === 'new-worktree') setStarting(issueId, true)
+      try {
+        // The worktree is named after the issue as it is saved, which Claude Code is sent.
+        for (const flush of issueEditorFlushes) flush()
+        await get().whenIssueSaved(issueId)
+        const saved = findIssue(issueId)
+        const project = get().projects.find((candidate) => candidate.id === saved?.projectId)
+        if (!saved || !isIssueOpen(saved) || !project) return
+        // As Git lists them now, which the sidebar then shows too.
+        let worktrees: WorktreeInfo[] | null
+        try {
+          worktrees = await api.readWorktrees(project.root)
+        } catch (error) {
+          toast.error(`Could not start work on ${issueIdentifier(issueId)}.`, {
+            description: errorMessage(error),
+          })
+          return
+        }
+        if (worktrees === null) return
+        const worktree = issueWorktree(worktrees, issueId)
+        if (worktree !== null) {
+          setStarting(issueId, false)
+          addSession(project.root, 'claude', worktree.path, issueId, permissionLevel)
+          return
+        }
+        setStarting(issueId, true)
+        const result = await api
+          .createIssueWorktree(project.root, issueId)
+          .catch((error: unknown) => ({
+            ok: false as const,
+            reason: 'failed' as const,
+            message: errorMessage(error),
+          }))
+        if (!result.ok) {
+          failToCreateIssueWorktree(issueId, result)
+          return
+        }
+        // Unless its project left the list meanwhile.
+        if (!get().projects.some((candidate) => candidate.id === project.id)) return
+        // The new worktree's row shows below the project, also when it was collapsed.
+        get().setProjectExpanded(project.id, true)
+        if (result.warning) warnAboutWorktree(result.warning)
+        addSession(project.root, 'claude', result.path, issueId, permissionLevel)
+      } finally {
+        issueStarts.delete(issueId)
+        setStarting(issueId, false)
+      }
     },
 
     async launchSession(id, cols, rows) {
@@ -1079,9 +1221,16 @@ export const useAppStore = create<AppState>()((set, get) => {
         worktreePath: session.worktreePath,
         toolId: session.toolId,
         issueId: session.issueId,
+        ...(session.permissionLevel === null ? {} : { permissionLevel: session.permissionLevel }),
         cols,
         rows,
       })
+      // Work on the issue has started: one in the backlog or to do is in progress now.
+      if (result.ok && session.issueId !== null) {
+        const issue = findIssue(session.issueId)
+        const status = issue && statusOnceStarted(issue.status)
+        if (issue && status && status !== issue.status) get().updateIssue(issue.id, { status })
+      }
       const started = findSession(id)
       // Closed while it was starting.
       if (!started || started.closing) return

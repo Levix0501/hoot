@@ -8,6 +8,7 @@ import {
   issueTitle,
   listOrder,
   oneLineTitle,
+  statusOnceStarted,
   type Issue,
 } from './issues'
 
@@ -50,6 +51,16 @@ describe('isCompleted and isIssueOpen', () => {
       expect(isIssueOpen({ status })).toBe(true)
     }
     expect(isIssueOpen({ status: 'done' })).toBe(false)
+  })
+})
+
+describe('statusOnceStarted', () => {
+  it('puts an issue in the backlog or to do in progress, and leaves every other status', () => {
+    expect(statusOnceStarted('backlog')).toBe('in_progress')
+    expect(statusOnceStarted('todo')).toBe('in_progress')
+    expect(statusOnceStarted('in_progress')).toBe('in_progress')
+    expect(statusOnceStarted('done')).toBe('done')
+    expect(statusOnceStarted('canceled')).toBe('canceled')
   })
 })
 

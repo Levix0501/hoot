@@ -30,6 +30,7 @@ import {
 import { browserLink } from '../shared/links'
 import { TOOL_IDS } from '../shared/tools'
 import type {
+  CreateIssueWorktreeResult,
   CreateWorktreeRequest,
   DeleteWorktreeResult,
   NewWorktreeOptionsResult,
@@ -73,6 +74,7 @@ const startSessionRequest = z.object({
   worktreePath: z.string().min(1).nullable(),
   toolId: z.enum(TOOL_IDS),
   issueId: rowId.nullable(),
+  permissionLevel: z.string().min(1).max(100).optional(),
   cols: terminalDimension,
   rows: terminalDimension,
 }) satisfies z.ZodType<StartSessionRequest>
@@ -128,15 +130,15 @@ function changeIssue(change: () => Issue | null, missing: string): IssueResult {
 }
 
 /**
- * What a session started from an issue's page sends Claude Code: the issue's
- * title and description as they are saved now. Or why it cannot be sent: the
- * issue is gone, or belongs to another project or to none.
+ * An issue of a project as it is saved now, which a session started from its
+ * start button is sent, and whose worktree is named after it. Or why there is
+ * none: the issue is gone, or belongs to another project or to none.
  */
-function issueToSend(
+function issueOfProject(
   issues: IssueStore,
   projectId: number,
   issueId: number,
-): { ok: true; issue: SentIssue } | { ok: false; message: string } {
+): { ok: true; issue: Issue } | { ok: false; message: string } {
   let issue: Issue | null
   try {
     issue = issues.get(issueId)
@@ -147,7 +149,7 @@ function issueToSend(
   if (issue.projectId !== projectId) {
     return { ok: false, message: 'The issue is no longer in this project.' }
   }
-  return { ok: true, issue: { title: issue.title, description: issue.description } }
+  return { ok: true, issue }
 }
 
 /** Registers handlers that accept messages only from the main window. */
@@ -309,16 +311,17 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!project) {
       return { ok: false, message: 'The project is not in the list.' }
     }
-    let issue: SentIssue | null = null
+    let saved: Issue | null = null
     if (request.issueId !== null) {
-      // Only Claude Code is sent issues, in the project's main worktree.
-      if (request.toolId !== 'claude' || request.worktreePath !== null) {
+      // Only Claude Code is sent issues, in one of the project's worktrees.
+      if (request.toolId !== 'claude' || request.worktreePath === null) {
         return { ok: false, message: 'Invalid session request.' }
       }
-      const sent = issueToSend(deps.issues, project.id, request.issueId)
-      if (!sent.ok) return sent
-      issue = sent.issue
+      const found = issueOfProject(deps.issues, project.id, request.issueId)
+      if (!found.ok) return found
+      saved = found.issue
     }
+    let issue: SentIssue | null = null
     if (request.worktreePath !== null) {
       // As it is now, which the sidebar then shows: it may be gone or missing since it last did.
       const worktree = await deps.worktrees.currentWorktree(
@@ -333,6 +336,16 @@ export function registerIpc(deps: IpcDependencies): void {
           ok: false,
           message: `The folder of the worktree is missing: ${request.worktreePath}`,
         }
+      }
+      if (saved !== null) {
+        // The first message names the branch the worktree has checked out.
+        if (worktree.branch === null) {
+          return {
+            ok: false,
+            message: `The worktree has no branch checked out: ${request.worktreePath}`,
+          }
+        }
+        issue = { title: saved.title, description: saved.description, branch: worktree.branch }
       }
     }
     try {
@@ -408,6 +421,28 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = createWorktreeRequest.safeParse(value)
     if (!parsed.success) return { ok: false, reason: 'invalid', message: 'Invalid request.' }
     return deps.worktrees.create(parsed.data)
+  })
+
+  handle(
+    IpcChannel.createIssueWorktree,
+    async (_event, ...args): Promise<CreateIssueWorktreeResult> => {
+      const parsed = z.tuple([projectRoot, rowId]).safeParse(args)
+      if (!parsed.success) return { ok: false, reason: 'invalid', message: 'Invalid request.' }
+      const [root, issueId] = parsed.data
+      const project = deps.projects.find(root)
+      if (!project) {
+        return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
+      }
+      // Named after the issue as it is saved now.
+      const found = issueOfProject(deps.issues, project.id, issueId)
+      if (!found.ok) return { ok: false, reason: 'invalid', message: found.message }
+      return deps.worktrees.createForIssue(root, found.issue)
+    },
+  )
+
+  handle(IpcChannel.readWorktrees, (_event, value) => {
+    const parsed = projectRoot.safeParse(value)
+    return parsed.success ? deps.worktrees.read(parsed.data) : null
   })
 
   handle(IpcChannel.inspectWorktree, (_event, ...args) => {

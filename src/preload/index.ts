@@ -68,6 +68,9 @@ const api: HootApi = {
   getWorktreeSubmodules: (projectRoot, participants) =>
     ipcRenderer.invoke(IpcChannel.worktreeSubmodules, projectRoot, participants),
   createWorktree: (request) => ipcRenderer.invoke(IpcChannel.createWorktree, request),
+  createIssueWorktree: (projectRoot, issueId) =>
+    ipcRenderer.invoke(IpcChannel.createIssueWorktree, projectRoot, issueId),
+  readWorktrees: (projectRoot) => ipcRenderer.invoke(IpcChannel.readWorktrees, projectRoot),
   inspectWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.inspectWorktree, projectRoot, worktreePath),
   deleteWorktree: (projectRoot, worktreePath, discard) =>

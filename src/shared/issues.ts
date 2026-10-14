@@ -98,6 +98,15 @@ export function isIssueOpen(issue: Pick<Issue, 'status'>): boolean {
 }
 
 /**
+ * The status of an issue once work on it has started, that is once a session
+ * started from its start button runs: In Progress for an issue in the
+ * backlog or to do, and any other status as it is.
+ */
+export function statusOnceStarted(status: IssueStatus): IssueStatus {
+  return status === 'backlog' || status === 'todo' ? 'in_progress' : status
+}
+
+/**
  * The statuses of the issue list, in the order it shows them, as Linear's
  * lists do: the closest to done first, then the done and the canceled issues.
  */

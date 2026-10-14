@@ -102,6 +102,31 @@ export type CreateWorktreeResult =
       message: string
     }
 
+/**
+ * What creating a worktree for an issue came to: the worktree, on the branch
+ * named after the issue, or why there is none.
+ */
+export type CreateIssueWorktreeResult =
+  | {
+      ok: true
+      path: string
+      branch: string
+      /** Set when Git reported a problem (such as a failing hook) for a member it created. */
+      warning: string | null
+    }
+  | {
+      ok: false
+      /**
+       * `no-base`: the base branch of the project, or of an inner repository,
+       * cannot be told, and nothing was created. `failed`: Git could not
+       * create a member, and what was created was undone; the message has
+       * Git's output. `invalid`: the request cannot be carried out, such as
+       * for an issue that is no longer in the project.
+       */
+      reason: 'no-base' | 'failed' | 'invalid'
+      message: string
+    }
+
 /** What a repository of a worktree would lose. */
 export interface RepositoryChanges {
   /** The project name for the outer member, otherwise the path relative to the root. */

@@ -11,7 +11,7 @@ import {
   issueFileText,
   resolveLaunch,
   sentIssueArgs,
-  splitIssuePrompt,
+  startIssuePrompt,
   type LaunchContext,
 } from './launch'
 import { SessionError } from './session-manager'
@@ -117,6 +117,22 @@ describe('resolveLaunch', () => {
     expect((await resolveLaunch(context(loginEnv, levels), 'shell', project)).args).toEqual(['-l'])
   })
 
+  it('starts a tool at the level given, unless it is none of its levels, and else at the one selected', async () => {
+    const levels = { claude: 'plan', codex: 'read-only', opencode: 'standard' }
+    const loginEnv = { PATH: `${bin}:/usr/bin` }
+    const args = async (toolId: 'claude' | 'codex' | 'shell', level: string | null) =>
+      (await resolveLaunch(context(loginEnv, levels), toolId, project, null, level)).args
+    expect(await args('claude', 'accept-edits')).toEqual(['--permission-mode', 'acceptEdits'])
+    expect(await args('claude', 'manual')).toEqual(['--permission-mode', 'manual'])
+    expect(await args('claude', null)).toEqual(['--permission-mode', 'plan'])
+    // Codex has no level of that name; the shell has no levels at all.
+    expect(await args('claude', 'full-access')).toEqual(['--permission-mode', 'plan'])
+    expect(await args('codex', 'full-access')).toEqual([
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
+    expect(await args('shell', 'manual')).toEqual(['-l'])
+  })
+
   it('keeps the level selected when the session started while the login environment is read', async () => {
     let selected: PermissionLevelSettings = highest
     let detecting = false
@@ -144,6 +160,7 @@ describe('resolveLaunch', () => {
     const issue = {
       title: 'Fix the login bug',
       description: '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
+      branch: 'iss-1-fix-the-login-bug',
     }
     const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
     // The issue is written in a folder of the session's own, in the temporary folder.
@@ -159,7 +176,7 @@ describe('resolveLaunch', () => {
       'acceptEdits',
       `--add-dir=${folder}`,
       '--name=Fix the login bug',
-      splitIssuePrompt(path.join(folder, 'issue.md')),
+      startIssuePrompt(path.join(folder, 'issue.md'), 'iss-1-fix-the-login-bug'),
     ])
     launch.cleanup?.()
     expect(fs.readdirSync(temporary)).toEqual([])
@@ -171,7 +188,7 @@ describe('resolveLaunch', () => {
   })
 
   it('sends an issue to Claude Code only, and writes it only when the launch can go ahead', async () => {
-    const issue = { title: 'T', description: '' }
+    const issue = { title: 'T', description: '', branch: 'iss-1-t' }
     await expect(
       resolveLaunch(context({ PATH: bin }), 'codex', project, issue),
     ).rejects.toBeInstanceOf(SessionError)
@@ -192,7 +209,7 @@ describe('resolveLaunch', () => {
       { ...context({ PATH: bin }), temporaryFolder: path.join(root, 'missing') },
       'claude',
       project,
-      { title: 'T', description: '' },
+      { title: 'T', description: '', branch: 'iss-1-t' },
     )
     await expect(launching).rejects.toBeInstanceOf(SessionError)
     await expect(launching).rejects.toThrow("Could not write the issue's file:")
@@ -223,28 +240,64 @@ describe('the issue, the first message and the arguments that send them', () => 
     expect(issueFileText({ title: 'Fix\0 login', description: 'a\0b' })).toBe('# Fix login\n\nab\n')
     // A description of nothing but NUL characters is an empty one.
     expect(issueFileText({ title: 'T', description: '\0\0' })).toBe('# T\n')
-    expect(sentIssueArgs('/tmp/hoot-issue-1', { title: 'Fix\0 login', description: '' })[1]).toBe(
-      '--name=Fix login',
-    )
+    expect(
+      sentIssueArgs('/tmp/hoot-issue-1', { title: 'Fix\0 login', description: '', branch: 'b' })[1],
+    ).toBe('--name=Fix login')
   })
 
-  it("starts the first message with the instructions, which point to the issue's file", () => {
-    const prompt = splitIssuePrompt('/tmp/hoot-issue-1/issue.md')
-    expect(prompt.split('\n')[0]).toBe(
-      'The issue to judge is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
+  it("is Hoot's instructions to judge the issue, then split or implement it, word for word", () => {
+    const prompt = startIssuePrompt(
+      '/tmp/hoot-issue-1/issue.md',
+      'iss-1-fix-the-login-bug-on-safari',
     )
-    expect(prompt).toContain('can one fresh agent session implement the whole issue')
+    expect(prompt).toBe(
+      [
+        'The issue to work on is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
+        '',
+        'This is a Git worktree of the project, on the branch `iss-1-fix-the-login-bug-on-safari`, made for this issue.',
+        '',
+        "First judge the issue against this project's code. Read whatever you need, but change nothing yet: no edits, no commits, no commands that change files.",
+        '',
+        '1. Workload: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time.',
+        '2. If yes, say that it needs no split, and wait for me to confirm. Once I do, implement the issue here.',
+        '3. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
+        '   - Title',
+        '   - Description: what it delivers, and how to accept it',
+        '   - Waits on: the issues it cannot be delivered and accepted without, or none',
+        '4. End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`, and stop there.',
+        '',
+        "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
+      ].join('\n'),
+    )
+    // Lines end with LF alone, and nothing follows the last one.
+    expect(prompt).not.toMatch(/\r|\s$/)
     // It names no agent, and says nothing of the hoot command.
     expect(prompt.replace('/tmp/hoot-issue-1/issue.md', '')).not.toMatch(/Claude|hoot/i)
   })
 
+  it("names the issue's file and the worktree's branch as they are given", () => {
+    const prompt = startIssuePrompt(
+      '/var/folders/x/T/hoot-issue-AbC/issue.md',
+      'iss-13-修复登录页的问题',
+    )
+    const [file, , branch] = prompt.split('\n')
+    expect(file).toContain('`/var/folders/x/T/hoot-issue-AbC/issue.md`')
+    expect(branch).toBe(
+      'This is a Git worktree of the project, on the branch `iss-13-修复登录页的问题`, made for this issue.',
+    )
+  })
+
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
     expect(
-      sentIssueArgs('/tmp/hoot-issue-1', { title: '--verbose flag broken', description: '' }),
+      sentIssueArgs('/tmp/hoot-issue-1', {
+        title: '--verbose flag broken',
+        description: '',
+        branch: 'iss-2-verbose-flag-broken',
+      }),
     ).toEqual([
       '--add-dir=/tmp/hoot-issue-1',
       '--name=--verbose flag broken',
-      splitIssuePrompt('/tmp/hoot-issue-1/issue.md'),
+      startIssuePrompt('/tmp/hoot-issue-1/issue.md', 'iss-2-verbose-flag-broken'),
     ])
   })
 })

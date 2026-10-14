@@ -1,10 +1,14 @@
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
+import { issueBranchAttempt, issueBranchName } from '../../shared/issue-worktrees'
+import type { Issue } from '../../shared/issues'
 import {
   compareWorktrees,
+  defaultNestedBase,
   inspectionIsClean,
   isWithin,
+  type CreateIssueWorktreeResult,
   type CreateWorktreeRequest,
   type CreateWorktreeResult,
   type DeleteWorktreeResult,
@@ -37,6 +41,13 @@ import {
 
 /** Creating or removing a worktree runs hooks and touches many files: no short limit. */
 const WORKTREE_COMMAND_TIMEOUT = 10 * 60_000
+
+/** How many names an issue's branch is tried with before Hoot gives up: its name, then `-2` on. */
+const ISSUE_BRANCH_ATTEMPTS = 1_000
+
+/** What the start button says to do instead when it cannot tell a base branch. */
+const PICK_BASE_IN_DIALOG =
+  "Create the worktree with New Worktree… from the project's + menu instead, and pick the base branches there."
 
 export interface WorktreeServiceOptions {
   layout: WorktreeLayout
@@ -184,6 +195,17 @@ export class WorktreeService extends EventEmitter<{
     if (!state) return null
     await this.refresh(state)
     return state.worktrees.find((worktree) => worktree.path === worktreePath) ?? null
+  }
+
+  /**
+   * Reads the project's worktrees again, which `changed` then reports, and
+   * returns them; `null` when the project is not in the list.
+   */
+  async read(projectRoot: string): Promise<WorktreeInfo[] | null> {
+    const state = this.projects.get(projectRoot)
+    if (!state) return null
+    await this.refresh(state)
+    return state.worktrees
   }
 
   /**
@@ -410,6 +432,79 @@ export class WorktreeService extends EventEmitter<{
     }
     await this.refresh(state)
     return { ok: true, path: root, warning: warnings.length > 0 ? warnings.join('\n\n') : null }
+  }
+
+  /**
+   * Creates the worktree of an issue, without asking anything: a new branch
+   * named after the issue, from the branch checked out in the main worktree,
+   * with the inner repositories the new worktree dialog includes by default
+   * (those with commits, each from its branch named like the project's base
+   * branch, or else from the branch it has checked out). While a repository
+   * that takes part has a branch of the name, the name gets `-2`, `-3` and
+   * on. Nothing is created when a base branch cannot be told: the main
+   * worktree's HEAD is detached, or an inner repository has neither.
+   */
+  async createForIssue(
+    projectRoot: string,
+    issue: Pick<Issue, 'id' | 'title'>,
+  ): Promise<CreateIssueWorktreeResult> {
+    const offered = await this.newWorktreeOptions(projectRoot)
+    // The project is no longer in the list, or not a Git repository.
+    if (!offered.ok) return { ok: false, reason: 'invalid', message: offered.message }
+    const { options } = offered
+    const name = path.basename(projectRoot) || projectRoot
+    const base = options.current
+    if (base === null) {
+      // A branch is checked out that has no commit yet, or none is.
+      const unborn = await git(await this.options.gitContext(), [
+        '-C',
+        projectRoot,
+        'symbolic-ref',
+        '-q',
+        'HEAD',
+      ])
+      return {
+        ok: false,
+        reason: 'no-base',
+        message:
+          unborn.code === 0
+            ? `The branch checked out in the main worktree of ${name} has no commits yet, so there is nothing to start the issue's branch from.`
+            : `The main worktree of ${name} has no branch checked out (its HEAD is detached), so Hoot cannot tell which branch to start the issue's branch from. ${PICK_BASE_IN_DIALOG}`,
+      }
+    }
+    const nested: CreateWorktreeRequest['nested'] = []
+    const undecided: string[] = []
+    for (const repository of options.nested) {
+      if (!repository.hasCommits) continue
+      const nestedBase = defaultNestedBase(repository, base)
+      if (nestedBase === null) undecided.push(repository.relativePath)
+      else nested.push({ relativePath: repository.relativePath, base: nestedBase })
+    }
+    if (undecided.length > 0) {
+      const which =
+        undecided.length === 1
+          ? `${undecided[0]} from: it has`
+          : `${undecided.join(', ')} from: they have`
+      return {
+        ok: false,
+        reason: 'no-base',
+        message: `Hoot cannot tell which branch to start ${which} no branch named ${base}, and no branch checked out. ${PICK_BASE_IN_DIALOG}`,
+      }
+    }
+    const branchName = issueBranchName(issue.id, issue.title)
+    for (let attempt = 1; attempt <= ISSUE_BRANCH_ATTEMPTS; attempt++) {
+      const branch = issueBranchAttempt(branchName, attempt)
+      const result = await this.create({ projectRoot, branch, base, nested })
+      if (result.ok) return { ok: true, path: result.path, branch, warning: result.warning }
+      // Nothing was created: try the next name.
+      if (result.reason === 'branch-exists') continue
+      return { ok: false, reason: result.reason, message: result.message }
+    }
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: `Branches named ${branchName} with every suffix up to -${ISSUE_BRANCH_ATTEMPTS} exist already.`,
+    }
   }
 
   /** Checks what deleting a worktree would delete and lose. */

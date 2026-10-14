@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import {
   defaultNestedBase,
   type NestedRepositoryOption,
@@ -7,7 +6,7 @@ import {
   type NewWorktreeOptionsResult,
 } from '../../shared/worktrees'
 import { api } from '../lib/api'
-import { errorMessage, focusAfterOverlay, useAppStore } from '../store/app-store'
+import { errorMessage, focusAfterOverlay, useAppStore, warnAboutWorktree } from '../store/app-store'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import {
@@ -246,20 +245,7 @@ function NewWorktreeForm({
     }
     // The new worktree's row shows below the project, also when it was collapsed.
     if (projectId !== undefined) setProjectExpanded(projectId, true)
-    if (result.warning) {
-      toast.warning('The worktree was created, but Git reported a problem.', {
-        description: (
-          <pre
-            className="max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap"
-            data-path=""
-            data-testid="worktree-warning"
-          >
-            {result.warning}
-          </pre>
-        ),
-        duration: 15_000,
-      })
-    }
+    if (result.warning) warnAboutWorktree(result.warning)
     onDone()
   }
 

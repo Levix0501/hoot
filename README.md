@@ -31,8 +31,8 @@ sessions does not yet.
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment, with only the arguments of their
-  [permission level](#permission-levels) (a Claude Code session an issue is
-  [sent to](#issues) also gets the issue); the shell runs as an interactive login shell. To the
+  [permission level](#permission-levels) (a Claude Code session
+  [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. To the
   environment of each session's process Hoot adds the terminal's variables (`TERM`, `COLORTERM`,
   `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`), and what [`hoot`](#the-hoot-command) needs: the
   variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder `hoot` is
@@ -127,10 +127,11 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   Canceled, the closest to done first. Each group lists its issues by priority, urgent first and
   those without one last, then newest first; done and canceled issues are listed the most recently
   completed first. A row shows the issue's priority, its identifier (such as `ISS-12`), its status,
-  its title, the name of its project if it has one, and the day it was created. Click a group's
-  header to collapse or expand it, or its `+` to create an issue with its status. Click an issue to
-  show its page; right-click it to change its status, priority or project, copy its identifier or
-  title, or delete it.
+  its title, the name of its project if it has one, and the day it was created, and ends with the
+  [start button](#issues) of an issue that is neither done nor canceled. Click a group's header to
+  collapse or expand it, or its `+` to create an issue with its status. Click an issue to show its
+  page; right-click it to change its status, priority or project, copy its identifier or title, or
+  delete it.
 - **The Project dropdown**, at the right end of the row of views, picks whose issues the list
   shows. Check any of its choices, **No project** and the projects (in the sidebar's order), to
   show only the issues of those checked: the issues without a project while **No project** is
@@ -155,8 +156,9 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   stays for the next issue, keeping the status, the priority and the project. An issue without a
   project can be created also while no project is in the list.
 - **An issue's page** shows its title and description, with its status, priority and project beside
-  them (under the title when the window is narrow), and when it was created and completed. Its title
-  row says **Issues ›**, the issue's identifier and its title. Edit the title and the description
+  them (under the title when the window is narrow), and when it was created and completed; above
+  them stands the start button of an issue that is neither done nor canceled. Its title row says
+  **Issues ›**, the issue's identifier and its title. Edit the title and the description
   where they show; they are saved as you type. The description is formatted as you type GitHub
   Flavored Markdown (`# `, `- `, `1. `, `[ ] `, `**bold**`, `` `code` `` and the like) and kept as
   Markdown: headings, lists, code, task lists, tables and links. Showing a description never changes
@@ -174,32 +176,62 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   asking; the list is shown then.
 - **Keys**: on an Issues page, unless you are typing in a field or the description, or a menu or
   dialog is open: C opens the new issue dialog; J and K (and on a list ↓ and ↑) move to the next
-  and previous issue; Enter shows the issue moved to on a list; S and P change the status and the
-  priority, in a picker where you can search or press the value's digit; ⌘⌫ deletes, after
-  asking; and Esc on an issue's page goes back to the list.
-- **Sending to Claude Code**: before handing an issue to an agent, find out whether it is too big
-  and how to split it. **Send to Claude Code**, above the title of an issue that is neither done nor
-  canceled, saves what you typed in it, then starts Claude Code in a new session in the root of the
-  issue's project (never in a worktree), at the permission level picked in the Agents menu, and
-  shows it. Hoot writes the issue, its title as a heading and its description below it, to
-  `issue.md` in a new folder of the session's own in the system's temporary folder, and adds that
-  folder to Claude Code's working directories (`--add-dir`), so that Claude Code reads the file
-  without asking at any permission level. The session is named after the issue's title, and its
-  first message is Hoot's instructions, which point to the file: they ask the agent to read the code
-  without changing anything and to judge whether one fresh agent session can implement the issue and
-  another verify it in full; if not, to split it into ordered issues that can each be accepted on
-  its own, each with a title, a description and the issues it waits on. The instructions would do
-  for any agent, and the issue stays out of the message, where an agent could take some of its text
-  for a command or a mention. Hoot does not enforce that nothing changes: like any other session,
-  this one can change files as far as its permission level lets it. The answer stays in the
-  conversation, where you can go on with it. Hoot removes the issue's folder once the session's
-  process has ended, or when it could not start; if Hoot stops without quitting, the folder stays
-  until macOS clears its temporary files. Nothing is written to `~/.claude`, `~/.claude.json` or the
-  project. While the session is in the sidebar, the button is **Show Claude Code Session** and
-  always shows it, whatever project the issue is in since; once the session is closed, the button
-  sends the issue again. Sending is not possible while Hoot is still checking whether Claude Code is
-  installed, when it is not installed, or for an issue without a project, which needs one first; the
-  button's tooltip then says why. NUL characters are left out of what is sent.
+  and previous issue; Enter shows the issue moved to on a list, and Tab moves from its row to its
+  start button; S and P change the status and the priority, in a picker where you can search or
+  press the value's digit; ⌘⌫ deletes, after asking; and Esc on an issue's page goes back to the
+  list.
+- **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
+  its row in the list and above the properties on its page, hands the issue to Claude Code in a
+  worktree of its own. It shows a paper plane, which turns into Claude Code's mark while you point
+  at it or move the keyboard focus to it, and its tooltip says what it does. Clicking it saves what
+  you typed in the issue, then starts Claude Code, at the permission level picked in the Agents
+  menu at the click, in the issue's worktree, and shows the session as soon as it appears, whatever
+  page is shown then, with the keyboard focus in its terminal; going back shows the page shown
+  before it. The issue's worktree is a worktree of the issue's project whose branch is `iss-12`,
+  or starts with `iss-12-` (for `ISS-12`), and whose folder exists; of several, the first in the
+  sidebar. When there is none, Hoot first creates one, without asking: a new branch named after the
+  issue, such as `iss-12-fix-the-login-bug-on-safari` (the title's letters and digits, of any
+  script, in lower case, and a `-` for each run of anything else, cut to 60 characters), or `-2`,
+  `-3` and on after the name when a repository taking part already has a branch of that name; from
+  the branch checked out in the project's main worktree, with the nested repositories that
+  **New Worktree…** includes by default, at `~/.hoot/worktrees/<project>/<branch>`. The project
+  expands to show the worktree's row. Meanwhile the button spins and clicking it does nothing; the
+  rest of Hoot can be used as usual. The branch keeps its name when the title changes. The session
+  is named after the issue's title. Hoot writes the issue, its title as a heading and its
+  description below it, to `issue.md` in a new folder of the session's own in the system's
+  temporary folder, and adds that folder to Claude Code's working directories (`--add-dir`), so
+  that Claude Code reads the file without asking at any permission level; NUL characters are left
+  out. The first message is Hoot's instructions, which point to the file and name the worktree's
+  branch: to judge first, reading the code without changing anything, whether one fresh agent
+  session can implement the issue and another verify it in full; if so, to say that it needs no
+  split and wait for you to confirm, then implement it in the worktree; if not, to split it into
+  ordered issues that can each be accepted on its own, each with a title, a description and the
+  issues it waits on, and stop there. The instructions would do for any agent, and the issue stays
+  out of the message, where an agent could take some of its text for a command or a mention. Hoot
+  does not enforce that nothing changes while the agent judges: like any other session, this one
+  can change files as far as its permission level lets it. Once the session has started, an issue
+  in the Backlog or Todo is In Progress. Hoot removes the issue's folder once the session's process
+  has ended, or when it could not start; if Hoot stops without quitting, the folder stays until
+  macOS clears its temporary files. Hoot types nothing into the session and answers none of Claude
+  Code's questions, such as whether you trust the folder, which Claude Code asks once for a project
+  and all its worktrees. It writes no file of its own to `~/.claude`, `~/.claude.json`, the project
+  or the worktree: apart from what Git writes, `git status` stays clean there.
+- **Starting again**: while the session started from an issue is in the sidebar, the button says so
+  and always shows it, whatever project the issue is in since, and whether or not Claude Code is
+  found now. Once the session is closed, the button starts a new session in the issue's worktree,
+  with the same instructions and a new file of the issue as it is then. Starting is not possible
+  while Hoot is still checking whether Claude Code is installed, when it is not installed, or for an
+  issue without a project, in which its worktree would be; the button's tooltip then says why.
+- **When it cannot start**: when the issue's project is not a Git repository, Hoot creates nothing
+  and says that it cannot have worktrees. When the project's main worktree has no branch checked out
+  (its HEAD is detached), or a nested repository has neither a branch named like the project's nor
+  one checked out, Hoot creates nothing and says so, suggesting **New Worktree…**, where you pick
+  the base branches yourself. When Git cannot create the worktree, Hoot removes what it created and
+  shows Git's output; when Git creates it but a hook such as `post-checkout` fails, the worktree is
+  kept, Hoot shows Git's output as a warning, and the session starts. When Claude Code cannot start,
+  such as when it is no longer on the login shell's `PATH`, Hoot says
+  **Could not start Claude Code.** and why, keeps the worktree, and leaves the issue's status as it
+  was.
 - **Drafts**: the new issue dialog has one draft, wherever you open it: what you enter stays when
   the dialog closes (with Esc, its close button, or by showing another page), until you create the
   issue or quit Hoot. Removing the draft's project from the list leaves the draft without a
@@ -287,7 +319,9 @@ new worktree dialog says so.
   it out in a linked worktree in `~/.hoot/worktrees/<project>/<branch>` (with `/` and other
   characters that do not belong in a folder name replaced by `-`). An installed Hoot and one run
   from its repository use the same folders. Hoot does not start a session in the new worktree; it
-  expands the project, if it was collapsed, to show the worktree's row.
+  expands the project, if it was collapsed, to show the worktree's row. An issue's
+  [start button](#issues) creates a worktree for the issue the same way, without the dialog, and
+  starts Claude Code in it.
 - **Nested repositories**: repositories inside the project that it ignores or does not track (such
   as the `hoot/` repository in Hoot's own workspace) get the same branch, at the same path inside
   the worktree, so that the worktree looks like the project. Each starts from its own base branch:

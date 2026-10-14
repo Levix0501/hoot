@@ -18,7 +18,10 @@ export interface SessionInfo {
   /** The root of the project's worktree the session runs in, or `null` for the main worktree. */
   worktreePath: string | null
   toolId: ToolId
-  /** The issue sent to Claude Code when the session started, or `null` for any other session. */
+  /**
+   * The issue whose start button started the session, which Claude Code was
+   * sent when it started; `null` for any other session.
+   */
   issueId: number | null
   status: SessionStatus
   exit: SessionExit | null

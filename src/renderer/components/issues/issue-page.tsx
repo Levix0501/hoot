@@ -23,10 +23,10 @@ import {
 } from '../ui/dropdown-menu'
 import { Kbd } from '../ui/kbd'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { ClaudeCodeButton } from './claude-code-button'
 import { DescriptionEditor, type DescriptionEditorHandle } from './description-editor'
 import { IssueActivity } from './issue-activity'
 import { IssueProperties } from './issue-properties'
+import { IssueStartButton } from './issue-start-button'
 import { IssuesBreadcrumb, IssuesTopRow } from './issues-top-row'
 import { TitleField } from './title-field'
 import { useIssueShortcuts } from './use-issue-shortcuts'
@@ -262,7 +262,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
             className="flex min-h-7 justify-end gap-2 [grid-area:toolbar]"
             data-testid="issue-actions"
           >
-            {isIssueOpen(issue) && <ClaudeCodeButton issue={issue} />}
+            {isIssueOpen(issue) && <IssueStartButton issue={issue} tooltipSide="bottom" />}
           </div>
           <div className="[grid-area:title]">
             <IssueTitle issue={issue} onEnter={() => description.current?.focus()} />

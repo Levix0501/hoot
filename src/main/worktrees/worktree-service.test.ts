@@ -387,6 +387,159 @@ describe('WorktreeService', () => {
     expect(linkedWorktrees(inner)).toHaveLength(1)
   })
 
+  it("creates an issue's worktree from the branch checked out, with the inner repositories the dialog includes", async () => {
+    // The project's base branch is the one checked out; inner has a branch of
+    // that name, inner/deep only the one it has checked out.
+    git(project, 'checkout', '-q', 'develop')
+    // An inner repository without commits is left out.
+    const empty = path.join(project, 'empty')
+    fs.mkdirSync(empty)
+    git(empty, 'init', '-q', '-b', 'main')
+    await start()
+    const result = await service.createForIssue(project, {
+      id: 12,
+      title: 'Fix the login bug on Safari',
+    })
+    const branch = 'iss-12-fix-the-login-bug-on-safari'
+    const R = path.join(W, 'project', branch)
+    expect(result).toEqual({ ok: true, path: R, branch, warning: null })
+    expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
+    expect(linkedWorktrees(inner)).toEqual([{ path: path.join(R, 'inner'), prunable: false }])
+    expect(linkedWorktrees(deep)).toEqual([
+      { path: path.join(R, 'inner', 'deep'), prunable: false },
+    ])
+    expect(linkedWorktrees(empty)).toEqual([])
+    expect(fs.existsSync(path.join(R, 'empty'))).toBe(false)
+    expect(git(R, 'rev-parse', 'HEAD')).toBe(git(project, 'rev-parse', 'develop'))
+    expect(git(path.join(R, 'inner'), 'rev-parse', 'HEAD')).toBe(git(inner, 'rev-parse', 'develop'))
+    expect(git(path.join(R, 'inner', 'deep'), 'rev-parse', 'HEAD')).toBe(
+      git(deep, 'rev-parse', 'main'),
+    )
+    for (const member of [R, path.join(R, 'inner'), path.join(R, 'inner', 'deep')]) {
+      expect(git(member, 'branch', '--show-current')).toBe(branch)
+      // Hoot writes nothing in the worktree.
+      expect(git(member, 'status', '--porcelain')).toBe('')
+    }
+    expect(await listed()).toMatchObject([
+      { path: R, branch, innerMembers: ['inner', 'inner/deep'] },
+    ])
+  })
+
+  it("names an issue's branch with -2, -3 and on while a repository that takes part has the name", async () => {
+    git(deep, 'branch', 'iss-7-suffix')
+    git(project, 'branch', 'iss-7-suffix-2')
+    await start()
+    const result = await service.createForIssue(project, { id: 7, title: 'Suffix' })
+    const R = path.join(W, 'project', 'iss-7-suffix-3')
+    expect(result).toEqual({ ok: true, path: R, branch: 'iss-7-suffix-3', warning: null })
+    expect(branches(project)).toEqual(['develop', 'iss-7-suffix-2', 'iss-7-suffix-3', 'main'])
+    expect(branches(inner)).toEqual(['develop', 'iss-7-suffix-3', 'main'])
+    expect(branches(deep)).toEqual(['iss-7-suffix', 'iss-7-suffix-3', 'main'])
+
+    // The suffix comes after the 60 code points the name keeps of the title.
+    const long = `iss-8-${'y'.repeat(54)}`
+    git(project, 'branch', long)
+    const again = await service.createForIssue(project, { id: 8, title: 'y'.repeat(60) })
+    expect(again).toMatchObject({ ok: true, branch: `${long}-2` })
+    // Named after the issue as it is, also when its worktree's folder is taken.
+    fs.mkdirSync(path.join(W, 'project', 'iss-9-taken'), { recursive: true })
+    expect(await service.createForIssue(project, { id: 9, title: 'Taken' })).toEqual({
+      ok: true,
+      path: path.join(W, 'project', 'iss-9-taken-2'),
+      branch: 'iss-9-taken',
+      warning: null,
+    })
+  })
+
+  it("creates no issue's worktree when the base branch of the project or of an inner repository cannot be told", async () => {
+    git(project, 'checkout', '-q', '--detach')
+    await start()
+    const detached = await service.createForIssue(project, { id: 1, title: 'Detached' })
+    expect(detached).toMatchObject({ ok: false, reason: 'no-base' })
+    expect(detached.ok === false && detached.message).toMatch(/no branch checked out.*detached/)
+    expect(detached.ok === false && detached.message).toContain('New Worktree…')
+
+    git(project, 'checkout', '-q', 'main')
+    // inner/deep has no branch named main, and none checked out.
+    git(deep, 'branch', '-m', 'main', 'other')
+    git(deep, 'checkout', '-q', '--detach')
+    const undecided = await service.createForIssue(project, { id: 2, title: 'Inner two' })
+    expect(undecided).toEqual({
+      ok: false,
+      reason: 'no-base',
+      message:
+        "Hoot cannot tell which branch to start inner/deep from: it has no branch named main, and no branch checked out. Create the worktree with New Worktree… from the project's + menu instead, and pick the base branches there.",
+    })
+
+    expect(fs.existsSync(W)).toBe(false)
+    expect(branches(project)).toEqual(['develop', 'main'])
+    expect(branches(inner)).toEqual(['develop', 'main'])
+    expect(branches(deep)).toEqual(['other'])
+  })
+
+  it("creates no issue's worktree in a project whose branch has no commits yet", async () => {
+    const fresh = path.join(root, 'fresh')
+    fs.mkdirSync(fresh)
+    git(fresh, 'init', '-q', '-b', 'main')
+    service.addProject(fresh)
+    expect(await service.createForIssue(fresh, { id: 1, title: 'First' })).toEqual({
+      ok: false,
+      reason: 'no-base',
+      message:
+        "The branch checked out in the main worktree of fresh has no commits yet, so there is nothing to start the issue's branch from.",
+    })
+    expect(fs.existsSync(W)).toBe(false)
+  })
+
+  it("creates no issue's worktree in a project that is not a Git repository", async () => {
+    const plain = path.join(root, 'plain')
+    fs.mkdirSync(plain)
+    service.addProject(plain)
+    expect(await service.createForIssue(plain, { id: 1, title: 'Plain' })).toEqual({
+      ok: false,
+      reason: 'invalid',
+      message: 'This project is not a Git repository, so it cannot have worktrees.',
+    })
+    expect(fs.readdirSync(plain)).toEqual([])
+  })
+
+  it("says what Git said, and leaves nothing behind, when Git cannot create an issue's worktree", async () => {
+    fs.writeFileSync(path.join(project, '.git', 'refs', 'heads', 'iss-3-locked-ref.lock'), '')
+    await start()
+    const result = await service.createForIssue(project, { id: 3, title: 'Locked ref' })
+    expect(result).toMatchObject({ ok: false, reason: 'failed' })
+    expect(result.ok === false && result.message).toContain('iss-3-locked-ref.lock')
+    for (const repository of [project, inner, deep]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).not.toContain('iss-3-locked-ref')
+    }
+    expect(fs.existsSync(path.join(W, 'project'))).toBe(false)
+  })
+
+  it("keeps an issue's worktree whose post-checkout hook fails, with the hook's output as a warning", async () => {
+    fs.writeFileSync(
+      path.join(project, '.git', 'hooks', 'post-checkout'),
+      '#!/bin/sh\necho "hook says no" >&2\nexit 1\n',
+      { mode: 0o755 },
+    )
+    await start()
+    const result = await service.createForIssue(project, { id: 4, title: 'Hooked' })
+    expect(result).toMatchObject({ ok: true, branch: 'iss-4-hooked' })
+    expect(result.ok && result.warning).toContain('hook says no')
+    expect(linkedWorktrees(project)).toHaveLength(1)
+  })
+
+  it('reads the worktrees of a project again when asked to, and of none that is not in the list', async () => {
+    await start()
+    const changes: WorktreeInfo[][] = []
+    service.on('changed', (_root, worktrees) => changes.push(worktrees))
+    const added = path.join(W, 'project', 'added')
+    git(project, 'worktree', 'add', '-q', '-b', 'added', added)
+    expect(await service.read(project)).toMatchObject([{ path: added, branch: 'added' }])
+    expect(changes).toMatchObject([[{ path: added }]])
+    expect(await service.read(path.join(root, 'elsewhere'))).toBeNull()
+  })
+
   it('deletes a worktree, inner members first, keeping branches, and only what may be lost when asked to', async () => {
     await start()
     const created = await service.create({

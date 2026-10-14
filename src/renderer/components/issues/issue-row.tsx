@@ -1,6 +1,6 @@
 import { CopyIcon, DeleteIcon, LinkIcon, Trash2Icon } from 'lucide-react'
 import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
-import { issueIdentifier, type Issue } from '../../../shared/issues'
+import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
 import {
   optionOfDigit,
   PRIORITY_OPTIONS,
@@ -24,6 +24,7 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
+import { IssueStartButton } from './issue-start-button'
 import { PriorityOptionIcon, ProjectOptionIcon, StatusOptionIcon } from './property-picker'
 
 /**
@@ -88,7 +89,8 @@ function PropertySubmenu<T extends string | number | null>({
 
 /**
  * An issue in the list, as Linear shows it: its priority, its identifier, its
- * status, its title, its project if any, and when it was created. Click it to
+ * status, its title, its project if any, and when it was created, and at the
+ * end, for an issue neither done nor canceled, its start button. Click it to
  * show its page; right-click it to change its status, priority or project,
  * copy it or delete it.
  */
@@ -117,10 +119,15 @@ export function IssueRow({
 
   return (
     <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
-      <ContextMenuTrigger render={<li />} onMouseEnter={() => onHover(issue.id)}>
+      <ContextMenuTrigger
+        render={<li />}
+        className="group/row relative"
+        onMouseEnter={() => onHover(issue.id)}
+      >
+        {/* Room is left at the end of every row for the start button, so that the dates line up. */}
         <button
           type="button"
-          className="flex h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-[13px] outline-none hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted"
+          className="flex h-11 w-full items-center gap-2.5 rounded-lg pr-11 pl-3 text-left text-[13px] outline-none group-hover/row:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted"
           onClick={() => showIssue(issue.id)}
           data-popup-open={menuOpen || undefined}
           data-testid="issue-row"
@@ -163,6 +170,14 @@ export function IssueRow({
             {shortDate(issue.createdAt, now)}
           </time>
         </button>
+        {/* Beside the row's button, which it cannot be inside: clicking it does not show the issue. */}
+        {isIssueOpen(issue) && (
+          <IssueStartButton
+            issue={issue}
+            tooltipSide="top"
+            className="absolute top-1/2 right-2 -translate-y-1/2"
+          />
+        )}
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-48 [app-region:no-drag]" finalFocus={focusAfterOverlay}>
         <PropertySubmenu

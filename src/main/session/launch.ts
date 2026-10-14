@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Issue } from '../../shared/issues'
-import type { PermissionLevel } from '../../shared/permission-levels'
+import { findPermissionLevel, type PermissionLevel } from '../../shared/permission-levels'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
 import {
@@ -24,16 +24,22 @@ export interface LaunchContext {
   /** The permission level currently selected for a coding tool. */
   permissionLevel(tool: CodingToolId): PermissionLevel
   /**
-   * Where each session an issue is sent to gets a folder of its own for the
-   * issue's file: the system's folder for temporary files.
+   * Where each session started from an issue gets a folder of its own for
+   * the issue's file: the system's folder for temporary files.
    */
   temporaryFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
 }
 
-/** What a session started from an issue sends Claude Code: the issue's title and description. */
-export type SentIssue = Pick<Issue, 'title' | 'description'>
+/**
+ * What a session started from an issue's start button sends Claude Code: the
+ * issue's title and description, and the branch of the worktree the session
+ * runs in.
+ */
+export interface SentIssue extends Pick<Issue, 'title' | 'description'> {
+  branch: string
+}
 
 /** The name of the file that holds an issue sent to a session, in the session's own folder. */
 const ISSUE_FILE_NAME = 'issue.md'
@@ -51,33 +57,38 @@ function withoutNul(text: string): string {
  * The file of an issue sent to a session: its title as a Markdown heading,
  * and its description, if any, below it.
  */
-export function issueFileText(issue: SentIssue): string {
+export function issueFileText(issue: Pick<Issue, 'title' | 'description'>): string {
   const heading = `# ${withoutNul(issue.title)}`
   const description = withoutNul(issue.description)
   return description === '' ? `${heading}\n` : `${heading}\n\n${description}\n`
 }
 
 /**
- * The first message of a session an issue is sent to: Hoot's instructions to
- * judge the issue's workload and to split it if needed, which point to the
- * issue's file for the agent to read. They are the same for any agent. The
+ * The first message of a session started from an issue's start button:
+ * Hoot's instructions, which point to the issue's file for the agent to read
+ * and name the worktree's branch. They ask the agent first to judge the
+ * issue's workload against the code without changing anything, and then
+ * either to split the issue, or to implement it in the worktree once the
+ * user confirms that it needs no split. They are the same for any agent. The
  * issue itself stays out of the message, where an agent could take some of
  * its text for a command or a mention, and out of the program's arguments,
  * whose length is limited.
  */
-export function splitIssuePrompt(issueFile: string): string {
+export function startIssuePrompt(issueFile: string, branch: string): string {
   return [
-    `The issue to judge is in \`${issueFile}\`. Read it first: its title is the heading; the rest, if any, is its description.`,
+    `The issue to work on is in \`${issueFile}\`. Read it first: its title is the heading; the rest, if any, is its description.`,
     '',
-    "Judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
+    `This is a Git worktree of the project, on the branch \`${branch}\`, made for this issue.`,
+    '',
+    "First judge the issue against this project's code. Read whatever you need, but change nothing yet: no edits, no commits, no commands that change files.",
     '',
     '1. Workload: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time.',
-    '2. If yes, say that it needs no split, and stop.',
+    '2. If yes, say that it needs no split, and wait for me to confirm. Once I do, implement the issue here.',
     '3. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
     '   - Title',
     '   - Description: what it delivers, and how to accept it',
     '   - Waits on: the issues it cannot be delivered and accepted without, or none',
-    '4. End with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`.',
+    '4. End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`, and stop there.',
     '',
     "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
   ].join('\n')
@@ -95,7 +106,7 @@ export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
   return [
     `--add-dir=${issueFolder}`,
     `--name=${withoutNul(issue.title)}`,
-    splitIssuePrompt(path.join(issueFolder, ISSUE_FILE_NAME)),
+    startIssuePrompt(path.join(issueFolder, ISSUE_FILE_NAME), issue.branch),
   ]
 }
 
@@ -103,7 +114,10 @@ export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
  * Writes the file of an issue sent to a session, in a new folder of the
  * session's own, and returns that folder.
  */
-async function writeIssueFolder(temporaryFolder: string, issue: SentIssue): Promise<string> {
+async function writeIssueFolder(
+  temporaryFolder: string,
+  issue: Pick<Issue, 'title' | 'description'>,
+): Promise<string> {
   let folder: string | null = null
   try {
     folder = await fs.mkdtemp(path.join(temporaryFolder, 'hoot-issue-'))
@@ -130,16 +144,18 @@ async function checkFolder(cwd: string): Promise<void> {
  * default shell as a login shell, starting from the same environment a
  * terminal opened from the Dock would give it. A coding tool runs its command
  * directly, with the login shell environment and with exactly the arguments
- * of its permission level; Claude Code, when it is sent an issue, also with
- * the arguments that send it, once the issue's file is written; the launch's
- * cleanup removes the file's folder. Either environment also has what hoot
- * needs to run in the session.
+ * of its permission level: the one `permissionLevel` names, or else the one
+ * picked now. Claude Code, when it is sent an issue, also gets the arguments
+ * that send it, once the issue's file is written; the launch's cleanup
+ * removes the file's folder. Either environment also has what hoot needs to
+ * run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
   toolId: ToolId,
   cwd: string,
   issue: SentIssue | null = null,
+  permissionLevel: string | null = null,
 ): Promise<SessionLaunch> {
   const tool = getTool(toolId)
   if (issue !== null && tool.id !== 'claude') {
@@ -154,9 +170,12 @@ export async function resolveLaunch(
     }
   }
 
-  // Read when the session starts: selecting another level later does not
-  // change this session, even while it waits for the login shell environment.
-  const level = context.permissionLevel(tool.id)
+  // Read when the session starts, unless it was given: selecting another
+  // level later does not change this session, even while it waits for the
+  // login shell environment.
+  const level =
+    (permissionLevel === null ? undefined : findPermissionLevel(tool.id, permissionLevel)) ??
+    context.permissionLevel(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
   const found = await findCommand(tool.command, login.env)

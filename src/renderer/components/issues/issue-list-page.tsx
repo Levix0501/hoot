@@ -77,9 +77,14 @@ export function IssueListPage() {
   } | null>(null)
   const pickedIssue = issues.find((issue) => issue.id === picker?.issueId)
 
-  /** The row that keys act on: the one with the focus, or else the one under the pointer. */
+  /**
+   * The row that keys act on: the one with the focus, also on its start
+   * button, or else the one under the pointer.
+   */
   const currentRow = (): HTMLElement | null => {
-    const focused = document.activeElement?.closest<HTMLElement>('[data-testid="issue-row"]')
+    const focused = document.activeElement
+      ?.closest('li')
+      ?.querySelector<HTMLElement>('[data-testid="issue-row"]')
     if (focused && listRef.current?.contains(focused)) return focused
     return hovered.current === null ? null : rowOf(listRef.current, hovered.current)
   }

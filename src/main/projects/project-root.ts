@@ -5,7 +5,6 @@ import { gitEnvironment, parseWorktreeList, runGit } from '../git/git'
 
 export type ProjectRootResult =
   | { kind: 'ok'; root: string }
-  | { kind: 'not-git' }
   | { kind: 'bare' }
   /** Git does not record where the repository's main worktree is. */
   | { kind: 'unknown-main-worktree' }
@@ -52,10 +51,11 @@ async function findMainWorktree(
 }
 
 /**
- * Finds the project root of a directory: the top-level directory of the main
- * worktree of the innermost Git repository that contains it, as a canonical
- * path. Directories of bare repositories (including their linked worktrees),
- * and directories whose main worktree Git does not record, are rejected.
+ * Finds the project root of a directory, as a canonical path: the top-level
+ * directory of the main worktree of the innermost Git repository that
+ * contains it, or the directory itself when it is in no Git repository.
+ * Directories of bare repositories (including their linked worktrees), and
+ * directories whose main worktree Git does not record, are rejected.
  */
 export async function resolveProjectRoot(
   directory: string,
@@ -75,7 +75,7 @@ export async function resolveProjectRoot(
     env,
   )
   if (list.code !== 0) {
-    if (/not a git repository/i.test(list.stderr)) return { kind: 'not-git' }
+    if (/not a git repository/i.test(list.stderr)) return { kind: 'ok', root: canonical }
     const message = list.stderr.trim() || `git exited with code ${list.code}.`
     return { kind: 'error', message }
   }

@@ -9,7 +9,7 @@ import {
   type CreateWorktreeResult,
   type DeleteWorktreeResult,
   type InspectWorktreeResult,
-  type NewWorktreeOptions,
+  type NewWorktreeOptionsResult,
   type RemoveWorktreeResult,
   type WorktreeInfo,
   type WorktreeInspection,
@@ -28,6 +28,7 @@ import {
   findInnerRepositories,
   git,
   hasBranch,
+  locateRepository,
   readBranches,
   submodulesAt,
   type GitContext,
@@ -198,12 +199,22 @@ export class WorktreeService extends EventEmitter<{
     return entry !== undefined && (await isDirectory(directory))
   }
 
-  /** What the new worktree dialog offers, after looking for inner repositories again. */
-  async newWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptions | null> {
+  /**
+   * What the new worktree dialog offers, after looking for inner repositories
+   * again; or why it offers nothing, as for a project that is not a Git
+   * repository.
+   */
+  async newWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptionsResult> {
     const state = this.projects.get(projectRoot)
-    if (!state) return null
-    await this.discover(state)
+    if (!state) return { ok: false, message: 'This project is no longer in the list.' }
     const context = await this.options.gitContext()
+    if (!(await locateRepository(context, projectRoot))) {
+      return {
+        ok: false,
+        message: 'This project is not a Git repository, so it cannot have worktrees.',
+      }
+    }
+    await this.discover(state)
     const [project, nested] = await Promise.all([
       readBranches(context, projectRoot),
       Promise.all(
@@ -213,7 +224,7 @@ export class WorktreeService extends EventEmitter<{
         })),
       ),
     ])
-    return { branches: project.branches, current: project.current, nested }
+    return { ok: true, options: { branches: project.branches, current: project.current, nested } }
   }
 
   /** Whether Git accepts a name as a new branch's name. */

@@ -40,6 +40,7 @@ beforeAll(() => {
   git(nested, 'init', '-q', '-b', 'main')
 
   fs.mkdirSync(path.join(root, 'plain'))
+  fs.symlinkSync(path.join(root, 'plain'), path.join(root, 'link-to-plain'))
   fs.symlinkSync(path.join(repo, 'sub'), path.join(root, 'link-to-sub'))
 
   const seed = path.join(root, 'seed')
@@ -139,8 +140,10 @@ describe('resolveProjectRoot', () => {
     expect(await resolve(path.join(root, 'separate.git'))).toEqual(unknown)
   })
 
-  it('rejects folders outside any repository', async () => {
-    expect(await resolve(path.join(root, 'plain'))).toEqual({ kind: 'not-git' })
+  it('uses a folder outside any repository as it is, by its canonical path', async () => {
+    const expected = { kind: 'ok', root: path.join(root, 'plain') }
+    expect(await resolve(path.join(root, 'plain'))).toEqual(expected)
+    expect(await resolve(path.join(root, 'link-to-plain'))).toEqual(expected)
   })
 
   it('rejects bare repositories and their linked worktrees', async () => {

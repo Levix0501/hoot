@@ -254,15 +254,39 @@ describe('WorktreeService', () => {
     expect(await listed()).toMatchObject([{ path: R, innerMembers: ['later'] }])
   })
 
+  it('offers no new worktree for a project that is not a Git repository or not in the list', async () => {
+    const plain = path.join(root, 'plain')
+    fs.mkdirSync(plain)
+    fs.writeFileSync(path.join(plain, 'notes.md'), 'notes\n')
+    service.addProject(plain)
+    expect(await service.newWorktreeOptions(plain)).toEqual({
+      ok: false,
+      message: 'This project is not a Git repository, so it cannot have worktrees.',
+    })
+    expect((await service.listAll())[plain]).toEqual([])
+    expect(await service.newWorktreeOptions(path.join(root, 'elsewhere'))).toEqual({
+      ok: false,
+      message: 'This project is no longer in the list.',
+    })
+  })
+
   it('offers the branches and inner repositories, checks names, and previews the location', async () => {
     await start()
     expect(await service.newWorktreeOptions(project)).toEqual({
-      branches: ['develop', 'main'],
-      current: 'main',
-      nested: [
-        { relativePath: 'inner', branches: ['develop', 'main'], current: 'main', hasCommits: true },
-        { relativePath: 'inner/deep', branches: ['main'], current: 'main', hasCommits: true },
-      ],
+      ok: true,
+      options: {
+        branches: ['develop', 'main'],
+        current: 'main',
+        nested: [
+          {
+            relativePath: 'inner',
+            branches: ['develop', 'main'],
+            current: 'main',
+            hasCommits: true,
+          },
+          { relativePath: 'inner/deep', branches: ['main'], current: 'main', hasCommits: true },
+        ],
+      },
     })
     expect(await service.isValidBranchName('feat/login')).toBe(true)
     expect(await service.isValidBranchName('bad..name')).toBe(false)

@@ -158,7 +158,7 @@ export function NoSession() {
           <EmptyDescription>
             {hasProjects
               ? 'Start a session from a project in the sidebar.'
-              : 'Add a local Git repository to get started.'}
+              : 'Add a project to get started.'}
           </EmptyDescription>
         </EmptyHeader>
         {!hasProjects && (

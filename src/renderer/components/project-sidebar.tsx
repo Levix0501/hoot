@@ -222,7 +222,7 @@ export function ProjectSidebar() {
           <SidebarGroupContent>
             {projects.length === 0 ? (
               <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-projects">
-                No projects yet. Add a local Git repository to get started.
+                No projects
               </p>
             ) : (
               <SidebarMenu data-testid="project-list">

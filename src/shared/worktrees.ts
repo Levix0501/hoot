@@ -69,6 +69,11 @@ export interface NewWorktreeOptions {
   nested: NestedRepositoryOption[]
 }
 
+/** What the new worktree dialog offers, or why the project cannot have a new worktree. */
+export type NewWorktreeOptionsResult =
+  | { ok: true; options: NewWorktreeOptions }
+  | { ok: false; message: string }
+
 export interface CreateWorktreeRequest {
   projectRoot: string
   /** The name of the new branch, and of the worktree. */

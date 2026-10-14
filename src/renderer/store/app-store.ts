@@ -1011,11 +1011,6 @@ export const useAppStore = create<AppState>()((set, get) => {
             description: pathText(result.project.root),
           })
           break
-        case 'not-git':
-          toast.error('The selected folder is not in a Git repository.', {
-            description: pathText(result.path),
-          })
-          break
         case 'bare':
           toast.error('Bare repositories are not supported yet.', {
             description: pathText(result.path),

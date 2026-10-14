@@ -32,6 +32,7 @@ import { TOOL_IDS } from '../shared/tools'
 import type {
   CreateWorktreeRequest,
   DeleteWorktreeResult,
+  NewWorktreeOptionsResult,
   RemoveWorktreeResult,
 } from '../shared/worktrees'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
@@ -226,8 +227,6 @@ export function registerIpc(deps: IpcDependencies): void {
 
     const resolved = await deps.resolveProjectRoot(directory)
     switch (resolved.kind) {
-      case 'not-git':
-        return { kind: 'not-git', path: directory }
       case 'bare':
         return { kind: 'bare', path: directory }
       case 'unknown-main-worktree':
@@ -383,9 +382,11 @@ export function registerIpc(deps: IpcDependencies): void {
     send(IpcChannel.worktreesChanged, root, worktrees),
   )
 
-  handle(IpcChannel.newWorktreeOptions, (_event, value) => {
+  handle(IpcChannel.newWorktreeOptions, (_event, value): Promise<NewWorktreeOptionsResult> => {
     const parsed = projectRoot.safeParse(value)
-    return parsed.success ? deps.worktrees.newWorktreeOptions(parsed.data) : null
+    return parsed.success
+      ? deps.worktrees.newWorktreeOptions(parsed.data)
+      : Promise.resolve({ ok: false, message: 'Invalid project.' })
   })
 
   handle(IpcChannel.checkBranchName, (_event, value) => {

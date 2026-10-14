@@ -4,6 +4,7 @@ import {
   defaultNestedBase,
   type NestedRepositoryOption,
   type NewWorktreeOptions,
+  type NewWorktreeOptionsResult,
 } from '../../shared/worktrees'
 import { api } from '../lib/api'
 import { errorMessage, focusAfterOverlay, useAppStore } from '../store/app-store'
@@ -404,7 +405,7 @@ function NewWorktreeContent({
   const projectName = useAppStore(
     (state) => state.projects.find((project) => project.root === projectRoot)?.name,
   )
-  const [options, setOptions] = useState<NewWorktreeOptions | null | undefined>(undefined)
+  const [options, setOptions] = useState<NewWorktreeOptionsResult | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
   useEffect(() => {
     let current = true
@@ -450,9 +451,9 @@ function NewWorktreeContent({
           <Spinner />
           Looking for branches and nested repositories…
         </p>
-      ) : options === null ? (
+      ) : !options.ok ? (
         <>
-          <p className="text-sm text-destructive">This project is no longer in the list.</p>
+          <p className="text-sm text-destructive">{options.message}</p>
           <DialogFooter>
             <Button variant="outline" onClick={onDone}>
               Close
@@ -462,7 +463,7 @@ function NewWorktreeContent({
       ) : (
         <NewWorktreeForm
           projectRoot={projectRoot}
-          options={options}
+          options={options.options}
           onCreatingChange={onCreatingChange}
           onDone={onDone}
         />

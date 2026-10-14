@@ -10,7 +10,7 @@ import type {
   CreateWorktreeResult,
   DeleteWorktreeResult,
   InspectWorktreeResult,
-  NewWorktreeOptions,
+  NewWorktreeOptionsResult,
   RemoveWorktreeResult,
   WorktreeInfo,
 } from './worktrees'
@@ -18,7 +18,10 @@ import type {
 export interface Project {
   /** Stays the same when the project is removed from the list and added again. */
   id: number
-  /** Canonical path of the main worktree's top-level directory. */
+  /**
+   * Canonical path of the project's folder: the top-level directory of a Git
+   * repository's main worktree, or a folder outside Git.
+   */
   root: string
   /** Display name, the last path segment of `root`. */
   name: string
@@ -28,7 +31,6 @@ export type AddProjectResult =
   | { kind: 'added'; project: Project }
   | { kind: 'duplicate'; project: Project }
   | { kind: 'cancelled' }
-  | { kind: 'not-git'; path: string }
   | { kind: 'bare'; path: string }
   | { kind: 'unknown-main-worktree'; path: string }
   | { kind: 'error'; message: string }
@@ -232,8 +234,11 @@ export interface HootApi {
    */
   currentWorktree(projectRoot: string, worktreePath: string): Promise<WorktreeInfo | null>
   onWorktreesChanged(listener: (projectRoot: string, worktrees: WorktreeInfo[]) => void): () => void
-  /** What the new worktree dialog offers; `null` when the project is not in the list. */
-  getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptions | null>
+  /**
+   * What the new worktree dialog offers, or why it offers nothing: the project
+   * is not in the list, or not a Git repository.
+   */
+  getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptionsResult>
   /** Whether Git accepts the name as a new branch's name. */
   checkBranchName(name: string): Promise<boolean>
   /** Where a new worktree of the branch would be created, also with `~` for the home directory. */

@@ -1,7 +1,7 @@
 # Hoot
 
 Hoot is a desktop app for developers who use coding CLIs such as Claude Code, Codex and
-OpenCode. Add local Git projects, then run coding tools and shells for them in terminals embedded in
+OpenCode. Add local projects, then run coding tools and shells for them in terminals embedded in
 the Hoot window, as many at a time as you like.
 
 Hoot supports macOS. Hoot for Windows is a preview: for now adding projects works, but starting
@@ -9,13 +9,14 @@ sessions does not yet.
 
 ## Features
 
-- **Projects**: add a local Git repository by choosing any folder inside it (including a linked
-  worktree, a submodule, or a repository whose Git directory is kept elsewhere). The project is the
-  repository's main worktree, the working directory it was created with. Folders outside Git, bare
-  repositories, and folders from which Git cannot tell where the main worktree is (such as a linked
-  worktree of a repository whose Git directory is kept elsewhere) are refused. The list is kept
-  across restarts. Right-click a project, or use its `⋯` menu, to remove it from the list (its
-  files and its issues are never touched).
+- **Projects**: add any folder as a project. A folder in a Git repository (including a linked
+  worktree, a submodule, or a repository whose Git directory is kept elsewhere) adds the
+  repository: the project is its main worktree, the working directory it was created with. A folder
+  outside Git is a project as it is, without [worktrees](#worktrees). Bare repositories, and folders
+  from which Git cannot tell where the main worktree is (such as a linked worktree of a repository
+  whose Git directory is kept elsewhere), are refused. The list is kept across restarts.
+  Right-click a project, or use its `⋯` menu, to remove it from the list (its files and its issues
+  are never touched).
 - **The project row**: a project's row in the sidebar shows its name, and how many of its
   [issues](#issues) are neither done nor canceled. Click it to expand or collapse the project: its
   sessions and [worktrees](#worktrees) are listed below it while it is expanded, and slide open and
@@ -278,7 +279,8 @@ pipe, and cmd and PowerShell would run `hoot.cmd`, and Git Bash `hoot`, both in 
 ## Worktrees
 
 Worktrees let several agents work on one project at the same time, each on a branch of its own in
-a folder of its own.
+a folder of its own. Only a project that is a Git repository has them: for any other project, the
+new worktree dialog says so.
 
 - **Creating**: choose **New Worktree…** from a project's `+` menu or its context menu, enter the
   name of a new branch and pick the local branch it starts from. Hoot creates the branch and checks

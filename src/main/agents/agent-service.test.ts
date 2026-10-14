@@ -476,6 +476,119 @@ describe('AgentService updates', () => {
     })
   })
 
+  it('fails when the version afterwards is not newer', async () => {
+    installInto(prefix, 'opencode', '1.0.0')
+    setLatest('opencode', '0.9.0')
+    const { service, agent, ended } = setup()
+    await service.detect()
+    service.update('opencode')
+    await ended('opencode')
+    expect(agent('opencode').operation).toMatchObject({
+      status: 'failed',
+      message: '✕ Update failed: npm finished, but the version is 0.9.0, not newer than 1.0.0',
+    })
+  })
+
+  it('fails when the agent is found somewhere else afterwards', async () => {
+    const { service, paths, agent, ended } = setup()
+    installInto(paths.directory, 'codex', '1.0.0')
+    setLatest('codex', '1.2.0')
+    // Meanwhile a Codex comes on the login shell PATH, which comes first.
+    const elsewhere = path.join(prefix, 'bin', 'codex')
+    write(
+      path.join(root, 'npm-script'),
+      `printf '#!/bin/sh\\necho 3.0.0\\n' > ${JSON.stringify(elsewhere)}\nchmod 755 ${JSON.stringify(elsewhere)}\n`,
+    )
+    await service.detect()
+    service.update('codex')
+    await ended('codex')
+    expect(agent('codex').operation).toMatchObject({
+      status: 'failed',
+      message: `✕ Update failed: npm finished, but Codex is now found at ${elsewhere}`,
+    })
+  })
+
+  it("updates an npm installation in another global folder with that folder's npm, first on PATH", async () => {
+    const other = path.join(root, 'other-global')
+    write(path.join(other, 'bin', 'npm'), FAKE_NPM.replace('__ROOT__', JSON.stringify(root)), 0o755)
+    installInto(other, 'codex', '1.0.0')
+    // Found on the login shell PATH, in the folder of the computer's npm's commands.
+    fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true })
+    fs.symlinkSync(
+      path.join(other, 'lib', 'node_modules', '@openai', 'codex', 'bin', 'codex'),
+      path.join(prefix, 'bin', 'codex'),
+    )
+    setLatest('codex', '2.1.0')
+    const installPath = path.join(root, 'install-path')
+    write(path.join(root, 'npm-script'), `echo "$PATH" > ${JSON.stringify(installPath)}\n`)
+    const { service, agent, ended } = setup()
+    await service.detect()
+    expect(agent('codex').installation).toMatchObject({
+      path: path.join(prefix, 'bin', 'codex'),
+      method: 'npm',
+      version: '1.0.0',
+    })
+    service.update('codex')
+    await ended('codex')
+    expect(agent('codex').operation).toMatchObject({
+      status: 'succeeded',
+      message: '✓ Updated to 2.1.0',
+    })
+    expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
+      `${path.join(other, 'bin', 'npm')} install -g @openai/codex@latest --loglevel=http`,
+    ])
+    // So that it runs with the node beside it.
+    expect(fs.readFileSync(installPath, 'utf8').split(':')[0]).toBe(path.join(other, 'bin'))
+    expect(fs.readdirSync(path.join(prefix, 'lib', 'node_modules'))).toEqual([])
+  })
+
+  it('upgrades only the Homebrew cask or formula an installation comes from', async () => {
+    const brewPrefix = path.join(root, 'homebrew')
+    const brewLog = path.join(root, 'brew.log')
+    const claude = (version: string) =>
+      path.join(brewPrefix, 'Caskroom', 'claude-code', version, 'claude')
+    const opencode = (version: string) =>
+      path.join(brewPrefix, 'Cellar', 'opencode', version, 'bin', 'opencode')
+    for (const version of ['1.0.0', '2.0.0']) {
+      write(claude(version), `#!/bin/sh\necho "${version} (Claude Code)"\n`, 0o755)
+      write(opencode(version), `#!/bin/sh\necho "${version}"\n`, 0o755)
+    }
+    fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true })
+    fs.symlinkSync(claude('1.0.0'), path.join(prefix, 'bin', 'claude'))
+    fs.symlinkSync(opencode('1.0.0'), path.join(prefix, 'bin', 'opencode'))
+    write(
+      path.join(brewPrefix, 'bin', 'brew'),
+      [
+        '#!/bin/sh',
+        `echo "$*" >> ${JSON.stringify(brewLog)}`,
+        'case "$3" in',
+        `  claude-code) ln -sf ${JSON.stringify(claude('2.0.0'))} ${JSON.stringify(path.join(prefix, 'bin', 'claude'))} ;;`,
+        `  opencode) ln -sf ${JSON.stringify(opencode('2.0.0'))} ${JSON.stringify(path.join(prefix, 'bin', 'opencode'))} ;;`,
+        'esac',
+        '',
+      ].join('\n'),
+      0o755,
+    )
+    const { service, agent, ended } = setup()
+    await service.detect()
+    expect(agent('claude').installation?.method).toBe('homebrew')
+    expect(agent('opencode').installation?.method).toBe('homebrew')
+    service.update('claude')
+    service.update('opencode')
+    await ended('claude')
+    await ended('opencode')
+    for (const id of ['claude', 'opencode'] as const) {
+      expect(agent(id).operation).toMatchObject({
+        status: 'succeeded',
+        message: '✓ Updated to 2.0.0',
+      })
+    }
+    expect(fs.readFileSync(brewLog, 'utf8')).toBe(
+      'upgrade --cask claude-code\nupgrade --formula opencode\n',
+    )
+    expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
+  })
+
   it("runs the official installer's own update command", async () => {
     const versions = path.join(home, '.local', 'share', 'claude', 'versions')
     write(

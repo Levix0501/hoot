@@ -19,7 +19,8 @@ export interface QuitGuardOptions {
   agentOperations(): AgentOperationSummary[]
   /**
    * Stops them: those waiting never run, and the command of the one running
-   * is sent SIGTERM; settles once its process has ended.
+   * is sent SIGTERM; settles once its process has ended, and none is left
+   * running or waiting.
    */
   stopAgentOperations(): Promise<void>
   /** Called when the user chose to keep Hoot running. */

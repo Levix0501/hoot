@@ -26,13 +26,14 @@ export type AgentOperationKind = 'install' | 'update'
 
 /**
  * Where an install or an update is: waiting for the one before it, running
- * (with the last line of what its command wrote so far, and whether it was
- * cancelled and waits for its command to end), or ended. An ended
- * operation's message is the result as the Agents page writes it.
+ * (with the last line of what its command wrote so far, and whether Cancel can
+ * still stop it: not once it was cancelled and waits for its command to end,
+ * nor once its command has ended and the agent is read again), or ended. An
+ * ended operation's message is the result as the Agents page writes it.
  */
 export type AgentOperation =
   | { kind: AgentOperationKind; status: 'waiting' }
-  | { kind: AgentOperationKind; status: 'running'; lastLine: string; cancelling: boolean }
+  | { kind: AgentOperationKind; status: 'running'; lastLine: string; cancellable: boolean }
   | { kind: AgentOperationKind; status: 'succeeded'; message: string }
   | {
       kind: AgentOperationKind

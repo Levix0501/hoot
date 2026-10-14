@@ -120,6 +120,8 @@ function setup(
     withNpm?: boolean
     latest?: Partial<Record<CodingToolId, string | null>>
     sessions?: () => string[]
+    /** Runs each time the login shell environment is read, before it is. */
+    beforeLoginEnvironment?: () => Promise<void>
   } = {},
 ) {
   const paths = agentPaths({
@@ -140,7 +142,10 @@ function setup(
     baseEnv: {},
     cwd: home,
     agentsBinDirectory: paths.binDirectory,
-    resolveEnv: async () => ({ PATH: loginPath, HOME: home }),
+    resolveEnv: async () => {
+      await options.beforeLoginEnvironment?.()
+      return { PATH: loginPath, HOME: home }
+    },
   })
   const latestCalls: string[] = []
   const service = new AgentService({
@@ -176,6 +181,29 @@ function setup(
       { timeout: 10_000, interval: 20 },
     )
   return { service, paths, tools, states, agent, ended, latestCalls }
+}
+
+/**
+ * A service whose readings of the login shell environment wait, from
+ * `hold()` on, until `release()`; `reads` counts them.
+ */
+function heldSetup() {
+  let gate: PromiseWithResolvers<void> | null = null
+  let reads = 0
+  const context = setup({
+    beforeLoginEnvironment: async () => {
+      reads += 1
+      await gate?.promise
+    },
+  })
+  return {
+    ...context,
+    reads: () => reads,
+    hold: () => {
+      gate = Promise.withResolvers<void>()
+    },
+    release: () => gate?.resolve(),
+  }
 }
 
 describe('AgentService detection', () => {
@@ -581,7 +609,7 @@ describe('AgentService queue and cancelling', () => {
     service.install('claude')
     await vi.waitFor(() => expect(started()).toHaveLength(1))
     service.cancel('claude')
-    expect(agent('claude').operation).toMatchObject({ status: 'running', cancelling: true })
+    expect(agent('claude').operation).toMatchObject({ status: 'running', cancellable: false })
     service.cancel('claude')
     const stopped = service.stopAll()
     await vi.waitFor(() => expect(fs.existsSync(path.join(root, 'signals.log'))).toBe(true))
@@ -606,5 +634,46 @@ describe('AgentService queue and cancelling', () => {
     expect(npmRuns().filter((run) => run.includes('codex'))).toEqual([])
     expect(service.pendingOperations()).toEqual([])
     expect(started()).toHaveLength(1)
+  })
+
+  it('keeps the result of a command that has ended, cancelled while the agent is read again', async () => {
+    const { service, agent, ended, reads, hold, release } = heldSetup()
+    await service.detect()
+    hold()
+    const before = reads()
+    service.install('claude')
+    // Once npm has ended, the agent is read again, which waits.
+    await vi.waitFor(() => expect(reads()).toBe(before + 1))
+    expect(agent('claude').operation).toMatchObject({ status: 'running', cancellable: false })
+    service.cancel('claude')
+    release()
+    await ended('claude')
+    expect(agent('claude').operation).toEqual({
+      kind: 'install',
+      status: 'succeeded',
+      message: '✓ Installed 2.0.0',
+    })
+  })
+
+  it('waits for the result of a command that has ended, for quitting, and leaves nothing pending', async () => {
+    const { service, agent, reads, hold, release } = heldSetup()
+    await service.detect()
+    hold()
+    const before = reads()
+    service.install('claude')
+    service.install('codex')
+    await vi.waitFor(() => expect(reads()).toBe(before + 1))
+    let stopped = false
+    const stopping = service.stopAll().then(() => {
+      stopped = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(stopped).toBe(false)
+    release()
+    await stopping
+    expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
+    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    expect(service.pendingOperations()).toEqual([])
+    expect(npmRuns().filter((run) => run.includes('codex'))).toEqual([])
   })
 })

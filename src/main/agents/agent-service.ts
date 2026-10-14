@@ -78,8 +78,13 @@ interface Operation {
   process: RunningProcess | null
   /** Whether its command's process has been sent SIGTERM. */
   terminated: boolean
-  /** Settles once its command's process has ended, or it is known to start none. */
-  commandEnded: PromiseWithResolvers<void>
+  /**
+   * Set once its command's process has ended, or it is known to start none:
+   * cancelling it then changes nothing, and its result stands.
+   */
+  commandDone: boolean
+  /** Settles once it has ended, with its result. */
+  ended: PromiseWithResolvers<void>
 }
 
 interface AgentRecord {
@@ -125,10 +130,13 @@ function terminate(operation: Operation): void {
   operation.process.signal('SIGTERM')
 }
 
-/** A running operation's state, as cancelling it shows. */
-function cancelling(operation: Operation): void {
-  if (operation.state.status === 'running') {
-    operation.state = { ...operation.state, cancelling: true }
+/**
+ * A running operation's state, once Cancel can no longer stop it: it was
+ * cancelled and waits for its command to end, or its command has ended.
+ */
+function uncancellable(operation: Operation): void {
+  if (operation.state.status === 'running' && operation.state.cancellable) {
+    operation.state = { ...operation.state, cancellable: false }
   }
 }
 
@@ -219,7 +227,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   /**
    * Cancels an agent's operation: one that waits leaves the queue and runs
    * nothing; the command of one that runs is sent SIGTERM, once, and the
-   * operation ends once its process has.
+   * operation ends once its process has. Once its command has ended, it is
+   * too late: the operation ends with the command's result.
    */
   cancel(id: CodingToolId): void {
     const record = this.record(id)
@@ -229,14 +238,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       this.queue = this.queue.filter((queued) => queued !== record)
       operation.cancelled = true
       operation.state = { kind: operation.kind, status: 'cancelled' }
-      operation.commandEnded.resolve()
+      operation.ended.resolve()
       this.changed()
       void this.readInstallations([record])
       return
     }
-    if (operation.state.status === 'running' && !operation.cancelled) {
+    if (operation.state.status === 'running' && !operation.cancelled && !operation.commandDone) {
       operation.cancelled = true
-      cancelling(operation)
+      uncancellable(operation)
       terminate(operation)
       this.changed()
     }
@@ -253,7 +262,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   /**
    * Stops every operation, for quitting: those waiting never run their
    * command, and the command of the one running is sent SIGTERM. Settles once
-   * its process has ended.
+   * that one has ended: once its process has or, when its command had
+   * already ended, once it has read the agent again for its result.
    */
   async stopAll(): Promise<void> {
     for (const record of this.queue.splice(0)) {
@@ -262,17 +272,17 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       operation.cancelled = true
       operation.stopped = true
       operation.state = { kind: operation.kind, status: 'cancelled' }
-      operation.commandEnded.resolve()
+      operation.ended.resolve()
     }
     const operation = this.running?.operation
-    if (operation) {
+    if (operation && !operation.commandDone) {
       operation.cancelled = true
       operation.stopped = true
-      cancelling(operation)
+      uncancellable(operation)
       terminate(operation)
     }
     this.changed()
-    await operation?.commandEnded.promise
+    await operation?.ended.promise
   }
 
   private record(id: CodingToolId): AgentRecord {
@@ -422,7 +432,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       stopped: false,
       process: null,
       terminated: false,
-      commandEnded: Promise.withResolvers<void>(),
+      commandDone: false,
+      ended: Promise.withResolvers<void>(),
     }
     this.queue.push(record)
     this.changed()
@@ -443,7 +454,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   private async perform(record: AgentRecord, operation: Operation): Promise<void> {
     const { kind } = operation
-    operation.state = { kind, status: 'running', lastLine: '', cancelling: false }
+    operation.state = { kind, status: 'running', lastLine: '', cancellable: true }
     this.changed()
     const before = record.installation
     const sessionsBefore = kind === 'update' ? this.options.runningSessions(record.tool.id) : []
@@ -477,7 +488,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           ? error.message
           : `Hoot could not run it: ${errorMessage(error)}`
     } finally {
-      operation.commandEnded.resolve()
+      operation.commandDone = true
+      uncancellable(operation)
     }
 
     try {
@@ -499,6 +511,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     } finally {
       output.dispose()
       this.changed()
+      operation.ended.resolve()
     }
   }
 

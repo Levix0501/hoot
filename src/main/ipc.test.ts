@@ -2,7 +2,9 @@ import { EventEmitter } from 'node:events'
 import type { BrowserWindow } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AGENTS_PATH_COMMAND, type AgentsState } from '../shared/agents'
+import type { AppInfo } from '../shared/app-info'
 import { IpcChannel } from '../shared/ipc'
+import type { UpdateStatus } from '../shared/updates'
 
 type Listener = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -40,19 +42,37 @@ const agents = Object.assign(new EventEmitter(), {
   cancel: vi.fn<(id: string) => void>(),
 })
 
+const appInfo: AppInfo = {
+  version: '0.1.0-alpha.2',
+  system: 'macOS',
+  systemVersion: '26.3.1',
+  arch: 'arm64',
+  electron: '44.7.0',
+  chromium: '152.0.7977.130',
+  node: '24.21.0',
+}
+const updateStatus: UpdateStatus = { state: { kind: 'none' }, check: { kind: 'finished' } }
+const updates = Object.assign(new EventEmitter(), {
+  status: updateStatus,
+  check: vi.fn<() => Promise<void>>(async () => {}),
+  install: vi.fn<() => Promise<void>>(async () => {}),
+})
+
 beforeEach(() => {
   electron.handlers.clear()
   electron.listeners.clear()
   vi.clearAllMocks()
   agents.removeAllListeners()
+  updates.removeAllListeners()
   registerIpc({
     getWindow: () => window,
+    appInfo,
     tools: emitter(),
     agents,
     permissionLevels: emitter(),
     appearance: emitter(),
     sessions: emitter(),
-    updates: emitter(),
+    updates,
     worktrees: emitter(),
   } as unknown as Parameters<typeof registerIpc>[0])
 })
@@ -97,5 +117,49 @@ describe('the messages of the Agents page', () => {
   it('put the line that adds the folder of agents to PATH on the clipboard', () => {
     send(IpcChannel.writeClipboardText, AGENTS_PATH_COMMAND)
     expect(electron.clipboard.writeText).toHaveBeenCalledWith(AGENTS_PATH_COMMAND)
+  })
+})
+
+describe('the messages of the About page', () => {
+  it('give what it tells of Hoot and of what it runs on', async () => {
+    expect(await electron.handlers.get(IpcChannel.getAppInfo)?.(trusted)).toBe(appInfo)
+  })
+
+  it('give where Hoot is with updates, and pass on every change', async () => {
+    expect(await electron.handlers.get(IpcChannel.getUpdateStatus)?.(trusted)).toBe(updateStatus)
+    const changed: UpdateStatus = {
+      state: { kind: 'available', version: '0.1.0-alpha.3' },
+      check: { kind: 'checking' },
+    }
+    updates.emit('changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.updateStatusChanged, changed)
+  })
+
+  it('look for a newer version when asked, and download one only when asked to', () => {
+    send(IpcChannel.checkForUpdates)
+    expect(updates.check).toHaveBeenCalledOnce()
+    expect(updates.install).not.toHaveBeenCalled()
+    send(IpcChannel.installUpdate)
+    expect(updates.install).toHaveBeenCalledOnce()
+    expect(updates.check).toHaveBeenCalledOnce()
+  })
+
+  it('answer a request for a look with where updates stand, whether or not it began one', () => {
+    send(IpcChannel.checkForUpdates)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.updateStatusChanged, updateStatus)
+  })
+
+  it('come only from the window', () => {
+    electron.listeners.get(IpcChannel.checkForUpdates)?.({ sender: {} })
+    expect(updates.check).not.toHaveBeenCalled()
+    expect(webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('pass on why downloading or installing failed', () => {
+    updates.emit('failed', 'sha512 checksum mismatch')
+    expect(webContents.send).toHaveBeenCalledWith(
+      IpcChannel.updateFailed,
+      'sha512 checksum mismatch',
+    )
   })
 })

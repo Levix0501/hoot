@@ -1,10 +1,11 @@
 import type { AgentOperationSummary, AgentsState } from './agents'
+import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
 import type { CodingToolId, ToolId } from './tools'
-import type { UpdateState } from './updates'
+import type { UpdateStatus } from './updates'
 import type { WindowControls } from './window-controls'
 import type {
   CreateIssueWorktreeResult,
@@ -105,6 +106,7 @@ export type StartupState =
 
 export const IpcChannel = {
   getStartupState: 'app:get-startup-state',
+  getAppInfo: 'app:get-info',
   revealDatabase: 'app:reveal-database',
   quit: 'app:quit',
   listProjects: 'projects:list',
@@ -138,13 +140,15 @@ export const IpcChannel = {
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
   showSettingsRequested: 'settings:show-requested',
+  showAboutRequested: 'settings:show-about-requested',
   getAppearance: 'appearance:get',
   setAppearance: 'appearance:set',
   appearanceChanged: 'appearance:changed',
   confirmQuit: 'app:confirm-quit',
   quitResponse: 'app:quit-response',
-  getUpdateState: 'updates:get-state',
-  updateStateChanged: 'updates:state-changed',
+  getUpdateStatus: 'updates:get-status',
+  updateStatusChanged: 'updates:status-changed',
+  checkForUpdates: 'updates:check',
   installUpdate: 'updates:install',
   updateFailed: 'updates:failed',
   listWorktrees: 'worktrees:list',
@@ -196,6 +200,8 @@ export interface HootApi {
    */
   manageAgents: boolean
   getStartupState(): Promise<StartupState>
+  /** What the About page tells of Hoot and of what it runs on. */
+  getAppInfo(): Promise<AppInfo>
   /**
    * Shows the database file, or the nearest folder of it there is, in Finder
    * (File Explorer on Windows).
@@ -251,6 +257,8 @@ export interface HootApi {
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
   /** The application menu asked to show the settings. */
   onShowSettingsRequested(listener: () => void): () => void
+  /** The application menu asked to show the settings' About page. */
+  onShowAboutRequested(listener: () => void): () => void
   /** The appearance picked in the settings, which Hoot shows in. */
   getAppearance(): Promise<Appearance>
   /** Picks an appearance, which applies at once and is saved for the next start. */
@@ -269,9 +277,15 @@ export interface HootApi {
     ) => void,
   ): () => void
   respondToQuit(confirmed: boolean): void
-  /** Where Hoot is with a newer version of itself. */
-  getUpdateState(): Promise<UpdateState>
-  onUpdateStateChanged(listener: (state: UpdateState) => void): () => void
+  /** Where Hoot is with a newer version of itself, and how its latest look for one went. */
+  getUpdateStatus(): Promise<UpdateStatus>
+  onUpdateStatusChanged(listener: (status: UpdateStatus) => void): () => void
+  /**
+   * Looks for a newer version of Hoot, unless one is being downloaded or
+   * installed; a look already in progress serves instead. `onUpdateStatusChanged`
+   * says how it goes.
+   */
+  checkForUpdates(): void
   /** Downloads the newer version, unless it is downloaded already, then restarts Hoot into it. */
   installUpdate(): void
   /** Downloading or installing the newer version failed, for this reason. */

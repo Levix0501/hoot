@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { AppUpdater } from 'electron-updater'
-import type { UpdateState } from '../../shared/updates'
+import type { UpdateCheck, UpdateState, UpdateStatus } from '../../shared/updates'
 
 /** What the service uses of electron-updater's `autoUpdater`. */
 export type Updater = Pick<
@@ -30,20 +30,26 @@ function errorMessage(error: unknown): string {
 
 /**
  * Looks for a newer version of Hoot among the releases published on GitHub,
- * when Hoot starts and every hour after. Once the user asks for it, downloads
- * it and restarts Hoot into it. `failed` says why downloading or installing
- * it went wrong; a failed look only waits for the next one.
+ * when Hoot starts, every hour after, and when asked to. Once the user asks
+ * for it, downloads it and restarts Hoot into it. `changed` says where it is
+ * with both; `failed` says why downloading or installing the version went
+ * wrong. A failed look is told by `changed` only: it leaves the newer version
+ * known so far as it was, and waits for the next look.
  */
 export class UpdateService extends EventEmitter<{
-  changed: [state: UpdateState]
+  changed: [status: UpdateStatus]
   failed: [message: string]
 }> {
   private current: UpdateState = { kind: 'none' }
+  private latestCheck: UpdateCheck
+  /** The look in progress, which every request for one meanwhile shares. */
+  private looking: Promise<void> | null = null
   private timer: NodeJS.Timeout | null = null
 
   constructor(private readonly options: UpdateServiceOptions) {
     super()
     const updater = options.updater
+    this.latestCheck = updater ? { kind: 'idle' } : { kind: 'unsupported' }
     if (!updater) return
     // Downloaded only when the user asks for it.
     updater.autoDownload = false
@@ -74,6 +80,10 @@ export class UpdateService extends EventEmitter<{
     return this.current
   }
 
+  get status(): UpdateStatus {
+    return { state: this.current, check: this.latestCheck }
+  }
+
   /** Looks for a newer version now, and then every hour. */
   start(): void {
     if (!this.options.updater || this.timer) return
@@ -82,15 +92,28 @@ export class UpdateService extends EventEmitter<{
     this.timer.unref()
   }
 
-  /** Looks for a newer version, unless one is being downloaded or installed. */
-  async check(): Promise<void> {
+  /**
+   * Looks for a newer version, unless one is being downloaded or installed;
+   * while a look is in progress, waits for that one instead.
+   */
+  check(): Promise<void> {
     const updater = this.options.updater
-    if (!updater) return
-    if (this.current.kind !== 'none' && this.current.kind !== 'available') return
+    if (!updater) return Promise.resolve()
+    if (this.current.kind !== 'none' && this.current.kind !== 'available') return Promise.resolve()
+    this.looking ??= this.look(updater).finally(() => {
+      this.looking = null
+    })
+    return this.looking
+  }
+
+  private async look(updater: Updater): Promise<void> {
+    this.setCheck({ kind: 'checking' })
     try {
       await updater.checkForUpdates()
-    } catch {
+      this.setCheck({ kind: 'finished' })
+    } catch (error) {
       // Offline, say: electron-updater logs why, and Hoot looks again later.
+      this.setCheck({ kind: 'failed', message: errorMessage(error) })
     }
   }
 
@@ -124,6 +147,11 @@ export class UpdateService extends EventEmitter<{
 
   private setState(state: UpdateState): void {
     this.current = state
-    this.emit('changed', state)
+    this.emit('changed', this.status)
+  }
+
+  private setCheck(check: UpdateCheck): void {
+    this.latestCheck = check
+    this.emit('changed', this.status)
   }
 }

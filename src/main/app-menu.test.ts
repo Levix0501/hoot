@@ -9,6 +9,7 @@ function setup(options: { sidebarOpen?: boolean } = {}) {
   const calls: string[] = []
   const template = appMenuTemplate({
     includeDeveloperItems: false,
+    showAbout: () => calls.push('showAbout'),
     showSettings: () => calls.push('showSettings'),
     addProject: () => calls.push('addProject'),
     closeSession: () => calls.push('closeSession'),
@@ -38,14 +39,14 @@ function click(item: MenuItemConstructorOptions | undefined): void {
 }
 
 describe('appMenuTemplate', () => {
-  it('has Settings…, with Cmd+, between About and Services in the app menu', () => {
+  it('has Settings…, with Cmd+, between About Hoot and Services in the app menu', () => {
     const { template, calls } = setup()
     expect(template[0]?.role).toBe('appMenu')
     const app = submenu(template[0])
     expect(
       app.map((item) => [item.role ?? item.label ?? item.type, item.accelerator ?? null]),
     ).toEqual([
-      ['about', null],
+      ['About Hoot', null],
       ['separator', null],
       ['Settings…', 'CmdOrCtrl+,'],
       ['separator', null],
@@ -59,6 +60,17 @@ describe('appMenuTemplate', () => {
     ])
     click(app.find((item) => item.label === 'Settings…'))
     expect(calls).toEqual(['showSettings'])
+  })
+
+  it('shows the About page, not the panel of macOS, for About Hoot, the first item of the app menu', () => {
+    const { template, calls } = setup()
+    const about = submenu(template[0])[0]
+    expect(about?.label).toBe('About Hoot')
+    // A role would open the panel of macOS whatever the click does.
+    expect(about?.role).toBeUndefined()
+    expect(about?.accelerator).toBeUndefined()
+    click(about)
+    expect(calls).toEqual(['showAbout'])
   })
 
   it('puts Close Session, with Cmd+W, in place of Close Window in the File menu', () => {
@@ -136,5 +148,10 @@ describe('databaseErrorMenuTemplate', () => {
     expect(template.every((item) => item.submenu === undefined && item.click === undefined)).toBe(
       true,
     )
+  })
+
+  it("keeps the app menu's own items, whose About Hoot opens the panel of macOS", () => {
+    const [app] = databaseErrorMenuTemplate()
+    expect(app).toEqual({ role: 'appMenu' })
   })
 })

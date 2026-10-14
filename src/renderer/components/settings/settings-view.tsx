@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, BotIcon, SunMoonIcon } from 'lucide-react'
+import { ArrowLeftIcon, BotIcon, InfoIcon, SunMoonIcon } from 'lucide-react'
 import { useEffect, type ComponentType } from 'react'
 import { api } from '../../lib/api'
 import { useAppStore, type SettingsSection } from '../../store/app-store'
@@ -11,10 +11,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '../ui/sidebar'
+import { AboutPage } from './about-page'
 import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
 
-/** The pages of the settings, in the order of their list: Agents on macOS only. */
+/** The pages of the settings, in the order of their list: Agents on macOS only, About last. */
 const SECTIONS: ReadonlyArray<{
   id: SettingsSection
   label: string
@@ -22,6 +23,7 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
   ...(api.manageAgents ? [{ id: 'agents' as const, label: 'Agents', icon: BotIcon }] : []),
+  { id: 'about', label: 'About', icon: InfoIcon },
 ]
 
 /** Whether the keyboard focus is where text is typed, where Esc is the field's. */
@@ -119,7 +121,13 @@ export function SettingsView() {
   return (
     <>
       <SettingsNavigation />
-      {section === 'agents' && api.manageAgents ? <AgentsPage /> : <AppearancePage />}
+      {section === 'about' ? (
+        <AboutPage />
+      ) : section === 'agents' && api.manageAgents ? (
+        <AgentsPage />
+      ) : (
+        <AppearancePage />
+      )}
     </>
   )
 }

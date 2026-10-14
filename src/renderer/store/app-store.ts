@@ -6,6 +6,7 @@ import {
   type AgentOperationSummary,
   type AgentsState,
 } from '../../shared/agents'
+import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
 import { issueWorktree } from '../../shared/issue-worktrees'
@@ -30,7 +31,7 @@ import {
 } from '../../shared/session'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
-import type { UpdateState } from '../../shared/updates'
+import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import type {
   CreateIssueWorktreeResult,
   WorktreeInfo,
@@ -66,8 +67,8 @@ import {
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
-/** The pages of the settings: Appearance, and on macOS Agents. */
-export type SettingsSection = 'appearance' | 'agents'
+/** The pages of the settings: Appearance, on macOS Agents, and About. */
+export type SettingsSection = 'appearance' | 'agents' | 'about'
 
 /** A session as the window shows it. */
 export interface UiSession {
@@ -199,6 +200,10 @@ export interface AppState {
   } | null
   /** Where Hoot is with a newer version of itself, which an Update button beside Settings offers. */
   update: UpdateState
+  /** How Hoot's latest look for a newer version went; `null` until it has been read. */
+  updateCheck: UpdateCheck | null
+  /** What the About page tells of Hoot and of what it runs on; `null` until it has been read. */
+  appInfo: AppInfo | null
   /** Whether the sidebar is expanded, also while the settings are shown in its place. */
   sidebarOpen: boolean
   /**
@@ -352,6 +357,8 @@ export interface AppState {
   answerQuit(confirmed: boolean): void
   /** Downloads the newer version, unless it is downloaded already, then restarts Hoot into it. */
   installUpdate(): void
+  /** Looks for a newer version, unless one is being downloaded or installed. */
+  checkForUpdates(): void
   openNewWorktreeDialog(projectRoot: string): void
   closeNewWorktreeDialog(): void
   /**
@@ -1005,6 +1012,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     closeConfirmation: null,
     quitConfirmation: null,
     update: { kind: 'none' },
+    updateCheck: null,
+    appInfo: null,
     sidebarOpen: true,
     sidebarWidth: SIDEBAR_WIDTH.default,
     sidebarResizing: false,
@@ -1082,16 +1091,20 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       api.onSessionCommand((command) => get().runMenuCommand(command))
       api.onShowSettingsRequested(() => get().showSettings())
+      api.onShowAboutRequested(() => get().showSettings('about'))
       api.onConfirmQuit((runningSessions, reason, agentOperations) =>
         set({ quitConfirmation: { runningSessions, reason, agentOperations } }),
       )
-      api.onUpdateStateChanged((update) => set({ update }))
+      api.onUpdateStatusChanged(({ state, check }) => set({ update: state, updateCheck: check }))
       api.onUpdateFailed((message) => {
         toast.error('Could not update Hoot.', { description: message })
       })
       // Set as soon as it arrives, not with the reads below: a change
       // reported after it is newer, and must not be overwritten by it.
-      void api.getUpdateState().then((update) => set({ update }))
+      void api
+        .getUpdateStatus()
+        .then(({ state, check }) => set({ update: state, updateCheck: check }))
+      void api.getAppInfo().then((appInfo) => set({ appInfo }))
       api.onAddProjectRequested(() => void get().addProject())
       // Changes reported while the list is read are newer than the list.
       const changedWorktrees = new Set<string>()
@@ -1665,6 +1678,20 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     installUpdate() {
       api.installUpdate()
+    },
+
+    checkForUpdates() {
+      const { update, updateCheck } = get()
+      // The look starts at once, as the page asking for it shows: the main
+      // process says so a moment later, or that it did not start one.
+      if (
+        updateCheck !== null &&
+        updateCheck.kind !== 'unsupported' &&
+        (update.kind === 'none' || update.kind === 'available')
+      ) {
+        set({ updateCheck: { kind: 'checking' } })
+      }
+      api.checkForUpdates()
     },
 
     openNewWorktreeDialog(projectRoot) {

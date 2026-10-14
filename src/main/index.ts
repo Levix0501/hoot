@@ -14,6 +14,7 @@ import {
 import { agentPaths, lastOnSessionPath } from './agents/agent-paths'
 import { AgentService } from './agents/agent-service'
 import { fetchLatestVersion } from './agents/latest-version'
+import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
@@ -348,6 +349,8 @@ if (!app.requestSingleInstanceLock()) {
     })
   }
 
+  // The panel macOS shows for About Hoot while the database cannot be opened
+  // and there is no About page to show.
   app.setAboutPanelOptions({ applicationName: 'Hoot', applicationVersion: app.getVersion() })
 
   const databasePath = databaseFile(app.getPath('userData'))
@@ -364,6 +367,13 @@ function startWithDatabase(database: DatabaseSync): void {
   sidebar.retainProjects(projects.list().map((project) => project.id))
   registerIpc({
     getWindow,
+    appInfo: readAppInfo({
+      version: app.getVersion(),
+      platform: process.platform,
+      systemVersion: process.getSystemVersion(),
+      arch: process.arch,
+      versions: process.versions,
+    }),
     projects,
     issues,
     tools,
@@ -414,6 +424,7 @@ function startWithDatabase(database: DatabaseSync): void {
     Menu.setApplicationMenu(
       buildAppMenu({
         includeDeveloperItems: Boolean(devServerUrl),
+        showAbout: () => getWindow()?.webContents.send(IpcChannel.showAboutRequested),
         showSettings: () => getWindow()?.webContents.send(IpcChannel.showSettingsRequested),
         addProject: () => getWindow()?.webContents.send(IpcChannel.addProjectRequested),
         closeSession: () => sendSessionCommand('close-current'),

@@ -2,6 +2,8 @@ import { Menu, type MenuItemConstructorOptions } from 'electron'
 import { agentsMenuTemplate, type AgentsMenuOptions } from './agents-menu'
 
 export interface AppMenuActions extends AgentsMenuOptions {
+  /** Shows the settings' About page in the window. */
+  showAbout(): void
   /** Shows the settings in the window. */
   showSettings(): void
   addProject(): void
@@ -31,10 +33,11 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
     : []
   return [
     {
-      // The app menu macOS apps have, with Settings… after About.
+      // The app menu macOS apps have, with Settings… after About. About shows
+      // the settings' About page, not macOS's About panel.
       role: 'appMenu',
       submenu: [
-        { role: 'about' },
+        { label: 'About Hoot', click: () => actions.showAbout() },
         { type: 'separator' },
         { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => actions.showSettings() },
         { type: 'separator' },

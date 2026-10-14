@@ -11,6 +11,7 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from 'electron'
+import type { AppInfo } from '../shared/app-info'
 import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
@@ -53,6 +54,8 @@ import type { WorktreeService } from './worktrees/worktree-service'
 
 export interface IpcDependencies {
   getWindow(): BrowserWindow | null
+  /** What the About page tells of Hoot and of what it runs on. */
+  appInfo: AppInfo
   projects: ProjectStore
   issues: IssueStore
   tools: ToolService
@@ -408,9 +411,16 @@ export function registerIpc(deps: IpcDependencies): void {
     void deps.quitGuard.answer(z.literal(true).safeParse(confirmed).success)
   })
 
-  handle(IpcChannel.getUpdateState, () => deps.updates.state)
+  handle(IpcChannel.getAppInfo, () => deps.appInfo)
+  handle(IpcChannel.getUpdateStatus, () => deps.updates.status)
+  on(IpcChannel.checkForUpdates, () => {
+    void deps.updates.check()
+    // The window takes the look for begun; this tells it where things stand
+    // also when none began, as while a version is downloading.
+    send(IpcChannel.updateStatusChanged, deps.updates.status)
+  })
   on(IpcChannel.installUpdate, () => void deps.updates.install())
-  deps.updates.on('changed', (state) => send(IpcChannel.updateStateChanged, state))
+  deps.updates.on('changed', (status) => send(IpcChannel.updateStatusChanged, status))
   deps.updates.on('failed', (message) => send(IpcChannel.updateFailed, message))
 
   handle(IpcChannel.listWorktrees, () => deps.worktrees.listAll())

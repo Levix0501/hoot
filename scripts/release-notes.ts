@@ -9,7 +9,7 @@ import path from 'node:path'
 const INSTALLING = `## Installing
 
 - **Mac**: download the DMG for your Mac's chip, \`arm64\` for Apple Silicon or \`x64\` for Intel, open it and drag Hoot to Applications.
-- **Windows**: Hoot for Windows is a preview. For now it only opens its window: adding projects and starting sessions do not work yet. The installer is not signed, so Microsoft Defender SmartScreen may say "Windows protected your PC": click **More info**, then **Run anyway**. It cannot be installed on a PC with Smart App Control turned on.
+- **Windows**: Hoot for Windows is a preview. For now adding projects works, with Git on \`PATH\` (where Git for Windows puts it by default), but starting sessions does not yet. The installer is not signed, so Microsoft Defender SmartScreen may say "Windows protected your PC": click **More info**, then **Run anyway**. It cannot be installed on a PC with Smart App Control turned on.
 `
 
 /** The body of `version`'s draft release, from the text of CHANGELOG.md. */

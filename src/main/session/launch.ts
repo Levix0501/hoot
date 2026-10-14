@@ -159,7 +159,7 @@ export async function resolveLaunch(
   const level = context.permissionLevel(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
-  const found = await findCommand(tool.command, login.env.PATH)
+  const found = await findCommand(tool.command, login.env)
   if (!found) {
     throw new SessionError(
       `${tool.label} is not available. Install it with: ${tool.installCommand}`,

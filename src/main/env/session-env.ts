@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import pathKey from 'path-key'
 import { HOOT_ENV } from '../../shared/hoot-cli'
 import type { Env } from './env'
 
@@ -55,11 +56,8 @@ export function hootCliEnvironment(options: HootCliEnvOptions): Env {
  * environment has, which is usually `Path`, and separates the folders with `;`.
  */
 export function prependToPath(env: Env, directory: string, platform: NodeJS.Platform): void {
-  const windows = platform === 'win32'
-  const name = windows
-    ? (Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'Path')
-    : 'PATH'
-  const delimiter = windows ? path.win32.delimiter : path.posix.delimiter
+  const name = pathKey({ env, platform })
+  const delimiter = platform === 'win32' ? path.win32.delimiter : path.posix.delimiter
   const current = env[name]
   env[name] = current ? `${directory}${delimiter}${current}` : directory
 }

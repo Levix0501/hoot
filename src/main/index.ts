@@ -164,12 +164,23 @@ const updates = new UpdateService({
   restart: (install) => quitGuard.restartToUpdate(install),
 })
 
-async function gitExecutable(): Promise<string> {
+// Only said on Windows, where PATH is what it was when Hoot started: there is
+// no login shell to read it from again, so a git installed since is found
+// once Hoot starts again.
+const GIT_NOT_FOUND =
+  'Git was not found on PATH. Install it from https://git-scm.com, then restart Hoot.'
+
+/**
+ * Where git is: on PATH, as the login shell or Hoot itself has it, or else
+ * /usr/bin/git, which macOS always has. Windows has no such place: `null`
+ * when it is not on PATH there.
+ */
+async function gitExecutable(): Promise<string | null> {
   const login = await tools.getLoginEnvironment()
   return (
-    (await findCommand('git', login.env.PATH)) ??
-    (await findCommand('git', baseEnv.PATH)) ??
-    '/usr/bin/git'
+    (await findCommand('git', login.env)) ??
+    (await findCommand('git', baseEnv)) ??
+    (process.platform === 'win32' ? null : '/usr/bin/git')
   )
 }
 
@@ -177,10 +188,11 @@ async function gitExecutable(): Promise<string> {
 // that an installed Hoot and one run from its repository share them.
 const worktrees = new WorktreeService({
   layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
-  gitContext: async () => ({
-    git: await gitExecutable(),
-    env: gitEnvironment((await tools.getLoginEnvironment()).env),
-  }),
+  gitContext: async () => {
+    const git = await gitExecutable()
+    if (git === null) throw new Error(GIT_NOT_FOUND)
+    return { git, env: gitEnvironment((await tools.getLoginEnvironment()).env) }
+  },
 })
 
 /** Opens the main window; `reveal` shows it once its first paint is ready. */
@@ -327,11 +339,11 @@ function startWithDatabase(database: DatabaseSync): void {
     quitGuard,
     updates,
     worktrees,
-    resolveProjectRoot: async (directory) =>
-      resolveProjectRoot(directory, {
-        git: await gitExecutable(),
-        env: (await tools.getLoginEnvironment()).env,
-      }),
+    resolveProjectRoot: async (directory) => {
+      const git = await gitExecutable()
+      if (git === null) return { kind: 'error', message: GIT_NOT_FOUND }
+      return resolveProjectRoot(directory, { git, env: (await tools.getLoginEnvironment()).env })
+    },
   })
 
   hootServer = new HootServer({

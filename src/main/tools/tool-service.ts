@@ -83,7 +83,7 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     const tools: ToolAvailability[] = await Promise.all(
       TOOLS.map(async (tool) => {
         if (!tool.command) return { id: tool.id, available: true, path: this.options.shell }
-        const found = await findCommand(tool.command, login.env.PATH)
+        const found = await findCommand(tool.command, login.env)
         return { id: tool.id, available: found !== null, path: found }
       }),
     )

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { findCommand } from './find-command'
+import { findCommand, pathFolders } from './find-command'
 
 let root: string
 
@@ -19,18 +19,42 @@ afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 describe('findCommand', () => {
   it('returns the first executable file in PATH order', async () => {
     const pathValue = ['a', 'b', 'c'].map((directory) => path.join(root, directory)).join(':')
-    expect(await findCommand('tool', pathValue)).toBe(path.join(root, 'c', 'tool'))
+    expect(await findCommand('tool', { PATH: pathValue })).toBe(path.join(root, 'c', 'tool'))
   })
 
   it('returns null when no PATH entry has the command', async () => {
-    expect(await findCommand('tool', path.join(root, 'a'))).toBeNull()
-    expect(await findCommand('missing', path.join(root, 'c'))).toBeNull()
-    expect(await findCommand('tool', undefined)).toBeNull()
+    expect(await findCommand('tool', { PATH: path.join(root, 'a') })).toBeNull()
+    expect(await findCommand('missing', { PATH: path.join(root, 'c') })).toBeNull()
+    expect(await findCommand('tool', {})).toBeNull()
   })
 
   it('ignores relative PATH entries', async () => {
     const relative = path.relative(process.cwd(), path.join(root, 'c'))
     expect(path.isAbsolute(relative)).toBe(false)
-    expect(await findCommand('tool', relative)).toBeNull()
+    expect(await findCommand('tool', { PATH: relative })).toBeNull()
+  })
+})
+
+describe('pathFolders', () => {
+  it('reads PATH, keeping its absolute folders in order', () => {
+    expect(pathFolders({ PATH: '/usr/local/bin:bin::/usr/bin' }, 'darwin')).toEqual([
+      '/usr/local/bin',
+      '/usr/bin',
+    ])
+    expect(pathFolders({}, 'darwin')).toEqual([])
+  })
+
+  it('takes the names of variables as case-sensitive outside Windows', () => {
+    expect(pathFolders({ Path: '/usr/bin' }, 'darwin')).toEqual([])
+  })
+
+  it('reads Path on Windows, or PATH in any other case, separated by ;', () => {
+    const windowsPath = 'C:\\Windows\\system32;C:\\Program Files\\Git\\cmd;;bin;'
+    const folders = ['C:\\Windows\\system32', 'C:\\Program Files\\Git\\cmd']
+    expect(pathFolders({ Path: windowsPath, USERPROFILE: 'C:\\Users\\me' }, 'win32')).toEqual(
+      folders,
+    )
+    expect(pathFolders({ PATH: windowsPath }, 'win32')).toEqual(folders)
+    expect(pathFolders({}, 'win32')).toEqual([])
   })
 })

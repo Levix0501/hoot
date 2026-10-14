@@ -34,8 +34,11 @@ sessions does not yet.
   [permission level](#permission-levels) (a Claude Code session
   [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. A tool's
   command is the first on your login shell's `PATH` or, on macOS when there is none there, the one
-  [Hoot installed](#agents) in `~/.hoot/agents/bin`; Hoot looks for them when it starts. To the
-  environment of each session's process Hoot adds the terminal's variables (`TERM`, `COLORTERM`,
+  [Hoot installed](#agents) in `~/.hoot/agents/bin`; Hoot looks for them when it starts. On
+  Windows, where the command npm or pnpm installs is a batch file, the session starts what it
+  points to instead, the agent's program or its script with Node.js, so that `cmd.exe` never
+  reads the arguments. To the environment of each session's process Hoot adds the terminal's
+  variables (`TERM`, `COLORTERM`,
   `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`), what [`hoot`](#the-hoot-command) needs: the
   variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder `hoot` is
   in, first on `PATH`; and on macOS, last on `PATH`, after every folder it has, the folder of

@@ -60,6 +60,9 @@ importers:
       '@tiptap/starter-kit':
         specifier: ^3.31.4
         version: 3.31.4
+      '@types/cmd-shim':
+        specifier: ^5.0.2
+        version: 5.0.2
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.1
@@ -93,12 +96,18 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.304
         version: 6.1.0-beta.304
+      '@zkochan/cmd-shim':
+        specifier: ^9.0.8
+        version: 9.0.8
       birpc:
         specifier: ^4.2.0
         version: 4.2.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
+      cmd-shim:
+        specifier: ^9.0.2
+        version: 9.0.2
       cn:
         specifier: ^0.4.0
         version: 0.4.0
@@ -144,6 +153,9 @@ importers:
       react-dom:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
+      read-cmd-shim:
+        specifier: ^7.0.1
+        version: 7.0.1
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -1303,6 +1315,9 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
+  '@types/cmd-shim@5.0.2':
+    resolution: {integrity: sha512-Pnee6lEDnxqVmV0SBKGmAFKCmdZtI7sIYI3qCo5iNIZ1SYNspDFwWVJll8F3zvl0Ap/a/XllHiaV8sA9UTjdeA==}
+
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
 
@@ -1524,6 +1539,10 @@ packages:
 
   '@xterm/xterm@6.1.0-beta.304':
     resolution: {integrity: sha512-Wq9d4qFYslYQBIan+riXotdyurtREc6v+HWdAwV6Y2JSDI9eJ1dkWm/fzYb2rCGgGnM3baiYuSK4Z6OLNKLzDw==}
+
+  '@zkochan/cmd-shim@9.0.8':
+    resolution: {integrity: sha512-PfbYtsZwUMs7YleBJ1XD+BaKQ99MGHxAw0XZCDiUId9Yok4zNg60N3hCALnh8KsjBI/ocMstjDDTFThNweIJAw==}
+    engines: {node: '>=22.13'}
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -1773,6 +1792,14 @@ packages:
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
+
+  cmd-extension@1.0.2:
+    resolution: {integrity: sha512-iWDjmP8kvsMdBmLTHxFaqXikO8EdFRDfim7k6vUHglY/2xJ5jLrPsnQGijdfp4U+sr/BeecG0wKm02dSIAeQ1g==}
+    engines: {node: '>=10'}
+
+  cmd-shim@9.0.2:
+    resolution: {integrity: sha512-xVHoI+wNrM4tDB9iC1idf/8D0tYnVimlBp/5zHW+x1sGjjRD69NvR9th3Z1JAYGN/BTW4he6aZFYV6kzy+k+jw==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   cn@0.2.6:
     resolution: {integrity: sha512-+i4L0zUGgRcEnhsxueVrP7iBGxBx5iD0WOTYg1MwFEu2ZyCmH5Ov2V1cul2Ht5UchRQQgftCf4be/RxspuW6QQ==}
@@ -3373,6 +3400,10 @@ packages:
   read-binary-file-arch@1.0.6:
     resolution: {integrity: sha512-BNg9EN3DD3GsDXX7Aa8O4p92sryjkmzYYgmgTAc6CA4uGLEDzFfxOxugu21akOxpcXHiEgsYkC6nPsQvLLLmEg==}
     hasBin: true
+
+  read-cmd-shim@7.0.1:
+    resolution: {integrity: sha512-GhAsW4iJS0xNqv8P6HocT3gb5HCKHtEBKLIN7fE2oWr27jGIEihu48lXyGGeexkbiLv1XAbwyXvgjYMfT81kZA==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   readable-stream@2.3.8:
     resolution: {integrity: sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==}
@@ -5180,6 +5211,8 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
+  '@types/cmd-shim@5.0.2': {}
+
   '@types/debug@4.1.13':
     dependencies:
       '@types/ms': 2.1.0
@@ -5317,6 +5350,11 @@ snapshots:
   '@xterm/headless@6.0.0': {}
 
   '@xterm/xterm@6.1.0-beta.304': {}
+
+  '@zkochan/cmd-shim@9.0.8':
+    dependencies:
+      cmd-extension: 1.0.2
+      graceful-fs: 4.2.11
 
   abbrev@4.0.0: {}
 
@@ -5591,6 +5629,10 @@ snapshots:
       mimic-response: 1.0.1
 
   clsx@2.1.1: {}
+
+  cmd-extension@1.0.2: {}
+
+  cmd-shim@9.0.2: {}
 
   cn@0.2.6: {}
 
@@ -7101,6 +7143,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  read-cmd-shim@7.0.1: {}
 
   readable-stream@2.3.8:
     dependencies:

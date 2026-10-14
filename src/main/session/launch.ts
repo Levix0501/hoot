@@ -10,6 +10,7 @@ import {
   type HootCliEnvOptions,
   type TerminalEnvOptions,
 } from '../env/session-env'
+import { commandProgram } from '../tools/command-program'
 import { findAgentCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { SessionError, type SessionLaunch } from './session-manager'
@@ -34,9 +35,7 @@ export interface LaunchContext {
    * On macOS, where Hoot installs agents: Hoot's folder of agents' commands,
    * where a coding tool that is not on the login shell PATH is looked for,
    * and the folders that go last on the PATH of every session (the one of
-   * Hoot's `node`, and that folder). A coding tool then runs as the command
-   * found, the installation the Agents page shows. `null` elsewhere, as on
-   * Windows, where a tool runs by its name.
+   * Hoot's `node`, and that folder). `null` elsewhere, as on Windows.
    */
   agents: { binDirectory: string; lastOnPath: readonly string[] } | null
 }
@@ -153,12 +152,15 @@ async function checkFolder(cwd: string): Promise<void> {
  * default shell as a login shell, starting from the same environment a
  * terminal opened from the Dock would give it. A coding tool runs its command
  * directly, the one found on the login shell PATH or else, on macOS, in Hoot's
- * folder of agents, with the login shell environment and with exactly the
- * arguments of its permission level: the one `permissionLevel` names, or else
- * the one picked now. Claude Code, when it is sent an issue, also gets the
- * arguments that send it, once the issue's file is written; the launch's
- * cleanup removes the file's folder. Either environment also has what hoot
- * needs to run in the session, and the folders that go last on its PATH.
+ * folder of agents: the installation the Agents page shows. On Windows, where
+ * the command that npm or pnpm makes is a batch file, the tool runs what that
+ * points to instead (see `commandProgram`). It runs with the login shell
+ * environment and with exactly the arguments of its permission level: the one
+ * `permissionLevel` names, or else the one picked now. Claude Code, when it is
+ * sent an issue, also gets the arguments that send it, once the issue's file
+ * is written; the launch's cleanup removes the file's folder. Either
+ * environment also has what hoot needs to run in the session, and the folders
+ * that go last on its PATH.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -203,19 +205,24 @@ export async function resolveLaunch(
       `${tool.label} is not available. Install it with: ${tool.installCommand}`,
     )
   }
+  const program = await commandProgram(found, login.env).catch((error: unknown) => {
+    throw new SessionError(
+      `Could not start ${tool.label}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  })
   const env = buildSessionEnv(login.env, {
     ...context.terminal(),
     cwd,
     hoot: context.hoot,
     lastOnPath: context.agents?.lastOnPath,
   })
-  const file = context.agents ? found : tool.command
-  if (issue === null) return { file, args: [...level.args], env }
+  const args = [...program.args, ...level.args]
+  if (issue === null) return { file: program.file, args, env }
   // Written last, so that a launch that fails leaves nothing behind.
   const issueFolder = await writeIssueFolder(context.temporaryFolder, issue)
   return {
-    file,
-    args: [...level.args, ...sentIssueArgs(issueFolder, issue)],
+    file: program.file,
+    args: [...args, ...sentIssueArgs(issueFolder, issue)],
     env,
     cleanup: () => rmSync(issueFolder, { recursive: true, force: true }),
   }

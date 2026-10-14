@@ -253,10 +253,10 @@ describe('resolveLaunch', () => {
     expect(shell.env.PATH).toBe(`${hoot.binDirectory}:/usr/bin:/bin:${nodeDirectory}:${agentsBin}`)
   })
 
-  it('runs a tool by its name, found on the login shell PATH only, where Hoot has no folder of agents', async () => {
+  it('runs a tool found on the login shell PATH only, where Hoot has no folder of agents', async () => {
     const elsewhere: LaunchContext = { ...context({ PATH: `${bin}:/usr/bin` }), agents: null }
     const codex = await resolveLaunch(elsewhere, 'codex', project)
-    expect(codex.file).toBe('codex')
+    expect(codex.file).toBe(path.join(bin, 'codex'))
     expect(codex.env.PATH).toBe(`${hoot.binDirectory}:${bin}:/usr/bin`)
     await expect(resolveLaunch(elsewhere, 'opencode', project)).rejects.toThrow(
       'OpenCode is not available.',

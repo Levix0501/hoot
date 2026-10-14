@@ -10,8 +10,8 @@ import {
   type HootCliEnvOptions,
   type TerminalEnvOptions,
 } from '../env/session-env'
+import { findAgentCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
-import { findCommand } from '../tools/find-command'
 import { SessionError, type SessionLaunch } from './session-manager'
 
 export interface LaunchContext {
@@ -30,6 +30,15 @@ export interface LaunchContext {
   temporaryFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
+  /**
+   * On macOS, where Hoot installs agents: Hoot's folder of agents' commands,
+   * where a coding tool that is not on the login shell PATH is looked for,
+   * and the folders that go last on the PATH of every session (the one of
+   * Hoot's `node`, and that folder). A coding tool then runs as the command
+   * found, the installation the Agents page shows. `null` elsewhere, as on
+   * Windows, where a tool runs by its name.
+   */
+  agents: { binDirectory: string; lastOnPath: readonly string[] } | null
 }
 
 /**
@@ -143,12 +152,13 @@ async function checkFolder(cwd: string): Promise<void> {
  * the root of one of the project's worktrees). A Shell session runs the
  * default shell as a login shell, starting from the same environment a
  * terminal opened from the Dock would give it. A coding tool runs its command
- * directly, with the login shell environment and with exactly the arguments
- * of its permission level: the one `permissionLevel` names, or else the one
- * picked now. Claude Code, when it is sent an issue, also gets the arguments
- * that send it, once the issue's file is written; the launch's cleanup
- * removes the file's folder. Either environment also has what hoot needs to
- * run in the session.
+ * directly, the one found on the login shell PATH or else, on macOS, in Hoot's
+ * folder of agents, with the login shell environment and with exactly the
+ * arguments of its permission level: the one `permissionLevel` names, or else
+ * the one picked now. Claude Code, when it is sent an issue, also gets the
+ * arguments that send it, once the issue's file is written; the launch's
+ * cleanup removes the file's folder. Either environment also has what hoot
+ * needs to run in the session, and the folders that go last on its PATH.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -166,7 +176,12 @@ export async function resolveLaunch(
     return {
       file: context.shell,
       args: ['-l'],
-      env: buildSessionEnv(context.baseEnv, { ...context.terminal(), cwd, hoot: context.hoot }),
+      env: buildSessionEnv(context.baseEnv, {
+        ...context.terminal(),
+        cwd,
+        hoot: context.hoot,
+        lastOnPath: context.agents?.lastOnPath,
+      }),
     }
   }
 
@@ -178,18 +193,28 @@ export async function resolveLaunch(
     context.permissionLevel(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
-  const found = await findCommand(tool.command, login.env)
+  const found = await findAgentCommand(
+    tool.command,
+    login.env,
+    context.agents?.binDirectory ?? null,
+  )
   if (!found) {
     throw new SessionError(
       `${tool.label} is not available. Install it with: ${tool.installCommand}`,
     )
   }
-  const env = buildSessionEnv(login.env, { ...context.terminal(), cwd, hoot: context.hoot })
-  if (issue === null) return { file: tool.command, args: [...level.args], env }
+  const env = buildSessionEnv(login.env, {
+    ...context.terminal(),
+    cwd,
+    hoot: context.hoot,
+    lastOnPath: context.agents?.lastOnPath,
+  })
+  const file = context.agents ? found : tool.command
+  if (issue === null) return { file, args: [...level.args], env }
   // Written last, so that a launch that fails leaves nothing behind.
   const issueFolder = await writeIssueFolder(context.temporaryFolder, issue)
   return {
-    file: tool.command,
+    file,
     args: [...level.args, ...sentIssueArgs(issueFolder, issue)],
     env,
     cleanup: () => rmSync(issueFolder, { recursive: true, force: true }),

@@ -12,7 +12,9 @@ export interface CodingToolDefinition {
   label: string
   /** Command looked up in the login shell PATH. */
   command: string
-  /** Shown next to the tool when it is not available. */
+  /** The npm package the tool comes in, which Hoot installs and updates. */
+  npmPackage: string
+  /** Shown next to the tool when it is not available, where Hoot does not install it. */
   installCommand: string
 }
 
@@ -21,6 +23,7 @@ export interface ShellToolDefinition {
   label: string
   /** The user's default shell runs instead of a command. */
   command: null
+  npmPackage: null
   installCommand: null
 }
 
@@ -31,24 +34,28 @@ export const TOOLS: readonly ToolDefinition[] = [
     id: 'claude',
     label: 'Claude Code',
     command: 'claude',
+    npmPackage: '@anthropic-ai/claude-code',
     installCommand: 'npm install -g @anthropic-ai/claude-code',
   },
   {
     id: 'codex',
     label: 'Codex',
     command: 'codex',
+    npmPackage: '@openai/codex',
     installCommand: 'npm install -g @openai/codex',
   },
   {
     id: 'opencode',
     label: 'OpenCode',
     command: 'opencode',
+    npmPackage: 'opencode-ai',
     installCommand: 'npm install -g opencode-ai',
   },
   {
     id: 'shell',
     label: 'Shell',
     command: null,
+    npmPackage: null,
     installCommand: null,
   },
 ]
@@ -56,5 +63,16 @@ export const TOOLS: readonly ToolDefinition[] = [
 export function getTool(id: ToolId): ToolDefinition {
   const tool = TOOLS.find((candidate) => candidate.id === id)
   if (!tool) throw new Error(`Unknown tool: ${id}`)
+  return tool
+}
+
+/** The coding tools, which run an agent: Claude Code, Codex and OpenCode, in this order. */
+export const CODING_TOOLS: readonly CodingToolDefinition[] = TOOLS.filter(
+  (tool): tool is CodingToolDefinition => tool.command !== null,
+)
+
+export function getCodingTool(id: CodingToolId): CodingToolDefinition {
+  const tool = CODING_TOOLS.find((candidate) => candidate.id === id)
+  if (!tool) throw new Error(`Unknown coding tool: ${id}`)
   return tool
 }

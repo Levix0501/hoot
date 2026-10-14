@@ -164,6 +164,18 @@ describe('SessionManager', () => {
     await expect(manager.start(request('h1'))).rejects.toBeInstanceOf(SessionError)
   })
 
+  it("tells a tool's sessions that are still running", async () => {
+    const { host, manager } = setup()
+    await manager.start(request('c1', 'claude'))
+    await manager.start(request('c2', 'claude'))
+    await manager.start(request('s1'))
+    expect(manager.runningIdsOf('claude')).toEqual(['c1', 'c2'])
+    host.emit('exit', 'c1', 0, 0)
+    expect(manager.runningIdsOf('claude')).toEqual(['c2'])
+    expect(manager.runningIdsOf('shell')).toEqual(['s1'])
+    expect(manager.runningIdsOf('codex')).toEqual([])
+  })
+
   it('records the exit code or the terminating signal of each session', async () => {
     const { manager, host, updates } = setup()
     await manager.start(request('s1'))

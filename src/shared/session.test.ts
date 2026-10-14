@@ -3,7 +3,9 @@ import {
   defaultSessionName,
   describeExit,
   describeExitCompact,
+  describeAgentOperations,
   describeExitShort,
+  describeQuit,
   describeRunningSessions,
   isNormalExit,
   quitConfirmationLabel,
@@ -108,5 +110,29 @@ describe('quit confirmation', () => {
     )
     expect(quitConfirmationLabel(1, 'update')).toBe('End Session and Restart')
     expect(quitConfirmationLabel(2, 'update')).toBe('End Sessions and Restart')
+  })
+
+  it('names the agents being installed or updated, and those waiting to be', () => {
+    const updating = { label: 'Claude Code', kind: 'update' as const, waiting: false }
+    const installing = { label: 'OpenCode', kind: 'install' as const, waiting: false }
+    const waiting = { label: 'Codex', kind: 'update' as const, waiting: true }
+    expect(describeAgentOperations([updating], 'quit')).toBe(
+      'Claude Code is being updated. Quitting will stop it.',
+    )
+    expect(describeAgentOperations([installing, waiting], 'update')).toBe(
+      'OpenCode is being installed and Codex is waiting to be updated. Restarting will stop them.',
+    )
+    expect(describeQuit(0, 'quit', [updating])).toBe(
+      'Claude Code is being updated. Quitting will stop it.',
+    )
+    expect(describeQuit(2, 'quit', [updating])).toBe(
+      'Claude Code is being updated. Quitting will stop it. ' +
+        '2 sessions are still running. Quitting will end them.',
+    )
+    expect(describeQuit(1, 'update', [])).toBe(
+      '1 session is still running. Restarting will end it.',
+    )
+    expect(quitConfirmationLabel(0, 'quit')).toBe('Stop and Quit')
+    expect(quitConfirmationLabel(0, 'update')).toBe('Stop and Restart')
   })
 })

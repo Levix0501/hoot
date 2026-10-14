@@ -123,6 +123,13 @@ export class SessionManager extends EventEmitter<{
     return [...this.records.values()].filter(isRunning).length
   }
 
+  /** The ids of a tool's sessions that are starting or running. */
+  runningIdsOf(toolId: ToolId): string[] {
+    return [...this.records.values()]
+      .filter((record) => record.info.toolId === toolId && isRunning(record))
+      .map((record) => record.info.id)
+  }
+
   hasRunningSession(): boolean {
     return this.runningCount() > 0
   }

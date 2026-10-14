@@ -10,6 +10,7 @@ import {
 import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
 import type { ToolId } from '../../shared/tools'
+import { api } from '../lib/api'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import { OpenIssueCount } from './open-issue-count'
 import { CollapsibleTrigger } from './ui/collapsible'
@@ -65,6 +66,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
   const newSession = useAppStore((state) => state.newSession)
   const removeProject = useAppStore((state) => state.removeProject)
   const redetectTools = useAppStore((state) => state.redetectTools)
+  const showSettings = useAppStore((state) => state.showSettings)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
   const showProjectIssues = useAppStore((state) => state.showProjectIssues)
   const openIssues = useAppStore(
@@ -81,6 +83,8 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
   const startSession = (toolId: ToolId) => newSession(project.root, toolId)
   const remove = () => void removeProject(project.root)
   const redetect = () => void redetectTools()
+  // On macOS, a tool that is not installed is installed on the Agents page.
+  const installInSettings = api.manageAgents ? () => showSettings('agents') : undefined
   const newWorktree = () => openNewWorktreeDialog(project.root)
   const Folder = expanded ? FolderOpenIcon : FolderIcon
 
@@ -149,6 +153,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
               permissionLevels={permissionLevels}
               onSelect={startSession}
               onRedetect={redetect}
+              onInstall={installInSettings}
             />
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={newWorktree} data-testid="new-worktree">
@@ -203,6 +208,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
               permissionLevels={permissionLevels}
               onSelect={startSession}
               onRedetect={redetect}
+              onInstall={installInSettings}
             />
           </ContextMenuSubContent>
         </ContextMenuSub>

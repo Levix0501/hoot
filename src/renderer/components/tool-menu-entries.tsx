@@ -32,11 +32,19 @@ interface ToolMenuEntriesProps {
   permissionLevels: PermissionLevelSettings | null
   onSelect: (toolId: ToolId) => void
   onRedetect: () => void
+  /**
+   * Shows the settings' Agents page, where a tool that is not installed can
+   * be installed; without it, as on Windows, the menu gives the tool's
+   * install command instead.
+   */
+  onInstall?: () => void
 }
 
 /**
  * The tool choices of a "new session" menu, with the permission level each
- * coding tool starts with, availability and install commands.
+ * coding tool starts with, and availability: below a tool that is not
+ * installed, "Install in Settings…", or where Hoot does not install tools,
+ * its install command.
  */
 export function ToolMenuEntries({
   components,
@@ -44,6 +52,7 @@ export function ToolMenuEntries({
   permissionLevels,
   onSelect,
   onRedetect,
+  onInstall,
 }: ToolMenuEntriesProps) {
   const { Group, Item, Separator, Label } = components
   return (
@@ -85,7 +94,16 @@ export function ToolMenuEntries({
                   </span>
                 )}
               </Item>
-              {!available && !unknown && tool.installCommand && (
+              {!available && !unknown && onInstall && (
+                <Item
+                  onClick={onInstall}
+                  className="pl-7 text-xs text-muted-foreground"
+                  data-testid={`install-in-settings-${tool.id}`}
+                >
+                  Install in Settings…
+                </Item>
+              )}
+              {!available && !unknown && !onInstall && tool.installCommand && (
                 <div className="flex items-baseline gap-1.5 pr-2 pb-1.5 pl-7 text-xs text-muted-foreground">
                   <span>Install:</span>
                   <code

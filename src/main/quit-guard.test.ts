@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentOperationSummary } from '../shared/agents'
 import { IpcChannel } from '../shared/ipc'
 
 const electron = vi.hoisted(() => ({
@@ -22,25 +23,41 @@ function fakeWindow() {
   return { window, send }
 }
 
-function setup(options: { running: number; window: BrowserWindow | null }) {
+function setup(options: {
+  running: number
+  window: BrowserWindow | null
+  operations?: AgentOperationSummary[]
+}) {
   let running = options.running
+  let operations = options.operations ?? []
+  const calls: string[] = []
   const presentWindow = vi.fn<(window: BrowserWindow) => void>()
   const onCancel = vi.fn<() => void>()
   const endSessions = vi.fn<() => Promise<void>>(async () => {
+    calls.push('end sessions')
     running = 0
+  })
+  const stopAgentOperations = vi.fn<() => Promise<void>>(async () => {
+    calls.push('stop operations')
+    operations = []
   })
   const guard = new QuitGuard({
     getWindow: () => options.window,
     presentWindow,
     runningSessionCount: () => running,
     endSessions,
+    agentOperations: () => operations,
+    stopAgentOperations,
     onCancel,
   })
   const setRunning = (count: number) => {
     running = count
   }
-  return { guard, presentWindow, onCancel, endSessions, setRunning }
+  return { guard, presentWindow, onCancel, endSessions, stopAgentOperations, setRunning, calls }
 }
+
+const updating: AgentOperationSummary = { label: 'Claude Code', kind: 'update', waiting: false }
+const waiting: AgentOperationSummary = { label: 'Codex', kind: 'update', waiting: true }
 
 const quitEvent = () => {
   const preventDefault = vi.fn<() => void>()
@@ -69,7 +86,7 @@ describe('QuitGuard', () => {
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
     expect(presentWindow).toHaveBeenCalledWith(window)
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'quit')
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'quit', [])
 
     // Asking again while the question is open only brings the window back.
     guard.intercept(quitEvent().event)
@@ -139,6 +156,70 @@ describe('QuitGuard', () => {
   })
 })
 
+describe('QuitGuard with agents being installed or updated', () => {
+  it('asks also without a running session, naming the agents', () => {
+    const { window, send } = fakeWindow()
+    const { guard } = setup({ running: 0, window, operations: [updating, waiting] })
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'quit', [updating, waiting])
+  })
+
+  it('keeps the operations when the user cancels', async () => {
+    const { window } = fakeWindow()
+    const { guard, stopAgentOperations, onCancel } = setup({
+      running: 0,
+      window,
+      operations: [updating],
+    })
+    guard.intercept(quitEvent().event)
+    await guard.answer(false)
+    expect(onCancel).toHaveBeenCalled()
+    expect(stopAgentOperations).not.toHaveBeenCalled()
+    expect(electron.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('stops the operations, then ends the sessions and quits, when the user confirms', async () => {
+    const { window } = fakeWindow()
+    const { guard, calls } = setup({ running: 1, window, operations: [updating] })
+    guard.intercept(quitEvent().event)
+    await guard.answer(true)
+    expect(calls).toEqual(['stop operations', 'end sessions'])
+    expect(electron.app.quit).toHaveBeenCalled()
+  })
+
+  it('asks before restarting into an update, and stops the operations first', async () => {
+    const { window, send } = fakeWindow()
+    const { guard, calls } = setup({ running: 0, window, operations: [updating] })
+    const install = vi.fn<() => void>(() => calls.push('install'))
+    guard.restartToUpdate(install)
+    expect(install).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'update', [updating])
+    await guard.answer(true)
+    expect(calls).toEqual(['stop operations', 'end sessions', 'install'])
+  })
+
+  it('names them in the native dialog when there is no window', async () => {
+    electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
+    const { guard, stopAgentOperations } = setup({
+      running: 0,
+      window: null,
+      operations: [updating],
+    })
+    guard.intercept(quitEvent().event)
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Quit Hoot?',
+        detail: 'Claude Code is being updated. Quitting will stop it.',
+        buttons: ['Stop and Quit', 'Cancel'],
+      }),
+    )
+    await vi.waitFor(() => expect(electron.app.quit).toHaveBeenCalled())
+    expect(stopAgentOperations).toHaveBeenCalled()
+  })
+})
+
 describe('QuitGuard.restartToUpdate', () => {
   it('installs at once when no session runs', () => {
     const { window, send } = fakeWindow()
@@ -156,7 +237,7 @@ describe('QuitGuard.restartToUpdate', () => {
     const install = vi.fn<() => void>()
     guard.restartToUpdate(install)
     expect(presentWindow).toHaveBeenCalledWith(window)
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'update')
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'update', [])
     expect(install).not.toHaveBeenCalled()
 
     await guard.answer(true)
@@ -177,7 +258,7 @@ describe('QuitGuard.restartToUpdate', () => {
     const { event, preventDefault } = quitEvent()
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
-    expect(send).toHaveBeenLastCalledWith(IpcChannel.confirmQuit, 1, 'quit')
+    expect(send).toHaveBeenLastCalledWith(IpcChannel.confirmQuit, 1, 'quit', [])
   })
 
   it('still asks before quitting after it ended the sessions to install', async () => {

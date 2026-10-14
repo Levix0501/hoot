@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { describeRunningSessions, quitConfirmationLabel, quitQuestion } from '../../shared/session'
+import { describeQuit, quitConfirmationLabel, quitQuestion } from '../../shared/session'
 import { focusAfterOverlay, useAppStore, type AppState } from '../store/app-store'
 import {
   AlertDialog,
@@ -20,13 +20,9 @@ export function QuitDialog() {
   const [shown, setShown] = useState<NonNullable<AppState['quitConfirmation']>>({
     runningSessions: 1,
     reason: 'quit',
+    agentOperations: [],
   })
-  if (
-    confirmation &&
-    (confirmation.runningSessions !== shown.runningSessions || confirmation.reason !== shown.reason)
-  ) {
-    setShown(confirmation)
-  }
+  if (confirmation && confirmation !== shown) setShown(confirmation)
   const answered = useRef(false)
   useEffect(() => {
     if (open) answered.current = false
@@ -49,7 +45,7 @@ export function QuitDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>{quitQuestion(shown.reason)}</AlertDialogTitle>
           <AlertDialogDescription data-testid="quit-dialog-description">
-            {describeRunningSessions(shown.runningSessions, shown.reason)}
+            {describeQuit(shown.runningSessions, shown.reason, shown.agentOperations)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -243,7 +243,7 @@ export function ProjectSidebar() {
             top and bottom.
           */}
           <SidebarMenuItem className="flex items-center gap-2">
-            <SidebarMenuButton onClick={showSettings} data-testid="sidebar-settings">
+            <SidebarMenuButton onClick={() => showSettings()} data-testid="sidebar-settings">
               <SettingsIcon />
               <span>Settings</span>
             </SidebarMenuButton>

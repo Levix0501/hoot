@@ -62,27 +62,42 @@ export function prependToPath(env: Env, directory: string, platform: NodeJS.Plat
   env[name] = current ? `${directory}${delimiter}${current}` : directory
 }
 
+/**
+ * Puts a folder last on the environment's PATH, which it names as
+ * `prependToPath` does.
+ */
+export function appendToPath(env: Env, directory: string, platform: NodeJS.Platform): void {
+  const name = pathKey({ env, platform })
+  const delimiter = platform === 'win32' ? path.win32.delimiter : path.posix.delimiter
+  const current = env[name]
+  env[name] = current ? `${current}${delimiter}${directory}` : directory
+}
+
 /** Variables that only describe the shell instance the environment was read from. */
 const SHELL_INSTANCE_VARIABLES = ['OLDPWD', 'SHLVL', '_']
 
 /**
  * Builds the environment of a session process from the environment it should
- * inherit. It adds only the terminal variables and what hoot needs: its
- * variables, and the folder of its launchers first on PATH.
+ * inherit. It adds only the terminal variables, what hoot needs (its
+ * variables, and the folder of its launchers first on PATH), and the folders
+ * `lastOnPath` gives, last on PATH, after every folder the environment has.
  */
 export function buildSessionEnv(
   source: Env,
   options: TerminalEnvOptions & {
     cwd: string
     hoot: HootCliEnvOptions
+    lastOnPath?: readonly string[]
     platform?: NodeJS.Platform
   },
 ): Env {
+  const platform = options.platform ?? process.platform
   const env: Env = { ...source }
   for (const name of SHELL_INSTANCE_VARIABLES) delete env[name]
   env.PWD = options.cwd
   Object.assign(env, terminalEnvironment(options), hootCliEnvironment(options.hoot))
-  prependToPath(env, options.hoot.binDirectory, options.platform ?? process.platform)
+  prependToPath(env, options.hoot.binDirectory, platform)
+  for (const directory of options.lastOnPath ?? []) appendToPath(env, directory, platform)
   if (!env.LANG) env.LANG = options.fallbackLang
   return env
 }

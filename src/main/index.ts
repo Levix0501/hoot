@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
-import { app, BrowserWindow, Menu, nativeTheme } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
 import {
@@ -11,6 +11,9 @@ import {
   windowControlsArgument,
   windowControlsFor,
 } from '../shared/window-controls'
+import { agentPaths, lastOnSessionPath } from './agents/agent-paths'
+import { AgentService } from './agents/agent-service'
+import { fetchLatestVersion } from './agents/latest-version'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase } from './database/database'
 import { captureBaseEnv } from './env/env'
@@ -57,6 +60,17 @@ const hootCli = hootCliSetup({
   executable: process.execPath,
   mainDirectory: import.meta.dirname,
 })
+// Hoot installs and updates agents on macOS only. The agents it installs
+// itself, when the computer has no npm it can use, live in the home folder,
+// so that an installed Hoot and one run from its repository share them.
+const manageAgents = process.platform === 'darwin'
+const agentFolders = agentPaths({
+  home: os.homedir(),
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  executable: process.execPath,
+})
 const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.
@@ -87,7 +101,12 @@ nativeTheme.themeSource = appearance.appearance
 appearance.on('changed', (picked) => {
   nativeTheme.themeSource = picked
 })
-const tools = new ToolService({ shell, baseEnv, cwd: os.homedir() })
+const tools = new ToolService({
+  shell,
+  baseEnv,
+  cwd: os.homedir(),
+  agentsBinDirectory: manageAgents ? agentFolders.binDirectory : null,
+})
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
 let terminalOptions: TerminalEnvOptions | null = null
@@ -107,12 +126,26 @@ const sessions = new SessionManager({
         permissionLevel: (tool) => permissionLevels.level(tool),
         temporaryFolder: app.getPath('temp'),
         hoot: { ...hootCli, sessionId },
+        agents: manageAgents
+          ? { binDirectory: agentFolders.binDirectory, lastOnPath: lastOnSessionPath(agentFolders) }
+          : null,
       },
       toolId,
       cwd,
       issue,
       permissionLevel,
     ),
+})
+
+const agents = new AgentService({
+  detectTools: () => tools.detectWithEnvironment(),
+  getLoginEnvironment: () => tools.getLoginEnvironment(),
+  paths: agentFolders,
+  home: os.homedir(),
+  // Through Electron's network stack, which takes the system's proxy settings.
+  latestVersion: (npmPackage) =>
+    fetchLatestVersion(npmPackage, (url, init) => net.fetch(url, init)),
+  runningSessions: (id) => sessions.runningIdsOf(id),
 })
 
 let mainWindow: BrowserWindow | null = null
@@ -148,6 +181,8 @@ const quitGuard = new QuitGuard({
   presentWindow,
   runningSessionCount: () => sessions.runningCount(),
   endSessions: () => sessions.endAll(),
+  agentOperations: () => agents.pendingOperations(),
+  stopAgentOperations: () => agents.stopAll(),
   // Keeping a running session must not leave Hoot without a window.
   onCancel: () => {
     if (!getWindow()) mainWindow = createMainWindow({ reveal: !openInBackground })
@@ -294,6 +329,8 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     worktrees.dispose()
     const shutdown = (async () => {
+      // Also when Hoot quits without asking, as on SIGTERM.
+      await agents.stopAll()
       // hoot then says that Hoot is not running.
       await hootServer?.stop()
       await sessions.endAll()
@@ -333,6 +370,7 @@ function startWithDatabase(database: DatabaseSync): void {
     projects,
     issues,
     tools,
+    agents,
     permissionLevels,
     sidebar,
     appearance,

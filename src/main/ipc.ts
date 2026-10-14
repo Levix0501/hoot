@@ -28,7 +28,7 @@ import {
   type NewIssue,
 } from '../shared/issues'
 import { browserLink } from '../shared/links'
-import { TOOL_IDS } from '../shared/tools'
+import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
 import type {
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
@@ -36,6 +36,7 @@ import type {
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
 } from '../shared/worktrees'
+import type { AgentService } from './agents/agent-service'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import type { ProjectRootResult } from './projects/project-root'
@@ -55,6 +56,7 @@ export interface IpcDependencies {
   projects: ProjectStore
   issues: IssueStore
   tools: ToolService
+  agents: AgentService
   permissionLevels: PermissionLevelStore
   sidebar: SidebarStateStore
   appearance: AppearanceStore
@@ -109,7 +111,11 @@ const issueChanges = z.strictObject({
   priority: issuePriority.optional(),
   projectId: rowId.nullable().optional(),
 }) satisfies z.ZodType<IssueChanges>
-/** The longest text put on the clipboard, which only ever gets an issue's identifier or title. */
+const agentId = z.enum(CODING_TOOL_IDS)
+/**
+ * The longest text put on the clipboard, which only ever gets an issue's
+ * identifier or title, or the line that puts Hoot's folder of agents on PATH.
+ */
 const clipboardText = z.string().max(ISSUE_TITLE_MAX_LENGTH)
 
 function errorMessage(error: unknown): string {
@@ -270,6 +276,22 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.getTools, () => deps.tools.settledState())
   handle(IpcChannel.redetectTools, () => deps.tools.detect())
   deps.tools.on('changed', (state) => send(IpcChannel.toolsChanged, state))
+
+  handle(IpcChannel.getAgents, () => deps.agents.getState())
+  on(IpcChannel.detectAgents, () => void deps.agents.detect())
+  deps.agents.on('changed', (state) => send(IpcChannel.agentsChanged, state))
+  on(IpcChannel.installAgent, (id) => {
+    const parsed = agentId.safeParse(id)
+    if (parsed.success) deps.agents.install(parsed.data)
+  })
+  on(IpcChannel.updateAgent, (id) => {
+    const parsed = agentId.safeParse(id)
+    if (parsed.success) deps.agents.update(parsed.data)
+  })
+  on(IpcChannel.cancelAgentOperation, (id) => {
+    const parsed = agentId.safeParse(id)
+    if (parsed.success) deps.agents.cancel(parsed.data)
+  })
 
   handle(IpcChannel.getPermissionLevels, () => deps.permissionLevels.all())
   deps.permissionLevels.on('changed', (settings) =>

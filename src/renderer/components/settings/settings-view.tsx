@@ -1,6 +1,7 @@
-import { ArrowLeftIcon, SunMoonIcon } from 'lucide-react'
-import { useEffect } from 'react'
-import { useAppStore } from '../../store/app-store'
+import { ArrowLeftIcon, BotIcon, SunMoonIcon } from 'lucide-react'
+import { useEffect, type ComponentType } from 'react'
+import { api } from '../../lib/api'
+import { useAppStore, type SettingsSection } from '../../store/app-store'
 import {
   Sidebar,
   SidebarContent,
@@ -10,7 +11,18 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '../ui/sidebar'
+import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
+
+/** The pages of the settings, in the order of their list: Agents on macOS only. */
+const SECTIONS: ReadonlyArray<{
+  id: SettingsSection
+  label: string
+  icon: ComponentType
+}> = [
+  { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
+  ...(api.manageAgents ? [{ id: 'agents' as const, label: 'Agents', icon: BotIcon }] : []),
+]
 
 /** Whether the keyboard focus is where text is typed, where Esc is the field's. */
 function focusInField(): boolean {
@@ -48,6 +60,8 @@ function useEscapeLeavesSettings(): void {
 /** The list of the settings' pages, in the sidebar's place and as wide. */
 function SettingsNavigation() {
   const leaveSettings = useAppStore((state) => state.leaveSettings)
+  const section = useAppStore((state) => state.settingsSection)
+  const selectSection = useAppStore((state) => state.selectSettingsSection)
   return (
     <Sidebar
       collapsible="none"
@@ -74,12 +88,19 @@ function SettingsNavigation() {
         </SidebarGroup>
         <SidebarGroup>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton isActive aria-current="page" data-testid="settings-appearance">
-                <SunMoonIcon />
-                <span>Appearance</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {SECTIONS.map(({ id, label, icon: Icon }) => (
+              <SidebarMenuItem key={id}>
+                <SidebarMenuButton
+                  isActive={id === section}
+                  aria-current={id === section ? 'page' : undefined}
+                  onClick={() => selectSection(id)}
+                  data-testid={`settings-${id}`}
+                >
+                  <Icon />
+                  <span>{label}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
@@ -89,15 +110,16 @@ function SettingsNavigation() {
 
 /**
  * What the window shows in place of the sidebar and the main area while the
- * settings are the current page: the list of their pages, and the
- * Appearance page.
+ * settings are the current page: the list of their pages, and the page of
+ * theirs shown last since Hoot started, Appearance at first.
  */
 export function SettingsView() {
   useEscapeLeavesSettings()
+  const section = useAppStore((state) => state.settingsSection)
   return (
     <>
       <SettingsNavigation />
-      <AppearancePage />
+      {section === 'agents' && api.manageAgents ? <AgentsPage /> : <AppearancePage />}
     </>
   )
 }

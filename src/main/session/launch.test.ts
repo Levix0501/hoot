@@ -19,18 +19,24 @@ import { SessionError } from './session-manager'
 let root: string
 let project: string
 let bin: string
+let agentsBin: string
 let temporary: string
 
 beforeAll(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
   project = path.join(root, 'project')
   bin = path.join(root, 'bin')
+  agentsBin = path.join(root, 'agents', 'bin')
   temporary = path.join(root, 'tmp')
   fs.mkdirSync(project)
   fs.mkdirSync(bin)
+  fs.mkdirSync(agentsBin, { recursive: true })
   fs.mkdirSync(temporary)
   for (const command of ['claude', 'codex']) {
     fs.writeFileSync(path.join(bin, command), '#!/bin/sh\n', { mode: 0o755 })
+  }
+  for (const command of ['codex', 'opencode']) {
+    fs.writeFileSync(path.join(agentsBin, command), '#!/bin/sh\n', { mode: 0o755 })
   }
 })
 
@@ -62,8 +68,13 @@ function context(
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
     temporaryFolder: temporary,
     hoot,
+    // A folder of agents without any.
+    agents: { binDirectory: path.join(root, 'no-agents'), lastOnPath: [] },
   }
 }
+
+/** Where the Hoot that a session's process runs `node` from keeps it. */
+const nodeDirectory = '/Applications/Hoot.app/Contents/Resources/node'
 
 const hootVariables = {
   HOOT_SOCKET: hoot.socket,
@@ -89,7 +100,7 @@ describe('resolveLaunch', () => {
   it('runs a tool command with its permission level arguments in the login shell environment', async () => {
     const loginEnv = { PATH: `${bin}:/usr/bin`, FROM_RC: 'yes', SHLVL: '1', _: '/usr/bin/env' }
     const launch = await resolveLaunch(context(loginEnv), 'codex', project)
-    expect(launch.file).toBe('codex')
+    expect(launch.file).toBe(path.join(bin, 'codex'))
     expect(launch.args).toEqual(['--dangerously-bypass-approvals-and-sandbox'])
     expect(launch.env).toMatchObject({
       PATH: `${hoot.binDirectory}:${bin}:/usr/bin`,
@@ -170,7 +181,7 @@ describe('resolveLaunch', () => {
     expect(fs.readFileSync(path.join(folder, 'issue.md'), 'utf8')).toBe(
       '# Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  \n',
     )
-    expect(launch.file).toBe('claude')
+    expect(launch.file).toBe(path.join(bin, 'claude'))
     expect(launch.args).toEqual([
       '--permission-mode',
       'acceptEdits',
@@ -218,6 +229,37 @@ describe('resolveLaunch', () => {
   it('refuses a tool that is not on the login shell PATH', async () => {
     await expect(resolveLaunch(context({ PATH: '/usr/bin' }), 'opencode', project)).rejects.toThrow(
       'OpenCode is not available. Install it with: npm install -g opencode-ai',
+    )
+  })
+
+  it("runs a tool from Hoot's folder of agents when the login shell PATH has none", async () => {
+    const withAgents = (loginEnv: Record<string, string>): LaunchContext => ({
+      ...context(loginEnv),
+      agents: { binDirectory: agentsBin, lastOnPath: [nodeDirectory, agentsBin] },
+    })
+    const loginEnv = { PATH: `${bin}:/usr/bin` }
+    const opencode = await resolveLaunch(withAgents(loginEnv), 'opencode', project)
+    expect(opencode.file).toBe(path.join(agentsBin, 'opencode'))
+    expect(opencode.args).toEqual(['--auto'])
+    // The folders that come with Hoot go last, after every folder the session had.
+    expect(opencode.env.PATH).toBe(
+      `${hoot.binDirectory}:${bin}:/usr/bin:${nodeDirectory}:${agentsBin}`,
+    )
+    // The one on the login shell PATH comes first.
+    expect((await resolveLaunch(withAgents(loginEnv), 'codex', project)).file).toBe(
+      path.join(bin, 'codex'),
+    )
+    const shell = await resolveLaunch(withAgents(loginEnv), 'shell', project)
+    expect(shell.env.PATH).toBe(`${hoot.binDirectory}:/usr/bin:/bin:${nodeDirectory}:${agentsBin}`)
+  })
+
+  it('runs a tool by its name, found on the login shell PATH only, where Hoot has no folder of agents', async () => {
+    const elsewhere: LaunchContext = { ...context({ PATH: `${bin}:/usr/bin` }), agents: null }
+    const codex = await resolveLaunch(elsewhere, 'codex', project)
+    expect(codex.file).toBe('codex')
+    expect(codex.env.PATH).toBe(`${hoot.binDirectory}:${bin}:/usr/bin`)
+    await expect(resolveLaunch(elsewhere, 'opencode', project)).rejects.toThrow(
+      'OpenCode is not available.',
     )
   })
 

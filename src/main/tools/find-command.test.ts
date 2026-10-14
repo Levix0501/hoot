@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { findCommand, pathFolders } from './find-command'
+import { findAgentCommand, findCommand, pathFolders } from './find-command'
 
 let root: string
 
@@ -32,6 +32,25 @@ describe('findCommand', () => {
     const relative = path.relative(process.cwd(), path.join(root, 'c'))
     expect(path.isAbsolute(relative)).toBe(false)
     expect(await findCommand('tool', { PATH: relative })).toBeNull()
+  })
+})
+
+describe('findAgentCommand', () => {
+  it('prefers the command on PATH to the one in the folder of agents', async () => {
+    const agentsBin = path.join(root, 'c')
+    expect(await findAgentCommand('tool', { PATH: path.join(root, 'c') }, agentsBin)).toBe(
+      path.join(root, 'c', 'tool'),
+    )
+    expect(await findAgentCommand('tool', { PATH: path.join(root, 'a') }, agentsBin)).toBe(
+      path.join(agentsBin, 'tool'),
+    )
+  })
+
+  it('finds none where neither has it, or without a folder of agents', async () => {
+    expect(await findAgentCommand('tool', {}, path.join(root, 'a'))).toBeNull()
+    expect(await findAgentCommand('tool', {}, path.join(root, 'b'))).toBeNull()
+    expect(await findAgentCommand('tool', {}, null)).toBeNull()
+    expect(await findAgentCommand('tool', {}, path.join(root, 'missing'))).toBeNull()
   })
 })
 

@@ -1,3 +1,4 @@
+import type { AgentOperationSummary } from './agents'
 import { getTool, type ToolId } from './tools'
 
 /** How a session's process ended. */
@@ -104,8 +105,44 @@ export function describeRunningSessions(count: number, reason: QuitReason): stri
     : `${count} sessions are still running. ${ending} will end them.`
 }
 
-/** The label of the button that confirms quitting. */
+/**
+ * What the quit confirmation says about the agents being installed or
+ * updated, and those waiting to be, which quitting stops.
+ */
+export function describeAgentOperations(
+  operations: readonly AgentOperationSummary[],
+  reason: QuitReason,
+): string {
+  const clauses = operations.map(({ label, kind, waiting }) => {
+    const done = kind === 'install' ? 'installed' : 'updated'
+    return waiting ? `${label} is waiting to be ${done}` : `${label} is being ${done}`
+  })
+  const list = new Intl.ListFormat('en', { type: 'conjunction' }).format(clauses)
+  const ending = reason === 'quit' ? 'Quitting' : 'Restarting'
+  return `${list}. ${ending} will stop ${operations.length === 1 ? 'it' : 'them'}.`
+}
+
+/**
+ * Everything the quit confirmation says: about the agents being installed or
+ * updated, if any, then about the running sessions, if any.
+ */
+export function describeQuit(
+  runningSessions: number,
+  reason: QuitReason,
+  operations: readonly AgentOperationSummary[],
+): string {
+  const parts: string[] = []
+  if (operations.length > 0) parts.push(describeAgentOperations(operations, reason))
+  if (runningSessions > 0) parts.push(describeRunningSessions(runningSessions, reason))
+  return parts.join(' ')
+}
+
+/**
+ * The label of the button that confirms quitting: it ends the running
+ * sessions, or, with none, stops what is being installed or updated.
+ */
 export function quitConfirmationLabel(count: number, reason: QuitReason): string {
   const action = reason === 'quit' ? 'Quit' : 'Restart'
+  if (count === 0) return `Stop and ${action}`
   return count === 1 ? `End Session and ${action}` : `End Sessions and ${action}`
 }

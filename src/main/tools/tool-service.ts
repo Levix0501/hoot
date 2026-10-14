@@ -3,12 +3,17 @@ import type { ToolAvailability, ToolsState } from '../../shared/ipc'
 import { TOOLS } from '../../shared/tools'
 import type { Env } from '../env/env'
 import { resolveLoginShellEnv } from '../env/login-shell-env'
-import { findCommand } from './find-command'
+import { findAgentCommand } from './find-command'
 
 export interface ToolServiceOptions {
   shell: string
   baseEnv: Env
   cwd: string
+  /**
+   * Hoot's folder of agents' commands, where a coding tool that is not on the
+   * login shell PATH is looked for; `null` where Hoot has none, as on Windows.
+   */
+  agentsBinDirectory?: string | null
   /** Replaceable for tests. */
   resolveEnv?: typeof resolveLoginShellEnv
 }
@@ -19,14 +24,24 @@ export interface LoginEnvironment {
   error: string | null
 }
 
+/** What a detection found, and the login shell environment it read to find it. */
+export interface Detection {
+  state: ToolsState
+  login: LoginEnvironment
+}
+
 /**
- * Reads the login shell environment and checks which tools can be found in its
- * PATH. Detection runs at startup and again whenever the user asks for it.
+ * Reads the login shell environment and checks which tools can be found: on
+ * its PATH, or else, for a coding tool, in Hoot's folder of agents. Detection
+ * runs at startup and again whenever the user asks for it, or an agent has
+ * been installed or updated.
  */
 export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   private state: ToolsState = { detecting: false, tools: [], error: null }
   private login: LoginEnvironment | null = null
-  private running: Promise<ToolsState> | null = null
+  private running: Promise<Detection> | null = null
+  /** The detection that starts once the running one ends. */
+  private queued: Promise<Detection> | null = null
 
   constructor(private readonly options: ToolServiceOptions) {
     super()
@@ -37,13 +52,27 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   }
 
   /** Re-reads the login shell environment and re-checks every tool. */
-  detect(): Promise<ToolsState> {
-    if (this.running) return this.running
-    this.setState({ ...this.state, detecting: true })
-    this.running = this.runDetection().finally(() => {
-      this.running = null
-    })
-    return this.running
+  async detect(): Promise<ToolsState> {
+    return (await this.detectWithEnvironment()).state
+  }
+
+  /**
+   * Re-reads the login shell environment and re-checks every tool, in a
+   * detection that starts no earlier than this call, so that it sees what
+   * changed before it: while one runs, the next starts once it ends, for
+   * every call made meanwhile.
+   */
+  detectWithEnvironment(): Promise<Detection> {
+    if (this.queued) return this.queued
+    const running = this.running
+    if (!running) return this.start()
+    const startNext = () => {
+      this.queued = null
+      return this.start()
+    }
+    const queued = running.then(startNext, startNext)
+    this.queued = queued
+    return queued
   }
 
   /** The most recently read login shell environment, detecting first if needed. */
@@ -55,12 +84,21 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
 
   /** Waits for a running detection and returns the current state. */
   async settledState(): Promise<ToolsState> {
-    if (this.running) return this.running
+    if (this.running) return (await this.running).state
     if (!this.login) return this.detect()
     return this.state
   }
 
-  private async runDetection(): Promise<ToolsState> {
+  private start(): Promise<Detection> {
+    this.setState({ ...this.state, detecting: true })
+    const running = this.runDetection().finally(() => {
+      if (this.running === running) this.running = null
+    })
+    this.running = running
+    return running
+  }
+
+  private async runDetection(): Promise<Detection> {
     const resolveEnv = this.options.resolveEnv ?? resolveLoginShellEnv
     let login: LoginEnvironment
     try {
@@ -80,16 +118,17 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     }
     this.login = login
 
+    const agentsBin = this.options.agentsBinDirectory ?? null
     const tools: ToolAvailability[] = await Promise.all(
       TOOLS.map(async (tool) => {
         if (!tool.command) return { id: tool.id, available: true, path: this.options.shell }
-        const found = await findCommand(tool.command, login.env)
+        const found = await findAgentCommand(tool.command, login.env, agentsBin)
         return { id: tool.id, available: found !== null, path: found }
       }),
     )
     const state: ToolsState = { detecting: false, tools, error: login.error }
     this.setState(state)
-    return state
+    return { state, login }
   }
 
   private setState(state: ToolsState): void {

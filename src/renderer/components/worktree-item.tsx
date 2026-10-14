@@ -107,6 +107,7 @@ export function WorktreeItem({
   const permissionLevels = useAppStore((state) => state.permissionLevels)
   const newSession = useAppStore((state) => state.newSession)
   const redetectTools = useAppStore((state) => state.redetectTools)
+  const showSettings = useAppStore((state) => state.showSettings)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
   const removeMissingWorktree = useAppStore((state) => state.removeMissingWorktree)
   // A worktree cannot be deleted while a session runs in it (or in a worktree inside it).
@@ -120,6 +121,8 @@ export function WorktreeItem({
 
   const startSession = (toolId: ToolId) => newSession(projectRoot, toolId, worktree.path)
   const redetect = () => void redetectTools()
+  // On macOS, a tool that is not installed is installed on the Agents page.
+  const installInSettings = api.manageAgents ? () => showSettings('agents') : undefined
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
@@ -207,6 +210,7 @@ export function WorktreeItem({
               permissionLevels={permissionLevels}
               onSelect={startSession}
               onRedetect={redetect}
+              onInstall={installInSettings}
             />
           </DropdownMenuContent>
         </DropdownMenu>
@@ -298,6 +302,7 @@ export function WorktreeItem({
                   permissionLevels={permissionLevels}
                   onSelect={startSession}
                   onRedetect={redetect}
+                  onInstall={installInSettings}
                 />
               </ContextMenuSubContent>
             </ContextMenuSub>

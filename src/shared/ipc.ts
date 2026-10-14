@@ -1,8 +1,9 @@
+import type { AgentOperationSummary, AgentsState } from './agents'
 import type { Appearance } from './appearance'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
-import type { ToolId } from './tools'
+import type { CodingToolId, ToolId } from './tools'
 import type { UpdateState } from './updates'
 import type { WindowControls } from './window-controls'
 import type {
@@ -39,7 +40,10 @@ export type AddProjectResult =
 export interface ToolAvailability {
   id: ToolId
   available: boolean
-  /** Absolute path of the command found in the login shell PATH. */
+  /**
+   * Absolute path of the command found in the login shell PATH or, for a
+   * coding tool on macOS, else in Hoot's folder of agents.
+   */
   path: string | null
 }
 
@@ -111,6 +115,12 @@ export const IpcChannel = {
   getTools: 'tools:get',
   redetectTools: 'tools:redetect',
   toolsChanged: 'tools:changed',
+  getAgents: 'agents:get',
+  detectAgents: 'agents:detect',
+  agentsChanged: 'agents:changed',
+  installAgent: 'agents:install',
+  updateAgent: 'agents:update',
+  cancelAgentOperation: 'agents:cancel',
   getPermissionLevels: 'permission-levels:get',
   permissionLevelsChanged: 'permission-levels:changed',
   listSessions: 'session:list',
@@ -180,6 +190,11 @@ export interface HootApi {
   windowControls: WindowControls
   /** The app that shows files and folders: Finder, or File Explorer on Windows. */
   fileManager: string
+  /**
+   * Whether Hoot manages agents here: shows the Agents page in the settings,
+   * and sends to it from the new session menu. On macOS only.
+   */
+  manageAgents: boolean
   getStartupState(): Promise<StartupState>
   /**
    * Shows the database file, or the nearest folder of it there is, in Finder
@@ -196,6 +211,20 @@ export interface HootApi {
   getTools(): Promise<ToolsState>
   redetectTools(): Promise<ToolsState>
   onToolsChanged(listener: (state: ToolsState) => void): () => void
+  /** The agents of the Agents page, as last read, with their operations. */
+  getAgents(): Promise<AgentsState>
+  /**
+   * Reads the login shell environment again, looks for every agent's
+   * installation and version, and reads every agent's latest version.
+   */
+  detectAgents(): void
+  onAgentsChanged(listener: (state: AgentsState) => void): () => void
+  /** Installs an agent, now or after the operations before it. */
+  installAgent(id: CodingToolId): void
+  /** Updates an agent's installation, now or after the operations before it. */
+  updateAgent(id: CodingToolId): void
+  /** Cancels an agent's operation, waiting or running. */
+  cancelAgentOperation(id: CodingToolId): void
   /** The permission level selected for each coding tool in the Agents menu. */
   getPermissionLevels(): Promise<PermissionLevelSettings>
   onPermissionLevelsChanged(listener: (settings: PermissionLevelSettings) => void): () => void
@@ -229,9 +258,16 @@ export interface HootApi {
   onAppearanceChanged(listener: (appearance: Appearance) => void): () => void
   /**
    * Quitting, or restarting into an update, needs confirmation because
-   * `runningSessions` sessions are running.
+   * `runningSessions` sessions are running, or agents are being installed or
+   * updated, or waiting to be.
    */
-  onConfirmQuit(listener: (runningSessions: number, reason: QuitReason) => void): () => void
+  onConfirmQuit(
+    listener: (
+      runningSessions: number,
+      reason: QuitReason,
+      agentOperations: AgentOperationSummary[],
+    ) => void,
+  ): () => void
   respondToQuit(confirmed: boolean): void
   /** Where Hoot is with a newer version of itself. */
   getUpdateState(): Promise<UpdateState>

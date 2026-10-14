@@ -32,12 +32,18 @@ sessions does not yet.
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment, with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session
-  [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. To the
+  [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. A tool's
+  command is the first on your login shell's `PATH` or, on macOS when there is none there, the one
+  [Hoot installed](#agents) in `~/.hoot/agents/bin`; Hoot looks for them when it starts. To the
   environment of each session's process Hoot adds the terminal's variables (`TERM`, `COLORTERM`,
-  `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`), and what [`hoot`](#the-hoot-command) needs: the
+  `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`), what [`hoot`](#the-hoot-command) needs: the
   variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder `hoot` is
-  in, first on `PATH`. Tools that are not installed are shown disabled with an install command, and
-  **Re-detect Tools**, the last item of the new session menu, checks again at any time.
+  in, first on `PATH`; and on macOS, last on `PATH`, after every folder it has, the folder of
+  Hoot's own `node` (Hoot's executable run as Node.js, for a Mac without Node.js) and
+  `~/.hoot/agents/bin`, so that a `node` or an agent of yours comes first. Tools that are not
+  installed are shown disabled, with **Install in Settings…** below them, which shows the
+  [Agents](#agents) page (on Windows, their install command instead), and **Re-detect Tools**, the
+  last item of the new session menu, looks for them again at any time.
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
   expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the
@@ -78,9 +84,11 @@ sessions does not yet.
   gaps; without WebGL it falls back to the DOM renderer. Text is set in Geist Mono at 14 pixels,
   which comes with Hoot, in Ghostty's default colors in the dark appearance and Claude Light's in
   the light one.
-- **Quitting**: closing the window or quitting while sessions run asks first and says how many
-  run; confirming ends them. A project cannot be removed from the list while one of its sessions
-  runs; removing it closes its other sessions.
+- **Quitting**: closing the window or quitting while sessions run, or while agents are being
+  [installed or updated](#agents) or wait to be, asks first, and says how many sessions run and
+  which agent is being installed or updated; confirming stops those installs and updates (the one
+  running is sent SIGTERM, and Hoot waits for it to end), then ends the sessions. A project cannot
+  be removed from the list while one of its sessions runs; removing it closes its other sessions.
 - **Window**: the window has no title bar. The sidebar and the shown page reach up to its top
   edge, where one row holds the window's traffic lights, the sidebar button, Back and Forward,
   and the session's header or the Issues page's title (in full screen, the buttons take the
@@ -96,7 +104,11 @@ sessions does not yet.
 
 **Settings** at the bottom of the sidebar, **Hoot > Settings…** or ⌘, shows the settings in place
 of the sidebar and the shown page: their list on the left, as wide as the sidebar, and their page
-on the right. The sidebar button and Back and Forward are not at the top left then: **Back to app**
+on the right: **Appearance** and, on macOS, **Agents**. Click one to show it; the settings show
+the page shown last whenever they are shown again (Appearance, after Hoot starts), and
+**Install in Settings…** in the new session menu always shows Agents. Switching between their
+pages is not a step for going back and forward. The sidebar button and Back and Forward are not at
+the top left then: **Back to app**
 at the top of the list, Esc (unless you are typing in a field or a dialog is open) and ⌘[ leave
 them, showing the page shown before them and the sidebar as you left it; the
 settings are a page among the others for going [back and forward](#features). When no page was shown before
@@ -111,6 +123,55 @@ project, and ⌘W and ⌘B do nothing. Changes apply at once; there is nothing t
   **Light** and **Dark** stay as they are whatever appearance macOS uses. Hoot opens in the
   appearance picked from its first frame, also when it can only show that its database cannot be
   opened. Click a card, or move to the cards with Tab and pick one with ← and →.
+
+### Agents
+
+On macOS, the **Agents** page lists Claude Code, Codex and OpenCode. Each row shows the agent's
+version, how it was installed (**npm**, **Installed by Hoot · only in Hoot's sessions**,
+**Homebrew** or **Official installer**) and its command's path (with `~` for your home folder,
+cut in the middle when it is long, and in full when you point at it); or **Not installed** and
+where **Install** would put it. On the right it says **Up to date**, offers **Install** or
+**Update to** the latest version, or says **Checking…**, **Couldn't check for updates**,
+**Update it the way you installed it**, or **Installed, but it doesn't run** (click it to see what
+the command wrote for `--version`). Showing the page, and **Re-detect** at its top right, read your login
+shell environment again, look for each agent (the first on its `PATH`, else in
+`~/.hoot/agents/bin`; the one sessions run), run it with `--version`, and read the latest version.
+The latest version is the one the `latest` tag names on registry.npmjs.org, whatever registry your
+npm uses; Hoot asks registry.npmjs.org only then, never in the background.
+
+- **Install** installs the npm package's latest version (`@anthropic-ai/claude-code`,
+  `@openai/codex`, `opencode-ai`) with npm, never with an agent's install script. When the first
+  `npm` on your login shell's `PATH` runs and you can create files in its global folder's
+  `lib/node_modules` and `bin`, Hoot runs `npm install -g <package>@latest` with it, as you would
+  in a terminal. Otherwise it uses the npm that comes with Hoot, run by Hoot's own executable as
+  Node.js, which installs into `~/.hoot/agents`: those agents work in Hoot's sessions only, and the
+  row has a button that copies the line that puts `~/.hoot/agents/bin` on `PATH` in zsh or bash,
+  for your terminals. Neither changes your shell's configuration files, and either works without
+  Node.js on your Mac: Hoot's `node` runs agents that need one, such as Codex.
+- **Update to** updates the installation the row shows, in its place, the way it was
+  installed: `npm install -g <package>@latest` with the npm of its global folder (with Hoot's npm
+  for one in `~/.hoot/agents`), `brew upgrade --cask` or `--formula` for the cask or formula it
+  comes from, or the agent's own update command for its official installer (`claude update`,
+  `codex update`, `opencode upgrade`). Hoot cannot update an agent installed any other way, and
+  says so. It never uses `sudo` or changes the owner or permissions of a file: an installation you
+  are not allowed to change, such as one installed with `sudo npm`, fails with npm's own error
+  message. Running sessions go on with the version they started with, and the result says how many
+  still do; sessions started afterwards run the new version.
+- **Progress and results**: while it runs, the row shows **Installing…** or **Updating…** and the
+  last line the command wrote. Installs and updates run one at a time, in the order you clicked
+  them: the others say **Waiting…**. **Cancel** takes a waiting one off the list, or sends the
+  running command SIGTERM and waits for it to end (npm then leaves the agent as it was). The result
+  stays in the row until the agent's next install or update, or until Hoot quits: **✓ Installed**
+  or **✓ Updated to** and the version, **Cancelled**, or why it failed, with the last lines the
+  command wrote and **Show output** for all of them. Installing succeeds when the command exits
+  with 0 and the agent is found and runs afterwards; updating, when it also stays at the same path
+  with a newer version. Afterwards Hoot looks for the agent again, and the new session menu has it
+  at once, without restarting Hoot.
+- npm, Hoot's included, uses your npm configuration (such as the registry and the proxy in
+  `~/.npmrc`); Hoot adds none of its own.
+
+Leaving the page or the settings does not stop an install or an update. Hoot for Windows has no
+Agents page.
 
 ## Issues
 
@@ -234,7 +295,7 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   the base branches yourself. When Git cannot create the worktree, Hoot removes what it created and
   shows Git's output; when Git creates it but a hook such as `post-checkout` fails, the worktree is
   kept, Hoot shows Git's output as a warning, and the session starts. When Claude Code cannot start,
-  such as when it is no longer on the login shell's `PATH`, Hoot says
+  such as when it is no longer installed, Hoot says
   **Could not start Claude Code.** and why, keeps the worktree, and leaves the issue's status as it
   was.
 - **Drafts**: the new issue dialog has one draft, wherever you open it: what you enter stays when
@@ -303,6 +364,7 @@ too long for a socket). Each session's process gets in its environment:
 | Variable          | Value                                                                                                                          |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `PATH`            | First, the folder `hoot` is in: `Hoot.app/Contents/Resources/bin`, or `resources/bin` in the repository for a Hoot run from it |
+|                   | Last, on macOS, the folder of Hoot's `node` (`Contents/Resources/node`, or `resources/node`), then `~/.hoot/agents/bin`        |
 | `HOOT_SOCKET`     | The socket of the Hoot that started the session                                                                                |
 | `HOOT_SESSION_ID` | The session's id, by which that Hoot knows the session's project                                                               |
 | `HOOT_NODE`       | Hoot's own executable, which runs `hoot` as Node.js                                                                            |
@@ -446,8 +508,9 @@ Hoot looks for a newer version when it starts and every hour after, among the re
 on GitHub. When there is one, a blue button with a download icon appears at the right of
 **Settings**, at the bottom of the sidebar, and says **Update** under the pointer. Clicking it
 downloads the new version, the button showing how much of it has arrived, then restarts Hoot with
-it. Restarting ends the sessions, and they are not restored: while some are running, Hoot asks
-first, and **Cancel** keeps them, with the button there for later.
+it. Restarting ends the sessions, and they are not restored: while some are running, or an agent
+is being installed or updated, Hoot asks first, and **Cancel** keeps them, with the button there
+for later.
 
 ### From source
 
@@ -570,18 +633,21 @@ it does on Windows: it shows on a Mac whether anything in the row would be cover
 
 ## Architecture
 
-| Part     | Location       | Role                                                                                                                       |
-| -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, session processes, quitting, answering `hoot` |
-| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                                                |
-| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                                         |
-| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                                        |
-| Shared   | `src/shared`   | Types and messages used by more than one process                                                                           |
-| hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`     |
+| Part     | Location       | Role                                                                                                                                                       |
+| -------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, installing and updating agents, session processes, quitting, answering `hoot` |
+| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                                                                                |
+| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                                                                         |
+| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                                                                        |
+| Shared   | `src/shared`   | Types and messages used by more than one process                                                                                                           |
+| hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`                                     |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
-node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder:
-`~/Library/Application Support/Hoot` for the installed app, and
+node-pty, the only runtime dependency. The app also carries, as files of their own beside the
+launchers of `hoot`, the launcher of its `node` (`resources/node`) and npm (from the `npm`
+package, pinned in `package.json`), which installs [agents](#agents) into `~/.hoot/agents`, a
+folder that an installed Hoot and one run from the repository share. Hoot keeps its data in the
+app's user data folder: `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository.
 
 - The projects and their issues are in a SQLite database, `data/hoot.db`, which Hoot reads and
@@ -609,4 +675,5 @@ extension for VS Code, with its color replaced by the color of the text around i
 
 Hoot is released under the MIT License. The Claude Code icon
 (`src/renderer/assets/brand-icons/claude-code.svg`) is a trademark of Anthropic and is not covered
-by Hoot's MIT License.
+by Hoot's MIT License. The npm that comes with Hoot is released under the Artistic License 2.0,
+whose text it carries.

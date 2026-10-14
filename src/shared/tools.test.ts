@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CODING_TOOL_IDS, getTool, TOOL_IDS, TOOLS } from './tools'
+import { CODING_TOOL_IDS, CODING_TOOLS, getCodingTool, getTool, TOOL_IDS, TOOLS } from './tools'
 
 describe('tools', () => {
   it('defines the four tools with their commands', () => {
@@ -19,6 +19,16 @@ describe('tools', () => {
       'npm install -g opencode-ai',
     ])
     expect(getTool('opencode').installCommand).toBe('npm install -g opencode-ai')
+  })
+
+  it('names the npm package each coding tool comes in', () => {
+    expect(CODING_TOOLS.map((tool) => [tool.id, tool.npmPackage])).toEqual([
+      ['claude', '@anthropic-ai/claude-code'],
+      ['codex', '@openai/codex'],
+      ['opencode', 'opencode-ai'],
+    ])
+    expect(getCodingTool('codex').npmPackage).toBe('@openai/codex')
+    expect(() => getCodingTool('shell' as never)).toThrow(/Unknown coding tool/)
   })
 
   it('lists every tool id once', () => {

@@ -1,6 +1,11 @@
 import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
+import {
+  AGENTS_PATH_COMMAND,
+  type AgentOperationSummary,
+  type AgentsState,
+} from '../../shared/agents'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
 import { issueWorktree } from '../../shared/issue-worktrees'
@@ -24,7 +29,7 @@ import {
   type SessionInfo,
 } from '../../shared/session'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
-import { getTool, type ToolId } from '../../shared/tools'
+import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateState } from '../../shared/updates'
 import type {
   CreateIssueWorktreeResult,
@@ -60,6 +65,9 @@ import {
 } from './page-history'
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
+
+/** The pages of the settings: Appearance, and on macOS Agents. */
+export type SettingsSection = 'appearance' | 'agents'
 
 /** A session as the window shows it. */
 export interface UiSession {
@@ -137,6 +145,8 @@ export interface AppState {
   newWorktreeProject: string | null
   worktreeDeletion: WorktreeDeletion | null
   tools: ToolsState
+  /** The agents of the Agents page and their operations; `null` until they are known. */
+  agents: AgentsState | null
   /** The permission level selected for each coding tool; `null` until it is known. */
   permissionLevels: PermissionLevelSettings | null
   /** Every session, in the order they were started. */
@@ -179,9 +189,14 @@ export interface AppState {
   closeConfirmation: string | null
   /**
    * While Hoot asks whether to quit, or to restart into an update: how many
-   * sessions are running, and which of the two it asks.
+   * sessions are running, which agents are being installed or updated or wait
+   * to be, and which of the two it asks.
    */
-  quitConfirmation: { runningSessions: number; reason: QuitReason } | null
+  quitConfirmation: {
+    runningSessions: number
+    reason: QuitReason
+    agentOperations: AgentOperationSummary[]
+  } | null
   /** Where Hoot is with a newer version of itself, which an Update button beside Settings offers. */
   update: UpdateState
   /** Whether the sidebar is expanded, also while the settings are shown in its place. */
@@ -202,6 +217,12 @@ export interface AppState {
   fullScreen: boolean
   /** The appearance picked in the settings. */
   appearance: Appearance
+  /**
+   * The page of the settings shown last since Hoot started, which they show
+   * again when they are shown: Appearance until another is shown. Showing
+   * another is not recorded in the history.
+   */
+  settingsSection: SettingsSection
 
   /**
    * Reads the window's state and the appearance picked, and follows their
@@ -213,6 +234,16 @@ export interface AppState {
   addProject(): Promise<void>
   removeProject(root: string): Promise<void>
   redetectTools(): Promise<void>
+  /**
+   * Reads the login shell environment again, looks for every agent's
+   * installation and version, and reads every agent's latest version.
+   */
+  detectAgents(): void
+  installAgent(id: CodingToolId): void
+  updateAgent(id: CodingToolId): void
+  cancelAgentOperation(id: CodingToolId): void
+  /** Puts the line that adds Hoot's folder of agents to PATH on the clipboard. */
+  copyAgentsPathCommand(): void
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
@@ -235,8 +266,13 @@ export interface AppState {
   goBack(): void
   /** Shows the page shown after the current one, if any. */
   goForward(): void
-  /** Shows the settings in place of the sidebar and the main area. */
-  showSettings(): void
+  /**
+   * Shows the settings in place of the sidebar and the main area, at a page
+   * of theirs; without one, at the page they showed last.
+   */
+  showSettings(section?: SettingsSection): void
+  /** Shows another page of the settings, without recording it in the history. */
+  selectSettingsSection(section: SettingsSection): void
   /**
    * Leaves the settings as going back does. Without a page before them, shows
    * the empty page instead, and takes the settings out of the history.
@@ -951,6 +987,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     newWorktreeProject: null,
     worktreeDeletion: null,
     tools: { detecting: true, tools: [], error: null },
+    agents: null,
     permissionLevels: null,
     sessions: [],
     startingIssues: [],
@@ -974,6 +1011,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     collapsedProjects: new Set(),
     fullScreen: false,
     appearance: DEFAULT_APPEARANCE,
+    settingsSection: 'appearance',
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
@@ -1024,6 +1062,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         ),
       )
       api.onToolsChanged((tools) => set({ tools }))
+      api.onAgentsChanged((agents) => set({ agents }))
+      // Set as soon as it arrives: a change reported after it is newer.
+      void api.getAgents().then((agents) => set((state) => ({ agents: state.agents ?? agents })))
       api.onPermissionLevelsChanged((permissionLevels) => set({ permissionLevels }))
       api.onSessionUpdated((info) => {
         if (!findSession(info.id)) return
@@ -1041,8 +1082,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       api.onSessionCommand((command) => get().runMenuCommand(command))
       api.onShowSettingsRequested(() => get().showSettings())
-      api.onConfirmQuit((runningSessions, reason) =>
-        set({ quitConfirmation: { runningSessions, reason } }),
+      api.onConfirmQuit((runningSessions, reason, agentOperations) =>
+        set({ quitConfirmation: { runningSessions, reason, agentOperations } }),
       )
       api.onUpdateStateChanged((update) => set({ update }))
       api.onUpdateFailed((message) => {
@@ -1150,6 +1191,26 @@ export const useAppStore = create<AppState>()((set, get) => {
       set((state) => ({ tools: { ...state.tools, detecting: true } }))
       const tools = await api.redetectTools()
       set({ tools })
+    },
+
+    detectAgents() {
+      api.detectAgents()
+    },
+
+    installAgent(id) {
+      api.installAgent(id)
+    },
+
+    updateAgent(id) {
+      api.updateAgent(id)
+    },
+
+    cancelAgentOperation(id) {
+      api.cancelAgentOperation(id)
+    },
+
+    copyAgentsPathCommand() {
+      copyText(AGENTS_PATH_COMMAND)
     },
 
     newSession(projectRoot, toolId, worktreePath = null) {
@@ -1331,10 +1392,15 @@ export const useAppStore = create<AppState>()((set, get) => {
       stepHistory(1)
     },
 
-    showSettings() {
+    showSettings(section) {
+      if (section) set({ settingsSection: section })
       if (isSettingsPage(get().currentPage)) return
       blurBeforeSettings()
       showPage(settingsPage)
+    },
+
+    selectSettingsSection(section) {
+      set({ settingsSection: section })
     },
 
     leaveSettings() {

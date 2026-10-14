@@ -533,11 +533,10 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
 
 - The projects and their issues are in a SQLite database, `data/hoot.db`, which Hoot reads and
   writes with Node's built-in `node:sqlite`, in plain SQL. Its tables' version is its
-  `PRAGMA user_version`; on opening it, Hoot applies the migrations in `src/main/database`
-  after that version, all in one transaction. The second one gave issues Linear's statuses
-  (open issues became to do, closed ones done), priorities and numbers; a Hoot from before it
-  cannot open the database afterwards. The project list used to be kept in `projects.json`, which
-  is no longer read: add your projects again.
+  `PRAGMA user_version`, the number of the migrations in `src/main/database` it has had: 1 for
+  the tables of the first release. On opening it, Hoot applies the migrations after that version,
+  all in one transaction. The tables change only by a new migration at the end, which keeps what
+  is in them; a migration that has been released is never changed.
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** (**Show in File Explorer** on Windows) and **Quit**,

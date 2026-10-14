@@ -85,9 +85,12 @@ sessions does not yet.
   edge, where one row holds the window's traffic lights, the sidebar button, Back and Forward,
   and the session's header or the Issues page's title (in full screen, the buttons take the
   traffic lights' place); drag the window by the row's blank parts. Hide the sidebar with the sidebar button, ⌘B or **View > Hide
-  Sidebar** to give the terminal the window's whole width; Hoot opens with the sidebar as you left
-  it. On Windows, the sidebar button, Back and Forward start the row, and the window's minimize,
-  maximize and close buttons end it, in the colors of the appearance in effect.
+  Sidebar** to give the terminal the window's whole width. Drag the sidebar's right edge to make
+  it 240 to 520 pixels wide (a narrow window narrows it to leave the shown page at least 240), or
+  narrower than 120 to hide it; double-click the edge for its default width, 275. Hoot opens with
+  the sidebar as you left it. On Windows, the sidebar button, Back and Forward start the row, and
+  the window's minimize, maximize and close buttons end it, in the colors of the appearance in
+  effect.
 
 ## Settings
 
@@ -591,8 +594,9 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** (**Show in File Explorer** on Windows) and **Quit**,
   and Hoot leaves the file as it is.
-- The permission levels picked in the Agents menu, whether the sidebar is hidden, which projects in
-  it are collapsed, and the appearance picked in the settings are in `settings.json`.
+- The permission levels picked in the Agents menu, whether the sidebar is hidden and how wide it is,
+  which projects in it are collapsed, and the appearance picked in the settings are in
+  `settings.json`.
 
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.

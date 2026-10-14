@@ -1,23 +1,32 @@
 import { useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
+import { sidebarSlide, sidebarSlideEnded } from '../lib/sidebar-slide'
 import { getSessionTerminal, useAppStore } from '../store/app-store'
 import { drawWithWebgl } from '../terminal/webgl-renderer'
 
 /** Sessions whose process start has been requested, so it is requested only once. */
 const launchedSessions = new Set<string>()
 
-/**
- * The transitions of the space the sidebar takes beside the main area, which
- * run while the sidebar slides in or out.
- */
-function sidebarSlide(): Animation[] {
-  return document.querySelector('[data-slot="sidebar-gap"]')?.getAnimations() ?? []
+/** Whether the sidebar's width is changing: while its edge is dragged, and while it slides. */
+function sidebarMoving(): boolean {
+  return useAppStore.getState().sidebarResizing || sidebarSlide().length > 0
 }
 
-/** Resolves once the sidebar has stopped sliding, also when it turned back half way. */
+/** Resolves once the sidebar's edge is let go of. */
+function sidebarResizeEnded(): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = useAppStore.subscribe((state) => {
+      if (state.sidebarResizing) return
+      unsubscribe()
+      resolve()
+    })
+  })
+}
+
+/** Resolves once the sidebar's width has stopped changing. */
 async function sidebarSettled(): Promise<void> {
-  for (let slide = sidebarSlide(); slide.length > 0; slide = sidebarSlide()) {
-    await Promise.allSettled(slide.map((animation) => animation.finished))
+  while (sidebarMoving()) {
+    await (useAppStore.getState().sidebarResizing ? sidebarResizeEnded() : sidebarSlideEnded())
   }
 }
 
@@ -42,13 +51,14 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     // Fill the area, which may have changed size while the session was not shown;
     // a new size reaches the session's process through the terminal's resize event.
     fit.fit()
-    // While the sidebar slides in or out, the area changes width on every
-    // frame: the grid keeps its size until the sidebar is in place, then
-    // takes the area's new size at once, so that its program redraws once.
+    // While the sidebar slides in or out, or its edge is dragged, the area
+    // changes width on every frame: the grid keeps its size until the
+    // sidebar is in place, then takes the area's new size at once, so that
+    // its program redraws once.
     let shown = true
     let waiting = false
     const observer = new ResizeObserver(() => {
-      if (sidebarSlide().length === 0) {
+      if (!sidebarMoving()) {
         fit.fit()
         return
       }

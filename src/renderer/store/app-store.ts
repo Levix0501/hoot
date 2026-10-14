@@ -23,6 +23,7 @@ import {
   type SessionExit,
   type SessionInfo,
 } from '../../shared/session'
+import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { getTool, type ToolId } from '../../shared/tools'
 import type { UpdateState } from '../../shared/updates'
 import type {
@@ -185,6 +186,16 @@ export interface AppState {
   update: UpdateState
   /** Whether the sidebar is expanded, also while the settings are shown in its place. */
   sidebarOpen: boolean
+  /**
+   * The sidebar's width in CSS pixels, as it was last resized; a window too
+   * narrow for it to leave the main area its narrowest width shows it narrower.
+   */
+  sidebarWidth: number
+  /**
+   * Whether the sidebar's edge is being dragged, and the sidebar's width
+   * follows the pointer at once, without sliding.
+   */
+  sidebarResizing: boolean
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
   collapsedProjects: ReadonlySet<number>
   /** Whether the window is in full screen. */
@@ -289,6 +300,9 @@ export interface AppState {
    * settings are shown in its place.
    */
   setSidebarOpen(open: boolean): void
+  /** Sets the sidebar's width, brought within its limits, and saves it. */
+  setSidebarWidth(width: number): void
+  setSidebarResizing(resizing: boolean): void
   /** Expands or collapses a project in the sidebar, and saves its state. */
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
@@ -955,6 +969,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     quitConfirmation: null,
     update: { kind: 'none' },
     sidebarOpen: true,
+    sidebarWidth: SIDEBAR_WIDTH.default,
+    sidebarResizing: false,
     collapsedProjects: new Set(),
     fullScreen: false,
     appearance: DEFAULT_APPEARANCE,
@@ -963,12 +979,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
       api.onAppearanceChanged((appearance) => set({ appearance }))
-      const [{ sidebarOpen, collapsedProjects, fullScreen }, appearance] = await Promise.all([
-        api.getWindowState(),
-        api.getAppearance(),
-      ])
+      const [{ sidebarOpen, sidebarWidth, collapsedProjects, fullScreen }, appearance] =
+        await Promise.all([api.getWindowState(), api.getAppearance()])
       set({
         sidebarOpen,
+        sidebarWidth,
         collapsedProjects: new Set(collapsedProjects),
         fullScreen,
         appearance,
@@ -1508,6 +1523,17 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (open === state.sidebarOpen || isSettingsPage(state.currentPage)) return
       set({ sidebarOpen: open })
       api.setSidebarOpen(open)
+    },
+
+    setSidebarWidth(width) {
+      const within = sidebarWidthWithin(width)
+      if (within === get().sidebarWidth) return
+      set({ sidebarWidth: within })
+      api.setSidebarWidth(within)
+    },
+
+    setSidebarResizing(resizing) {
+      set({ sidebarResizing: resizing })
     },
 
     setProjectExpanded(projectId, expanded) {

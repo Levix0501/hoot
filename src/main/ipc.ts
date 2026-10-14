@@ -278,12 +278,17 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.getWindowState, (): WindowState => ({
     sidebarOpen: deps.sidebar.open,
+    sidebarWidth: deps.sidebar.width,
     collapsedProjects: deps.sidebar.collapsedProjects,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
   }))
   on(IpcChannel.setSidebarOpen, (open) => {
     const parsed = z.boolean().safeParse(open)
     if (parsed.success) deps.sidebar.setOpen(parsed.data)
+  })
+  on(IpcChannel.setSidebarWidth, (width) => {
+    const parsed = z.number().safeParse(width)
+    if (parsed.success) deps.sidebar.setWidth(parsed.data)
   })
   on(IpcChannel.setProjectExpanded, (...args) => {
     const parsed = z.tuple([rowId, z.boolean()]).safeParse(args)

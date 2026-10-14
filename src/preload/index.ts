@@ -42,6 +42,7 @@ const api: HootApi = {
   onSessionCommand: (listener) => subscribe(IpcChannel.sessionCommand, listener),
   getWindowState: () => ipcRenderer.invoke(IpcChannel.getWindowState),
   setSidebarOpen: (open) => ipcRenderer.send(IpcChannel.setSidebarOpen, open),
+  setSidebarWidth: (width) => ipcRenderer.send(IpcChannel.setSidebarWidth, width),
   setProjectExpanded: (projectId, expanded) =>
     ipcRenderer.send(IpcChannel.setProjectExpanded, projectId, expanded),
   onToggleSidebarRequested: (listener) => subscribe(IpcChannel.toggleSidebarRequested, listener),

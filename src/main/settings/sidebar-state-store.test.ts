@@ -145,3 +145,58 @@ describe('SidebarStateStore: collapsed projects', () => {
     expect(saved()).toEqual({ collapsedProjects: [7] })
   })
 })
+
+describe('SidebarStateStore: width', () => {
+  it('is 275 pixels wide when nothing was saved, without writing anything', () => {
+    expect(new SidebarStateStore(directory).width).toBe(275)
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it('saves the width, and keeps it across instances', () => {
+    const first = new SidebarStateStore(directory)
+    first.setWidth(320)
+    expect(first.width).toBe(320)
+    expect(saved()).toEqual({ sidebarWidth: 320 })
+    expect(new SidebarStateStore(directory).width).toBe(320)
+  })
+
+  it('saves a width brought within 240 to 520 pixels, in whole pixels', () => {
+    const store = new SidebarStateStore(directory)
+    store.setWidth(900)
+    expect(store.width).toBe(520)
+    expect(saved()).toEqual({ sidebarWidth: 520 })
+    store.setWidth(100)
+    expect(saved()).toEqual({ sidebarWidth: 240 })
+    store.setWidth(300.4)
+    expect(saved()).toEqual({ sidebarWidth: 300 })
+  })
+
+  it('writes nothing when the width does not change', () => {
+    const store = new SidebarStateStore(directory)
+    store.setWidth(275)
+    expect(fs.existsSync(file)).toBe(false)
+    store.setWidth(330)
+    fs.writeFileSync(file, JSON.stringify({ sidebarWidth: 330, marker: true }))
+    store.setWidth(330.2)
+    expect(saved()).toEqual({ sidebarWidth: 330, marker: true })
+  })
+
+  it('reads a saved width outside the limits as the nearest limit, and one that is not a number as the default', () => {
+    writeSettings({ sidebarWidth: 2000 })
+    expect(new SidebarStateStore(directory).width).toBe(520)
+    writeSettings({ sidebarWidth: 'wide' })
+    expect(new SidebarStateStore(directory).width).toBe(275)
+  })
+
+  it('shares settings.json with the rest of the sidebar state', () => {
+    const sidebar = new SidebarStateStore(directory)
+    sidebar.setOpen(false)
+    sidebar.setWidth(400)
+    sidebar.setProjectCollapsed(2, true)
+    expect(saved()).toEqual({ sidebarCollapsed: true, sidebarWidth: 400, collapsedProjects: [2] })
+    const reopened = new SidebarStateStore(directory)
+    expect(reopened.open).toBe(false)
+    expect(reopened.width).toBe(400)
+    expect(reopened.collapsedProjects).toEqual([2])
+  })
+})

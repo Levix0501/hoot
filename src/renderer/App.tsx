@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { useEffect } from 'react'
 import { CloseSessionDialog } from './components/close-session-dialog'
 import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
@@ -8,6 +9,7 @@ import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
 import { QuitDialog } from './components/quit-dialog'
 import { SettingsView } from './components/settings/settings-view'
+import { sidebarWidthStyle } from './components/sidebar-resize-handle'
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar'
 import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -15,6 +17,14 @@ import { WindowNavigation } from './components/window-navigation'
 import { sessionShortcut } from './lib/session-shortcuts'
 import { useAppStore } from './store/app-store'
 import { isSettingsPage } from './store/page-history'
+
+/**
+ * While the sidebar's edge is dragged, the sidebar and the space it takes
+ * beside the main area take each width at once instead of sliding to it, the
+ * pointer shows the resize cursor wherever it is, and no text is selected.
+ */
+const SIDEBAR_RESIZING_CLASS =
+  'data-resizing:select-none data-resizing:**:cursor-col-resize! data-resizing:**:data-[slot=sidebar-container]:transition-none data-resizing:**:data-[slot=sidebar-gap]:transition-none'
 
 /**
  * Handles the session shortcuts (⌘1–⌘9, ⌘⇧], ⌘⇧[, ⌘[, ⌘] and ⌘W) and ⌘, for
@@ -42,6 +52,8 @@ export function App() {
   const initialize = useAppStore((state) => state.initialize)
   const sidebarOpen = useAppStore((state) => state.sidebarOpen)
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen)
+  const sidebarWidth = useAppStore((state) => state.sidebarWidth)
+  const sidebarResizing = useAppStore((state) => state.sidebarResizing)
   const settingsShown = useAppStore((state) => isSettingsPage(state.currentPage))
   useEffect(() => {
     void initialize()
@@ -52,15 +64,16 @@ export function App() {
     <TooltipProvider>
       {/*
         ⌘B, the sidebar's trigger and View > Hide Sidebar collapse and expand
-        the sidebar. The settings take the place of the sidebar, the main area
-        and the navigation, which come back as they were when the settings are
-        left.
+        the sidebar, and dragging its edge resizes it. The settings take the
+        place of the sidebar, the main area and the navigation, which come
+        back as they were when the settings are left.
       */}
       <SidebarProvider
         open={sidebarOpen}
         onOpenChange={setSidebarOpen}
-        className="h-svh overflow-hidden"
-        style={{ '--sidebar-width': '18rem' } as React.CSSProperties}
+        data-resizing={sidebarResizing || undefined}
+        className={cn('h-svh overflow-hidden', SIDEBAR_RESIZING_CLASS)}
+        style={{ '--sidebar-width': sidebarWidthStyle(sidebarWidth) } as React.CSSProperties}
       >
         {settingsShown ? (
           <SettingsView />

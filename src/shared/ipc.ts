@@ -77,6 +77,8 @@ export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: fals
 export interface WindowState {
   /** Whether the sidebar is expanded, as it was when Hoot last showed or hid it. */
   sidebarOpen: boolean
+  /** The sidebar's width in CSS pixels, as it was last resized. */
+  sidebarWidth: number
   /** The ids of the projects collapsed in the sidebar, as they were left; the others are expanded. */
   collapsedProjects: number[]
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
@@ -121,6 +123,7 @@ export const IpcChannel = {
   sessionCommand: 'session:command',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
+  setSidebarWidth: 'window:set-sidebar-width',
   setProjectExpanded: 'window:set-project-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
@@ -210,6 +213,8 @@ export interface HootApi {
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
   setSidebarOpen(open: boolean): void
+  /** Saves the sidebar's width, so that Hoot opens with it as wide as it was left. */
+  setSidebarWidth(width: number): void
   /** Saves whether a project is expanded in the sidebar, so that Hoot opens with it as it was left. */
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** The application menu asked to show or hide the sidebar. */

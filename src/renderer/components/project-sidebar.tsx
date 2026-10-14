@@ -9,6 +9,7 @@ import { worktreeRows } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
+import { SidebarResizeHandle } from './sidebar-resize-handle'
 import { UpdateButton } from './update-button'
 import { WorktreeItem } from './worktree-item'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
@@ -250,6 +251,7 @@ export function ProjectSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <SidebarResizeHandle />
     </Sidebar>
   )
 }

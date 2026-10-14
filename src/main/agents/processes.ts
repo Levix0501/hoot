@@ -90,7 +90,8 @@ export interface CommandResult extends ProcessEnd {
 
 /**
  * Runs a command to its end and returns what it wrote. A command that is not
- * done within `timeoutMs` is ended with SIGKILL.
+ * done within `timeoutMs` is ended with SIGKILL, together with the processes
+ * it started, which could otherwise keep its output open.
  */
 export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<CommandResult> {
   let stdout = ''
@@ -101,6 +102,8 @@ export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<
       cwd: spec.cwd,
       env: spec.env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // In a process group of its own, which a timeout ends.
+      detached: true,
     })
   } catch (error) {
     const reason = error instanceof Error ? error : new Error(String(error))
@@ -119,7 +122,12 @@ export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
-    child.kill('SIGKILL')
+    try {
+      if (child.pid) process.kill(-child.pid, 'SIGKILL')
+    } catch {
+      // It has ended meanwhile.
+      child.kill('SIGKILL')
+    }
   }, timeoutMs)
   const end = await new Promise<ProcessEnd>((resolve) => {
     let settled = false

@@ -220,8 +220,10 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   and always shows it, whatever project the issue is in since, and whether or not Claude Code is
   found now. Once the session is closed, the button starts a new session in the issue's worktree,
   with the same instructions and a new file of the issue as it is then. Starting is not possible
-  while Hoot is still checking whether Claude Code is installed, when it is not installed, or for an
-  issue without a project, in which its worktree would be; the button's tooltip then says why.
+  while Hoot is still checking whether Claude Code is installed after it starts, when it is not
+  installed, or for an issue without a project, in which its worktree would be; the button's tooltip
+  then says why. Checking again with **Re-detect Tools** keeps the last check's answer until it is
+  done.
 - **When it cannot start**: when the issue's project is not a Git repository, Hoot creates nothing
   and says that it cannot have worktrees. When the project's main worktree has no branch checked out
   (its HEAD is detached), or a nested repository has neither a branch named like the project's nor

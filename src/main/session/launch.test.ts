@@ -7,6 +7,7 @@ import {
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
 import type { LoginEnvironment } from '../tools/tool-service'
+import { git } from '../worktrees/test-support'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import { firstMessage } from '../../shared/workflow-text'
 import type { WorkflowStep } from '../../shared/workflows'
@@ -23,18 +24,15 @@ let root: string
 let project: string
 let bin: string
 let agentsBin: string
-let temporary: string
 
 beforeAll(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
   project = path.join(root, 'project')
   bin = path.join(root, 'bin')
   agentsBin = path.join(root, 'agents', 'bin')
-  temporary = path.join(root, 'tmp')
   fs.mkdirSync(project)
   fs.mkdirSync(bin)
   fs.mkdirSync(agentsBin, { recursive: true })
-  fs.mkdirSync(temporary)
   for (const command of ['claude', 'codex']) {
     fs.writeFileSync(path.join(bin, command), '#!/bin/sh\n', { mode: 0o755 })
   }
@@ -44,6 +42,21 @@ beforeAll(() => {
 })
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+/** The folder in a session's working directory that holds the folders of sessions' issues. */
+function temporaryFolder(cwd: string): string {
+  return path.join(cwd, '.hoot', 'tmp')
+}
+
+/** The folders of sessions' issues in a working directory, without the `.gitignore` beside them. */
+function issueFolders(cwd: string): string[] {
+  const folder = temporaryFolder(cwd)
+  if (!fs.existsSync(folder)) return []
+  return fs
+    .readdirSync(folder)
+    .filter((name) => name !== '.gitignore')
+    .map((name) => path.join(folder, name))
+}
 
 const [scope, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
 
@@ -76,7 +89,6 @@ function context(
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
-    temporaryFolder: temporary,
     hoot,
     // A folder of agents without any.
     agents: { binDirectory: path.join(root, 'no-agents'), lastOnPath: [] },
@@ -184,10 +196,13 @@ describe('resolveLaunch', () => {
       'iss-1-fix-the-login-bug',
     )
     const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
-    // The issue is written in a folder of the session's own, in the temporary folder.
-    const [folderName] = fs.readdirSync(temporary)
-    expect(folderName).toMatch(/^hoot-issue-/)
-    const folder = path.join(temporary, folderName)
+    // The issue is written in a folder of the session's own, in `.hoot/tmp` of the working
+    // directory, beside the `.gitignore` that has Git ignore everything there.
+    const [folder] = issueFolders(project)
+    expect(path.basename(folder)).toMatch(/^issue-/)
+    expect(fs.readFileSync(path.join(temporaryFolder(project), '.gitignore'), 'utf8')).toBe(
+      '# Created by Hoot automatically.\n*\n',
+    )
     expect(fs.readFileSync(path.join(folder, 'issue.md'), 'utf8')).toBe(
       '# Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  \n',
     )
@@ -197,7 +212,6 @@ describe('resolveLaunch', () => {
     expect(launch.args).toEqual([
       '--permission-mode',
       'acceptEdits',
-      `--add-dir=${folder}`,
       '--name=Fix the login bug',
       firstMessage({
         issueFile: path.join(folder, 'issue.md'),
@@ -206,13 +220,32 @@ describe('resolveLaunch', () => {
         step: scope,
       }),
     ])
+    // The cleanup removes the session's folder and leaves the `.gitignore`.
     launch.cleanup?.()
-    expect(fs.readdirSync(temporary)).toEqual([])
+    expect(fs.readdirSync(temporaryFolder(project))).toEqual(['.gitignore'])
     // Any other session, Claude Code's included, has only its level's arguments.
     const other = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)
     expect(other.args).toEqual(['--permission-mode', 'acceptEdits'])
     expect(other.cleanup).toBeUndefined()
-    expect(fs.readdirSync(temporary)).toEqual([])
+    expect(issueFolders(project)).toEqual([])
+  })
+
+  it("keeps the issue's files out of Git, and leaves a .gitignore that is there as it is", async () => {
+    const repository = path.join(root, 'repository')
+    fs.mkdirSync(repository)
+    git(repository, 'init', '-q')
+    const issue = sentIssue('T', 'D', 'iss-1-t')
+    const launch = await resolveLaunch(context({ PATH: bin }), 'claude', repository, issue)
+    expect(issueFolders(repository)).toHaveLength(1)
+    expect(git(repository, 'status', '--porcelain', '--untracked-files=all')).toBe('')
+    launch.cleanup?.()
+    // Even with nothing beside it, the .gitignore keeps itself out of Git.
+    expect(git(repository, 'status', '--porcelain', '--untracked-files=all')).toBe('')
+    const gitignore = path.join(temporaryFolder(repository), '.gitignore')
+    fs.writeFileSync(gitignore, '*\n')
+    const next = await resolveLaunch(context({ PATH: bin }), 'claude', repository, issue)
+    expect(fs.readFileSync(gitignore, 'utf8')).toBe('*\n')
+    next.cleanup?.()
   })
 
   it('writes what earlier steps found beside the issue, and points to both', async () => {
@@ -222,8 +255,7 @@ describe('resolveLaunch', () => {
       stepsFile: '## Scope · No split\n\nFits.\n',
     }
     const launch = await resolveLaunch(context({ PATH: bin }), 'claude', project, issue)
-    const [folderName] = fs.readdirSync(temporary)
-    const folder = path.join(temporary, folderName)
+    const [folder] = issueFolders(project)
     expect(fs.readdirSync(folder).toSorted()).toEqual(['issue.md', 'steps.md'])
     expect(fs.readFileSync(path.join(folder, 'steps.md'), 'utf8')).toBe(
       '## Scope · No split\n\nFits.\n',
@@ -237,7 +269,7 @@ describe('resolveLaunch', () => {
       }),
     )
     launch.cleanup?.()
-    expect(fs.readdirSync(temporary)).toEqual([])
+    expect(issueFolders(project)).toEqual([])
   })
 
   it('sends an issue to Claude Code only, and writes it only when the launch can go ahead', async () => {
@@ -254,14 +286,18 @@ describe('resolveLaunch', () => {
     await expect(
       resolveLaunch(context({ PATH: bin }), 'claude', path.join(root, 'gone'), issue),
     ).rejects.toBeInstanceOf(SessionError)
-    expect(fs.readdirSync(temporary)).toEqual([])
+    expect(issueFolders(project)).toEqual([])
   })
 
   it('says why the issue could not be written', async () => {
+    // A file where the folder for the issue's files would be.
+    const blocked = path.join(root, 'blocked')
+    fs.mkdirSync(blocked)
+    fs.writeFileSync(path.join(blocked, '.hoot'), '')
     const launching = resolveLaunch(
-      { ...context({ PATH: bin }), temporaryFolder: path.join(root, 'missing') },
+      context({ PATH: bin }),
       'claude',
-      project,
+      blocked,
       sentIssue('T', '', 'iss-1-t'),
     )
     await expect(launching).rejects.toBeInstanceOf(SessionError)
@@ -324,7 +360,7 @@ describe('the issue, the first message and the arguments that send them', () => 
     expect(issueFileText({ title: 'Fix\0 login', description: 'a\0b' })).toBe('# Fix login\n\nab\n')
     // A description of nothing but NUL characters is an empty one.
     expect(issueFileText({ title: 'T', description: '\0\0' })).toBe('# T\n')
-    expect(sentIssueArgs('/tmp/hoot-issue-1', sentIssue('Fix\0 login', '', 'b'))[1]).toBe(
+    expect(sentIssueArgs('/w/.hoot/tmp/issue-1', sentIssue('Fix\0 login', '', 'b'))[0]).toBe(
       '--name=Fix login',
     )
   })
@@ -332,14 +368,13 @@ describe('the issue, the first message and the arguments that send them', () => 
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
     expect(
       sentIssueArgs(
-        '/tmp/hoot-issue-1',
+        '/w/.hoot/tmp/issue-1',
         sentIssue('--verbose flag broken', '', 'iss-2-verbose-flag-broken'),
       ),
     ).toEqual([
-      '--add-dir=/tmp/hoot-issue-1',
       '--name=--verbose flag broken',
       firstMessage({
-        issueFile: '/tmp/hoot-issue-1/issue.md',
+        issueFile: '/w/.hoot/tmp/issue-1/issue.md',
         stepsFile: null,
         branch: 'iss-2-verbose-flag-broken',
         step: scope,

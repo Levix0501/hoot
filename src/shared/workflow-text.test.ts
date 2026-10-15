@@ -57,7 +57,7 @@ function reporting(outcomes: string[]): string {
     '<outcome> is one of:',
     ...outcomes,
     '',
-    "The summary is Markdown, for me and for the steps after this one, which may start in a new session that has only the issue and the summaries. Write the file outside the worktree, such as next to the issue's file, or pass `-` to read standard input. hoot then says what to do next.",
+    "The summary is Markdown, for me and for the steps after this one, which may start in a new session that has only the issue and the summaries. Write the file next to the issue's file, in a folder that Git ignores, or pass `-` to read standard input. hoot then says what to do next.",
   ].join('\n')
 }
 
@@ -91,14 +91,15 @@ describe('the built-in steps', () => {
 describe('firstMessage', () => {
   it('opens with the issue, the branch and the step, then gives the step and how to report it', () => {
     const message = firstMessage({
-      issueFile: '/tmp/hoot-issue-1/issue.md',
+      issueFile:
+        '/home/me/.hoot/worktrees/app/iss-1-fix-the-login-bug-on-safari/.hoot/tmp/issue-1/issue.md',
       stepsFile: null,
       branch: 'iss-1-fix-the-login-bug-on-safari',
       step: scope,
     })
     expect(message).toBe(
       [
-        'The issue to work on is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
+        'The issue to work on is in `/home/me/.hoot/worktrees/app/iss-1-fix-the-login-bug-on-safari/.hoot/tmp/issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
         '',
         'This is a Git worktree of the project, on the branch `iss-1-fix-the-login-bug-on-safari`, made for this issue. Work on the issue goes in steps; this session starts at the step Scope.',
         '',
@@ -113,14 +114,14 @@ describe('firstMessage', () => {
 
   it('points to what earlier steps found when there is a file of it', () => {
     const message = firstMessage({
-      issueFile: '/var/folders/x/T/hoot-issue-AbC/issue.md',
-      stepsFile: '/var/folders/x/T/hoot-issue-AbC/steps.md',
+      issueFile: '/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/issue.md',
+      stepsFile: '/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/steps.md',
       branch: 'iss-13-修复登录页的问题',
       step: design,
     })
     expect(message).toBe(
       [
-        'The issue to work on is in `/var/folders/x/T/hoot-issue-AbC/issue.md`. Read it first: its title is the heading; the rest, if any, is its description. What earlier steps found is in `/var/folders/x/T/hoot-issue-AbC/steps.md`; read it too.',
+        'The issue to work on is in `/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/issue.md`. Read it first: its title is the heading; the rest, if any, is its description. What earlier steps found is in `/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/steps.md`; read it too.',
         '',
         'This is a Git worktree of the project, on the branch `iss-13-修复登录页的问题`, made for this issue. Work on the issue goes in steps; this session starts at the step Design.',
         '',

@@ -23,7 +23,7 @@ export function reportInstructions(step: Pick<WorkflowStep, 'outcomes'>): string
     '<outcome> is one of:',
     ...step.outcomes.map((outcome) => `- ${outcome.name}: ${outcome.instruction}`),
     '',
-    "The summary is Markdown, for me and for the steps after this one, which may start in a new session that has only the issue and the summaries. Write the file outside the worktree, such as next to the issue's file, or pass `-` to read standard input. hoot then says what to do next.",
+    "The summary is Markdown, for me and for the steps after this one, which may start in a new session that has only the issue and the summaries. Write the file next to the issue's file, in a folder that Git ignores, or pass `-` to read standard input. hoot then says what to do next.",
   ].join('\n')
 }
 

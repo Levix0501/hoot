@@ -122,7 +122,6 @@ const sessions = new SessionManager({
           }),
         getLoginEnvironment: () => tools.getLoginEnvironment(),
         permissionLevel: (tool) => permissionLevels.level(tool),
-        temporaryFolder: app.getPath('temp'),
         hoot: { ...hootCli, sessionId },
         agents: hootOwnsAgents
           ? { binDirectory: agentFolders.binDirectory, lastOnPath: lastOnSessionPath(agentFolders) }

@@ -299,26 +299,28 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   start, so that the session starts at the step the issue was at when you clicked. The branch keeps
   its name when the title changes. The session is named after the issue's title. An issue that had
   not started is at its first step once the session has started. Hoot writes the issue, its title as
-  a heading and its description below it, to `issue.md` in a new folder of the session's own in the
-  system's temporary folder, and adds that folder to Claude Code's working directories
-  (`--add-dir`), so that Claude Code reads its files without asking at any permission level; NUL
-  characters are left out. When an outcome reported since the workflow last started over has a
-  summary, Hoot also writes what the earlier steps found to `steps.md` beside it: for each outcome
-  reported since then, in order, a heading such as `## Scope · No split` and the summary below it,
-  or, for an outcome you picked in Hoot, a sentence that says so. The first message points to
-  `issue.md`, and to `steps.md` when there is one, names the worktree's branch and the step the
-  session starts at, then gives the step's prompt and how to report it with `hoot step report`: the
-  step's outcomes, each with what it means, and that the summary is a file outside the worktree, or
-  standard input. The message would do for any agent, and the issue stays out of it, where an agent
-  could take some of its text for a command or a mention. Hoot does not enforce that nothing changes
-  while the agent judges or asks: like any other session, this one can change files as far as its
-  permission level lets it. Once the session has started, an issue in the Backlog or Todo is In
-  Progress. Hoot removes the session's folder once the session's process has ended, or when it could
-  not start; if Hoot stops without quitting, the folder stays until macOS clears its temporary
-  files. Hoot types nothing into the session and answers none of Claude Code's questions, such as
-  whether you trust the folder, which Claude Code asks once for a project and all its worktrees. It
-  writes no file of its own to `~/.claude`, `~/.claude.json`, the project or the worktree: apart
-  from what Git writes, `git status` stays clean there.
+  a heading and its description below it, to `issue.md` in a new folder of the session's own in
+  `.hoot/tmp` of the worktree, where Claude Code reads its files without asking at any permission
+  level; NUL characters are left out. A `.gitignore` there has Git ignore everything in `.hoot/tmp`,
+  itself included, which leaves the rest of `.hoot` to files a project might commit. When an outcome
+  reported since the workflow last started over has a summary, Hoot also writes what the earlier
+  steps found to `steps.md` beside it: for each outcome reported since then, in order, a heading
+  such as `## Scope · No split` and the summary below it, or, for an outcome you picked in Hoot, a
+  sentence that says so. The first message points to `issue.md`, and to `steps.md` when there is
+  one, names the worktree's branch and the step the session starts at, then gives the step's prompt
+  and how to report it with `hoot step report`: the step's outcomes, each with what it means, and
+  that the summary is a file next to the issue's file, or standard input. The message would do for
+  any agent, and the issue stays out of it, where an agent could take some of its text for a command
+  or a mention. Hoot does not enforce that nothing changes while the agent judges or asks: like any
+  other session, this one can change files as far as its permission level lets it. Once the session
+  has started, an issue in the Backlog or Todo is In Progress. Hoot removes the session's folder
+  once the session's process has ended, or when it could not start, and leaves `.hoot/tmp` with its
+  `.gitignore`; if Hoot stops without quitting, the session's folder stays there too, out of Git's
+  sight, until the worktree is deleted. Hoot types nothing into the session and answers none of
+  Claude Code's questions, such as whether you trust the folder, which Claude Code asks once for a
+  project and all its worktrees. It writes no file of its own to `~/.claude`, `~/.claude.json` or
+  the project, and none to the worktree outside `.hoot/tmp`: apart from what Git writes,
+  `git status` stays clean there.
 - **Starting again**: while the session started from an issue is in the sidebar, the button says so
   and always shows it, whatever project the issue is in since, whether or not Claude Code is found
   now, and whether or not the workflow is finished. Once the session is closed, the button starts a

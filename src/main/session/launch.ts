@@ -27,11 +27,6 @@ export interface LaunchContext {
   getLoginEnvironment(): Promise<LoginEnvironment>
   /** The permission level currently selected for a coding tool. */
   permissionLevel(tool: CodingToolId): PermissionLevel
-  /**
-   * Where each session started from an issue gets a folder of its own for
-   * the issue's files: the system's folder for temporary files.
-   */
-  temporaryFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
   /**
@@ -54,6 +49,17 @@ export interface SentIssue extends Pick<Issue, 'title' | 'description'> {
   step: WorkflowStep
   stepsFile: string | null
 }
+
+/**
+ * Where, in its working directory, each session started from an issue gets a
+ * folder of its own for the issue's files. Git ignores this folder by the
+ * `.gitignore` in it, which leaves the rest of `.hoot` to files a project
+ * might commit.
+ */
+const TEMPORARY_FOLDER = path.join('.hoot', 'tmp')
+
+/** The `.gitignore` of `TEMPORARY_FOLDER`: Git ignores everything in it, this file included. */
+const TEMPORARY_GITIGNORE = '# Created by Hoot automatically.\n*\n'
 
 /** The name of the file that holds an issue sent to a session, in the session's own folder. */
 const ISSUE_FILE_NAME = 'issue.md'
@@ -82,15 +88,14 @@ export function issueFileText(issue: Pick<Issue, 'title' | 'description'>): stri
 
 /**
  * The arguments that send an issue to Claude Code, after those of its
- * permission level: the folder of the issue's files as one more working
- * directory, which Claude Code reads at any permission level without asking;
- * the issue's title as the session's name; and the first message, which
- * points to the files and starts the step. Each option and its value are one
+ * permission level: the issue's title as the session's name, and the first
+ * message, which points to the files and starts the step. The folder of the
+ * files is in the session's working directory, where Claude Code reads them
+ * at any permission level without asking. Each option and its value are one
  * argument, so that a title starting with `-` is still the name.
  */
 export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
   return [
-    `--add-dir=${issueFolder}`,
     `--name=${withoutNul(issue.title)}`,
     firstMessage({
       issueFile: path.join(issueFolder, ISSUE_FILE_NAME),
@@ -103,13 +108,23 @@ export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
 
 /**
  * Writes the file of an issue sent to a session, and the file of what earlier
- * steps found when there is one, in a new folder of the session's own, and
- * returns that folder.
+ * steps found when there is one, in a new folder of the session's own in
+ * `TEMPORARY_FOLDER` of its working directory, and returns that folder. The
+ * `.gitignore` there is written when it is missing and stays afterwards, as
+ * does the folder that holds it: another session's folder may be beside this
+ * one.
  */
-async function writeIssueFolder(temporaryFolder: string, issue: SentIssue): Promise<string> {
+async function writeIssueFolder(cwd: string, issue: SentIssue): Promise<string> {
   let folder: string | null = null
   try {
-    folder = await fs.mkdtemp(path.join(temporaryFolder, 'hoot-issue-'))
+    const temporaryFolder = path.join(cwd, TEMPORARY_FOLDER)
+    await fs.mkdir(temporaryFolder, { recursive: true })
+    await fs
+      .writeFile(path.join(temporaryFolder, '.gitignore'), TEMPORARY_GITIGNORE, { flag: 'wx' })
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST') throw error
+      })
+    folder = await fs.mkdtemp(path.join(temporaryFolder, 'issue-'))
     await fs.writeFile(path.join(folder, ISSUE_FILE_NAME), issueFileText(issue))
     if (issue.stepsFile !== null) {
       await fs.writeFile(path.join(folder, STEPS_FILE_NAME), issue.stepsFile)
@@ -203,8 +218,8 @@ export async function resolveLaunch(
   })
   const args = [...program.args, ...level.args]
   if (issue === null) return { file: program.file, args, env }
-  // Written last, so that a launch that fails leaves nothing behind.
-  const issueFolder = await writeIssueFolder(context.temporaryFolder, issue)
+  // Written last, so that a launch that fails leaves no folder of its own behind.
+  const issueFolder = await writeIssueFolder(cwd, issue)
   return {
     file: program.file,
     args: [...args, ...sentIssueArgs(issueFolder, issue)],

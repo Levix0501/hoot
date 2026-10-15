@@ -89,7 +89,11 @@ function SettingsNavigation() {
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarMenu>
+          {/*
+            As far apart as the sessions' rows in the sidebar, so that the
+            selected page's row and a hovered one next to it don't run together.
+          */}
+          <SidebarMenu className="gap-1">
             {SECTIONS.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
                 <SidebarMenuButton

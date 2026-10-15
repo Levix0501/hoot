@@ -44,6 +44,13 @@ const functions: PtyHostFunctions = {
   kill(id, signal) {
     const session = sessions.get(id)
     if (!session) return
+    // Windows has no signals, and node-pty throws when given one there.
+    // Without a signal it ends every process attached to the session's
+    // console instead.
+    if (process.platform === 'win32') {
+      session.kill()
+      return
+    }
     // The session process leads its own process group; signal the whole group
     // so that processes it started in that group end as well.
     try {

@@ -16,7 +16,10 @@ export interface PtyHostFunctions {
   spawn(request: PtySpawnRequest): number
   write(id: string, data: string, binary: boolean): void
   resize(id: string, cols: number, rows: number): void
-  /** Sends a signal to the session's process group. */
+  /**
+   * Sends a signal to the session's process group. On Windows, which has no
+   * signals, it ends the processes attached to the session's console instead.
+   */
   kill(id: string, signal: string): void
 }
 

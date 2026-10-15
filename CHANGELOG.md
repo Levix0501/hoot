@@ -1,5 +1,13 @@
 # hoot
 
+## 0.1.0-alpha.5
+
+### Patch Changes
+
+- [`ed1b594`](https://github.com/Levix0501/hoot/commit/ed1b5948298d25e959e75cad8f5aadb01db840a4) - On Windows, closing a running session or quitting Hoot ends the session's processes at once, instead of waiting about 4 seconds and leaving them running.
+
+- [`075818b`](https://github.com/Levix0501/hoot/commit/075818b2ccfa4d3e160eb54adda1a28479ddc9e2) - On Windows, closing a session also ends the programs started in it that keep running in the background, such as a dev server that Claude Code started, as quitting Claude Code with Ctrl+C does, instead of leaving them running.
+
 ## 0.1.0-alpha.4
 
 ### Minor Changes

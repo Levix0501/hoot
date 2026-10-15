@@ -33,9 +33,10 @@ sessions does not yet.
   directly in your login shell environment (on Windows, in the one Hoot started with, which
   Windows gives every app), with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session
-  [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. A tool's
-  command is the first on your login shell's `PATH` or, on macOS when there is none there, the one
-  [Hoot installed](#agents) in `~/.hoot/agents/bin`; Hoot looks for them when it starts. On
+  [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell
+  (on Windows, the shell is PowerShell: PowerShell 7 when it is on `Path`, or else the Windows
+  PowerShell that comes with Windows). A tool's command is the first on your login shell's `PATH`
+  or, on macOS when there is none there, the one [Hoot installed](#agents) in `~/.hoot/agents/bin`; Hoot looks for them when it starts. On
   Windows, where the command npm or pnpm installs is a batch file, the session starts what it
   points to instead, the agent's program or its script with Node.js, so that `cmd.exe` never
   reads the arguments. To the environment of each session's process Hoot adds the terminal's

@@ -61,7 +61,7 @@ function context(
   levels: PermissionLevelSettings = highest,
 ): LaunchContext {
   return {
-    shell: '/bin/zsh',
+    shell: { file: '/bin/zsh', args: ['-l'] },
     baseEnv: { HOME: '/home/me', PATH: '/usr/bin:/bin', SHELL: '/bin/zsh' },
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),

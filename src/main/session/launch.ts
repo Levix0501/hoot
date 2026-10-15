@@ -11,13 +11,14 @@ import {
   type TerminalEnvOptions,
 } from '../env/session-env'
 import { commandProgram } from '../tools/command-program'
+import type { SessionShell } from '../tools/default-shell'
 import { findAgentCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { SessionError, type SessionLaunch } from './session-manager'
 
 export interface LaunchContext {
-  /** The user's default shell. */
-  shell: string
+  /** The shell that Shell sessions run, and its arguments (see `defaultShell`). */
+  shell: SessionShell
   /** The graphical login session environment Hoot started with. */
   baseEnv: Env
   terminal(): TerminalEnvOptions
@@ -149,11 +150,12 @@ async function checkFolder(cwd: string): Promise<void> {
 /**
  * Decides what a session runs in its working directory (the project root, or
  * the root of one of the project's worktrees). A Shell session runs the
- * default shell as a login shell, starting from the same environment a
- * terminal opened from the Dock would give it. A coding tool runs its command
- * directly, the one found on the login shell PATH or else, on macOS, in Hoot's
- * folder of agents: the installation the Agents page shows. On Windows, where
- * the command that npm or pnpm makes is a batch file, the tool runs what that
+ * default shell with its arguments, as a login shell outside Windows,
+ * starting from the same environment a terminal opened from the Dock or the
+ * Start menu would give it. A coding tool runs its command directly, the one
+ * found on the login shell PATH or else, on macOS, in Hoot's folder of
+ * agents: the installation the Agents page shows. On Windows, where the
+ * command that npm or pnpm makes is a batch file, the tool runs what that
  * points to instead (see `commandProgram`). It runs with the login shell
  * environment and with exactly the arguments of its permission level: the one
  * `permissionLevel` names, or else the one picked now. Claude Code, when it is
@@ -176,8 +178,8 @@ export async function resolveLaunch(
   if (tool.command === null) {
     await checkFolder(cwd)
     return {
-      file: context.shell,
-      args: ['-l'],
+      file: context.shell.file,
+      args: [...context.shell.args],
       env: buildSessionEnv(context.baseEnv, {
         ...context.terminal(),
         cwd,

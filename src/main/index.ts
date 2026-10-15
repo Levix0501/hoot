@@ -32,6 +32,7 @@ import { SessionManager } from './session/session-manager'
 import { AppearanceStore } from './settings/appearance-store'
 import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
+import { defaultShell } from './tools/default-shell'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
@@ -82,15 +83,7 @@ const windowControls = windowControlsFor(
   app.commandLine.hasSwitch(WINDOWS_LAYOUT_SWITCH),
 )
 
-function defaultShell(): string {
-  const candidates = [baseEnv.SHELL, os.userInfo().shell, '/bin/zsh']
-  for (const candidate of candidates) {
-    if (candidate && path.isAbsolute(candidate) && fs.existsSync(candidate)) return candidate
-  }
-  return '/bin/sh'
-}
-
-const shell = defaultShell()
+const shell = defaultShell(baseEnv)
 const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const appearance = new AppearanceStore(app.getPath('userData'))
@@ -102,7 +95,7 @@ appearance.on('changed', (picked) => {
   nativeTheme.themeSource = picked
 })
 const tools = new ToolService({
-  shell,
+  shell: shell.file,
   baseEnv,
   cwd: os.homedir(),
   agentsBinDirectory: manageAgents ? agentFolders.binDirectory : null,

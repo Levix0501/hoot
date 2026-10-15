@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.3
+
+### Patch Changes
+
+- [`d6e61ec`](https://github.com/Levix0501/hoot/commit/d6e61ecf3e83bd7351100b93d5004ab5a55e7c55) - Starting Claude Code, Codex or OpenCode on Windows runs the installation found first on `Path`, one that npm or pnpm installed included, instead of exiting with code 2 or starting another one further down `Path`, such as an old `claude.exe`.
+
+- [`5878dd0`](https://github.com/Levix0501/hoot/commit/5878dd025f578ddd0fb7437ded2becb4c7d50177) - On Windows, Hoot runs tools and Git in the environment it started with, which Windows gives every app: the new session menu no longer says that it could not read the login shell environment, and a Hoot started from Git Bash finds agents too.
+
+- [`19df66e`](https://github.com/Levix0501/hoot/commit/19df66e18fb51189dc084b28dd5abbf299f1b790) - On Windows, a Shell session starts PowerShell: PowerShell 7 when it is on `Path`, or else the Windows PowerShell that comes with Windows, instead of failing to find `/bin/sh`.
+
 ## 0.1.0-alpha.2
 
 ### Minor Changes

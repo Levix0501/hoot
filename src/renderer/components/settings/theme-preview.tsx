@@ -1,6 +1,5 @@
 import { useId } from 'react'
 import type { Appearance } from '../../../shared/appearance'
-import { TERMINAL_FONT_FAMILY } from '../../terminal/terminal-font'
 import { terminalTheme, type ColorScheme } from '../../terminal/themes'
 
 /** The size of the drawing, which scales to the card's width. */
@@ -18,11 +17,11 @@ const SIDEBAR_ROWS = [
   [34, 30],
   [44, 20],
 ] as const
-/** Bars standing for the lines below the terminal's prompt. */
+/** Bars standing for the terminal's lines, the first level with the sidebar's first row. */
 const TERMINAL_LINES = [
-  [29, 80],
-  [38, 56],
-  [47, 66],
+  [14, 80],
+  [23, 56],
+  [32, 66],
 ] as const
 
 /**
@@ -67,16 +66,6 @@ function WindowDrawing({ scheme, clipPath }: { scheme: ColorScheme; clipPath?: s
         strokeWidth={1}
         className="stroke-sidebar-border"
       />
-      <text
-        x={SIDEBAR_WIDTH + 8}
-        y={20}
-        fontSize={8}
-        fill={terminal.foreground}
-        style={{ fontFamily: TERMINAL_FONT_FAMILY }}
-        data-part="prompt"
-      >
-        <tspan fill={terminal.green}>$</tspan> claude
-      </text>
       {TERMINAL_LINES.map(([y, width]) => (
         <rect
           key={y}

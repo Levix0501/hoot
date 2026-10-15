@@ -4,8 +4,8 @@ Hoot is a desktop app for developers who use coding CLIs such as Claude Code, Co
 OpenCode. Add local projects, then run coding tools and shells for them in terminals embedded in
 the Hoot window, as many at a time as you like.
 
-Hoot supports macOS. Hoot for Windows is a preview: for now adding projects works, but starting
-sessions does not yet.
+Hoot supports macOS. Hoot for Windows is a preview: it adds projects and starts sessions, but has
+no [Agents](#agents) page.
 
 ## Features
 
@@ -380,8 +380,8 @@ too long for a socket). Each session's process gets in its environment:
 
 A login shell may move that folder further down `PATH` (macOS's `/etc/zprofile` and fish put the
 system's folders first); `hoot` is still found by its name, unless another program named `hoot`
-comes before it. On Windows, where Hoot cannot start sessions yet, Hoot would listen on a named
-pipe, and cmd and PowerShell would run `hoot.cmd`, and Git Bash `hoot`, both in that folder.
+comes before it. On Windows, Hoot listens on a named pipe, and cmd and PowerShell run `hoot.cmd`,
+and Git Bash `hoot`, both in that folder.
 
 ## Worktrees
 
@@ -503,8 +503,8 @@ versions are prereleases for now.
 
 - **Mac**: take the DMG for your Mac's chip, `arm64` for Apple Silicon or `x64` for Intel. Open it
   and drag Hoot to Applications. Hoot is signed and notarized, so it opens like any other app.
-- **Windows**: Hoot for Windows is a preview. For now adding projects works, with Git on `PATH`
-  (where Git for Windows puts it by default), but starting sessions does not yet. Run the installer
+- **Windows**: Hoot for Windows is a preview. It adds projects, with Git on `PATH` (where Git for
+  Windows puts it by default), and starts sessions, but has no Agents page. Run the installer
   (`Hoot-Setup-<version>.exe`): it installs Hoot for you alone, in `%LOCALAPPDATA%\Programs\Hoot`,
   without asking anything. The installer is not signed, so Microsoft Defender SmartScreen may say
   "Windows protected your PC": click **More info**, then **Run anyway**. It cannot be installed on a

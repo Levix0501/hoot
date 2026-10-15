@@ -16,6 +16,7 @@ export interface ToolServiceOptions {
   agentsBinDirectory?: string | null
   /** Replaceable for tests. */
   resolveEnv?: typeof resolveLoginShellEnv
+  platform?: NodeJS.Platform
 }
 
 export interface LoginEnvironment {
@@ -31,10 +32,11 @@ export interface Detection {
 }
 
 /**
- * Reads the login shell environment and checks which tools can be found: on
- * its PATH, or else, for a coding tool, in Hoot's folder of agents. Detection
- * runs at startup and again whenever the user asks for it, or an agent has
- * been installed or updated.
+ * Reads the login shell environment (on Windows, takes the one Hoot started
+ * with) and checks which tools can be found: on its PATH, or else, for a
+ * coding tool, in Hoot's folder of agents. Detection runs at startup and
+ * again whenever the user asks for it, or an agent has been installed or
+ * updated.
  */
 export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   private state: ToolsState = { detecting: false, tools: [], error: null }
@@ -98,24 +100,38 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     return running
   }
 
-  private async runDetection(): Promise<Detection> {
+  /**
+   * The login shell environment, or the base environment when it could not
+   * be read. On Windows, the base environment, without starting a shell:
+   * Windows gives every app the user's environment, which no shell's startup
+   * files change, and the one shell SHELL names there, Git Bash's when it
+   * started Hoot, gives PATH and HOME in a form of its own, such as
+   * `/c/Users/me`, which Windows programs cannot read.
+   */
+  private async readLoginEnvironment(): Promise<LoginEnvironment> {
+    if ((this.options.platform ?? process.platform) === 'win32') {
+      return { env: this.options.baseEnv, error: null }
+    }
     const resolveEnv = this.options.resolveEnv ?? resolveLoginShellEnv
-    let login: LoginEnvironment
     try {
       const env = await resolveEnv({
         shell: this.options.shell,
         baseEnv: this.options.baseEnv,
         cwd: this.options.cwd,
       })
-      login = { env, error: null }
+      return { env, error: null }
     } catch (error) {
-      login = {
+      return {
         env: this.options.baseEnv,
         error: `Could not read the login shell environment: ${
           error instanceof Error ? error.message : String(error)
         }`,
       }
     }
+  }
+
+  private async runDetection(): Promise<Detection> {
+    const login = await this.readLoginEnvironment()
     this.login = login
 
     const agentsBin = this.options.agentsBinDirectory ?? null

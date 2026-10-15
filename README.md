@@ -30,7 +30,8 @@ sessions does not yet.
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
-  directly in your login shell environment, with only the arguments of their
+  directly in your login shell environment (on Windows, in the one Hoot started with, which
+  Windows gives every app), with only the arguments of their
   [permission level](#permission-levels) (a Claude Code session
   [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell. A tool's
   command is the first on your login shell's `PATH` or, on macOS when there is none there, the one
@@ -46,7 +47,8 @@ sessions does not yet.
   `~/.hoot/agents/bin`, so that a `node` or an agent of yours comes first. Tools that are not
   installed are shown disabled, with **Install in Settings…** below them, which shows the
   [Agents](#agents) page (on Windows, their install command instead), and **Re-detect Tools**, the
-  last item of the new session menu, looks for them again at any time.
+  last item of the new session menu, looks for them again at any time (on Windows, in the folders
+  `Path` had when Hoot started).
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
   expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the

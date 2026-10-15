@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ToolsState } from '../../shared/ipc'
+import type { resolveLoginShellEnv } from '../env/login-shell-env'
 import { ToolService } from './tool-service'
 
 let bin: string
@@ -75,6 +76,24 @@ describe('ToolService', () => {
     expect(state.error).toMatch(/login shell environment.*Timed out/)
     expect(availability(state).claude).toBe(true)
     expect(changes.map((change) => change.detecting)).toEqual([true, false])
+  })
+
+  it('takes the environment Hoot started with on Windows, without starting a shell', async () => {
+    // What Git Bash's login shell would give.
+    const resolveEnv = vi.fn<typeof resolveLoginShellEnv>(async () => ({
+      PATH: '/c/Users/me/bin:/mingw64/bin:/usr/bin',
+    }))
+    const baseEnv = { Path: 'C:\\Users\\me\\AppData\\Roaming\\npm;C:\\Windows\\system32' }
+    const service = new ToolService({
+      shell: 'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      baseEnv,
+      cwd: 'C:\\Users\\me',
+      resolveEnv,
+      platform: 'win32',
+    })
+    expect((await service.detect()).error).toBeNull()
+    expect(await service.getLoginEnvironment()).toEqual({ env: baseEnv, error: null })
+    expect(resolveEnv).not.toHaveBeenCalled()
   })
 
   it('looks for a coding tool missing from PATH in the folder of agents', async () => {

@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { createBirpc } from 'birpc'
 import type { IPty } from 'node-pty'
 import type { PtyHostEvents, PtyHostFunctions } from '../shared/pty-protocol'
+import { endWindowsSession } from './end-windows-session'
 
 const require = createRequire(import.meta.url)
 const pty = require('node-pty') as typeof import('node-pty')
@@ -44,11 +45,8 @@ const functions: PtyHostFunctions = {
   kill(id, signal) {
     const session = sessions.get(id)
     if (!session) return
-    // Windows has no signals, and node-pty throws when given one there.
-    // Without a signal it ends every process attached to the session's
-    // console instead.
     if (process.platform === 'win32') {
-      session.kill()
+      void endWindowsSession(session)
       return
     }
     // The session process leads its own process group; signal the whole group

@@ -18,7 +18,8 @@ export interface PtyHostFunctions {
   resize(id: string, cols: number, rows: number): void
   /**
    * Sends a signal to the session's process group. On Windows, which has no
-   * signals, it ends the processes attached to the session's console instead.
+   * signals, it ends the session's process, those started under it, and those
+   * attached to its console instead.
    */
   kill(id: string, signal: string): void
 }

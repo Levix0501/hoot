@@ -1,5 +1,17 @@
 # hoot
 
+## 0.1.0-alpha.4
+
+### Minor Changes
+
+- [`f0ab03e`](https://github.com/Levix0501/hoot/commit/f0ab03efbf83b70d91439bc81f93dc8f180ba5be) - A new About page in the settings shows Hoot's version and what it runs on, checks for a newer version whenever it is shown and downloads it on request, and About Hoot in the macOS menu opens it.
+
+### Patch Changes
+
+- [`f7d0d80`](https://github.com/Levix0501/hoot/commit/f7d0d806236b0af4a093b77b804de053a21dc1df) - The previews on the Appearance page no longer show a prompt with an agent's command in their terminal.
+
+- [`5bc49fa`](https://github.com/Levix0501/hoot/commit/5bc49fa6044f462186eb6a92d565149de7aac4ce) - The rows of the settings' list of pages stand apart, so that the selected page's row and a hovered one next to it no longer run together.
+
 ## 0.1.0-alpha.3
 
 ### Patch Changes

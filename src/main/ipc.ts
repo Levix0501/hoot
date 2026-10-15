@@ -378,7 +378,10 @@ export function registerIpc(deps: IpcDependencies): void {
             message: `The worktree has no branch checked out: ${request.worktreePath}`,
           }
         }
-        // And the step of the issue's workflow the session starts at.
+        // And the step of the issue's workflow the session starts at: the one
+        // it was at when its start button was clicked, since the window
+        // changes none of its progress until this start has ended, so that
+        // the session is in a run of that step once it has started.
         const start = deps.workflows.sessionStart(saved.id)
         if (!start.ok) return start
         issue = {

@@ -11,7 +11,12 @@ import { firstStep, workflowProgress, workflowStep } from '../../../shared/workf
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
 import { progressLabel } from '../../lib/issue-workflow'
 import { cn } from '../../lib/utils'
-import { focusAfterOverlay, issueRecordsOf, useAppStore } from '../../store/app-store'
+import {
+  focusAfterOverlay,
+  isIssueStarting,
+  issueRecordsOf,
+  useAppStore,
+} from '../../store/app-store'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -34,12 +39,15 @@ const PROPERTY_BUTTON =
  * Where the issue is in its workflow: Not started, the step it is at, or
  * Finished. Once it has started, it opens a menu that reports an outcome of
  * the step it is at, as the user picks it, or starts the workflow over; both
- * apply at once.
+ * apply at once. It does not open while the issue is being started, whose
+ * session starts at the step the issue was at when its start button was
+ * clicked.
  */
 function StepProperty({ issue }: { issue: Issue }) {
   const reportStep = useAppStore((state) => state.reportStep)
   const startOverWorkflow = useAppStore((state) => state.startOverWorkflow)
   const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
+  const starting = useAppStore((state) => isIssueStarting(state, issue.id))
   const label = progressLabel(progress, ISSUE_WORKFLOW)
   const content = (
     <>
@@ -62,11 +70,15 @@ function StepProperty({ issue }: { issue: Issue }) {
     'data-testid': 'issue-step',
     'data-progress': progress.kind,
   } as const
-  if (progress.kind === 'not-started') {
-    // Nothing to report or start over yet; it looks as the other properties do.
+  // As the other properties that open something show.
+  const chevron = <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+  if (progress.kind === 'not-started' || starting) {
+    // Nothing to report or start over yet, or not while the issue is being
+    // started; it looks as it does otherwise, as the other properties do.
     return (
       <Button {...buttonProps} className={cn(PROPERTY_BUTTON, 'disabled:opacity-100')} disabled>
         {content}
+        {progress.kind !== 'not-started' && chevron}
       </Button>
     )
   }
@@ -75,8 +87,7 @@ function StepProperty({ issue }: { issue: Issue }) {
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button {...buttonProps} className={PROPERTY_BUTTON} />}>
         {content}
-        {/* As the other properties that open something show. */}
-        <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+        {chevron}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="w-auto min-w-(--anchor-width) [app-region:no-drag]"

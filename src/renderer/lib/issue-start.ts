@@ -84,3 +84,22 @@ export function startHint(
     ? `Continue ${stepName(workflow, progress.step)} with Claude Code in ${where}`
     : `Start ${firstStep(workflow).name} with Claude Code in ${where}`
 }
+
+/**
+ * Whether work on an issue is being started: from the click on its start
+ * button, while Hoot saves the issue and finds or creates its worktree (the
+ * issue is in `starts` then), until the session the click starts has
+ * started or could not start (a session of the issue that is still
+ * starting). The session starts at the step the issue was at when the button
+ * was clicked, so nothing in the window changes its progress meanwhile.
+ */
+export function isStartUnderWay(
+  issueId: number,
+  starts: readonly number[],
+  sessions: readonly { issueId: number | null; status: string }[],
+): boolean {
+  return (
+    starts.includes(issueId) ||
+    sessions.some((session) => session.issueId === issueId && session.status === 'starting')
+  )
+}

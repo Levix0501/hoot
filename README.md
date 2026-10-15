@@ -294,11 +294,13 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   branch of that name; from the branch checked out in the project's main worktree, with the nested
   repositories that **New Worktree…** includes by default, at
   `~/.hoot/worktrees/<project>/<branch>`. The project expands to show the worktree's row. Meanwhile
-  the button spins and clicking it does nothing; the rest of Hoot can be used as usual. The branch
-  keeps its name when the title changes. The session is named after the issue's title. An issue that
-  had not started is at its first step once the session has started. Hoot writes the issue, its
-  title as a heading and its description below it, to `issue.md` in a new folder of the session's
-  own in the system's temporary folder, and adds that folder to Claude Code's working directories
+  the button spins and clicking it does nothing; the rest of Hoot can be used as usual, except the
+  issue's **Step**, which does not open from the click until the session has started or could not
+  start, so that the session starts at the step the issue was at when you clicked. The branch keeps
+  its name when the title changes. The session is named after the issue's title. An issue that had
+  not started is at its first step once the session has started. Hoot writes the issue, its title as
+  a heading and its description below it, to `issue.md` in a new folder of the session's own in the
+  system's temporary folder, and adds that folder to Claude Code's working directories
   (`--add-dir`), so that Claude Code reads its files without asking at any permission level; NUL
   characters are left out. When an outcome reported since the workflow last started over has a
   summary, Hoot also writes what the earlier steps found to `steps.md` beside it: for each outcome
@@ -331,12 +333,13 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
 - **Step**: below the project, an issue's page shows the step of the workflow it is at: **Not
   started**, the step's name, or **Finished**. Once work on it has started, clicking it opens a
   menu: **Report** and the outcome, such as **Report No split**, for each outcome of the step it is
-  at, and **Start over from Scope**. What you pick applies at once, without asking. An outcome you
-  report is recorded as yours, without a summary, and starts the step it leads to, or finishes the
-  workflow, as when the agent reports it: use it when the agent did not report, or to move on
-  yourself. Starting over makes the issue not started again; what was recorded stays. A session
-  still running is not told: should its agent report afterwards, `hoot` refuses, says where the
-  issue is now, and asks to close the session and start the issue again.
+  at, and **Start over from Scope**; not while the start button is starting a session for the issue,
+  until the session has started or could not start. What you pick applies at once, without asking.
+  An outcome you report is recorded as yours, without a summary, and starts the step it leads to, or
+  finishes the workflow, as when the agent reports it: use it when the agent did not report, or to
+  move on yourself. Starting over makes the issue not started again; what was recorded stays. A
+  session still running is not told: should its agent report afterwards, `hoot` refuses, says where
+  the issue is now, and asks to close the session and start the issue again.
 - **Activity**: below the description, an issue's page lists, in the order they happened, when the
   issue was created; each outcome reported, such as **Scope · No split · 2 hours ago**, or
   **Design · Implement directly · by you · 1 minute ago** for one you picked; each time the

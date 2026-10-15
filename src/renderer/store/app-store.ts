@@ -39,7 +39,7 @@ import type {
   WorktreeInspection,
 } from '../../shared/worktrees'
 import { api } from '../lib/api'
-import { startState } from '../lib/issue-start'
+import { isStartUnderWay, startState } from '../lib/issue-start'
 import type { ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
@@ -158,6 +158,12 @@ export interface AppState {
    * their session shows or creating it fails.
    */
   startingIssues: readonly number[]
+  /**
+   * The issues whose start button was clicked to start a session for them,
+   * from the click until their session shows in the sidebar, starting, or
+   * the start ends without one (see `isIssueStarting`).
+   */
+  issueStarts: readonly number[]
   /** What the window shows; `null` for the empty page. */
   currentPage: Page | null
   /** The pages shown one after another, for going back and forward. */
@@ -523,6 +529,19 @@ export function issueWorktreeOf(
 ): WorktreeInfo | null {
   const project = state.projects.find((candidate) => candidate.id === issue.projectId)
   return project ? issueWorktree(state.worktrees[project.root] ?? [], issue.id) : null
+}
+
+/**
+ * Whether work on an issue is being started: from the click on its start
+ * button until the session it starts has started, or could not start.
+ * Meanwhile its Step row cannot be clicked, so that the session starts at
+ * the step the issue was at when the button was clicked.
+ */
+export function isIssueStarting(
+  state: Pick<AppState, 'issueStarts' | 'sessions'>,
+  issueId: number,
+): boolean {
+  return isStartUnderWay(issueId, state.issueStarts, state.sessions)
 }
 
 /** The records of an issue not started, the same array every time. */
@@ -1025,8 +1044,17 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
   }
 
-  /** The issues whose start is under way, so that a second click does not start another. */
-  const issueStarts = new Set<number>()
+  /**
+   * Marks the start of an issue's session as under way, or no longer: a
+   * second click meanwhile does not start another.
+   */
+  const setIssueStart = (issueId: number, underWay: boolean) => {
+    set((state) => ({
+      issueStarts: underWay
+        ? [...state.issueStarts, issueId]
+        : state.issueStarts.filter((id) => id !== issueId),
+    }))
+  }
 
   /** Shows on an issue's start button whether a worktree is being created for it. */
   const setStarting = (issueId: number, starting: boolean) => {
@@ -1064,6 +1092,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     permissionLevels: null,
     sessions: [],
     startingIssues: [],
+    issueStarts: [],
     currentPage: null,
     history: emptyHistory,
     issues: [],
@@ -1305,9 +1334,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         get().selectSession(started.id)
         return
       }
-      // Clicking again while the issue's session is being started does nothing.
-      if (issueStarts.has(issueId)) return
       const state = get()
+      // Clicking again while the issue's session is being started does nothing.
+      if (state.issueStarts.includes(issueId)) return
       const issue = findIssue(issueId)
       if (!issue || !isIssueOpen(issue)) return
       const expected = startState(issue, {
@@ -1320,7 +1349,9 @@ export const useAppStore = create<AppState>()((set, get) => {
       // The session starts at the level picked at the click, also when that
       // changes while its worktree is created.
       const permissionLevel = state.permissionLevels?.claude ?? null
-      issueStarts.add(issueId)
+      // Under way until its session shows, which keeps it under way while it
+      // starts, or until the start ends without one.
+      setIssueStart(issueId, true)
       // Creating a worktree takes a while, which the button shows from the click.
       if (expected.kind === 'new-worktree') setStarting(issueId, true)
       try {
@@ -1366,7 +1397,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (result.warning) warnAboutWorktree(result.warning)
         addSession(project.root, 'claude', result.path, issueId, permissionLevel)
       } finally {
-        issueStarts.delete(issueId)
+        setIssueStart(issueId, false)
         setStarting(issueId, false)
       }
     },

@@ -3,7 +3,7 @@ import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import type { ToolsState } from '../../shared/ipc'
 import { getTool } from '../../shared/tools'
 import type { WorkflowProgress } from '../../shared/workflows'
-import { startBlockers, startHint, startState } from './issue-start'
+import { isStartUnderWay, startBlockers, startHint, startState } from './issue-start'
 import { toolStatus } from './tool-status'
 
 const notStarted: WorkflowProgress = { kind: 'not-started' }
@@ -171,5 +171,26 @@ describe('startHint', () => {
     expect(startHint(worktree, notStarted, renamed)).toBe(
       "Start Look with Claude Code in this issue's worktree",
     )
+  })
+})
+
+describe('isStartUnderWay', () => {
+  it('holds from the click, while the issue is saved and its worktree found or created', () => {
+    expect(isStartUnderWay(3, [3], [])).toBe(true)
+    expect(isStartUnderWay(3, [4], [])).toBe(false)
+    expect(isStartUnderWay(3, [], [])).toBe(false)
+  })
+
+  it('holds while the session started from the issue is starting, also while it is closed', () => {
+    expect(isStartUnderWay(3, [], [{ issueId: 3, status: 'starting' }])).toBe(true)
+    const closing = { issueId: 3, status: 'starting', closing: true }
+    expect(isStartUnderWay(3, [], [closing])).toBe(true)
+  })
+
+  it('ends once the session has started, and for any other session', () => {
+    expect(isStartUnderWay(3, [], [{ issueId: 3, status: 'running' }])).toBe(false)
+    expect(isStartUnderWay(3, [], [{ issueId: 3, status: 'exited' }])).toBe(false)
+    expect(isStartUnderWay(3, [], [{ issueId: 4, status: 'starting' }])).toBe(false)
+    expect(isStartUnderWay(3, [], [{ issueId: null, status: 'starting' }])).toBe(false)
   })
 })

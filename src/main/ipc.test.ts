@@ -5,6 +5,7 @@ import { AGENTS_PATH_COMMAND, type AgentsState } from '../shared/agents'
 import type { AppInfo } from '../shared/app-info'
 import { IpcChannel } from '../shared/ipc'
 import type { UpdateStatus } from '../shared/updates'
+import type { WorkflowRecord } from '../shared/workflows'
 
 type Listener = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -58,12 +59,24 @@ const updates = Object.assign(new EventEmitter(), {
   install: vi.fn<() => Promise<void>>(async () => {}),
 })
 
+type WorkflowChange = { ok: true } | { ok: false; message: string }
+const workflows = Object.assign(new EventEmitter(), {
+  listShown: vi.fn<() => Record<number, WorkflowRecord[]>>(() => ({
+    3: [{ kind: 'started-over', id: 1, at: 0 }],
+  })),
+  reportByUser: vi.fn<(issueId: number, run: number, outcome: string) => WorkflowChange>(() => ({
+    ok: true,
+  })),
+  startOver: vi.fn<(issueId: number) => WorkflowChange>(() => ({ ok: true })),
+})
+
 beforeEach(() => {
   electron.handlers.clear()
   electron.listeners.clear()
   vi.clearAllMocks()
   agents.removeAllListeners()
   updates.removeAllListeners()
+  workflows.removeAllListeners()
   registerIpc({
     getWindow: () => window,
     appInfo,
@@ -74,7 +87,49 @@ beforeEach(() => {
     sessions: emitter(),
     updates,
     worktrees: emitter(),
+    workflows,
   } as unknown as Parameters<typeof registerIpc>[0])
+})
+
+const invoke = (channel: string, ...args: unknown[]) =>
+  electron.handlers.get(channel)?.(trusted, ...args)
+
+describe("the messages of the issues' workflows", () => {
+  it('give the records, and pass on every change of them to the window', async () => {
+    expect(await invoke(IpcChannel.listWorkflowRecords)).toEqual({
+      3: [{ kind: 'started-over', id: 1, at: 0 }],
+    })
+    const records = [{ kind: 'step-started', id: 2, step: 'scope', at: 1 }]
+    workflows.emit('changed', 3, records)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.workflowChanged, 3, records)
+  })
+
+  it('report an outcome the user picked, and start a workflow over, for the issue named', async () => {
+    expect(await invoke(IpcChannel.reportStep, 3, 2, 'no-split')).toEqual({ ok: true })
+    expect(await invoke(IpcChannel.startOverWorkflow, 3)).toEqual({ ok: true })
+    expect(workflows.reportByUser.mock.calls).toEqual([[3, 2, 'no-split']])
+    expect(workflows.startOver.mock.calls).toEqual([[3]])
+  })
+
+  it('take only an issue, a run and an outcome', async () => {
+    for (const args of [
+      [3, 2],
+      ['3', 2, 'no-split'],
+      [3, 2, ''],
+      [3, -1, 'no-split'],
+    ]) {
+      expect(await invoke(IpcChannel.reportStep, ...args)).toEqual({
+        ok: false,
+        message: 'Invalid report.',
+      })
+    }
+    expect(await invoke(IpcChannel.startOverWorkflow, 'ISS-3')).toEqual({
+      ok: false,
+      message: 'Invalid issue.',
+    })
+    expect(workflows.reportByUser).not.toHaveBeenCalled()
+    expect(workflows.startOver).not.toHaveBeenCalled()
+  })
 })
 
 const send = (channel: string, ...args: unknown[]) =>

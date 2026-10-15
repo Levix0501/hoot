@@ -1,7 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { BUILT_IN_WORKFLOW } from '../shared/built-in-workflow'
 import type { Issue, IssuePriority, IssueStatus } from '../shared/issues'
+import { stepInstructions } from '../shared/workflow-text'
+import { workflowProgress, type WorkflowStep } from '../shared/workflows'
 import { leaveSocket, startTestHoot, type TestHoot } from '../main/hoot-cli/test-support'
 import { runHoot } from './program'
 
@@ -479,6 +482,187 @@ describe('hoot issue create', () => {
   })
 })
 
+/** Runs `hoot step report` in the session started from an issue. */
+const report = (args: string[], stdin?: string) =>
+  run(['step', 'report', ...args], { session: 'issue-session', stdin })
+
+describe('hoot step report', () => {
+  const [, design, implement] = BUILT_IN_WORKFLOW.steps as [
+    WorkflowStep,
+    WorkflowStep,
+    WorkflowStep,
+  ]
+  let issue: Issue
+  let files: string
+
+  beforeEach(() => {
+    issue = addIssue('Fix the login bug', 'todo')
+    hoot.startIssueSession('issue-session', issue.id)
+    files = fs.mkdtempSync(path.join(hoot.directory, 'summaries-'))
+  })
+
+  /** Writes a file of a summary, outside any worktree. */
+  const summaryFile = (content: string | Uint8Array, name = 'summary.md') => {
+    const file = path.join(files, name)
+    fs.writeFileSync(file, content)
+    return file
+  }
+
+  const progress = () => workflowProgress(hoot.workflows.records(issue.id))
+
+  it("reports the step with the summary in a file, and prints the next step's prompt and how to report it", async () => {
+    const result = await report([
+      'no-split',
+      '--summary-file',
+      summaryFile('# Why\n\nOnly `src/auth` changes.\n'),
+    ])
+    expect(result).toEqual({
+      code: 0,
+      stdout: `ISS-1: Scope → No split. Next step: Design.\n\n${stepInstructions(design)}\n`,
+      stderr: '',
+    })
+    expect(hoot.workflows.records(issue.id)[1]).toMatchObject({
+      kind: 'step-reported',
+      step: 'scope',
+      outcome: 'no-split',
+      reporter: 'agent',
+      summary: '# Why\n\nOnly `src/auth` changes.\n',
+    })
+    expect(progress()).toMatchObject({ kind: 'at-step', step: 'design' })
+  })
+
+  it('reads the summary from standard input with -, and takes it with --summary', async () => {
+    await report(['no-split', '--summary', 'Fits.'])
+    const fromStdin = await report(['implement', '--summary-file', '-'], 'Decided.')
+    expect(fromStdin.code).toBe(0)
+    expect(fromStdin.stdout).toBe(
+      `ISS-1: Design → Implement directly. Next step: Implement.\n\n${stepInstructions(implement)}\n`,
+    )
+    expect(hoot.workflows.records(issue.id)[3]).toMatchObject({ summary: 'Decided.' })
+    const done = await report(['done', '--summary', 'Changed the login check.'])
+    expect(done).toEqual({
+      code: 0,
+      stdout: 'ISS-1: Implement → Implemented. The workflow for this issue is finished.\n',
+      stderr: '',
+    })
+    expect(progress()).toEqual({ kind: 'finished' })
+  })
+
+  it('keeps the summary exactly as the file has it, its byte order mark included', async () => {
+    const summary = '\uFEFF  Line one\r\n\nLine three  \n\n'
+    expect((await report(['split', '--summary-file', summaryFile(summary)])).code).toBe(0)
+    expect(hoot.workflows.records(issue.id)[1]).toMatchObject({ summary })
+  })
+
+  it('takes a summary as long as Hoot saves, and refuses a longer one', async () => {
+    const tooLong = await report(['no-split', '--summary-file', summaryFile('x'.repeat(1_000_001))])
+    expect(tooLong).toEqual({
+      code: 1,
+      stdout: '',
+      stderr:
+        'error: The summary is 1,000,001 characters long; Hoot saves summaries of up to 1,000,000.\n',
+    })
+    expect(progress()).toMatchObject({ kind: 'at-step', step: 'scope' })
+    const longest = await report(['no-split', '--summary-file', summaryFile('x'.repeat(1_000_000))])
+    expect(longest.code).toBe(0)
+    expect(progress()).toMatchObject({ kind: 'at-step', step: 'design' })
+  })
+
+  it("refuses an outcome the step does not have, and lists the step's outcomes", async () => {
+    expect(await report(['done', '--summary', 'x'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'error: done is not an outcome of Scope.\nOutcomes: no-split, split\n',
+    })
+    await report(['no-split', '--summary', 'x'])
+    expect((await report(['done', '--summary', 'x'])).stderr).toBe(
+      'error: done is not an outcome of Design.\nOutcomes: implement\n',
+    )
+  })
+
+  it('refuses a report without a summary, with an empty one, or with two', async () => {
+    const before = hoot.workflows.records(issue.id)
+    const missing = await report(['no-split'])
+    expect(missing.code).toBe(1)
+    expect(missing.stderr).toBe(
+      'error: No summary was given: give it with --summary <text> or --summary-file <file>.\n',
+    )
+    for (const summary of ['', '   ', '\n\t\n']) {
+      expect(await report(['no-split', '--summary', summary])).toEqual({
+        code: 1,
+        stdout: '',
+        stderr: 'error: The summary is empty, or only whitespace.\n',
+      })
+    }
+    expect((await report(['no-split', '--summary-file', summaryFile(' \n')])).stderr).toBe(
+      'error: The summary is empty, or only whitespace.\n',
+    )
+    const both = await report(['no-split', '--summary', 'x', '--summary-file', summaryFile('x')])
+    expect(both.code).toBe(1)
+    expect(both.stderr).toMatch(
+      /^error: option '--summary <text>' cannot be used with option '--summary-file <file>'/,
+    )
+    expect(hoot.workflows.records(issue.id)).toEqual(before)
+  })
+
+  it('refuses a file it cannot read, or that is not UTF-8', async () => {
+    const missing = path.join(files, 'missing.md')
+    const unreadable = await report(['no-split', '--summary-file', missing])
+    expect(unreadable.code).toBe(1)
+    expect(unreadable.stderr).toMatch(
+      new RegExp(`^error: Could not read the summary from ${missing}: ENOENT`),
+    )
+    const binary = summaryFile(Uint8Array.of(0x41, 0xff, 0x42), 'binary.md')
+    expect(await report(['no-split', '--summary-file', binary])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: `error: The summary in ${binary} is not UTF-8 text.\n`,
+    })
+    expect(progress()).toMatchObject({ kind: 'at-step', step: 'scope' })
+  })
+
+  it('refuses in a session not started from an issue', async () => {
+    expect(
+      await run(['step', 'report', 'no-split', '--summary', 'x'], { session: 'gamma-session' }),
+    ).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'error: this session was not started from an issue.\n',
+    })
+  })
+
+  it('refuses once the workflow is finished, or the issue is deleted', async () => {
+    await report(['split', '--summary', 'Split.'])
+    const finished = await report(['split', '--summary', 'Again.'])
+    expect(finished.code).toBe(1)
+    expect(finished.stderr).toBe(
+      'error: The workflow for ISS-1 is finished; there is no step left to report.\n',
+    )
+    hoot.issues.delete(issue.id)
+    expect((await report(['split', '--summary', 'x'])).stderr).toBe(
+      'error: ISS-1 no longer exists in Hoot.\n',
+    )
+  })
+
+  it('refuses in a session whose issue was moved on in Hoot since', async () => {
+    const scope = progress()
+    if (scope.kind !== 'at-step') throw new Error('Not at a step.')
+    hoot.workflows.reportByUser(issue.id, scope.run, 'no-split')
+    const moved = await report(['no-split', '--summary', 'x'])
+    expect(moved).toEqual({
+      code: 1,
+      stdout: '',
+      stderr:
+        'error: ISS-1 was moved on in Hoot; it is now at Design. Close this session and start the issue again to continue.\n',
+    })
+  })
+
+  it('reports for the issue whatever project it is in now', async () => {
+    hoot.issues.update(issue.id, { projectId: hoot.hotel.id, status: 'canceled' })
+    expect((await report(['no-split', '--summary', 'x'])).code).toBe(0)
+  })
+})
+
 describe('hoot --help and hoot issue --help', () => {
   it('together name the commands, their arguments and options, the names of statuses and priorities, and the defaults', async () => {
     const top = await run(['--help'])
@@ -513,6 +697,22 @@ describe('hoot --help and hoot issue --help', () => {
     const { code, stdout } = await run(['issue', 'create', '--help'])
     expect(code).toBe(0)
     expect(stdout).toContain('Usage: hoot issue create [options]')
+  })
+
+  it('names the step command, its argument and its options', async () => {
+    const top = await run(['--help'])
+    const step = await run(['step', '--help'])
+    expect(step.code).toBe(0)
+    const help = `${top.stdout}${step.stdout}`.replace(/\s+/g, ' ')
+    for (const text of [
+      'hoot step --help',
+      'report',
+      '<outcome>',
+      '--summary <text>',
+      '--summary-file <file>',
+    ]) {
+      expect(help).toContain(text)
+    }
   })
 })
 

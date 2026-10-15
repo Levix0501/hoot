@@ -1,20 +1,16 @@
 import { SendIcon } from 'lucide-react'
+import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import type { Issue } from '../../../shared/issues'
 import { getTool } from '../../../shared/tools'
-import { startState, type StartBlocker, type StartState } from '../../lib/issue-start'
+import { WORKFLOW_FINISHED } from '../../../shared/workflow-text'
+import { workflowProgress } from '../../../shared/workflows'
+import { startHint, startState, type StartBlocker } from '../../lib/issue-start'
 import { cn } from '../../lib/utils'
-import { issueWorktreeOf, useAppStore } from '../../store/app-store'
+import { issueRecordsOf, issueWorktreeOf, useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
 import { Button } from '../ui/button'
 import { Spinner } from '../ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-
-/** What the button's tooltip says it does, when it can be used. */
-const HINTS: Record<Exclude<StartState['kind'], 'blocked'>, string> = {
-  show: 'Show the Claude Code session started from this issue',
-  worktree: "Start Claude Code in this issue's worktree",
-  'new-worktree': 'Start with Claude Code in a new worktree',
-}
 
 /** What the tooltip of a start button that cannot be used says about one of the reasons. */
 function BlockerNote({ blocker }: { blocker: StartBlocker }) {
@@ -32,19 +28,23 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
       return (
         <p>Set a Project for this issue first: its worktree is created in the issue's project.</p>
       )
+    case 'finished':
+      return <p>{WORKFLOW_FINISHED}</p>
   }
 }
 
 /**
  * The start button of an open issue, at the end of its row in the issue list
  * and on its page, where it is the same button. It starts work on the issue
- * with Claude Code, in the issue's worktree, which it creates when there is
- * none; while the session started from the issue is in the sidebar, it shows
- * that session instead. It has only an icon: a paper plane, which turns into
- * Claude Code's mark under the pointer or with the keyboard focus while it
- * can be used, and into a spinner while the issue's worktree is created. Its
- * tooltip says what it does, or why it cannot be used now, also while it is
- * disabled: the tooltip's trigger wraps the button.
+ * with Claude Code, at the first step of the issue's workflow or at the step
+ * it is at, in the issue's worktree, which it creates when there is none;
+ * while the session started from the issue is in the sidebar, it shows that
+ * session instead. Once the workflow is finished, it cannot be used. It has
+ * only an icon: a paper plane, which turns into Claude Code's mark under the
+ * pointer or with the keyboard focus while it can be used, and into a
+ * spinner while the issue's worktree is created. Its tooltip says what it
+ * does, or why it cannot be used now, also while it is disabled: the
+ * tooltip's trigger wraps the button.
  */
 export function IssueStartButton({
   issue,
@@ -63,8 +63,9 @@ export function IssueStartButton({
   const worktreePath = useAppStore((state) => issueWorktreeOf(state, issue)?.path ?? null)
   const starting = useAppStore((state) => state.startingIssues.includes(issue.id))
   const startIssue = useAppStore((state) => state.startIssue)
-  const action = startState(issue, { sessionId, tools, worktreePath })
-  const usable = action.kind !== 'blocked'
+  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
+  const action = startState(issue, { sessionId, tools, worktreePath, progress })
+  const hint = action.kind === 'blocked' ? null : startHint(action, progress, ISSUE_WORKFLOW)
 
   return (
     <Tooltip>
@@ -74,8 +75,8 @@ export function IssueStartButton({
           variant="ghost"
           size="icon-sm"
           className="text-muted-foreground disabled:pointer-events-auto"
-          disabled={!usable}
-          aria-label={usable ? HINTS[action.kind] : 'Start with Claude Code'}
+          disabled={hint === null}
+          aria-label={hint ?? 'Start with Claude Code'}
           aria-busy={starting || undefined}
           onClick={() => void startIssue(issue.id)}
           data-testid="issue-start"
@@ -89,11 +90,11 @@ export function IssueStartButton({
             <>
               <SendIcon
                 className={cn(
-                  usable && 'group-hover/button:hidden group-focus-visible/button:hidden',
+                  hint !== null && 'group-hover/button:hidden group-focus-visible/button:hidden',
                 )}
                 data-start-icon="send"
               />
-              {usable && (
+              {hint !== null && (
                 <ToolIcon
                   toolId="claude"
                   className="hidden group-hover/button:block group-focus-visible/button:block"
@@ -104,8 +105,8 @@ export function IssueStartButton({
         </Button>
       </TooltipTrigger>
       <TooltipContent side={tooltipSide} data-testid="issue-start-tooltip">
-        {usable ? (
-          HINTS[action.kind]
+        {action.kind !== 'blocked' ? (
+          hint
         ) : (
           <div className="grid gap-1">
             {action.blockers.map((blocker) => (

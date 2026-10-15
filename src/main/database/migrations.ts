@@ -41,4 +41,33 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX issues_by_project ON issues (project_id);
   `,
+  // 2: the issues' progress through their workflow.
+  `
+  -- What happened to each issue in its workflow, in the order it happened: a
+  -- run of a step started, the outcome of a run was reported, or the user
+  -- started the workflow over. An issue's progress is read from its last
+  -- record; an issue without any has not started. The records go with their
+  -- issue when it is deleted.
+  CREATE TABLE workflow_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('step-started', 'step-reported', 'started-over')),
+    -- The id of the step in the workflow's definition; NULL when the workflow started over.
+    step TEXT,
+    -- The name of the outcome reported; NULL for any other record.
+    outcome TEXT,
+    -- Who reported the outcome, 'agent' or 'user'; NULL for any other record.
+    reporter TEXT CHECK (reporter IN ('agent', 'user')),
+    -- The agent's summary of the step, in Markdown; NULL for any other record.
+    summary TEXT,
+    -- Milliseconds since the Unix epoch.
+    at INTEGER NOT NULL,
+    CHECK ((step IS NULL) = (kind = 'started-over')),
+    CHECK ((outcome IS NOT NULL) = (kind = 'step-reported')),
+    CHECK ((reporter IS NOT NULL) = (kind = 'step-reported')),
+    CHECK ((summary IS NOT NULL) = (reporter IS 'agent'))
+  ) STRICT;
+
+  CREATE INDEX workflow_records_by_issue ON workflow_records (issue_id, id);
+  `,
 ]

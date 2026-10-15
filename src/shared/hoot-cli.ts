@@ -7,11 +7,15 @@
  * - `GET /issues/<number>`: the issue with this number, as in `ISS-12`, if it is in the
  *   project; `null` when it is not.
  * - `POST /issues`: creates an issue in the project, from a `NewHootIssue`.
+ * - `POST /steps/report`: reports the outcome of the current step of the
+ *   workflow of the issue the session was started from, from a
+ *   `StepReportRequest`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
  * answer is a JSON `HootAnswer`.
  */
 import type { Issue, IssuePriority, IssueStatus } from './issues'
+import type { WorkflowStep } from './workflows'
 
 /** The variables Hoot adds to the environment of every session's process for hoot. */
 export const HOOT_ENV = {
@@ -53,3 +57,23 @@ export type HootAnswer<T> =
 export type IssueListAnswer = HootAnswer<{ issues: Issue[] }>
 export type IssueAnswer = HootAnswer<{ issue: Issue | null }>
 export type CreatedIssueAnswer = HootAnswer<{ issue: Issue }>
+
+/** An outcome of the current step, by its name, and the agent's summary of the step, in Markdown. */
+export interface StepReportRequest {
+  outcome: string
+  summary: string
+}
+
+/** What Hoot recorded of a step's outcome, and what comes next. */
+export interface StepReport {
+  /** The issue's identifier, such as `ISS-12`. */
+  issue: string
+  /** The name of the step reported. */
+  step: string
+  /** The label of the outcome. */
+  outcome: string
+  /** The step that starts now, or `null` when the outcome finished the workflow. */
+  next: WorkflowStep | null
+}
+
+export type StepReportAnswer = HootAnswer<{ report: StepReport }>

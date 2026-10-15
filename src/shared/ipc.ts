@@ -6,6 +6,7 @@ import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
 import type { CodingToolId, ToolId } from './tools'
 import type { UpdateStatus } from './updates'
+import type { WorkflowRecord } from './workflows'
 import type { WindowControls } from './window-controls'
 import type {
   CreateIssueWorktreeResult,
@@ -78,6 +79,9 @@ export interface StartSessionRequest {
 }
 
 export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: false; message: string }
+
+/** Whether a change to an issue's progress through its workflow was made, or why not. */
+export type WorkflowChangeResult = { ok: true } | { ok: false; message: string }
 
 export interface WindowState {
   /** Whether the sidebar is expanded, as it was when Hoot last showed or hid it. */
@@ -171,6 +175,10 @@ export const IpcChannel = {
   updateIssue: 'issues:update',
   deleteIssue: 'issues:delete',
   issueCreated: 'issues:created',
+  listWorkflowRecords: 'workflows:list-records',
+  workflowChanged: 'workflows:changed',
+  reportStep: 'workflows:report-step',
+  startOverWorkflow: 'workflows:start-over',
   writeClipboardText: 'clipboard:write-text',
   openExternalLink: 'links:open-external',
 } as const
@@ -353,6 +361,21 @@ export interface HootApi {
   deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
   /** An issue was created other than from the window: by hoot, in a session. */
   onIssueCreated(listener: (issue: Issue) => void): () => void
+  /**
+   * The records of the workflows of the issues without a project and of
+   * those of the projects in the list, by issue; an issue without any is
+   * left out.
+   */
+  listWorkflowRecords(): Promise<Record<number, WorkflowRecord[]>>
+  /** An issue's workflow records changed; these are all of them now. */
+  onWorkflowChanged(listener: (issueId: number, records: WorkflowRecord[]) => void): () => void
+  /**
+   * Records an outcome the user picked for the run of a step `run` of an
+   * issue, without a summary, unless the issue has moved on from that run.
+   */
+  reportStep(issueId: number, run: number, outcome: string): Promise<WorkflowChangeResult>
+  /** Starts an issue's workflow over: it is not started again, and keeps its records. */
+  startOverWorkflow(issueId: number): Promise<WorkflowChangeResult>
   /**
    * Puts text on the clipboard. Through the main process, which can write it
    * while the window does not have the focus.

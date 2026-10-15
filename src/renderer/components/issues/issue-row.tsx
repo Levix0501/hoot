@@ -1,15 +1,18 @@
 import { CopyIcon, DeleteIcon, LinkIcon, Trash2Icon } from 'lucide-react'
 import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
+import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
+import { workflowProgress } from '../../../shared/workflows'
 import {
   optionOfDigit,
   PRIORITY_OPTIONS,
   STATUS_OPTIONS,
   type PropertyOption,
 } from '../../lib/issue-properties'
+import { progressLabel } from '../../lib/issue-workflow'
 import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
-import { focusAfterOverlay, useAppStore } from '../../store/app-store'
+import { focusAfterOverlay, issueRecordsOf, useAppStore } from '../../store/app-store'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -89,8 +92,10 @@ function PropertySubmenu<T extends string | number | null>({
 
 /**
  * An issue in the list, as Linear shows it: its priority, its identifier, its
- * status, its title, its project if any, and when it was created, and at the
- * end, for an issue neither done nor canceled, its start button. Click it to
+ * status, its title, followed by the step of its workflow it is at, or
+ * Finished, once it has started, its project if any, and when it was
+ * created, and at the end, for an issue neither done nor canceled, its start
+ * button. Click it to
  * show its page; right-click it to change its status, priority or project,
  * copy it or delete it.
  */
@@ -116,6 +121,7 @@ export function IssueRow({
   const copyIssueTitle = useAppStore((state) => state.copyIssueTitle)
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
   const [menuOpen, setMenuOpen] = useState(false)
+  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
 
   return (
     <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -144,13 +150,29 @@ export function IssueRow({
             {issueIdentifier(issue.id)}
           </span>
           <StatusIcon status={issue.status} />
-          <span
-            className="min-w-0 flex-1 truncate font-medium"
-            data-user-text=""
-            data-testid="issue-row-title"
-          >
-            {issue.title}
-          </span>
+          {progress.kind === 'not-started' ? (
+            <span
+              className="min-w-0 flex-1 truncate font-medium"
+              data-user-text=""
+              data-testid="issue-row-title"
+            >
+              {issue.title}
+            </span>
+          ) : (
+            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              {/* Room for the ink of its last letter, which its width would cut. */}
+              <span
+                className="min-w-0 truncate pr-0.5 font-medium"
+                data-user-text=""
+                data-testid="issue-row-title"
+              >
+                {issue.title}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground" data-testid="issue-row-step">
+                {progressLabel(progress, ISSUE_WORKFLOW)}
+              </span>
+            </span>
+          )}
           {project && (
             <span
               className="max-w-[30%] shrink-0 truncate text-xs text-muted-foreground"

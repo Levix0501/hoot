@@ -32,6 +32,7 @@ import {
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
+import { workflowProgress, type WorkflowRecord } from '../../shared/workflows'
 import type {
   CreateIssueWorktreeResult,
   WorktreeInfo,
@@ -163,6 +164,11 @@ export interface AppState {
   history: PageHistory
   /** The issues without a project, and those of the projects in the list. */
   issues: Issue[]
+  /**
+   * The records of the issues' progress through their workflow, by issue id,
+   * in the order they were made; an issue without any is not started.
+   */
+  issueWorkflows: Record<number, WorkflowRecord[]>
   /**
    * What is checked in the issue list's Project filter: projects of the list,
    * and `null` for No project. The list shows every issue while nothing is
@@ -337,6 +343,13 @@ export interface AppState {
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
   /**
+   * Reports an outcome of the run of a step `run` that an issue is at, as
+   * the user picked it, without a summary; says why when it cannot.
+   */
+  reportStep(issueId: number, run: number, outcome: string): Promise<void>
+  /** Starts an issue's workflow over; says why when it cannot. */
+  startOverWorkflow(issueId: number): Promise<void>
+  /**
    * Expands or collapses the sidebar, and saves its state; not while the
    * settings are shown in its place.
    */
@@ -510,6 +523,20 @@ export function issueWorktreeOf(
 ): WorktreeInfo | null {
   const project = state.projects.find((candidate) => candidate.id === issue.projectId)
   return project ? issueWorktree(state.worktrees[project.root] ?? [], issue.id) : null
+}
+
+/** The records of an issue not started, the same array every time. */
+const NO_RECORDS: WorkflowRecord[] = []
+
+/**
+ * An issue's records of its progress through its workflow, in the order they
+ * were made; none for an issue not started.
+ */
+export function issueRecordsOf(
+  state: Pick<AppState, 'issueWorkflows'>,
+  issueId: number,
+): WorkflowRecord[] {
+  return state.issueWorkflows[issueId] ?? NO_RECORDS
 }
 
 /** Says why the worktree of an issue could not be created, with Git's own words in its font. */
@@ -779,11 +806,50 @@ export const useAppStore = create<AppState>()((set, get) => {
   let issuesRead = false
 
   /**
+   * For each reading of the workflows' records under way, the issues whose
+   * records changed since it began.
+   */
+  const workflowReads = new Set<Set<number>>()
+
+  /**
+   * Reads the records of the issues' workflows again; those that changed
+   * while they were read stay as the change left them, which is newer.
+   */
+  const loadWorkflows = () => {
+    const changed = new Set<number>()
+    workflowReads.add(changed)
+    void api
+      .listWorkflowRecords()
+      .then(
+        (records) =>
+          set((state) => ({
+            issueWorkflows: {
+              ...records,
+              ...Object.fromEntries(
+                [...changed]
+                  .filter((id) => state.issueWorkflows[id] !== undefined)
+                  .map((id) => [id, state.issueWorkflows[id]!]),
+              ),
+            },
+          })),
+        (error: unknown) => console.error("Could not read the issues' workflows:", error),
+      )
+      .finally(() => workflowReads.delete(changed))
+  }
+
+  /** Shows an issue's records as they are now, which are newer than any reading under way. */
+  const applyWorkflow = (issueId: number, records: WorkflowRecord[]) => {
+    for (const changed of workflowReads) changed.add(issueId)
+    set((state) => ({ issueWorkflows: { ...state.issueWorkflows, [issueId]: records } }))
+  }
+
+  /**
    * Reads the issues again, showing them with the changes to them not saved
    * yet; those of a project that has left the list by then stay out.
    */
   const loadIssues = () => {
     issuesRead = true
+    loadWorkflows()
     void api.listIssues().then(
       (issues) =>
         set((state) => {
@@ -1001,6 +1067,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     currentPage: null,
     history: emptyHistory,
     issues: [],
+    issueWorkflows: {},
     checkedProjects: [],
     issueView: 'all',
     collapsedIssueGroups: [],
@@ -1070,6 +1137,8 @@ export const useAppStore = create<AppState>()((set, get) => {
             : state,
         ),
       )
+      // Wherever the change came from: a session's agent, or this window.
+      api.onWorkflowChanged(applyWorkflow)
       api.onToolsChanged((tools) => set({ tools }))
       api.onAgentsChanged((agents) => set({ agents }))
       // Set as soon as it arrives: a change reported after it is newer.
@@ -1245,6 +1314,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         sessionId: null,
         tools: state.tools,
         worktreePath: issueWorktreeOf(state, issue)?.path ?? null,
+        progress: workflowProgress(issueRecordsOf(state, issueId)),
       })
       if (expected.kind !== 'worktree' && expected.kind !== 'new-worktree') return
       // The session starts at the level picked at the click, also when that
@@ -1576,7 +1646,11 @@ export const useAppStore = create<AppState>()((set, get) => {
           toast.error('Could not delete the issue.', { description: result.message })
           return
         }
-        set((state) => ({ issues: state.issues.filter((entry) => entry.id !== issueId) }))
+        set((state) => {
+          // Its records went with it.
+          const { [issueId]: _deleted, ...issueWorkflows } = state.issueWorkflows
+          return { issues: state.issues.filter((entry) => entry.id !== issueId), issueWorkflows }
+        })
         // Its page has gone already if its project left the list meanwhile.
         const gone = (page: Page) => page.kind === 'issue' && page.issueId === issueId
         const { currentPage } = get()
@@ -1595,6 +1669,26 @@ export const useAppStore = create<AppState>()((set, get) => {
     copyIssueTitle(issueId) {
       const issue = findIssue(issueId)
       if (issue) copyText(issue.title)
+    },
+
+    async reportStep(issueId, run, outcome) {
+      await once(`report:${issueId}`, async () => {
+        const result = await api
+          .reportStep(issueId, run, outcome)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) toast.error('Could not report the step.', { description: result.message })
+      })
+    },
+
+    async startOverWorkflow(issueId) {
+      await once(`start-over:${issueId}`, async () => {
+        const result = await api
+          .startOverWorkflow(issueId)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error('Could not start the workflow over.', { description: result.message })
+        }
+      })
     },
 
     setSidebarOpen(open) {

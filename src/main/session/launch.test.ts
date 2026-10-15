@@ -7,12 +7,15 @@ import {
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
 import type { LoginEnvironment } from '../tools/tool-service'
+import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
+import { firstMessage } from '../../shared/workflow-text'
+import type { WorkflowStep } from '../../shared/workflows'
 import {
   issueFileText,
   resolveLaunch,
   sentIssueArgs,
-  startIssuePrompt,
   type LaunchContext,
+  type SentIssue,
 } from './launch'
 import { SessionError } from './session-manager'
 
@@ -41,6 +44,13 @@ beforeAll(() => {
 })
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+const [scope, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
+
+/** An issue sent to a session that starts at the first step, without earlier steps. */
+function sentIssue(title: string, description: string, branch: string): SentIssue {
+  return { title, description, branch, step: scope, stepsFile: null }
+}
 
 const highest: PermissionLevelSettings = {
   claude: 'bypass-permissions',
@@ -168,11 +178,11 @@ describe('resolveLaunch', () => {
 
   it('sends Claude Code an issue after the arguments of its permission level', async () => {
     const levels = { ...highest, claude: 'accept-edits' }
-    const issue = {
-      title: 'Fix the login bug',
-      description: '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
-      branch: 'iss-1-fix-the-login-bug',
-    }
+    const issue = sentIssue(
+      'Fix the login bug',
+      '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
+      'iss-1-fix-the-login-bug',
+    )
     const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
     // The issue is written in a folder of the session's own, in the temporary folder.
     const [folderName] = fs.readdirSync(temporary)
@@ -181,13 +191,20 @@ describe('resolveLaunch', () => {
     expect(fs.readFileSync(path.join(folder, 'issue.md'), 'utf8')).toBe(
       '# Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  \n',
     )
+    // Without earlier steps' summaries, nothing else.
+    expect(fs.readdirSync(folder)).toEqual(['issue.md'])
     expect(launch.file).toBe(path.join(bin, 'claude'))
     expect(launch.args).toEqual([
       '--permission-mode',
       'acceptEdits',
       `--add-dir=${folder}`,
       '--name=Fix the login bug',
-      startIssuePrompt(path.join(folder, 'issue.md'), 'iss-1-fix-the-login-bug'),
+      firstMessage({
+        issueFile: path.join(folder, 'issue.md'),
+        stepsFile: null,
+        branch: 'iss-1-fix-the-login-bug',
+        step: scope,
+      }),
     ])
     launch.cleanup?.()
     expect(fs.readdirSync(temporary)).toEqual([])
@@ -198,8 +215,33 @@ describe('resolveLaunch', () => {
     expect(fs.readdirSync(temporary)).toEqual([])
   })
 
+  it('writes what earlier steps found beside the issue, and points to both', async () => {
+    const issue: SentIssue = {
+      ...sentIssue('Continue', '', 'iss-4-continue'),
+      step: design,
+      stepsFile: '## Scope · No split\n\nFits.\n',
+    }
+    const launch = await resolveLaunch(context({ PATH: bin }), 'claude', project, issue)
+    const [folderName] = fs.readdirSync(temporary)
+    const folder = path.join(temporary, folderName)
+    expect(fs.readdirSync(folder).toSorted()).toEqual(['issue.md', 'steps.md'])
+    expect(fs.readFileSync(path.join(folder, 'steps.md'), 'utf8')).toBe(
+      '## Scope · No split\n\nFits.\n',
+    )
+    expect(launch.args.at(-1)).toBe(
+      firstMessage({
+        issueFile: path.join(folder, 'issue.md'),
+        stepsFile: path.join(folder, 'steps.md'),
+        branch: 'iss-4-continue',
+        step: design,
+      }),
+    )
+    launch.cleanup?.()
+    expect(fs.readdirSync(temporary)).toEqual([])
+  })
+
   it('sends an issue to Claude Code only, and writes it only when the launch can go ahead', async () => {
-    const issue = { title: 'T', description: '', branch: 'iss-1-t' }
+    const issue = sentIssue('T', '', 'iss-1-t')
     await expect(
       resolveLaunch(context({ PATH: bin }), 'codex', project, issue),
     ).rejects.toBeInstanceOf(SessionError)
@@ -220,7 +262,7 @@ describe('resolveLaunch', () => {
       { ...context({ PATH: bin }), temporaryFolder: path.join(root, 'missing') },
       'claude',
       project,
-      { title: 'T', description: '', branch: 'iss-1-t' },
+      sentIssue('T', '', 'iss-1-t'),
     )
     await expect(launching).rejects.toBeInstanceOf(SessionError)
     await expect(launching).rejects.toThrow("Could not write the issue's file:")
@@ -282,64 +324,26 @@ describe('the issue, the first message and the arguments that send them', () => 
     expect(issueFileText({ title: 'Fix\0 login', description: 'a\0b' })).toBe('# Fix login\n\nab\n')
     // A description of nothing but NUL characters is an empty one.
     expect(issueFileText({ title: 'T', description: '\0\0' })).toBe('# T\n')
-    expect(
-      sentIssueArgs('/tmp/hoot-issue-1', { title: 'Fix\0 login', description: '', branch: 'b' })[1],
-    ).toBe('--name=Fix login')
-  })
-
-  it("is Hoot's instructions to judge the issue, then split or implement it, word for word", () => {
-    const prompt = startIssuePrompt(
-      '/tmp/hoot-issue-1/issue.md',
-      'iss-1-fix-the-login-bug-on-safari',
-    )
-    expect(prompt).toBe(
-      [
-        'The issue to work on is in `/tmp/hoot-issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
-        '',
-        'This is a Git worktree of the project, on the branch `iss-1-fix-the-login-bug-on-safari`, made for this issue.',
-        '',
-        "First judge the issue against this project's code. Read whatever you need, but change nothing yet: no edits, no commits, no commands that change files.",
-        '',
-        '1. Workload: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time.',
-        '2. If yes, say that it needs no split, and wait for me to confirm. Once I do, implement the issue here.',
-        '3. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
-        '   - Title',
-        '   - Description: what it delivers, and how to accept it',
-        '   - Waits on: the issues it cannot be delivered and accepted without, or none',
-        '4. End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`, and stop there.',
-        '',
-        "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
-      ].join('\n'),
-    )
-    // Lines end with LF alone, and nothing follows the last one.
-    expect(prompt).not.toMatch(/\r|\s$/)
-    // It names no agent, and says nothing of the hoot command.
-    expect(prompt.replace('/tmp/hoot-issue-1/issue.md', '')).not.toMatch(/Claude|hoot/i)
-  })
-
-  it("names the issue's file and the worktree's branch as they are given", () => {
-    const prompt = startIssuePrompt(
-      '/var/folders/x/T/hoot-issue-AbC/issue.md',
-      'iss-13-修复登录页的问题',
-    )
-    const [file, , branch] = prompt.split('\n')
-    expect(file).toContain('`/var/folders/x/T/hoot-issue-AbC/issue.md`')
-    expect(branch).toBe(
-      'This is a Git worktree of the project, on the branch `iss-13-修复登录页的问题`, made for this issue.',
+    expect(sentIssueArgs('/tmp/hoot-issue-1', sentIssue('Fix\0 login', '', 'b'))[1]).toBe(
+      '--name=Fix login',
     )
   })
 
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
     expect(
-      sentIssueArgs('/tmp/hoot-issue-1', {
-        title: '--verbose flag broken',
-        description: '',
-        branch: 'iss-2-verbose-flag-broken',
-      }),
+      sentIssueArgs(
+        '/tmp/hoot-issue-1',
+        sentIssue('--verbose flag broken', '', 'iss-2-verbose-flag-broken'),
+      ),
     ).toEqual([
       '--add-dir=/tmp/hoot-issue-1',
       '--name=--verbose flag broken',
-      startIssuePrompt('/tmp/hoot-issue-1/issue.md', 'iss-2-verbose-flag-broken'),
+      firstMessage({
+        issueFile: '/tmp/hoot-issue-1/issue.md',
+        stepsFile: null,
+        branch: 'iss-2-verbose-flag-broken',
+        step: scope,
+      }),
     ])
   })
 })

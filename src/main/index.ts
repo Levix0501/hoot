@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { ISSUE_WORKFLOW } from '../shared/built-in-workflow'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
 import {
   WINDOWS_LAYOUT_SWITCH,
@@ -37,6 +38,7 @@ import { defaultShell } from './tools/default-shell'
 import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
+import { WorkflowExecutor } from './workflows/workflow-executor'
 import { titleBarOverlay, windowBackground } from './window-colors'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
@@ -365,6 +367,7 @@ if (!app.requestSingleInstanceLock()) {
 function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
+  const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW)
   // Only projects in the list are kept collapsed, so that a project added later is expanded.
   sidebar.retainProjects(projects.list().map((project) => project.id))
   registerIpc({
@@ -387,6 +390,7 @@ function startWithDatabase(database: DatabaseSync): void {
     quitGuard,
     updates,
     worktrees,
+    workflows,
     resolveProjectRoot: async (directory) => {
       const git = await gitExecutable()
       if (git === null) return { kind: 'error', message: GIT_NOT_FOUND }
@@ -413,6 +417,9 @@ function startWithDatabase(database: DatabaseSync): void {
     issues,
     // The window shows it at once, and nothing else changes there.
     issueCreated: (issue) => getWindow()?.webContents.send(IpcChannel.issueCreated, issue),
+    // For the issue the session was started from; the window shows the change at once.
+    reportStep: (sessionId, outcome, summary) =>
+      workflows.reportFromSession(sessionId, sessions.issueOf(sessionId), outcome, summary),
   })
   hootServer.start().catch((error: unknown) => {
     console.error(`Could not listen for hoot on ${hootCli.socket}:`, error)

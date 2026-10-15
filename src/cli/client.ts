@@ -6,6 +6,8 @@ import {
   type IssueAnswer,
   type IssueListAnswer,
   type NewHootIssue,
+  type StepReportAnswer,
+  type StepReportRequest,
 } from '../shared/hoot-cli'
 
 /** Something hoot cannot do, and why; it ends hoot with exit code 1. */
@@ -55,6 +57,14 @@ export class HootClient {
   /** Creates an issue in the session's project. */
   createIssue(issue: NewHootIssue): Promise<CreatedIssueAnswer> {
     return this.ask('POST', '/issues', issue)
+  }
+
+  /**
+   * Reports an outcome of the current step of the workflow of the issue the
+   * session was started from.
+   */
+  reportStep(report: StepReportRequest): Promise<StepReportAnswer> {
+    return this.ask('POST', '/steps/report', report)
   }
 
   /** Sends a request, and settles with Hoot's answer; rejects with a `CliError` when there is none. */

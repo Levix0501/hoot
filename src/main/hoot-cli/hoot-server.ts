@@ -9,11 +9,15 @@ import {
   type IssueAnswer,
   type IssueListAnswer,
   type NewHootIssue,
+  type StepReportAnswer,
+  type StepReportRequest,
 } from '../../shared/hoot-cli'
 import type { Project } from '../../shared/ipc'
 import { oneLineTitle, type Issue } from '../../shared/issues'
+import { STEP_SUMMARY_MAX_LENGTH } from '../../shared/workflows'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from '../issues/issue-schemas'
 import type { IssueStore } from '../issues/issue-store'
+import type { StepReportResult } from '../workflows/workflow-executor'
 
 /**
  * The most a request may send: a new issue at the longest Hoot saves, even
@@ -28,6 +32,15 @@ const newHootIssue = z.strictObject({
   priority: issuePriority,
 }) satisfies z.ZodType<NewHootIssue>
 
+const stepReportRequest = z.strictObject({
+  outcome: z.string().max(1_000),
+  // Not empty, and not only whitespace.
+  summary: z
+    .string()
+    .max(STEP_SUMMARY_MAX_LENGTH)
+    .refine((summary) => summary.trim() !== ''),
+}) satisfies z.ZodType<StepReportRequest>
+
 /** The project a session runs for, or why there is none. */
 export type SessionProject = { ok: true; project: Project } | { ok: false; message: string }
 
@@ -40,6 +53,11 @@ export interface HootServerOptions {
   issues: Pick<IssueStore, 'listInProject' | 'getInProject' | 'create'>
   /** Called with each issue hoot creates, once it is saved. */
   issueCreated(issue: Issue): void
+  /**
+   * Reports an outcome, with the agent's summary, of the current step of the
+   * workflow of the issue the session with this id was started from.
+   */
+  reportStep(sessionId: string, outcome: string, summary: string): StepReportResult
 }
 
 type Reply = { status: number; answer: HootAnswer<object> }
@@ -79,7 +97,8 @@ async function readJson(request: http.IncomingMessage): Promise<unknown> {
 
 /**
  * Answers hoot, run in a session this Hoot started: it reads the issues of the
- * session's project, and creates issues in it. It listens only where the
+ * session's project, creates issues in it, and reports the steps of the
+ * workflow of the issue the session was started from. It listens only where the
  * sessions' environment tells hoot to connect, through a Unix domain socket
  * that only the user can connect to, or on Windows a named pipe.
  */
@@ -206,6 +225,16 @@ export class HootServer {
       }
       const answer: CreatedIssueAnswer = { ok: true, project, issue }
       return { status: 201, answer }
+    }
+
+    if (pathname === '/steps/report' && request.method === 'POST') {
+      const parsed = stepReportRequest.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid report.')
+      const { outcome, summary } = parsed.data
+      const result = this.options.reportStep(sessionId, outcome, summary)
+      if (!result.ok) return failure(409, result.message)
+      const answer: StepReportAnswer = { ok: true, project, report: result.report }
+      return { status: 200, answer }
     }
 
     return failure(404, 'Hoot does not know this request.')

@@ -20,6 +20,7 @@ import {
   type StartSessionResult,
   type StartupState,
   type WindowState,
+  type WorkflowChangeResult,
 } from '../shared/ipc'
 import {
   ISSUE_TITLE_MAX_LENGTH,
@@ -50,6 +51,7 @@ import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
 import type { UpdateService } from './updates/update-service'
+import type { WorkflowExecutor } from './workflows/workflow-executor'
 import type { WorktreeService } from './worktrees/worktree-service'
 
 export interface IpcDependencies {
@@ -67,6 +69,7 @@ export interface IpcDependencies {
   quitGuard: QuitGuard
   updates: UpdateService
   worktrees: WorktreeService
+  workflows: WorkflowExecutor
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
 
@@ -375,11 +378,23 @@ export function registerIpc(deps: IpcDependencies): void {
             message: `The worktree has no branch checked out: ${request.worktreePath}`,
           }
         }
-        issue = { title: saved.title, description: saved.description, branch: worktree.branch }
+        // And the step of the issue's workflow the session starts at.
+        const start = deps.workflows.sessionStart(saved.id)
+        if (!start.ok) return start
+        issue = {
+          title: saved.title,
+          description: saved.description,
+          branch: worktree.branch,
+          step: start.step,
+          stepsFile: start.stepsFile,
+        }
       }
     }
     try {
-      return { ok: true, session: await deps.sessions.start(request, issue) }
+      const session = await deps.sessions.start(request, issue)
+      // Work on the issue goes on in the session from now on.
+      if (request.issueId !== null) deps.workflows.sessionStarted(session.id, request.issueId)
+      return { ok: true, session }
     } catch (error) {
       if (error instanceof SessionError) return { ok: false, message: error.message }
       throw error
@@ -388,7 +403,9 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.closeSession, async (_event, value) => {
     const parsed = sessionId.safeParse(value)
-    if (parsed.success) await deps.sessions.close(parsed.data)
+    if (!parsed.success) return
+    await deps.sessions.close(parsed.data)
+    deps.workflows.forgetSession(parsed.data)
   })
 
   on(IpcChannel.writeSession, (...args) => {
@@ -557,6 +574,23 @@ export function registerIpc(deps: IpcDependencies): void {
     } catch (error) {
       return { ok: false, message: errorMessage(error) }
     }
+  })
+
+  handle(IpcChannel.listWorkflowRecords, () => deps.workflows.listShown())
+  deps.workflows.on('changed', (issueId, records) =>
+    send(IpcChannel.workflowChanged, issueId, records),
+  )
+
+  handle(IpcChannel.reportStep, (_event, ...args): WorkflowChangeResult => {
+    const parsed = z.tuple([rowId, rowId, z.string().min(1).max(1_000)]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid report.' }
+    return deps.workflows.reportByUser(...parsed.data)
+  })
+
+  handle(IpcChannel.startOverWorkflow, (_event, value): WorkflowChangeResult => {
+    const parsed = rowId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    return deps.workflows.startOver(parsed.data)
   })
 
   on(IpcChannel.writeClipboardText, (value) => {

@@ -1,9 +1,25 @@
-import { FolderIcon } from 'lucide-react'
+import {
+  ChevronDownIcon,
+  CircleArrowRightIcon,
+  FolderIcon,
+  RotateCcwIcon,
+  WorkflowIcon,
+} from 'lucide-react'
+import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import type { Issue } from '../../../shared/issues'
+import { firstStep, workflowProgress, workflowStep } from '../../../shared/workflows'
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
+import { progressLabel } from '../../lib/issue-workflow'
 import { cn } from '../../lib/utils'
-import { useAppStore } from '../../store/app-store'
+import { focusAfterOverlay, issueRecordsOf, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
 import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
 
@@ -15,9 +31,87 @@ const PROPERTY_BUTTON =
   'justify-start @max-2xl/issue:rounded-full @max-2xl/issue:border-border @2xl/issue:w-full'
 
 /**
+ * Where the issue is in its workflow: Not started, the step it is at, or
+ * Finished. Once it has started, it opens a menu that reports an outcome of
+ * the step it is at, as the user picks it, or starts the workflow over; both
+ * apply at once.
+ */
+function StepProperty({ issue }: { issue: Issue }) {
+  const reportStep = useAppStore((state) => state.reportStep)
+  const startOverWorkflow = useAppStore((state) => state.startOverWorkflow)
+  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
+  const label = progressLabel(progress, ISSUE_WORKFLOW)
+  const content = (
+    <>
+      <WorkflowIcon className="text-muted-foreground" />
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-left',
+          progress.kind === 'not-started' && 'text-muted-foreground',
+        )}
+        data-testid="issue-step-label"
+      >
+        {label}
+      </span>
+    </>
+  )
+  const buttonProps = {
+    variant: 'ghost',
+    size: 'sm',
+    'aria-label': `Step: ${label}`,
+    'data-testid': 'issue-step',
+    'data-progress': progress.kind,
+  } as const
+  if (progress.kind === 'not-started') {
+    // Nothing to report or start over yet; it looks as the other properties do.
+    return (
+      <Button {...buttonProps} className={cn(PROPERTY_BUTTON, 'disabled:opacity-100')} disabled>
+        {content}
+      </Button>
+    )
+  }
+  const step = progress.kind === 'at-step' ? workflowStep(ISSUE_WORKFLOW, progress.step) : undefined
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button {...buttonProps} className={PROPERTY_BUTTON} />}>
+        {content}
+        {/* As the other properties that open something show. */}
+        <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="w-auto min-w-(--anchor-width) [app-region:no-drag]"
+        finalFocus={focusAfterOverlay}
+        data-testid="issue-step-menu"
+      >
+        {progress.kind === 'at-step' &&
+          step?.outcomes.map((outcome) => (
+            <DropdownMenuItem
+              key={outcome.name}
+              onClick={() => void reportStep(issue.id, progress.run, outcome.name)}
+              data-testid="issue-step-report"
+              data-outcome={outcome.name}
+            >
+              <CircleArrowRightIcon />
+              Report {outcome.label}
+            </DropdownMenuItem>
+          ))}
+        {step !== undefined && <DropdownMenuSeparator />}
+        <DropdownMenuItem
+          onClick={() => void startOverWorkflow(issue.id)}
+          data-testid="issue-step-start-over"
+        >
+          <RotateCcwIcon />
+          Start over from {firstStep(ISSUE_WORKFLOW).name}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/**
  * An issue's status, priority and project, each a button that opens its
- * picker. The status and priority pickers also open with S and P, through
- * `open` and `onOpenChange`.
+ * picker, and the step of its workflow it is at. The status and priority
+ * pickers also open with S and P, through `open` and `onOpenChange`.
  */
 export function IssueProperties({
   issue,
@@ -119,6 +213,7 @@ export function IssueProperties({
           {project ? project.name : 'Add to project'}
         </span>
       </ProjectPicker>
+      <StepProperty issue={issue} />
     </section>
   )
 }

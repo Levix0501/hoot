@@ -8,6 +8,8 @@ import {
   issueTitle,
   listOrder,
 } from '../shared/issues'
+import { stepReportText } from '../shared/workflow-text'
+import { STEP_SUMMARY_MAX_LENGTH } from '../shared/workflows'
 import { CliError, HootClient } from './client'
 import { issueJson, issueListText, issueText, jsonText } from './format'
 import { PRIORITY_NAME_LIST, STATUS_NAME_LIST, priorityNamed, statusNamed } from './names'
@@ -42,18 +44,20 @@ function answered<T extends HootAnswer<object>>(answer: T): Extract<T, { ok: tru
 }
 
 /** Text decoded as UTF-8, kept exactly as it is, byte order mark included. */
-function utf8Text(bytes: Uint8Array, source: string): string {
+function utf8Text(bytes: Uint8Array, what: string, source: string): string {
   try {
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch {
-    throw new CliError(`The description in ${source} is not UTF-8 text.`)
+    throw new CliError(`The ${what} in ${source} is not UTF-8 text.`)
   }
 }
 
 /**
  * Builds hoot's commands: `hoot issue view`, `list` and `create`, modeled on
- * `gh issue`. Each reads or creates the issues of the project of the Hoot
- * session hoot runs in, through the Hoot that started the session.
+ * `gh issue`, which read or create the issues of the project of the Hoot
+ * session hoot runs in; and `hoot step report`, which reports a step of the
+ * workflow of the issue the session was started from. Each works through the
+ * Hoot that started the session.
  */
 export function hootProgram(io: CliIo): Command {
   /** The Hoot and the session that the session's environment names. */
@@ -69,21 +73,25 @@ export function hootProgram(io: CliIo): Command {
     return new HootClient(socket, sessionId)
   }
 
-  const readDescription = async (file: string): Promise<string> => {
+  /** The text of a UTF-8 file, or of standard input for `-`, which is the `what` of a command. */
+  const readText = async (file: string, what: string): Promise<string> => {
     const source = file === '-' ? 'standard input' : file
     let bytes: Uint8Array
     try {
       bytes = file === '-' ? await io.readStdin() : await io.readFile(file)
     } catch (error) {
       throw new CliError(
-        `Could not read the description from ${source}: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not read the ${what} from ${source}: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
-    return utf8Text(bytes, source)
+    return utf8Text(bytes, what, source)
   }
 
   const program = new Command('hoot')
-    .description('Read and create the issues of the project of the Hoot session that hoot runs in.')
+    .description(
+      'Read and create the issues of the project of the Hoot session that hoot runs in, and ' +
+        'report the steps of the workflow of the issue the session was started from.',
+    )
     .configureOutput({
       writeOut: (text) => io.write(text),
       writeErr: (text) => io.writeError(text),
@@ -91,7 +99,8 @@ export function hootProgram(io: CliIo): Command {
     .exitOverride()
     .addHelpText(
       'after',
-      '\nRun "hoot issue --help" for the issue commands, their options, and the names of the statuses and priorities.',
+      '\nRun "hoot issue --help" for the issue commands, their options, and the names of the statuses and priorities.' +
+        '\nRun "hoot step --help" for reporting a step of the workflow.',
     )
 
   const issueCommand: Command = program
@@ -200,7 +209,7 @@ export function hootProgram(io: CliIo): Command {
         const description =
           options.descriptionFile === undefined
             ? (options.description ?? '')
-            : await readDescription(options.descriptionFile)
+            : await readText(options.descriptionFile, 'description')
         if (description.length > ISSUE_DESCRIPTION_MAX_LENGTH) {
           throw new CliError(
             `The description is ${quantity.format(description.length)} characters long; ` +
@@ -218,6 +227,46 @@ export function hootProgram(io: CliIo): Command {
         io.write(options.json ? jsonText(issueJson(created)) : `${issueIdentifier(created.id)}\n`)
       },
     )
+
+  const stepCommand: Command = program
+    .command('step')
+    .description('Report the steps of the workflow of the issue that this session was started from')
+    .addHelpText('after', () =>
+      stepCommand.commands.map((command) => `\n${command.helpInformation()}`).join(''),
+    )
+
+  stepCommand
+    .command('report')
+    .description(
+      'Report the outcome of the current step, with a summary of what the step found, ' +
+        'and print what to do next: the next step, or that the workflow is finished',
+    )
+    .argument('<outcome>', 'the name of one of the outcomes of the current step')
+    .addOption(new Option('--summary <text>', 'the summary, in Markdown').conflicts('summaryFile'))
+    .option(
+      '--summary-file <file>',
+      'read the summary from a UTF-8 file, or from standard input with -',
+    )
+    .action(async (outcome: string, options: { summary?: string; summaryFile?: string }) => {
+      const summary =
+        options.summaryFile === undefined
+          ? options.summary
+          : await readText(options.summaryFile, 'summary')
+      if (summary === undefined) {
+        throw new CliError(
+          'No summary was given: give it with --summary <text> or --summary-file <file>.',
+        )
+      }
+      if (summary.trim() === '') throw new CliError('The summary is empty, or only whitespace.')
+      if (summary.length > STEP_SUMMARY_MAX_LENGTH) {
+        throw new CliError(
+          `The summary is ${quantity.format(summary.length)} characters long; ` +
+            `Hoot saves summaries of up to ${quantity.format(STEP_SUMMARY_MAX_LENGTH)}.`,
+        )
+      }
+      const { report } = answered(await connect().reportStep({ outcome, summary }))
+      io.write(stepReportText(report))
+    })
 
   return program
 }

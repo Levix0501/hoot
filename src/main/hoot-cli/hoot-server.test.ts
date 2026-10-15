@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import { SESSION_HEADER } from '../../shared/hoot-cli'
 import { HootServer } from './hoot-server'
 import { leaveSocket, startTestHoot, type TestHoot } from './test-support'
@@ -121,6 +122,63 @@ describe('HootServer', () => {
     expect(hoot.created).toEqual([])
   })
 
+  it("reports a step of the workflow of the session's issue, and answers with what comes next", async () => {
+    const started = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    hoot.startIssueSession('issue-session', started.id)
+    const { status, answer } = await request('POST', '/steps/report', {
+      session: 'issue-session',
+      body: JSON.stringify({ outcome: 'no-split', summary: 'Fits.' }),
+    })
+    expect(status).toBe(200)
+    expect(answer).toEqual({
+      ok: true,
+      project: { name: 'gamma' },
+      report: {
+        issue: 'ISS-1',
+        step: 'Scope',
+        outcome: 'No split',
+        next: BUILT_IN_WORKFLOW.steps[1],
+      },
+    })
+    expect(
+      await request('POST', '/steps/report', {
+        session: 'issue-session',
+        body: JSON.stringify({ outcome: 'done', summary: 'x' }),
+      }),
+    ).toEqual({
+      status: 409,
+      answer: { ok: false, message: 'done is not an outcome of Design.\nOutcomes: implement' },
+    })
+    expect(
+      (
+        await request('POST', '/steps/report', {
+          body: JSON.stringify({ outcome: 'no-split', summary: 'x' }),
+        })
+      ).answer,
+    ).toEqual({ ok: false, message: 'this session was not started from an issue.' })
+  })
+
+  it('reports nothing from a request it cannot take', async () => {
+    const started = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    hoot.startIssueSession('issue-session', started.id)
+    const before = hoot.workflows.records(started.id)
+    for (const body of [
+      'not JSON',
+      JSON.stringify({ outcome: 'no-split' }),
+      JSON.stringify({ outcome: 'no-split', summary: ' \n ' }),
+      JSON.stringify({ outcome: 'no-split', summary: 'x'.repeat(1_000_001) }),
+      JSON.stringify({ outcome: 'no-split', summary: 'x', extra: true }),
+    ]) {
+      const { status, answer } = await request('POST', '/steps/report', {
+        session: 'issue-session',
+        body,
+      })
+      expect(status).toBe(400)
+      expect(answer.ok).toBe(false)
+    }
+    expect(hoot.workflows.records(started.id)).toEqual(before)
+  })
+
   it('answers only for a session it knows, and only what it knows', async () => {
     expect(await request('GET', '/issues', { session: null })).toEqual({
       status: 400,
@@ -159,6 +217,7 @@ describe('HootServer', () => {
       sessionProject: () => ({ ok: true, project: hoot.gamma }),
       issues: hoot.issues,
       issueCreated: () => {},
+      reportStep: () => ({ ok: false, message: 'none' }),
     })
     await server.start()
     const answer = await new Promise<string>((resolve, reject) => {
@@ -181,6 +240,7 @@ describe('HootServer', () => {
       sessionProject: () => ({ ok: false, message: 'none' }),
       issues: hoot.issues,
       issueCreated: () => {},
+      reportStep: () => ({ ok: false, message: 'none' }),
     })
     await server.stop()
     const started = server.start()

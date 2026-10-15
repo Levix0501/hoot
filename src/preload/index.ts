@@ -98,6 +98,11 @@ const api: HootApi = {
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),
   deleteIssue: (id) => ipcRenderer.invoke(IpcChannel.deleteIssue, id),
   onIssueCreated: (listener) => subscribe(IpcChannel.issueCreated, listener),
+  listWorkflowRecords: () => ipcRenderer.invoke(IpcChannel.listWorkflowRecords),
+  onWorkflowChanged: (listener) => subscribe(IpcChannel.workflowChanged, listener),
+  reportStep: (issueId, run, outcome) =>
+    ipcRenderer.invoke(IpcChannel.reportStep, issueId, run, outcome),
+  startOverWorkflow: (issueId) => ipcRenderer.invoke(IpcChannel.startOverWorkflow, issueId),
   writeClipboardText: (text) => ipcRenderer.send(IpcChannel.writeClipboardText, text),
   openExternalLink: (url) => ipcRenderer.send(IpcChannel.openExternalLink, url),
 }

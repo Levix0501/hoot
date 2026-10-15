@@ -204,11 +204,12 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   Canceled, the closest to done first. Each group lists its issues by priority, urgent first and
   those without one last, then newest first; done and canceled issues are listed the most recently
   completed first. A row shows the issue's priority, its identifier (such as `ISS-12`), its status,
-  its title, the name of its project if it has one, and the day it was created, and ends with the
-  [start button](#issues) of an issue that is neither done nor canceled. Click a group's header to
-  collapse or expand it, or its `+` to create an issue with its status. Click an issue to show its
-  page; right-click it to change its status, priority or project, copy its identifier or title, or
-  delete it.
+  its title, followed in smaller, lighter text by the [step](#issues) it is at, or **Finished**,
+  once work on it has started, the name of its project if it has one, and the day it was created,
+  and ends with the [start button](#issues) of an issue that is neither done nor canceled. Click a
+  group's header to collapse or expand it, or its `+` to create an issue with its status. Click an
+  issue to show its page; right-click it to change its status, priority or project, copy its
+  identifier or title, or delete it.
 - **The Project dropdown**, at the right end of the row of views, picks whose issues the list
   shows. Check any of its choices, **No project** and the projects (in the sidebar's order), to
   show only the issues of those checked: the issues without a project while **No project** is
@@ -232,8 +233,8 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   **View issue** to show it; ⌘⌥ Enter creates it and shows it. With **Create more** on, the dialog
   stays for the next issue, keeping the status, the priority and the project. An issue without a
   project can be created also while no project is in the list.
-- **An issue's page** shows its title and description, with its status, priority and project beside
-  them (under the title when the window is narrow), and when it was created and completed; above
+- **An issue's page** shows its title and description, with its status, priority, project and
+  [step](#issues) beside them (under the title when the window is narrow), and its activity; above
   them stands the start button of an issue that is neither done nor canceled. Its title row says
   **Issues ›**, the issue's identifier and its title. Edit the title and the description
   where they show; they are saved as you type. The description is formatted as you type GitHub
@@ -257,50 +258,92 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   start button; S and P change the status and the priority, in a picker where you can search or
   press the value's digit; ⌘⌫ deletes, after asking; and Esc on an issue's page goes back to the
   list.
+- **The workflow**: work on an issue goes through Hoot's built-in workflow, one step after another,
+  in Claude Code sessions started from the issue. In **Scope**, the agent judges the issue against
+  the code, without changing anything: whether one fresh agent session can implement all of it and
+  another then verify it in full. If so, it says that the issue needs no split and waits for you to
+  confirm (**No split**, which leads to Design); if not, it splits the issue into issues that can
+  each be implemented and accepted on their own, each with a title, a description and the issues it
+  waits on, and ends with their order (**Split**, which finishes the workflow: the split is in the
+  conversation and the step's summary). In **Design**, the agent interviews you in rounds until
+  every decision about the issue is settled, asking you only for decisions and for facts only you
+  can provide, with the option it recommends first; then it sums up what the issue delivers, the
+  decisions and the facts it relied on, and asks you to confirm (**Implement directly**, which leads
+  to Implement). In **Implement**, the agent implements the issue in the worktree, as the earlier
+  steps settled it (**Implemented**, which finishes the workflow). When a step is done, the agent
+  reports its outcome with [`hoot step report`](#the-hoot-command), with a summary in Markdown, and
+  `hoot` prints the next step's prompt, which the agent goes on with in the same session. The
+  workflow is data, which Hoot runs as it would run any workflow; its prompts name no agent.
+  Reporting, starting over and finishing change no status, and changing the status, the project or
+  anything else of the issue changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
-  worktree of its own. It shows a paper plane, which turns into Claude Code's mark while you point
-  at it or move the keyboard focus to it, and its tooltip says what it does. Clicking it saves what
-  you typed in the issue, then starts Claude Code, at the permission level picked in the Agents
-  menu at the click, in the issue's worktree, and shows the session as soon as it appears, whatever
-  page is shown then, with the keyboard focus in its terminal; going back shows the page shown
-  before it. The issue's worktree is a worktree of the issue's project whose branch is `iss-12`,
-  or starts with `iss-12-` (for `ISS-12`), and whose folder exists; of several, the first in the
-  sidebar. When there is none, Hoot first creates one, without asking: a new branch named after the
-  issue, such as `iss-12-fix-the-login-bug-on-safari` (the title's letters and digits, of any
-  script, in lower case, and a `-` for each run of anything else, cut to 60 characters), or `-2`,
-  `-3` and on after the name when a repository taking part already has a branch of that name; from
-  the branch checked out in the project's main worktree, with the nested repositories that
-  **New Worktree…** includes by default, at `~/.hoot/worktrees/<project>/<branch>`. The project
-  expands to show the worktree's row. Meanwhile the button spins and clicking it does nothing; the
-  rest of Hoot can be used as usual. The branch keeps its name when the title changes. The session
-  is named after the issue's title. Hoot writes the issue, its title as a heading and its
-  description below it, to `issue.md` in a new folder of the session's own in the system's
-  temporary folder, and adds that folder to Claude Code's working directories (`--add-dir`), so
-  that Claude Code reads the file without asking at any permission level; NUL characters are left
-  out. The first message is Hoot's instructions, which point to the file and name the worktree's
-  branch: to judge first, reading the code without changing anything, whether one fresh agent
-  session can implement the issue and another verify it in full; if so, to say that it needs no
-  split and wait for you to confirm, then implement it in the worktree; if not, to split it into
-  ordered issues that can each be accepted on its own, each with a title, a description and the
-  issues it waits on, and stop there. The instructions would do for any agent, and the issue stays
-  out of the message, where an agent could take some of its text for a command or a mention. Hoot
-  does not enforce that nothing changes while the agent judges: like any other session, this one
-  can change files as far as its permission level lets it. Once the session has started, an issue
-  in the Backlog or Todo is In Progress. Hoot removes the issue's folder once the session's process
-  has ended, or when it could not start; if Hoot stops without quitting, the folder stays until
-  macOS clears its temporary files. Hoot types nothing into the session and answers none of Claude
-  Code's questions, such as whether you trust the folder, which Claude Code asks once for a project
-  and all its worktrees. It writes no file of its own to `~/.claude`, `~/.claude.json`, the project
-  or the worktree: apart from what Git writes, `git status` stays clean there.
+  worktree of its own, at the first step of its workflow when it has not started, and at the step it
+  is at otherwise. It shows a paper plane, which turns into Claude Code's mark while you point at it
+  or move the keyboard focus to it, and its tooltip says what it does, such as **Start Scope with
+  Claude Code in a new worktree** or **Continue Design with Claude Code in this issue's worktree**.
+  Clicking it saves what you typed in the issue, then starts Claude Code, at the permission level
+  picked in the Agents menu at the click, in the issue's worktree, and shows the session as soon as
+  it appears, whatever page is shown then, with the keyboard focus in its terminal; going back shows
+  the page shown before it. The issue's worktree is a worktree of the issue's project whose branch
+  is `iss-12`, or starts with `iss-12-` (for `ISS-12`), and whose folder exists; of several, the
+  first in the sidebar. When there is none, Hoot first creates one, without asking: a new branch
+  named after the issue, such as `iss-12-fix-the-login-bug-on-safari` (the title's letters and
+  digits, of any script, in lower case, and a `-` for each run of anything else, cut to 60
+  characters), or `-2`, `-3` and on after the name when a repository taking part already has a
+  branch of that name; from the branch checked out in the project's main worktree, with the nested
+  repositories that **New Worktree…** includes by default, at
+  `~/.hoot/worktrees/<project>/<branch>`. The project expands to show the worktree's row. Meanwhile
+  the button spins and clicking it does nothing; the rest of Hoot can be used as usual. The branch
+  keeps its name when the title changes. The session is named after the issue's title. An issue that
+  had not started is at its first step once the session has started. Hoot writes the issue, its
+  title as a heading and its description below it, to `issue.md` in a new folder of the session's
+  own in the system's temporary folder, and adds that folder to Claude Code's working directories
+  (`--add-dir`), so that Claude Code reads its files without asking at any permission level; NUL
+  characters are left out. When an outcome reported since the workflow last started over has a
+  summary, Hoot also writes what the earlier steps found to `steps.md` beside it: for each outcome
+  reported since then, in order, a heading such as `## Scope · No split` and the summary below it,
+  or, for an outcome you picked in Hoot, a sentence that says so. The first message points to
+  `issue.md`, and to `steps.md` when there is one, names the worktree's branch and the step the
+  session starts at, then gives the step's prompt and how to report it with `hoot step report`: the
+  step's outcomes, each with what it means, and that the summary is a file outside the worktree, or
+  standard input. The message would do for any agent, and the issue stays out of it, where an agent
+  could take some of its text for a command or a mention. Hoot does not enforce that nothing changes
+  while the agent judges or asks: like any other session, this one can change files as far as its
+  permission level lets it. Once the session has started, an issue in the Backlog or Todo is In
+  Progress. Hoot removes the session's folder once the session's process has ended, or when it could
+  not start; if Hoot stops without quitting, the folder stays until macOS clears its temporary
+  files. Hoot types nothing into the session and answers none of Claude Code's questions, such as
+  whether you trust the folder, which Claude Code asks once for a project and all its worktrees. It
+  writes no file of its own to `~/.claude`, `~/.claude.json`, the project or the worktree: apart
+  from what Git writes, `git status` stays clean there.
 - **Starting again**: while the session started from an issue is in the sidebar, the button says so
-  and always shows it, whatever project the issue is in since, and whether or not Claude Code is
-  found now. Once the session is closed, the button starts a new session in the issue's worktree,
-  with the same instructions and a new file of the issue as it is then. Starting is not possible
-  while Hoot is still checking whether Claude Code is installed after it starts, when it is not
-  installed, or for an issue without a project, in which its worktree would be; the button's tooltip
-  then says why. Checking again with **Re-detect Tools** keeps the last check's answer until it is
-  done.
+  and always shows it, whatever project the issue is in since, whether or not Claude Code is found
+  now, and whether or not the workflow is finished. Once the session is closed, the button starts a
+  new session in the issue's worktree, at the step the issue is at, with new files of the issue as
+  it is then and of what the earlier steps found. Starting is not possible while Hoot is still
+  checking whether Claude Code is installed after it starts, when it is not installed, for an issue
+  without a project, in which its worktree would be, or once the issue's workflow is finished; the
+  button's tooltip then says why, such as **The workflow for this issue is finished.** Checking
+  again with **Re-detect Tools** keeps the last check's answer until it is done. To work on an issue
+  whose workflow is finished, start it over from its step, or start a session in its worktree with
+  the worktree row's `+`.
+- **Step**: below the project, an issue's page shows the step of the workflow it is at: **Not
+  started**, the step's name, or **Finished**. Once work on it has started, clicking it opens a
+  menu: **Report** and the outcome, such as **Report No split**, for each outcome of the step it is
+  at, and **Start over from Scope**. What you pick applies at once, without asking. An outcome you
+  report is recorded as yours, without a summary, and starts the step it leads to, or finishes the
+  workflow, as when the agent reports it: use it when the agent did not report, or to move on
+  yourself. Starting over makes the issue not started again; what was recorded stays. A session
+  still running is not told: should its agent report afterwards, `hoot` refuses, says where the
+  issue is now, and asks to close the session and start the issue again.
+- **Activity**: below the description, an issue's page lists, in the order they happened, when the
+  issue was created; each outcome reported, such as **Scope · No split · 2 hours ago**, or
+  **Design · Implement directly · by you · 1 minute ago** for one you picked; each time the
+  workflow started over (**Started over**); the step in progress, such as **Design · in progress**,
+  since it started; and when the issue was done or canceled. Below an outcome the agent reported is
+  its summary, formatted and with links as a description is, and read only; a long summary shows
+  only its beginning, with **Show more** below it for the rest.
 - **When it cannot start**: when the issue's project is not a Git repository, Hoot creates nothing
   and says that it cannot have worktrees. When the project's main worktree has no branch checked out
   (its HEAD is detached), or a nested repository has neither a branch named like the project's nor
@@ -322,7 +365,8 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
 ## The hoot command
 
 In every session Hoot starts, `hoot`, Hoot's command line program, reads and creates the issues of
-the session's project, with commands modeled on `gh issue`. It works with the Hoot that started the
+the session's project, with commands modeled on `gh issue`, and, in a session started from an
+issue, reports the steps of the issue's [workflow](#issues). It works with the Hoot that started the
 session and the project the session belongs to (also when it runs in one of the project's
 worktrees), whatever the current folder, and whichever other Hoots run at the same time, such as an
 installed one and one run from its repository.
@@ -332,6 +376,7 @@ hoot issue view ISS-12         # or by its number: hoot issue view 12
 hoot issue list                # the issues neither done nor canceled
 hoot issue list --status todo --status in-progress
 hoot issue create --title "Fix the login bug" --description-file notes.md --priority high
+hoot step report no-split --summary-file scope.md   # in a session started from an issue
 ```
 
 - **`hoot issue view <issue>`** shows an issue, given its identifier (such as `ISS-12`) or its
@@ -349,26 +394,41 @@ hoot issue create --title "Fix the login bug" --description-file notes.md --prio
   unless given. Otherwise it is created as the new issue dialog creates one: its title on one
   line, each line break a space, and without the whitespace around it; with the next number; and
   completed as it is created when it is done or canceled.
+- **`hoot step report <outcome>`**, in a session started from an issue's start button, reports the
+  outcome of the step of the issue's workflow that the session is in, by its name, such as
+  `no-split`, whatever project and status the issue has now. Its summary, in Markdown, is
+  `--summary <text>`, or what the UTF-8 file `--summary-file <file>` holds (`-` reads standard
+  input), exactly as given; it must not be empty or only whitespace, nor longer than 1,000,000
+  characters. Hoot records the outcome, the summary and when, and starts the step the outcome leads
+  to, or finishes the workflow; the window shows it at once. `hoot` then prints what it reported and
+  what comes next: `ISS-12: Scope → No split. Next step: Design.`, a blank line, the next step's
+  prompt and how to report it; or `ISS-12: Implement → Implemented. The workflow for this issue is
+  finished.` It refuses, recording nothing, an outcome the step does not have, listing the step's
+  outcomes; in a session not started from an issue; for an issue that was deleted, or whose workflow
+  is finished; and in a session whose issue was moved on in Hoot since, by an outcome picked there
+  or by starting over, saying where the issue is now.
 - **Names**: the statuses are `backlog`, `todo`, `in-progress`, `done` and `canceled`; the
   priorities `none`, `urgent`, `high`, `medium` and `low`.
 - **`--json`** prints the issue, or the list as an array, as JSON objects with exactly
   `identifier`, `number`, `title`, `description`, `status`, `priority`, `createdAt` and
   `completedAt`, the times in UTC in ISO 8601, `completedAt` being `null` while the issue is
-  neither done nor canceled. `hoot --help` and `hoot issue --help` explain all of this.
+  neither done nor canceled. `hoot --help`, `hoot issue --help` and `hoot step --help` explain all
+  of this.
 - **In the window**, an issue `hoot` creates shows at once: in the counts of its project's row and
   of the **Issues** row, on the list when what is checked and the view show it, and among the
   issues an issue's page steps through. Nothing else changes there: no message pops up, the page,
   the sidebar and the keyboard focus stay as they are, and so does what you are typing. Hoot does
   not record that `hoot`, or which session, created an issue.
 - **When it cannot** do what it is asked, `hoot` says why on standard error and exits with code 1,
-  without creating anything: when the issue is not in the project, a name, option or command is
-  wrong, the Hoot that started the session is not running any more, or it does not run in a session
-  Hoot started.
-- **Agents** are not told about `hoot`, and it is not allowed in advance: a coding tool runs it like
-  any other command, at its [permission level](#permission-levels), and Hoot changes no tool's
-  settings for it. At Codex's **Default** and **Read Only** levels, Codex's sandbox may block
-  `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside the sandbox, as Codex
-  offers to with your approval, or pick **Full Access**.
+  without creating or recording anything: when the issue is not in the project, a name, option or
+  command is wrong, a step cannot be reported, the Hoot that started the session is not running any
+  more, or it does not run in a session Hoot started.
+- **Agents** are told about `hoot` only by the first message of a session started from an issue,
+  which asks them to report each step with `hoot step report`, and it is not allowed in advance: a
+  coding tool runs it like any other command, at its [permission level](#permission-levels), and
+  Hoot changes no tool's settings for it. At Codex's **Default** and **Read Only** levels, Codex's
+  sandbox may block `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside the
+  sandbox, as Codex offers to with your approval, or pick **Full Access**.
 
 Hoot listens for `hoot` on a Unix domain socket that only you can connect to, `hoot.sock` in its
 [user data folder](#architecture) (or in the system's folder for temporary files when that path is
@@ -666,12 +726,13 @@ computer's Node.js and npm instead, and carries neither. Hoot keeps its data in 
 app's user data folder: `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository.
 
-- The projects and their issues are in a SQLite database, `data/hoot.db`, which Hoot reads and
-  writes with Node's built-in `node:sqlite`, in plain SQL. Its tables' version is its
-  `PRAGMA user_version`, the number of the migrations in `src/main/database` it has had: 1 for
-  the tables of the first release. On opening it, Hoot applies the migrations after that version,
-  all in one transaction. The tables change only by a new migration at the end, which keeps what
-  is in them; a migration that has been released is never changed.
+- The projects, their issues and the issues' progress through their workflow are in a SQLite
+  database, `data/hoot.db`, which Hoot reads and writes with Node's built-in `node:sqlite`, in plain
+  SQL. Its tables' version is its `PRAGMA user_version`, the number of the migrations in
+  `src/main/database` it has had: 1 for the tables of the first release. On opening it, Hoot applies
+  the migrations after that version, all in one transaction. The tables change only by a new
+  migration at the end, which keeps what is in them; a migration that has been released is never
+  changed.
 - If the database cannot be used when Hoot starts (it is not a database, cannot be read, written
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** (**Show in File Explorer** on Windows) and **Quit**,

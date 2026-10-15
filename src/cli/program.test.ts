@@ -576,7 +576,7 @@ describe('hoot step report', () => {
     })
     await report(['no-split', '--summary', 'x'])
     expect((await report(['done', '--summary', 'x'])).stderr).toBe(
-      'error: done is not an outcome of Design.\nOutcomes: implement\n',
+      'error: done is not an outcome of Design.\nOutcomes: implement, split\n',
     )
   })
 

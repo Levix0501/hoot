@@ -228,7 +228,7 @@ describe('reportFromSession', () => {
     executor.reportFromSession('s1', issue.id, 'no-split', 'x')
     expect(executor.reportFromSession('s1', issue.id, 'done', 'x')).toEqual({
       ok: false,
-      message: 'done is not an outcome of Design.\nOutcomes: implement',
+      message: 'done is not an outcome of Design.\nOutcomes: implement, split',
     })
   })
 

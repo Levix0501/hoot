@@ -61,7 +61,13 @@ describe('the built-in workflow', () => {
           ['split', 'Split', null],
         ],
       },
-      { step: 'Design', outcomes: [['implement', 'Implement directly', 'implement']] },
+      {
+        step: 'Design',
+        outcomes: [
+          ['implement', 'Implement directly', 'implement'],
+          ['split', 'Split', null],
+        ],
+      },
       { step: 'Implement', outcomes: [['done', 'Implemented', null]] },
     ])
     expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Scope')

@@ -147,7 +147,10 @@ describe('HootServer', () => {
       }),
     ).toEqual({
       status: 409,
-      answer: { ok: false, message: 'done is not an outcome of Design.\nOutcomes: implement' },
+      answer: {
+        ok: false,
+        message: 'done is not an outcome of Design.\nOutcomes: implement, split',
+      },
     })
     expect(
       (

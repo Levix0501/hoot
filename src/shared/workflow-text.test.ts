@@ -19,9 +19,9 @@ const [scope, design, implement] = BUILT_IN_WORKFLOW.steps as [
 const SCOPE_PROMPT = [
   "Scope: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
   '',
-  '1. Workload: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time.',
-  '2. If yes, say that it needs no split, and wait for me to confirm.',
-  '3. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
+  '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
+  '2. If one, say so, and wait for me to confirm.',
+  '3. If several, split it into one issue per result. For each:',
   '   - Title',
   '   - Description: what it delivers, and how to accept it',
   '   - Waits on: the issues it cannot be delivered and accepted without, or none',
@@ -33,7 +33,7 @@ const SCOPE_PROMPT = [
 const DESIGN_PROMPT = [
   'Design: settle with me how the issue is to be built, before anything changes. Read whatever you need, but change nothing yet.',
   '',
-  'Interview me until every decision about the issue is settled. A decision is a choice that whoever implements the issue may not make on their own. Ask me only for decisions, and for facts only I can provide. Find out every other fact yourself, from the code and the environment, even one I stated; when what you find contradicts me, put it to me as a decision.',
+  'Interview me until every decision about the issue is settled. A decision is a choice that whoever implements the issue may not make on their own. A decision the issue already states, or an earlier step settled, is settled: do not ask it again. Ask me only for decisions, and for facts only I can provide. Find out every other fact yourself, from the code and the environment, even one I stated; when what you find contradicts me, put it to me as a decision.',
   '',
   'Ask in rounds. Each round asks every open decision whose prerequisites are settled, those that unblock the most first. Put the option you recommend first, with its main reason and its cost. Use your tool for asking structured questions if you have one; otherwise ask in your reply, with numbered options. Wait for my answers before the next round.',
   '',
@@ -42,7 +42,14 @@ const DESIGN_PROMPT = [
   '- each decision, as I settled it',
   '- the facts you relied on, each with how you established it, and the risks I accepted',
   '',
-  'Ask me to confirm the summary.',
+  'Then judge the workload of the issue as settled: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
+  '- Title',
+  '- Description: what it delivers, how to accept it, and the decisions and facts above that it relies on',
+  '- Waits on: the issues it cannot be delivered and accepted without, or none',
+  '',
+  "End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`. Write titles and descriptions in the issue's language.",
+  '',
+  'Ask me to confirm the summary, with the split if there is one.',
 ].join('\n')
 
 const IMPLEMENT_PROMPT = 'Implement: implement the issue here, as the earlier steps settled it.'
@@ -62,11 +69,12 @@ function reporting(outcomes: string[]): string {
 }
 
 const SCOPE_REPORTING = reporting([
-  '- no-split: I confirmed that the issue needs no split. The summary says why it fits one session.',
-  '- split: the issue needs a split. The summary is the split.',
+  '- no-split: I confirmed that the issue is one piece of work. The summary says why.',
+  '- split: the issue is several pieces of work. The summary is the split.',
 ])
 const DESIGN_REPORTING = reporting([
-  '- implement: I confirmed the summary. The summary is the confirmed summary.',
+  '- implement: I confirmed the summary, and the issue fits one session. The summary is the confirmed summary.',
+  '- split: I confirmed the summary and the split. The summary is the confirmed summary, with the split after it.',
 ])
 const IMPLEMENT_REPORTING = reporting([
   '- done: the issue is implemented. The summary says what changed, how you verified it, and what is left undone.',

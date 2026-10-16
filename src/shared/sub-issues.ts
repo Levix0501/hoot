@@ -97,18 +97,21 @@ function levelOf(parents: ReadonlyMap<number, number>, issueId: number): number 
   return seen.size
 }
 
-/** The deepest of an issue's descendants, and how many levels below the issue it is: 0 for the issue itself. */
+/**
+ * The deepest of an issue's descendants, all those at that level, and how
+ * many levels below the issue they are: 0 for the issue itself.
+ */
 function deepestBelow(
   children: ReadonlyMap<number, readonly number[]>,
   issueId: number,
-): { issueId: number; depth: number } {
-  let deepest = { issueId, depth: 0 }
+): { issueIds: number[]; depth: number } {
+  let deepest = { issueIds: [issueId], depth: 0 }
   const seen = new Set([issueId])
   let level = [issueId]
   for (let depth = 1; level.length > 0; depth++) {
     const next = level.flatMap((id) => children.get(id) ?? []).filter((id) => !seen.has(id))
     for (const id of next) seen.add(id)
-    if (next.length > 0) deepest = { issueId: next[0]!, depth }
+    if (next.length > 0) deepest = { issueIds: next, depth }
     level = next
   }
   return deepest
@@ -119,11 +122,13 @@ function deepestBelow(
  * of sub-issues; `null` when they do not. An issue cannot be below itself,
  * no issue can have more than `MAX_SUB_ISSUES` sub-issues, and no issue can
  * be below `MAX_SUB_ISSUE_LEVEL`. `changed` are the issues whose parent
- * changed, the only ones checked.
+ * changed, the only ones checked. The reason names only issues that `shown`
+ * accepts, which Hoot shows: not those of projects removed from the list.
  */
 export function subIssueProblem(
   links: readonly SubIssueLink[],
   changed: readonly number[],
+  shown: (issueId: number) => boolean = () => true,
 ): string | null {
   const parents = new Map(links.map((link) => [link.issueId, link.parentId]))
   const children = new Map<number, number[]>()
@@ -158,9 +163,11 @@ export function subIssueProblem(
     const deepest = deepestBelow(children, issueId)
     const level = levelOf(parents, issueId) + deepest.depth
     if (level > MAX_SUB_ISSUE_LEVEL) {
+      const named = deepest.issueIds.find(shown)
       return (
         `${issueIdentifier(issueId)} cannot be a sub-issue of ` +
-        `${issueIdentifier(parents.get(issueId)!)}: ${issueIdentifier(deepest.issueId)} would ` +
+        `${issueIdentifier(parents.get(issueId)!)}: ` +
+        `${named === undefined ? 'an issue below it' : issueIdentifier(named)} would ` +
         `then be ${level} levels below a top-level issue, and an issue can be at most ` +
         `${MAX_SUB_ISSUE_LEVEL} levels below one.`
       )

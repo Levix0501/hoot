@@ -499,6 +499,26 @@ describe('IssueStore sub-issues', () => {
     expect(issues.subIssues()).toEqual({ version: 0, links: [] })
   })
 
+  it('names no issue of a removed project when it refuses a change', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const chain = createAll(issues, g.id, ['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7'])
+    issues.setParents(chain.slice(1).map((id, index) => ({ issueId: id, parentId: chain[index]! })))
+    const [k] = createAll(issues, g.id, ['K'])
+    const [k1] = createAll(issues, h.id, ['K1'])
+    issues.setParents([{ issueId: k1!, parentId: k! }])
+    projects.remove('/work/h')
+    const before = issues.subIssues()
+    expect(() => issues.setParents([{ issueId: k!, parentId: chain[7]! }])).toThrow(
+      new SubIssueError(
+        `ISS-${k} cannot be a sub-issue of ISS-${chain[7]}: an issue below it would then be 9 ` +
+          'levels below a top-level issue, and an issue can be at most 8 levels below one.',
+      ),
+    )
+    expect(issues.subIssues()).toEqual(before)
+  })
+
   it('keeps the parents and sub-issues of the issues of a removed project, which come back with it', () => {
     const { projects, issues } = start()
     const g = projects.add('/work/g').project

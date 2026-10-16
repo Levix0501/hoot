@@ -742,7 +742,15 @@ describe('hoot issue edit', () => {
     // The hundredth is of hotel, removed from the list: it counts all the same.
     const hidden = addElsewhere(hoot.hotel.id, 'S100')
     attach(s, hidden)
+    // K's sub-issue is of hotel too: K under L7 would put it at level 9.
+    const k = addIssue('K', 'todo')
+    const k1 = addElsewhere(hoot.hotel.id, 'K1')
+    attach(k, k1)
     hoot.projects.remove(hoot.hotel.root)
+    const deep = await run(['issue', 'edit', `ISS-${k.id}`, '--parent', `ISS-${levels[7]!.id}`])
+    expect(deep.code).toBe(1)
+    expect(deep.stderr).toContain('an issue below it would then be 9 levels below')
+    expect(deep.stderr).not.toContain(`ISS-${k1.id}`)
     const t = addIssue('T', 'todo')
     const refused = await run(['issue', 'edit', `ISS-${s.id}`, '--add-sub-issue', `ISS-${t.id}`])
     expect(refused.code).toBe(1)

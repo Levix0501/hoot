@@ -232,6 +232,8 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
       const problem = subIssueProblem(
         withParents(links, changes),
         changes.map((change) => change.issueId),
+        // Not naming an issue of a removed project, which Hoot does not show.
+        (id) => this.get(id) !== null,
       )
       if (problem !== null) throw new SubIssueError(problem)
       let current = links

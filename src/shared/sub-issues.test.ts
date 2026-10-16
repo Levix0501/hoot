@@ -13,6 +13,11 @@ import {
   type SubIssueLink,
 } from './sub-issues'
 
+/** Why ISS-20 cannot be a sub-issue of ISS-8, naming the issue that would be too deep. */
+const tooDeep = (named: string) =>
+  `ISS-20 cannot be a sub-issue of ISS-8: ${named} would then be 9 levels below a ` +
+  'top-level issue, and an issue can be at most 8 levels below one.'
+
 /** Links from [sub-issue, parent] pairs, in order. */
 const links = (...pairs: Array<[number, number]>): SubIssueLink[] =>
   pairs.map(([issueId, parentId]) => ({ issueId, parentId }))
@@ -47,6 +52,15 @@ describe('the tree of sub-issues', () => {
   it('finds nothing wrong with links within the rules', () => {
     expect(subIssueProblem(tree, [2, 3, 4, 5, 7])).toBeNull()
     expect(newSubIssueProblem(tree, 5)).toBeNull()
+  })
+
+  it('names the deepest issue below the limit only when it is shown', () => {
+    // 9 is at level 8; 20 under 8 would put its sub-issues 21 and 22 at level 9.
+    const chain = Array.from({ length: 8 }, (_, index): [number, number] => [index + 2, index + 1])
+    const moved = withParents(links(...chain, [21, 20], [22, 20]), [{ issueId: 20, parentId: 8 }])
+    expect(subIssueProblem(moved, [20])).toBe(tooDeep('ISS-21'))
+    expect(subIssueProblem(moved, [20], (id) => id !== 21)).toBe(tooDeep('ISS-22'))
+    expect(subIssueProblem(moved, [20], (id) => id < 21)).toBe(tooDeep('an issue below it'))
   })
 })
 

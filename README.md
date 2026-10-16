@@ -287,10 +287,10 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   in Claude Code sessions started from the issue. In **Scope**, the agent judges the issue against
   the code, without changing anything: whether it is one piece of work, or several, results that
   could each be delivered and accepted on their own; how much work it is waits until its design is
-  settled. If it is one, the agent says so and waits for you to confirm (**No split**, which leads
-  to Design); if several, it splits the issue into one issue per result, each with a title, a
-  description and the issues it waits on, and ends with their order (**Split**, which finishes the
-  workflow: the split is in the conversation and the step's summary). In **Design**, the agent
+  settled. If it is one, the agent says so (**No split**, which leads to Design); if several, it
+  splits the issue into one issue per result, each with a title, a description and the issues it
+  waits on, and ends with their order (**Split**, which finishes the workflow: the split is in the
+  conversation and the step's summary). Either way, it asks you to confirm. In **Design**, the agent
   interviews you in rounds until every decision about the issue is settled, asking you only for
   decisions the issue and the earlier steps have not settled, and for facts only you can provide,
   with the option it recommends first; then it sums up what the issue delivers, the decisions and
@@ -299,13 +299,14 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   that one session can each implement and another verify, each with the decisions and facts it
   relies on in its description. It asks you to confirm the summary, with the split if there is one
   (**Implement directly**, which leads to Implement, or **Split**, which finishes the workflow). In
-  **Implement**, the agent implements the issue in the worktree, as the earlier steps settled it
-  (**Implemented**, which finishes the workflow). When a step is done, the agent reports its outcome
-  with [`hoot step report`](#the-hoot-command), with a summary in Markdown, and `hoot` prints the
-  next step's prompt, which the agent goes on with in the same session. The workflow is data, which
-  Hoot runs as it would run any workflow; its prompts name no agent. Reporting, starting over and
-  finishing change no status, and changing the status, the project or anything else of the issue
-  changes nothing of its progress.
+  both steps, when you object or ask for changes, the agent revises and asks you again, and reports
+  the step only once you confirm. In **Implement**, the agent implements the issue in the worktree,
+  as the earlier steps settled it (**Implemented**, which finishes the workflow). When a step is
+  done, the agent reports its outcome with [`hoot step report`](#the-hoot-command), with a summary
+  in Markdown, and `hoot` prints the next step's prompt, which the agent goes on with in the same
+  session. The workflow is data, which Hoot runs as it would run any workflow; its prompts name no
+  agent. Reporting, starting over and finishing change no status, and changing the status, the
+  project or anything else of the issue changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
   worktree of its own, at the first step of its workflow when it has not started, and at the step it

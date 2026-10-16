@@ -19,12 +19,13 @@ const SPEC_DRIVEN: WorkflowDefinition = {
         "Scope: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
         '',
         '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
-        '2. If one, say so, and wait for me to confirm.',
+        '2. If one, say so.',
         '3. If several, split it into one issue per result. For each:',
         '   - Title',
         '   - Description: what it delivers, and how to accept it',
         '   - Waits on: the issues it cannot be delivered and accepted without, or none',
         '4. End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`.',
+        '5. Ask me to confirm your answer, with the split if there is one. If I object or ask for changes, revise it and ask me again, until I confirm.',
         '',
         "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
       ].join('\n'),
@@ -38,7 +39,7 @@ const SPEC_DRIVEN: WorkflowDefinition = {
         {
           name: 'split',
           label: 'Split',
-          instruction: 'the issue is several pieces of work. The summary is the split.',
+          instruction: 'I confirmed the split. The summary is the confirmed split.',
           next: null,
         },
       ],
@@ -65,7 +66,7 @@ const SPEC_DRIVEN: WorkflowDefinition = {
         '',
         "End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`. Write titles and descriptions in the issue's language.",
         '',
-        'Ask me to confirm the summary, with the split if there is one.',
+        'Ask me to confirm the summary, with the split if there is one. If I object or ask for changes, revise it and ask me again, until I confirm.',
       ].join('\n'),
       outcomes: [
         {

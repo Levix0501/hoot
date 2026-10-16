@@ -413,6 +413,7 @@ function startWithDatabase(database: DatabaseSync): void {
         ? { ok: true, project }
         : { ok: false, message: "The session's project is no longer in Hoot's list." }
     },
+    listProjects: () => projects.list(),
     issues,
     // The window shows it at once, and nothing else changes there.
     issueCreated: (issue) => getWindow()?.webContents.send(IpcChannel.issueCreated, issue),

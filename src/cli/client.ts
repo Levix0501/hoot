@@ -2,8 +2,10 @@ import http from 'node:http'
 import {
   SESSION_HEADER,
   type CreatedIssueAnswer,
+  type EditedIssueAnswer,
   type HootAnswer,
   type IssueAnswer,
+  type IssueEdit,
   type IssueListAnswer,
   type NewHootIssue,
   type StepReportAnswer,
@@ -57,6 +59,14 @@ export class HootClient {
   /** Creates an issue in the session's project. */
   createIssue(issue: NewHootIssue): Promise<CreatedIssueAnswer> {
     return this.ask('POST', '/issues', issue)
+  }
+
+  /**
+   * Changes the parent and the sub-issues of the issue with this number,
+   * given in decimal digits, in the session's project.
+   */
+  editIssue(digits: string, edit: IssueEdit): Promise<EditedIssueAnswer> {
+    return this.ask('PATCH', `/issues/${digits}`, edit)
   }
 
   /**

@@ -1,4 +1,12 @@
-import { CopyIcon, DeleteIcon, LinkIcon, Trash2Icon } from 'lucide-react'
+import {
+  CopyIcon,
+  CornerLeftUpIcon,
+  DeleteIcon,
+  LinkIcon,
+  ListTreeIcon,
+  Trash2Icon,
+  UnlinkIcon,
+} from 'lucide-react'
 import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
 import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
@@ -12,7 +20,12 @@ import {
 import { progressLabel } from '../../lib/issue-workflow'
 import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
-import { focusAfterOverlay, issueRecordsOf, useAppStore } from '../../store/app-store'
+import {
+  focusAfterOverlay,
+  issueRecordsOf,
+  shownParentOf,
+  useAppStore,
+} from '../../store/app-store'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -97,7 +110,8 @@ function PropertySubmenu<T extends string | number | null>({
  * created, and at the end, for an issue neither done nor canceled, its start
  * button. Click it to
  * show its page; right-click it to change its status, priority or project,
- * copy it or delete it.
+ * copy it, give it a parent or sub-issues, take it from its parent, or
+ * delete it.
  */
 export function IssueRow({
   issue,
@@ -120,6 +134,9 @@ export function IssueRow({
   const copyIssueIdentifier = useAppStore((state) => state.copyIssueIdentifier)
   const copyIssueTitle = useAppStore((state) => state.copyIssueTitle)
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
+  const openIssuePicker = useAppStore((state) => state.openIssuePicker)
+  const setIssueParents = useAppStore((state) => state.setIssueParents)
+  const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
   const [menuOpen, setMenuOpen] = useState(false)
   const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
 
@@ -241,6 +258,35 @@ export function IssueRow({
           <CopyIcon />
           Copy title
         </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onClick={() => openIssuePicker('parent', issue.id)}
+          data-testid="issue-menu-sub-issue-of"
+        >
+          <CornerLeftUpIcon />
+          Sub-issue of…
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => openIssuePicker('sub-issues', issue.id)}
+          data-testid="issue-menu-parent-of"
+        >
+          <ListTreeIcon />
+          Parent of…
+        </ContextMenuItem>
+        {hasParent && (
+          <ContextMenuItem
+            onClick={() =>
+              void setIssueParents(
+                [{ issueId: issue.id, parentId: null }],
+                'Could not remove the parent issue.',
+              )
+            }
+            data-testid="issue-menu-remove-parent"
+          >
+            <UnlinkIcon />
+            Remove parent
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           variant="destructive"

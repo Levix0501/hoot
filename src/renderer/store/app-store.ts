@@ -30,6 +30,7 @@ import {
   type SessionInfo,
 } from '../../shared/session'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
+import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import { workflowProgress, type WorkflowRecord } from '../../shared/workflows'
@@ -125,6 +126,18 @@ export const emptyNewIssueDraft: NewIssueDraft = {
   projectId: null,
 }
 
+/** What is entered in the card for a new sub-issue, before the issue is created. */
+export type SubIssueDraft = NewIssueDraft
+
+/**
+ * The picker of issues open for an issue: of its parent, for Sub-issue of…,
+ * or of issues to become its sub-issues, for Parent of….
+ */
+export interface IssuePicker {
+  kind: 'parent' | 'sub-issues'
+  issueId: number
+}
+
 /** The deletion of a worktree, from checking it until it is deleted or cancelled. */
 export interface WorktreeDeletion {
   projectRoot: string
@@ -175,6 +188,13 @@ export interface AppState {
    * in the order they were made; an issue without any is not started.
    */
   issueWorkflows: Record<number, WorkflowRecord[]>
+  /**
+   * The parent of every issue that has one, those of removed projects
+   * included; the version is -1 until they have been read.
+   */
+  subIssues: SubIssues
+  /** The picker of issues open for an issue, from Sub-issue of… or Parent of…. */
+  issuePicker: IssuePicker | null
   /**
    * What is checked in the issue list's Project filter: projects of the list,
    * and `null` for No project. The list shows every issue while nothing is
@@ -345,6 +365,20 @@ export interface AppState {
   answerDeleteIssue(confirmed: boolean): void
   /** Deletes an issue for good; its page, if shown, gives way to the issue list. */
   deleteIssue(issueId: number): Promise<void>
+  /**
+   * Creates an issue as the last sub-issue of a parent, from what is entered
+   * in the card for it; says why when it cannot. Settles with the new issue,
+   * or `null` when none was created.
+   */
+  createSubIssue(parentId: number, draft: SubIssueDraft): Promise<Issue | null>
+  /**
+   * Gives issues other parents, or none, all together; says why, under
+   * `failure`, when it cannot. Settles with whether they were given.
+   */
+  setIssueParents(changes: ParentChange[], failure: string): Promise<boolean>
+  /** Opens the picker of a parent (Sub-issue of…) or of sub-issues (Parent of…) for an issue. */
+  openIssuePicker(kind: IssuePicker['kind'], issueId: number): void
+  closeIssuePicker(): void
   /** Puts an issue's identifier, such as "ISS-12", on the clipboard. */
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
@@ -544,6 +578,27 @@ export function isIssueStarting(
   return isStartUnderWay(issueId, state.issueStarts, state.sessions)
 }
 
+/** An issue's parent, unless it has none or Hoot does not show it, as of a removed project. */
+export function shownParentOf(
+  state: Pick<AppState, 'issues' | 'subIssues'>,
+  issueId: number,
+): Issue | undefined {
+  const parentId = parentOf(state.subIssues.links, issueId)
+  return parentId === null ? undefined : state.issues.find((issue) => issue.id === parentId)
+}
+
+/**
+ * An issue's sub-issues that Hoot shows, without those of removed projects,
+ * in the order they last became its sub-issues.
+ */
+export function shownSubIssuesOf(
+  state: Pick<AppState, 'issues' | 'subIssues'>,
+  issueId: number,
+): Issue[] {
+  const byId = new Map(state.issues.map((issue) => [issue.id, issue]))
+  return subIssueIdsOf(state.subIssues.links, issueId).flatMap((id) => byId.get(id) ?? [])
+}
+
 /** The records of an issue not started, the same array every time. */
 const NO_RECORDS: WorkflowRecord[] = []
 
@@ -649,9 +704,11 @@ export function focusCurrentTerminal(): void {
 /**
  * Where a menu or dialog moves the keyboard focus when it closes: into the
  * current session's terminal, or where it would go anyway when the main area
- * shows no session.
+ * shows no session. A menu that opened the picker of issues leaves the focus
+ * where the picker put it.
  */
 export function focusAfterOverlay(): HTMLElement | boolean {
+  if (useAppStore.getState().issuePicker !== null) return false
   const id = currentSessionId(useAppStore.getState())
   if (id === null) return true
   // A terminal that is not on screen yet takes the focus once it is.
@@ -788,6 +845,10 @@ export const useAppStore = create<AppState>()((set, get) => {
           state.issueDeletion !== null && goneIssues.has(state.issueDeletion)
             ? null
             : state.issueDeletion,
+        issuePicker:
+          state.issuePicker !== null && goneIssues.has(state.issuePicker.issueId)
+            ? null
+            : state.issuePicker,
       }
     })
     if (sessionShown) expandProjectOf(get().currentPage)
@@ -862,6 +923,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     set((state) => ({ issueWorkflows: { ...state.issueWorkflows, [issueId]: records } }))
   }
 
+  /** Shows the parents of issues as they are now, unless newer ones are shown already. */
+  const applySubIssues = (subIssues: SubIssues) => {
+    if (subIssues.version >= get().subIssues.version) set({ subIssues })
+  }
+
   /**
    * Reads the issues again, showing them with the changes to them not saved
    * yet; those of a project that has left the list by then stay out.
@@ -869,6 +935,11 @@ export const useAppStore = create<AppState>()((set, get) => {
   const loadIssues = () => {
     issuesRead = true
     loadWorkflows()
+    void api
+      .listSubIssues()
+      .then(applySubIssues, (error: unknown) =>
+        console.error('Could not read the parents of the issues:', error),
+      )
     void api.listIssues().then(
       (issues) =>
         set((state) => {
@@ -1097,6 +1168,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     history: emptyHistory,
     issues: [],
     issueWorkflows: {},
+    subIssues: { version: -1, links: [] },
+    issuePicker: null,
     checkedProjects: [],
     issueView: 'all',
     collapsedIssueGroups: [],
@@ -1168,6 +1241,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       )
       // Wherever the change came from: a session's agent, or this window.
       api.onWorkflowChanged(applyWorkflow)
+      // Wherever the change came from: hoot in a session, or this window.
+      api.onSubIssuesChanged(applySubIssues)
       api.onToolsChanged((tools) => set({ tools }))
       api.onAgentsChanged((agents) => set({ agents }))
       // Set as soon as it arrives: a change reported after it is newer.
@@ -1680,7 +1755,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         set((state) => {
           // Its records went with it.
           const { [issueId]: _deleted, ...issueWorkflows } = state.issueWorkflows
-          return { issues: state.issues.filter((entry) => entry.id !== issueId), issueWorkflows }
+          return {
+            issues: state.issues.filter((entry) => entry.id !== issueId),
+            issueWorkflows,
+            issuePicker: state.issuePicker?.issueId === issueId ? null : state.issuePicker,
+          }
         })
         // Its page has gone already if its project left the list meanwhile.
         const gone = (page: Page) => page.kind === 'issue' && page.issueId === issueId
@@ -1691,6 +1770,47 @@ export const useAppStore = create<AppState>()((set, get) => {
           set((state) => ({ history: forget(state.history, gone) }))
         }
       })
+    },
+
+    async createSubIssue(parentId, draft) {
+      const result = await api
+        .createSubIssue(parentId, draft)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error('Could not create the sub-issue.', { description: result.message })
+        return null
+      }
+      const { issue } = result
+      // Unless its project left the list while the issue was being created.
+      if (
+        issue.projectId !== null &&
+        !get().projects.some((project) => project.id === issue.projectId)
+      ) {
+        return null
+      }
+      set((state) => ({
+        // Unless the issues were read again meanwhile, with it.
+        issues: state.issues.some((entry) => entry.id === issue.id)
+          ? state.issues
+          : [...state.issues, issue],
+      }))
+      return issue
+    },
+
+    async setIssueParents(changes, failure) {
+      const result = await api
+        .setIssueParents(changes)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error(failure, { description: result.message })
+      return result.ok
+    },
+
+    openIssuePicker(kind, issueId) {
+      if (findIssue(issueId)) set({ issuePicker: { kind, issueId } })
+    },
+
+    closeIssuePicker() {
+      set({ issuePicker: null })
     },
 
     copyIssueIdentifier(issueId) {

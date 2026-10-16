@@ -43,6 +43,7 @@ export async function startTestHoot() {
       const project = root === undefined ? undefined : projects.find(root)
       return project ? { ok: true, project } : { ok: false, message: 'No such session.' }
     },
+    listProjects: () => projects.list(),
     issues,
     issueCreated: (issue) => created.push(issue),
     reportStep: (sessionId, outcome, summary) =>

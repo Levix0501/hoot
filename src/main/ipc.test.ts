@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AGENTS_PATH_COMMAND, type AgentsState } from '../shared/agents'
 import type { AppInfo } from '../shared/app-info'
 import { IpcChannel } from '../shared/ipc'
+import type { Issue, NewIssue } from '../shared/issues'
+import type { ParentChange, SubIssues } from '../shared/sub-issues'
 import type { UpdateStatus } from '../shared/updates'
 import type { WorkflowRecord } from '../shared/workflows'
 
@@ -59,6 +61,23 @@ const updates = Object.assign(new EventEmitter(), {
   install: vi.fn<() => Promise<void>>(async () => {}),
 })
 
+const subIssues: SubIssues = { version: 3, links: [{ issueId: 2, parentId: 1 }] }
+const created: Issue = {
+  id: 4,
+  projectId: null,
+  title: 'Child',
+  description: '',
+  status: 'backlog',
+  priority: 2,
+  createdAt: 0,
+  completedAt: null,
+}
+const issues = Object.assign(new EventEmitter(), {
+  subIssues: vi.fn<() => SubIssues>(() => subIssues),
+  setParents: vi.fn<(changes: ParentChange[]) => void>(),
+  create: vi.fn<(issue: NewIssue, parentId?: number | null) => Issue | null>(() => created),
+})
+
 type WorkflowChange = { ok: true } | { ok: false; message: string }
 const workflows = Object.assign(new EventEmitter(), {
   listShown: vi.fn<() => Record<number, WorkflowRecord[]>>(() => ({
@@ -77,7 +96,9 @@ beforeEach(() => {
   agents.removeAllListeners()
   updates.removeAllListeners()
   workflows.removeAllListeners()
+  issues.removeAllListeners()
   registerIpc({
+    issues,
     getWindow: () => window,
     appInfo,
     tools: emitter(),
@@ -129,6 +150,61 @@ describe("the messages of the issues' workflows", () => {
     })
     expect(workflows.reportByUser).not.toHaveBeenCalled()
     expect(workflows.startOver).not.toHaveBeenCalled()
+  })
+})
+
+describe('the messages of sub-issues', () => {
+  it('give the parents of issues, and pass on every change of them to the window', async () => {
+    expect(await invoke(IpcChannel.listSubIssues)).toBe(subIssues)
+    const changed: SubIssues = { version: 4, links: [] }
+    issues.emit('sub-issues-changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.subIssuesChanged, changed)
+  })
+
+  it('give issues other parents, and say why they cannot', async () => {
+    const changes = [
+      { issueId: 2, parentId: 3 },
+      { issueId: 5, parentId: null },
+    ]
+    expect(await invoke(IpcChannel.setIssueParents, changes)).toEqual({ ok: true })
+    expect(issues.setParents.mock.calls).toEqual([[changes]])
+    issues.setParents.mockImplementationOnce(() => {
+      throw new Error('ISS-2 cannot be a sub-issue of itself.')
+    })
+    expect(await invoke(IpcChannel.setIssueParents, [{ issueId: 2, parentId: 2 }])).toEqual({
+      ok: false,
+      message: 'ISS-2 cannot be a sub-issue of itself.',
+    })
+    for (const value of [[], [{ issueId: 2 }], [{ issueId: '2', parentId: 1 }], 'ISS-2']) {
+      expect(await invoke(IpcChannel.setIssueParents, value)).toEqual({
+        ok: false,
+        message: 'Invalid change.',
+      })
+    }
+    expect(issues.setParents).toHaveBeenCalledTimes(2)
+  })
+
+  it('create an issue as the sub-issue of a parent', async () => {
+    const issue = {
+      projectId: null,
+      title: 'Child',
+      description: '',
+      status: 'backlog',
+      priority: 2,
+    }
+    expect(await invoke(IpcChannel.createSubIssue, 1, issue)).toEqual({ ok: true, issue: created })
+    expect(issues.create.mock.calls).toEqual([[issue, 1]])
+    issues.create.mockImplementationOnce(() => {
+      throw new Error('ISS-1 has 100 sub-issues, the most an issue can have.')
+    })
+    expect(await invoke(IpcChannel.createSubIssue, 1, issue)).toEqual({
+      ok: false,
+      message: 'ISS-1 has 100 sub-issues, the most an issue can have.',
+    })
+    expect(await invoke(IpcChannel.createSubIssue, '1', issue)).toEqual({
+      ok: false,
+      message: 'Invalid issue.',
+    })
   })
 })
 

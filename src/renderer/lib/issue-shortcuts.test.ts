@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { issueShortcut, type IssuesPageKind } from './issue-shortcuts'
+import { issueShortcut, worksWhileTyping, type IssuesPageKind } from './issue-shortcuts'
 
 const press = (
   key: string,
@@ -60,6 +60,24 @@ describe('issueShortcut', () => {
     expect(press('x')).toBeNull()
     expect(press('Enter')).toBeNull()
     expect(press('c', 'list', {}, { composing: true })).toBeNull()
+  })
+
+  it('adds a sub-issue with ⌘⇧O and picks the parent with ⌘⇧P, on an issue’s page only', () => {
+    const both = { meta: true, shift: true }
+    // With ⇧, the key may say the capital.
+    for (const key of ['o', 'O'])
+      expect(press(key, 'issue', both)).toEqual({ kind: 'new-sub-issue' })
+    for (const key of ['p', 'P']) expect(press(key, 'issue', both)).toEqual({ kind: 'set-parent' })
+    expect(press('o', 'list', both)).toBeNull()
+    expect(press('p', 'list', both)).toBeNull()
+    expect(press('o', 'issue', { meta: true })).toBeNull()
+    expect(press('o', 'issue', { shift: true })).toBeNull()
+    expect(press('p', 'issue', { ...both, alt: true })).toBeNull()
+    expect(press('o', 'issue', both, { repeat: true })).toBeNull()
+    expect(worksWhileTyping({ kind: 'new-sub-issue' })).toBe(true)
+    expect(worksWhileTyping({ kind: 'set-parent' })).toBe(true)
+    expect(worksWhileTyping({ kind: 'new-issue' })).toBe(false)
+    expect(worksWhileTyping({ kind: 'delete' })).toBe(false)
   })
 
   it('repeats only the moves while a key is held', () => {

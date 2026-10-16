@@ -4,9 +4,10 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ISSUE_STATUSES, type NewIssue } from '../../shared/issues'
+import type { SubIssues } from '../../shared/sub-issues'
 import { databaseFile, openDatabase } from '../database/database'
 import { ProjectStore } from '../projects/project-store'
-import { IssueStore } from './issue-store'
+import { IssueStore, SubIssueError } from './issue-store'
 
 let directory: string
 let file: string
@@ -282,5 +283,282 @@ describe('IssueStore', () => {
     clock += 1_000
     const other = first.issues.create(newIssue(null, 'Other', { priority: 4 }))!
     expect(start().issues.list()).toEqual([one, other])
+  })
+})
+
+/** The parent of each sub-issue, as [sub-issue, parent], in the order they became sub-issues. */
+const pairs = (issues: IssueStore) =>
+  issues.subIssues().links.map((link) => [link.issueId, link.parentId])
+
+/** Creates issues with these titles in a project, or in none, and returns their numbers. */
+const createAll = (issues: IssueStore, projectId: number | null, titles: string[]) =>
+  titles.map((title) => issues.create(newIssue(projectId, title))!.id)
+
+describe('IssueStore sub-issues', () => {
+  it('makes issues sub-issues of others, in the order they last became sub-issues, kept across starts', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [p, q, a, b, c] = createAll(issues, g.id, ['P', 'Q', 'A', 'B', 'C'])
+    expect(issues.subIssues()).toEqual({ version: 0, links: [] })
+    issues.setParents([
+      { issueId: b!, parentId: p! },
+      { issueId: a!, parentId: p! },
+    ])
+    issues.setParents([{ issueId: c!, parentId: q! }])
+    expect(pairs(issues)).toEqual([
+      [b, p],
+      [a, p],
+      [c, q],
+    ])
+    // Given the parent it has, an issue keeps its place; given another, it goes last there.
+    issues.setParents([{ issueId: b!, parentId: p! }])
+    expect(pairs(issues)).toEqual([
+      [b, p],
+      [a, p],
+      [c, q],
+    ])
+    issues.setParents([{ issueId: c!, parentId: p! }])
+    issues.setParents([{ issueId: b!, parentId: q! }])
+    issues.setParents([{ issueId: b!, parentId: p! }])
+    expect(pairs(issues)).toEqual([
+      [a, p],
+      [c, p],
+      [b, p],
+    ])
+    issues.setParents([{ issueId: a!, parentId: null }])
+    expect(pairs(start().issues)).toEqual([
+      [c, p],
+      [b, p],
+    ])
+  })
+
+  it('keeps an issue under its parent, and its sub-issues under it, whatever their projects and statuses', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [p] = createAll(issues, g.id, ['P'])
+    const [c] = createAll(issues, h.id, ['C'])
+    const [loose] = createAll(issues, null, ['Loose'])
+    issues.setParents([
+      { issueId: c!, parentId: p! },
+      { issueId: loose!, parentId: c! },
+    ])
+    issues.update(c!, { projectId: null, status: 'done' })
+    issues.update(p!, { projectId: h.id, status: 'canceled' })
+    issues.update(loose!, { projectId: g.id })
+    expect(pairs(issues)).toEqual([
+      [c, p],
+      [loose, c],
+    ])
+    // Moving an issue moves its sub-issues with it.
+    const [r] = createAll(issues, g.id, ['R'])
+    issues.setParents([{ issueId: c!, parentId: r! }])
+    expect(pairs(issues)).toEqual([
+      [loose, c],
+      [c, r],
+    ])
+    expect(issues.get(c!)).toMatchObject({ status: 'done', projectId: null })
+  })
+
+  it('creates an issue as the last sub-issue of a parent, and tells', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [p, a] = createAll(issues, g.id, ['P', 'A'])
+    issues.setParents([{ issueId: a!, parentId: p! }])
+    const told: SubIssues[] = []
+    issues.on('sub-issues-changed', (subIssues) => told.push(subIssues))
+    const created = issues.create(newIssue(null, ' Child ', { status: 'todo', priority: 2 }), p!)
+    expect(created).toMatchObject({ id: 3, projectId: null, title: 'Child', priority: 2 })
+    expect(pairs(issues)).toEqual([
+      [a, p],
+      [3, p],
+    ])
+    expect(told).toEqual([issues.subIssues()])
+    expect(told[0]!.version).toBe(2)
+  })
+
+  it('refuses to create a sub-issue of a parent that cannot have another, creating nothing and taking no number', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const chain = createAll(issues, g.id, ['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8'])
+    issues.setParents(chain.slice(1).map((id, index) => ({ issueId: id, parentId: chain[index]! })))
+    expect(() => issues.create(newIssue(g.id, 'L9'), chain[8]!)).toThrow(
+      new SubIssueError(
+        'ISS-9 is 8 levels below a top-level issue, the deepest an issue can be, so it cannot have sub-issues.',
+      ),
+    )
+    expect(issues.create(newIssue(g.id, 'At level 8'), chain[7]!)?.id).toBe(10)
+    const [full] = createAll(issues, g.id, ['Full'])
+    const children = createAll(
+      issues,
+      g.id,
+      Array.from({ length: 99 }, (_, index) => `Child ${index}`),
+    )
+    issues.setParents(children.map((id) => ({ issueId: id, parentId: full! })))
+    // The hundredth is of a project removed from the list, and counts all the same.
+    const [hidden] = createAll(issues, h.id, ['Hidden'])
+    issues.setParents([{ issueId: hidden!, parentId: full! }])
+    projects.remove('/work/h')
+    const before = issues.subIssues()
+    expect(() => issues.create(newIssue(g.id, 'One more'), full!)).toThrow(
+      `ISS-${full} has 100 sub-issues, the most an issue can have.`,
+    )
+    expect(() => issues.create(newIssue(g.id, 'Lost'), hidden!)).toThrow(
+      'The parent issue no longer exists.',
+    )
+    expect(() => issues.create(newIssue(g.id, 'Lost'), 999)).toThrow(
+      'The parent issue no longer exists.',
+    )
+    expect(issues.subIssues()).toEqual(before)
+    expect(issues.create(newIssue(g.id, 'Next'))?.id).toBe(hidden! + 1)
+  })
+
+  it('refuses an issue below itself, changing nothing', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [a, b, c] = createAll(issues, g.id, ['A', 'B', 'C'])
+    issues.setParents([
+      { issueId: b!, parentId: a! },
+      { issueId: c!, parentId: b! },
+    ])
+    const before = issues.subIssues()
+    expect(() => issues.setParents([{ issueId: a!, parentId: a! }])).toThrow(
+      new SubIssueError('ISS-1 cannot be a sub-issue of itself.'),
+    )
+    expect(() => issues.setParents([{ issueId: a!, parentId: c! }])).toThrow(
+      new SubIssueError('ISS-1 cannot be a sub-issue of ISS-3, which is below it.'),
+    )
+    expect(() => issues.setParents([{ issueId: a!, parentId: b! }])).toThrow(SubIssueError)
+    expect(issues.subIssues()).toEqual(before)
+  })
+
+  it('makes all the changes or none, refusing more than 100 sub-issues or an issue below level 8', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [n, f1, f2, k, k1] = createAll(issues, g.id, ['N', 'F1', 'F2', 'K', 'K1'])
+    const children = createAll(
+      issues,
+      g.id,
+      Array.from({ length: 99 }, (_, index) => `Child ${index}`),
+    )
+    issues.setParents([
+      ...children.map((id) => ({ issueId: id, parentId: n! })),
+      { issueId: k1!, parentId: k! },
+    ])
+    const before = issues.subIssues()
+    expect(() =>
+      issues.setParents([
+        { issueId: f1!, parentId: n! },
+        { issueId: f2!, parentId: n! },
+      ]),
+    ).toThrow(
+      new SubIssueError('ISS-1 would have 101 sub-issues, and an issue can have at most 100.'),
+    )
+    expect(issues.subIssues()).toEqual(before)
+    // Taking one away first makes room.
+    issues.setParents([
+      { issueId: children[0]!, parentId: null },
+      { issueId: f1!, parentId: n! },
+      { issueId: f2!, parentId: n! },
+    ])
+    expect(issues.subIssues().links.filter((link) => link.parentId === n)).toHaveLength(100)
+
+    const chain = createAll(issues, g.id, ['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7'])
+    issues.setParents(chain.slice(1).map((id, index) => ({ issueId: id, parentId: chain[index]! })))
+    const chained = issues.subIssues()
+    expect(() => issues.setParents([{ issueId: k!, parentId: chain[7]! }])).toThrow(
+      new SubIssueError(
+        `ISS-${k} cannot be a sub-issue of ISS-${chain[7]}: ISS-${k1} would then be 9 levels ` +
+          'below a top-level issue, and an issue can be at most 8 levels below one.',
+      ),
+    )
+    expect(issues.subIssues()).toEqual(chained)
+    issues.setParents([{ issueId: k!, parentId: chain[6]! }])
+    expect(issues.subIssues().links.at(-1)).toEqual({ issueId: k, parentId: chain[6] })
+  })
+
+  it('refuses the issues it cannot read, changing nothing', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [p, a] = createAll(issues, g.id, ['P', 'A'])
+    const [hidden] = createAll(issues, h.id, ['Hidden'])
+    projects.remove('/work/h')
+    for (const changes of [
+      [{ issueId: hidden!, parentId: p! }],
+      [{ issueId: a!, parentId: hidden! }],
+      [{ issueId: hidden!, parentId: null }],
+      [
+        { issueId: a!, parentId: p! },
+        { issueId: 99, parentId: p! },
+      ],
+    ]) {
+      expect(() => issues.setParents(changes)).toThrow('The issue no longer exists.')
+    }
+    expect(issues.subIssues()).toEqual({ version: 0, links: [] })
+  })
+
+  it('keeps the parents and sub-issues of the issues of a removed project, which come back with it', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [p, c1] = createAll(issues, g.id, ['P', 'C1'])
+    const [c2, q] = createAll(issues, h.id, ['C2', 'Q'])
+    const [r] = createAll(issues, g.id, ['R'])
+    issues.setParents([
+      { issueId: c1!, parentId: p! },
+      { issueId: c2!, parentId: p! },
+      { issueId: r!, parentId: q! },
+    ])
+    const before = issues.subIssues()
+    projects.remove('/work/h')
+    expect(issues.subIssues()).toEqual(before)
+    projects.add('/work/h')
+    expect(start().issues.subIssues().links).toEqual(before.links)
+  })
+
+  it('makes the sub-issues of a deleted issue top-level issues, those of removed projects too, keeping their own', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [p, c1, g1, z] = createAll(issues, g.id, ['P', 'C1', 'G1', 'Z'])
+    const [c2] = createAll(issues, h.id, ['C2'])
+    issues.setParents([
+      { issueId: c1!, parentId: p! },
+      { issueId: c2!, parentId: p! },
+      { issueId: g1!, parentId: c1! },
+    ])
+    const told: SubIssues[] = []
+    issues.on('sub-issues-changed', (subIssues) => told.push(subIssues))
+    // An issue with neither a parent nor sub-issues changes none.
+    expect(issues.delete(z!)).toBe(true)
+    expect(told).toEqual([])
+    projects.remove('/work/h')
+    expect(issues.delete(p!)).toBe(true)
+    expect(pairs(issues)).toEqual([[g1, c1]])
+    expect(told).toEqual([{ version: 2, links: [{ issueId: g1, parentId: c1 }] }])
+    // A deleted sub-issue leaves its parent.
+    expect(issues.delete(g1!)).toBe(true)
+    expect(pairs(issues)).toEqual([])
+    expect(told).toHaveLength(2)
+  })
+
+  it('tells when the parents change, and only then', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [p, a] = createAll(issues, g.id, ['P', 'A'])
+    const told: SubIssues[] = []
+    issues.on('sub-issues-changed', (subIssues) => told.push(subIssues))
+    issues.setParents([{ issueId: a!, parentId: null }])
+    issues.update(a!, { status: 'done' })
+    issues.create(newIssue(g.id, 'Top'))
+    expect(told).toEqual([])
+    issues.setParents([{ issueId: a!, parentId: p! }])
+    issues.setParents([{ issueId: a!, parentId: p! }])
+    expect(() => issues.setParents([{ issueId: p!, parentId: a! }])).toThrow(SubIssueError)
+    issues.setParents([{ issueId: a!, parentId: null }])
+    expect(told.map((subIssues) => subIssues.version)).toEqual([1, 2])
+    expect(told.at(-1)).toEqual({ version: 2, links: [] })
   })
 })

@@ -1,5 +1,5 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'
-import { HOOT_ENV, type HootAnswer } from '../shared/hoot-cli'
+import { HOOT_ENV, type HootAnswer, type IssueEdit } from '../shared/hoot-cli'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
   ISSUE_TITLE_MAX_LENGTH,
@@ -8,6 +8,7 @@ import {
   issueTitle,
   listOrder,
 } from '../shared/issues'
+import { MAX_SUB_ISSUE_LEVEL, MAX_SUB_ISSUES } from '../shared/sub-issues'
 import { stepReportText } from '../shared/workflow-text'
 import { STEP_SUMMARY_MAX_LENGTH } from '../shared/workflows'
 import { CliError, HootClient } from './client'
@@ -35,6 +36,22 @@ export function issueNumberDigits(text: string): string | null {
   return /^(?:ISS-)?(\d+)$/.exec(text)?.[1] ?? null
 }
 
+/** The number of an issue given on the command line, or a `CliError` when it is not one. */
+function givenIssue(text: string): string {
+  const digits = issueNumberDigits(text)
+  if (digits === null) {
+    throw new CliError(
+      `"${text}" is neither an issue's identifier, such as ISS-12, nor its number, such as 12.`,
+    )
+  }
+  return digits
+}
+
+/** The numbers of the issues given on the command line, separated by commas. */
+function givenIssues(list: string): string[] {
+  return list.split(',').map((text) => givenIssue(text.trim()))
+}
+
 const quantity = new Intl.NumberFormat('en-US')
 
 /** What Hoot answered, or a `CliError` with why it could not do what was asked. */
@@ -53,11 +70,12 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 }
 
 /**
- * Builds hoot's commands: `hoot issue view`, `list` and `create`, modeled on
- * `gh issue`, which read or create the issues of the project of the Hoot
- * session hoot runs in; and `hoot step report`, which reports a step of the
- * workflow of the issue the session was started from. Each works through the
- * Hoot that started the session.
+ * Builds hoot's commands: `hoot issue view`, `list`, `create` and `edit`,
+ * modeled on `gh issue`, which read or create the issues of the project of
+ * the Hoot session hoot runs in, and change their parents and sub-issues; and
+ * `hoot step report`, which reports a step of the workflow of the issue the
+ * session was started from. Each works through the Hoot that started the
+ * session.
  */
 export function hootProgram(io: CliIo): Command {
   /** The Hoot and the session that the session's environment names. */
@@ -89,8 +107,9 @@ export function hootProgram(io: CliIo): Command {
 
   const program = new Command('hoot')
     .description(
-      'Read and create the issues of the project of the Hoot session that hoot runs in, and ' +
-        'report the steps of the workflow of the issue the session was started from.',
+      'Read and create the issues of the project of the Hoot session that hoot runs in, change ' +
+        'their parents and sub-issues, and report the steps of the workflow of the issue the ' +
+        'session was started from.',
     )
     .configureOutput({
       writeOut: (text) => io.write(text),
@@ -105,7 +124,9 @@ export function hootProgram(io: CliIo): Command {
 
   const issueCommand: Command = program
     .command('issue')
-    .description("Show, list and create the issues of the session's project")
+    .description(
+      "Show, list and create the issues of the session's project, and change their parents and sub-issues",
+    )
     // Every command's usage, so that this help says all there is.
     .addHelpText('after', () =>
       issueCommand.commands.map((command) => `\n${command.helpInformation()}`).join(''),
@@ -114,17 +135,13 @@ export function hootProgram(io: CliIo): Command {
   issueCommand
     .command('view')
     .description(
-      'Show an issue: its identifier and title; its status, priority and creation time; and its description',
+      'Show an issue: its identifier and title; its status, priority and creation time; the issue ' +
+        'it is a sub-issue of; its description; and its sub-issues',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option('--json', 'print the issue as a JSON object')
     .action(async (text: string, options: { json?: boolean }) => {
-      const digits = issueNumberDigits(text)
-      if (digits === null) {
-        throw new CliError(
-          `"${text}" is neither an issue's identifier, such as ISS-12, nor its number, such as 12.`,
-        )
-      }
+      const digits = givenIssue(text)
       // Hoot answers only with an issue of the session's project.
       const { project, issue: found } = answered(await connect().issue(digits))
       if (found === null) {
@@ -132,7 +149,7 @@ export function hootProgram(io: CliIo): Command {
           `There is no issue ISS-${digits} in this session's project, ${project.name}.`,
         )
       }
-      io.write(options.json ? jsonText(issueJson(found)) : issueText(found))
+      io.write(options.json ? jsonText(issueJson(found)) : issueText(found, project))
     })
 
   issueCommand
@@ -186,19 +203,31 @@ export function hootProgram(io: CliIo): Command {
       new Option('--status <name>', 'the status').choices(STATUS_NAME_LIST).default('backlog'),
     )
     .addOption(
-      new Option('--priority <name>', 'the priority').choices(PRIORITY_NAME_LIST).default('none'),
+      new Option('--priority <name>', 'the priority')
+        .choices(PRIORITY_NAME_LIST)
+        .default('none', '"none", or with --parent the parent\'s'),
+    )
+    .option(
+      '--parent <issue>',
+      'create it as a sub-issue of this issue of the project, after its other sub-issues: the ' +
+        "parent's identifier, such as ISS-12, or its number",
     )
     .option('--json', 'print the new issue as a JSON object instead of its identifier')
     .action(
-      async (options: {
-        title: string
-        description?: string
-        descriptionFile?: string
-        status: string
-        priority: string
-        json?: boolean
-      }) => {
+      async (
+        options: {
+          title: string
+          description?: string
+          descriptionFile?: string
+          status: string
+          priority: string
+          parent?: string
+          json?: boolean
+        },
+        command: Command,
+      ) => {
         const { title } = options
+        const parent = options.parent === undefined ? undefined : givenIssue(options.parent)
         if (title.length > ISSUE_TITLE_MAX_LENGTH) {
           throw new CliError(
             `The title is ${quantity.format(title.length)} characters long; ` +
@@ -216,15 +245,73 @@ export function hootProgram(io: CliIo): Command {
               `Hoot saves descriptions of up to ${quantity.format(ISSUE_DESCRIPTION_MAX_LENGTH)}.`,
           )
         }
+        // A sub-issue takes its parent's priority unless one is given.
+        const priorityGiven =
+          parent === undefined || command.getOptionValueSource('priority') !== 'default'
         const { issue: created } = answered(
           await connect().createIssue({
             title,
             description,
             status: statusNamed(options.status)!,
-            priority: priorityNamed(options.priority)!,
+            ...(priorityGiven ? { priority: priorityNamed(options.priority)! } : {}),
+            ...(parent === undefined ? {} : { parent }),
           }),
         )
         io.write(options.json ? jsonText(issueJson(created)) : `${issueIdentifier(created.id)}\n`)
+      },
+    )
+
+  issueCommand
+    .command('edit')
+    .description(
+      'Change the parent and the sub-issues of an issue, all together or, when one of the ' +
+        `changes cannot be made, not at all, and print its identifier. An issue has at most ` +
+        `${MAX_SUB_ISSUES} sub-issues and is at most ${MAX_SUB_ISSUE_LEVEL} levels below a ` +
+        'top-level issue, and cannot be below itself',
+    )
+    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .addOption(
+      new Option(
+        '--parent <issue>',
+        'make it a sub-issue of this issue of the project, after its other sub-issues, ' +
+          'instead of a sub-issue of the parent it has',
+      ).conflicts('removeParent'),
+    )
+    .option('--remove-parent', 'make it a top-level issue, without a parent')
+    .option(
+      '--add-sub-issue <issues>',
+      'make these issues of the project, separated by commas, its last sub-issues, in this ' +
+        'order, instead of sub-issues of the parents they have',
+    )
+    .option(
+      '--remove-sub-issue <issues>',
+      'make these sub-issues of it, separated by commas, top-level issues',
+    )
+    .action(
+      async (
+        text: string,
+        options: {
+          parent?: string
+          removeParent?: boolean
+          addSubIssue?: string
+          removeSubIssue?: string
+        },
+      ) => {
+        const digits = givenIssue(text)
+        const edit: IssueEdit = {}
+        if (options.parent !== undefined) edit.parent = givenIssue(options.parent)
+        if (options.removeParent) edit.removeParent = true
+        if (options.addSubIssue !== undefined) edit.addSubIssues = givenIssues(options.addSubIssue)
+        if (options.removeSubIssue !== undefined) {
+          edit.removeSubIssues = givenIssues(options.removeSubIssue)
+        }
+        if (Object.keys(edit).length === 0) {
+          throw new CliError(
+            'Nothing to change: give --parent, --remove-parent, --add-sub-issue or --remove-sub-issue.',
+          )
+        }
+        const { issue: edited } = answered(await connect().editIssue(digits, edit))
+        io.write(`${issueIdentifier(edited.id)}\n`)
       },
     )
 

@@ -2,16 +2,19 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CopyIcon,
+  CornerLeftUpIcon,
   DeleteIcon,
   EllipsisIcon,
   LinkIcon,
+  ListTreeIcon,
   Trash2Icon,
+  UnlinkIcon,
 } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { isIssueOpen, issueTitle, type Issue } from '../../../shared/issues'
 import { issuePageOrder, isOnList } from '../../lib/project-choices'
-import { focusAfterOverlay, useAppStore } from '../../store/app-store'
+import { focusAfterOverlay, shownParentOf, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -28,14 +31,21 @@ import { IssueActivity } from './issue-activity'
 import { IssueProperties } from './issue-properties'
 import { IssueStartButton } from './issue-start-button'
 import { IssuesBreadcrumb, IssuesTopRow } from './issues-top-row'
+import { ParentLine, SubIssuesSection, type SubIssuesHandle } from './sub-issues'
 import { TitleField } from './title-field'
 import { useIssueShortcuts } from './use-issue-shortcuts'
 
-/** The issue's menu in the title row: copying it, and deleting it. */
+/**
+ * The issue's menu in the title row: copying it, giving it a parent or
+ * sub-issues, taking it from its parent, and deleting it.
+ */
 function IssueMenu({ issue }: { issue: Issue }) {
   const copyIssueIdentifier = useAppStore((state) => state.copyIssueIdentifier)
   const copyIssueTitle = useAppStore((state) => state.copyIssueTitle)
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
+  const openIssuePicker = useAppStore((state) => state.openIssuePicker)
+  const setIssueParents = useAppStore((state) => state.setIssueParents)
+  const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -69,6 +79,36 @@ function IssueMenu({ issue }: { issue: Issue }) {
           <CopyIcon />
           Copy title
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => openIssuePicker('parent', issue.id)}
+          data-testid="issue-menu-sub-issue-of"
+        >
+          <CornerLeftUpIcon />
+          Sub-issue of…
+          <DropdownMenuShortcut>⌘⇧P</DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => openIssuePicker('sub-issues', issue.id)}
+          data-testid="issue-menu-parent-of"
+        >
+          <ListTreeIcon />
+          Parent of…
+        </DropdownMenuItem>
+        {hasParent && (
+          <DropdownMenuItem
+            onClick={() =>
+              void setIssueParents(
+                [{ issueId: issue.id, parentId: null }],
+                'Could not remove the parent issue.',
+              )
+            }
+            data-testid="issue-menu-remove-parent"
+          >
+            <UnlinkIcon />
+            Remove parent
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
@@ -153,12 +193,13 @@ function IssueTitle({ issue, onEnter }: { issue: Issue; onEnter(): void }) {
 }
 
 /**
- * An issue's page, laid out as Linear's: the title, the description and the
- * activity, with the properties beside them on a wide page or under the
- * title on a narrow one. The title and the description are edited where
- * they show, and saved as they change. J and K show the next and previous
- * issue of the issue list, S and P change the status and priority, and Esc
- * goes back to the list.
+ * An issue's page, laid out as Linear's: the title, with the issue it is a
+ * sub-issue of under it, the description, its sub-issues and the activity,
+ * with the properties beside them on a wide page or under the title on a
+ * narrow one. The title and the description are edited where they show, and
+ * saved as they change. J and K show the next and previous issue of the
+ * issue list, S and P change the status and priority, ⌘⇧O adds a sub-issue,
+ * ⌘⇧P picks the parent, and Esc goes back to the list.
  */
 export function IssuePage({ issueId }: { issueId: number }) {
   const issue = useAppStore((state) => state.issues.find(({ id }) => id === issueId))
@@ -174,9 +215,11 @@ export function IssuePage({ issueId }: { issueId: number }) {
   const openNewIssue = useAppStore((state) => state.openNewIssue)
   const requestDeleteIssue = useAppStore((state) => state.requestDeleteIssue)
   const updateIssue = useAppStore((state) => state.updateIssue)
+  const openIssuePicker = useAppStore((state) => state.openIssuePicker)
   const [statusOpen, setStatusOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
   const description = useRef<DescriptionEditorHandle>(null)
+  const subIssues = useRef<SubIssuesHandle>(null)
 
   // The issues in the order of the issue list as it is, or of every issue
   // when the list does not show this one.
@@ -211,6 +254,12 @@ export function IssuePage({ issueId }: { issueId: number }) {
         return true
       case 'back-to-list':
         showIssueList()
+        return true
+      case 'new-sub-issue':
+        subIssues.current?.openCard()
+        return true
+      case 'set-parent':
+        openIssuePicker('parent', issue.id)
         return true
     }
   })
@@ -257,15 +306,16 @@ export function IssuePage({ issueId }: { issueId: number }) {
         )}
       </IssuesTopRow>
       <div className="@container/issue min-h-0 flex-1 overflow-y-auto" data-testid="issue-scroll">
-        <div className="mx-auto grid w-full max-w-6xl gap-x-12 gap-y-4 px-6 pt-1 pb-12 [grid-template-areas:'toolbar'_'title'_'properties'_'description'_'activity'] @2xl/issue:grid-cols-[minmax(0,1fr)_15rem] @2xl/issue:grid-rows-[auto_auto_auto_1fr] @2xl/issue:[grid-template-areas:'._toolbar'_'title_properties'_'description_properties'_'activity_properties']">
+        <div className="mx-auto grid w-full max-w-6xl gap-x-12 gap-y-4 px-6 pt-1 pb-12 [grid-template-areas:'toolbar'_'title'_'properties'_'description'_'sub-issues'_'activity'] @2xl/issue:grid-cols-[minmax(0,1fr)_15rem] @2xl/issue:grid-rows-[auto_auto_auto_auto_1fr] @2xl/issue:[grid-template-areas:'._toolbar'_'title_properties'_'description_properties'_'sub-issues_properties'_'activity_properties']">
           <div
             className="flex min-h-7 justify-end gap-2 [grid-area:toolbar]"
             data-testid="issue-actions"
           >
             {isIssueOpen(issue) && <IssueStartButton issue={issue} tooltipSide="bottom" />}
           </div>
-          <div className="[grid-area:title]">
+          <div className="min-w-0 [grid-area:title]">
             <IssueTitle issue={issue} onEnter={() => description.current?.focus()} />
+            <ParentLine issue={issue} />
           </div>
           <IssueProperties
             issue={issue}
@@ -282,6 +332,11 @@ export function IssuePage({ issueId }: { issueId: number }) {
             escapeBlurs
             className="[grid-area:description] [&_.tiptap]:min-h-24"
             testId="issue-description"
+          />
+          <SubIssuesSection
+            ref={subIssues}
+            issue={issue}
+            className="self-start [grid-area:sub-issues]"
           />
           <IssueActivity issue={issue} className="mt-6 self-start [grid-area:activity]" />
         </div>

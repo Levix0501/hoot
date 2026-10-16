@@ -209,7 +209,8 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   and ends with the [start button](#issues) of an issue that is neither done nor canceled. Click a
   group's header to collapse or expand it, or its `+` to create an issue with its status. Click an
   issue to show its page; right-click it to change its status, priority or project, copy its
-  identifier or title, or delete it.
+  identifier or title, give it a parent or sub-issues or take it from its parent (see
+  [Sub-issues](#issues)), or delete it.
 - **The Project dropdown**, at the right end of the row of views, picks whose issues the list
   shows. Check any of its choices, **No project** and the projects (in the sidebar's order), to
   show only the issues of those checked: the issues without a project while **No project** is
@@ -250,14 +251,38 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   title row to go back to the list. The arrows at the top right show the next and previous issue of
   the list as it is shown, and the count beside them says where the issue is in it; when the list
   does not show the issue, they go through every issue in the order of **All issues** with nothing
-  checked. The `⋯` menu copies the issue's identifier or title, or deletes the issue for good, after
-  asking; the list is shown then.
+  checked. The `⋯` menu copies the issue's identifier or title, gives it a parent or sub-issues or
+  takes it from its parent (see Sub-issues below), or deletes the issue for good, after asking;
+  the list is shown then. Deleting an issue with sub-issues says how many there are: they stay, as
+  top-level issues, with their own sub-issues.
+- **Sub-issues**: as in Linear and GitHub, an issue can have a parent, whose sub-issue it is,
+  and sub-issues of its own, any level deep: up to 8 levels below a top-level issue, an issue
+  without a parent, and up to 100 sub-issues each. A parent and its sub-issues may belong to
+  different projects, or to none, and keep their parent when they move; a status changes only its
+  own issue. Under the description, an issue's page lists its sub-issues, in the order they became
+  its sub-issues, each with its status and title, and its project when that is not the issue's
+  (**No project** for none); their header says how many of those not canceled are done, such as
+  **1/3**, beside a circle that fills as they get done (one in progress counts a quarter). Click
+  **Sub-issues** to collapse or expand them, and a sub-issue to show its page. **Add sub-issues**
+  (without any), the header's `+`, or ⌘⇧O opens a card there for a new sub-issue, with a title, a
+  description, a status (Backlog), and the issue's priority and project, which you can change;
+  **Create** (⌘ Enter) creates it as the last sub-issue, ⌘⇧ Enter creates it and keeps the card
+  for the next one, and **Cancel** or Esc closes the card. The new issue dialog's draft is not
+  touched. Under the title of a sub-issue, **Sub-issue of** names its parent, with the parent's
+  progress; click it to show the parent. **Sub-issue of…** (⌘⇧P on the page) in the `⋯` menu and
+  the row's menu picks the issue's parent, and **Parent of…** issues to become its sub-issues,
+  taking them from any other parent, in a list you can search by identifier or title, which leaves
+  out what would put an issue below itself and marks the parent an issue has; **Remove parent**
+  makes it a top-level issue. A change that would break a limit changes nothing, and says why.
+  The issues of a project removed from the list are not shown, nor counted, as anyone's parent or
+  sub-issue, but keep their place, and are back in it when the project is added again.
 - **Keys**: on an Issues page, unless you are typing in a field or the description, or a menu or
   dialog is open: C opens the new issue dialog; J and K (and on a list ↓ and ↑) move to the next
   and previous issue; Enter shows the issue moved to on a list, and Tab moves from its row to its
   start button; S and P change the status and the priority, in a picker where you can search or
   press the value's digit; ⌘⌫ deletes, after asking; and Esc on an issue's page goes back to the
-  list.
+  list. On an issue's page, also while you type in its fields, ⌘⇧O adds a sub-issue and ⌘⇧P picks
+  its parent.
 - **The workflow**: work on an issue goes through Hoot's built-in workflow, one step after another,
   in Claude Code sessions started from the issue. In **Scope**, the agent judges the issue against
   the code, without changing anything: whether it is one piece of work, or several, results that
@@ -347,7 +372,7 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   move on yourself. Starting over makes the issue not started again; what was recorded stays. A
   session still running is not told: should its agent report afterwards, `hoot` refuses, says where
   the issue is now, and asks to close the session and start the issue again.
-- **Activity**: below the description, an issue's page lists, in the order they happened, when the
+- **Activity**: below the sub-issues, an issue's page lists, in the order they happened, when the
   issue was created; each outcome reported, such as **Scope · No split · 2 hours ago**, or
   **Design · Implement directly · by you · 1 minute ago** for one you picked; each time the
   workflow started over (**Started over**); the step in progress, such as **Design · in progress**,
@@ -386,13 +411,19 @@ hoot issue view ISS-12         # or by its number: hoot issue view 12
 hoot issue list                # the issues neither done nor canceled
 hoot issue list --status todo --status in-progress
 hoot issue create --title "Fix the login bug" --description-file notes.md --priority high
+hoot issue create --title "Write the tests" --parent ISS-12   # a sub-issue of ISS-12
+hoot issue edit ISS-12 --add-sub-issue ISS-14,ISS-15
 hoot step report no-split --summary-file scope.md   # in a session started from an issue
 ```
 
 - **`hoot issue view <issue>`** shows an issue, given its identifier (such as `ISS-12`) or its
   number (`12`): its identifier and title; then its status, its priority and when it was created
-  (in local time, to the minute); then, if it has a description, a blank line and the description
-  as it is written, in Markdown.
+  (in local time, to the minute); then, if it has a parent, a line such as
+  `Sub-issue of ISS-4 Ship it (Todo)`; then, if it has a description, a blank line and the
+  description as it is written, in Markdown; then, if it has sub-issues, a blank line,
+  `Sub-issues · 1/3 (33%)` (how many of those not canceled are done) and a line for each, with
+  its status, identifier and title. A parent or sub-issue of another project than the session's
+  is followed by its project's name, or **No project**, in parentheses.
 - **`hoot issue list`** lists the project's issues that are neither done nor canceled, one per
   line with its identifier, status, priority and title, in the order of **All issues** with only
   the project checked. `--all` lists every issue, and `--status <name>`, given once for each
@@ -403,7 +434,17 @@ hoot step report no-split --summary-file scope.md   # in a session started from 
   status is `--status <name>`, `backlog` unless given; its priority `--priority <name>`, `none`
   unless given. Otherwise it is created as the new issue dialog creates one: its title on one
   line, each line break a space, and without the whitespace around it; with the next number; and
-  completed as it is created when it is done or canceled.
+  completed as it is created when it is done or canceled. With `--parent <issue>`, an issue of the
+  project, it is created as that issue's last sub-issue, with its priority unless `--priority` is
+  given.
+- **`hoot issue edit <issue>`** changes an issue's parent and sub-issues, all together or, when
+  one change cannot be made, not at all, and prints its identifier: `--parent <issue>` makes it a
+  sub-issue of another issue of the project, `--remove-parent` a top-level issue,
+  `--add-sub-issue <issues>` makes issues of the project, separated by commas, its last
+  sub-issues in that order, and `--remove-sub-issue <issues>` makes sub-issues of it top-level
+  issues. It refuses what would put an issue below itself, more than 100 sub-issues under an
+  issue or an issue more than 8 levels below a top-level one, removing a parent the issue does not
+  have or a sub-issue it does not have, and an edit without any of these options.
 - **`hoot step report <outcome>`**, in a session started from an issue's start button, reports the
   outcome of the step of the issue's workflow that the session is in, by its name, such as
   `no-split`, whatever project and status the issue has now. Its summary, in Markdown, is
@@ -420,19 +461,25 @@ hoot step report no-split --summary-file scope.md   # in a session started from 
 - **Names**: the statuses are `backlog`, `todo`, `in-progress`, `done` and `canceled`; the
   priorities `none`, `urgent`, `high`, `medium` and `low`.
 - **`--json`** prints the issue, or the list as an array, as JSON objects with exactly
-  `identifier`, `number`, `title`, `description`, `status`, `priority`, `createdAt` and
-  `completedAt`, the times in UTC in ISO 8601, `completedAt` being `null` while the issue is
-  neither done nor canceled. `hoot --help`, `hoot issue --help` and `hoot step --help` explain all
-  of this.
+  `identifier`, `number`, `title`, `description`, `status`, `priority`, `createdAt`,
+  `completedAt`, `parent`, `subIssues` and `subIssuesSummary`, the times in UTC in ISO 8601,
+  `completedAt` being `null` while the issue is neither done nor canceled. `parent` (`null` for a
+  top-level issue) and each of `subIssues` have `identifier`, `number`, `title`, `status` and
+  `project` (its name, or `null` for none); `subIssuesSummary` has `total` (the sub-issues not
+  canceled), `completed` (those done) and `percentCompleted`, rounded down. A parent or sub-issue
+  of a project removed from Hoot's list is left out, as the window leaves it out. `hoot --help`,
+  `hoot issue --help` and `hoot step --help` explain all of this.
 - **In the window**, an issue `hoot` creates shows at once: in the counts of its project's row and
-  of the **Issues** row, on the list when what is checked and the view show it, and among the
-  issues an issue's page steps through. Nothing else changes there: no message pops up, the page,
-  the sidebar and the keyboard focus stay as they are, and so does what you are typing. Hoot does
-  not record that `hoot`, or which session, created an issue.
+  of the **Issues** row, on the list when what is checked and the view show it, among the
+  issues an issue's page steps through, and among its parent's sub-issues. Parents and sub-issues
+  `hoot` changes show at once too. Nothing else changes there: no message pops up, the page, the
+  sidebar and the keyboard focus stay as they are, and so does what you are typing. Hoot does not
+  record that `hoot`, or which session, created an issue.
 - **When it cannot** do what it is asked, `hoot` says why on standard error and exits with code 1,
-  without creating or recording anything: when the issue is not in the project, a name, option or
-  command is wrong, a step cannot be reported, the Hoot that started the session is not running any
-  more, or it does not run in a session Hoot started.
+  without creating, changing or recording anything: when an issue is not in the project, a name,
+  option or command is wrong, a parent or sub-issue would break the limits of sub-issues, a step
+  cannot be reported, the Hoot that started the session is not running any more, or it does not run
+  in a session Hoot started.
 - **Agents** are told about `hoot` only by the first message of a session started from an issue,
   which asks them to report each step with `hoot step report`, and it is not allowed in advance: a
   coding tool runs it like any other command, at its [permission level](#permission-levels), and
@@ -736,9 +783,9 @@ computer's Node.js and npm instead, and carries neither. Hoot keeps its data in 
 app's user data folder: `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository.
 
-- The projects, their issues and the issues' progress through their workflow are in a SQLite
-  database, `data/hoot.db`, which Hoot reads and writes with Node's built-in `node:sqlite`, in plain
-  SQL. Its tables' version is its `PRAGMA user_version`, the number of the migrations in
+- The projects, their issues, the issues' parents and the issues' progress through their workflow
+  are in a SQLite database, `data/hoot.db`, which Hoot reads and writes with Node's built-in
+  `node:sqlite`, in plain SQL. Its tables' version is its `PRAGMA user_version`, the number of the migrations in
   `src/main/database` it has had: 1 for the tables of the first release. On opening it, Hoot applies
   the migrations after that version, all in one transaction. The tables change only by a new
   migration at the end, which keeps what is in them; a migration that has been released is never

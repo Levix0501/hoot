@@ -70,4 +70,21 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX workflow_records_by_issue ON workflow_records (issue_id, id);
   `,
+  // 3: sub-issues.
+  `
+  -- The parent of each issue that has one, one row per sub-issue, in the
+  -- order the sub-issues last became sub-issues of their parent: an issue
+  -- that gets another parent gets a new row, and so goes after the parent's
+  -- other sub-issues. An issue without a row is a top-level issue. Deleting
+  -- either issue deletes the row, so the sub-issues of a deleted issue become
+  -- top-level issues, keeping their own sub-issues.
+  CREATE TABLE sub_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL UNIQUE REFERENCES issues (id) ON DELETE CASCADE,
+    parent_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    CHECK (issue_id <> parent_id)
+  ) STRICT;
+
+  CREATE INDEX sub_issues_by_parent ON sub_issues (parent_id, id);
+  `,
 ]

@@ -212,6 +212,42 @@ describe('the tables', () => {
   })
 })
 
+describe('the upgrade to sub-issues', () => {
+  it('keeps what a database of the version before holds, every issue a top-level issue', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 2))
+    db.exec(`
+      INSERT INTO projects (id, root, list_position) VALUES (1, '/work/gamma', 1), (2, '/work/hotel', NULL);
+      INSERT INTO issues (project_id, title, description, status, priority, created_at, completed_at)
+        VALUES (1, 'X', 'Desc', 'todo', 2, 100, NULL), (NULL, 'Y', '', 'done', 0, 200, 300),
+          (2, 'Z', '', 'backlog', 4, 400, NULL);
+      INSERT INTO workflow_records (issue_id, kind, step, outcome, reporter, summary, at)
+        VALUES (1, 'step-started', 'scope', NULL, NULL, NULL, 500);
+    `)
+    const tables = ['projects', 'issues', 'workflow_records']
+    const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(3)
+    expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
+      before,
+    )
+    expect(db.prepare('SELECT * FROM sub_issues').all()).toEqual([])
+    db.close()
+  })
+
+  it('refuses an issue as its own parent, or two parents for one issue', () => {
+    const db = openDatabase(file)
+    const first = insertIssue(db, {})
+    const second = insertIssue(db, {})
+    const link = db.prepare('INSERT INTO sub_issues (issue_id, parent_id) VALUES (?, ?)')
+    expect(() => link.run(first, first)).toThrow(/CHECK constraint/)
+    link.run(second, first)
+    expect(() => link.run(second, first)).toThrow(/UNIQUE constraint/)
+    expect(() => link.run(first, 99)).toThrow(/FOREIGN KEY constraint/)
+    db.close()
+  })
+})
+
 describe('migrate', () => {
   it('does nothing to a database at the latest version', () => {
     const db = new DatabaseSync(':memory:')

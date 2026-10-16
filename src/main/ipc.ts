@@ -19,6 +19,7 @@ import {
   type StartSessionRequest,
   type StartSessionResult,
   type StartupState,
+  type SubIssueChangeResult,
   type WindowState,
   type WorkflowChangeResult,
 } from '../shared/ipc'
@@ -30,6 +31,7 @@ import {
   type NewIssue,
 } from '../shared/issues'
 import { browserLink } from '../shared/links'
+import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
 import type {
   CreateIssueWorktreeResult,
@@ -110,6 +112,10 @@ const newIssue = z.object({
   status: issueStatus,
   priority: issuePriority,
 }) satisfies z.ZodType<NewIssue>
+const parentChanges = z
+  .array(z.strictObject({ issueId: rowId, parentId: rowId.nullable() }))
+  .min(1)
+  .max(1_000) satisfies z.ZodType<ParentChange[]>
 const issueChanges = z.strictObject({
   title: issueTitle.optional(),
   description: issueDescription.optional(),
@@ -567,6 +573,28 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.tuple([rowId, issueChanges]).safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
     return changeIssue(() => deps.issues.update(...parsed.data), noIssue)
+  })
+
+  handle(IpcChannel.createSubIssue, (_event, ...args): IssueResult => {
+    const parsed = z.tuple([rowId, newIssue]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    const [parentId, issue] = parsed.data
+    return changeIssue(() => deps.issues.create(issue, parentId), 'The project is not in the list.')
+  })
+
+  handle(IpcChannel.listSubIssues, () => deps.issues.subIssues())
+  // Wherever the change came from: hoot in a session, or this window.
+  deps.issues.on('sub-issues-changed', (subIssues) => send(IpcChannel.subIssuesChanged, subIssues))
+
+  handle(IpcChannel.setIssueParents, (_event, value): SubIssueChangeResult => {
+    const parsed = parentChanges.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid change.' }
+    try {
+      deps.issues.setParents(parsed.data)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
   })
 
   handle(IpcChannel.deleteIssue, (_event, value) => {

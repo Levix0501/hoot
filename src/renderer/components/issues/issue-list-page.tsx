@@ -125,6 +125,8 @@ export function IssueListPage() {
         return true
       }
       case 'back-to-list':
+      case 'new-sub-issue':
+      case 'set-parent':
         return false
     }
   })

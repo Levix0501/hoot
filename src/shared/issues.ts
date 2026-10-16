@@ -164,8 +164,10 @@ export function issueGroups(issues: readonly Issue[], view: IssueView): IssueGro
 }
 
 /** The issues a list shows for a view, one after another, in the order it shows them. */
-export function listOrder(issues: readonly Issue[], view: IssueView): Issue[] {
-  return issueGroups(issues, view).flatMap((group) => group.issues)
+export function listOrder<T extends Issue>(issues: readonly T[], view: IssueView): T[] {
+  return VIEW_STATUSES[view].flatMap((status) =>
+    issues.filter((issue) => issue.status === status).toSorted(compareInGroup),
+  )
 }
 
 /** How an issue is referred to: `ISS-` and its number, such as `ISS-12`. */

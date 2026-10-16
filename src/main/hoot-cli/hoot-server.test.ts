@@ -3,7 +3,8 @@ import http from 'node:http'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
-import { SESSION_HEADER } from '../../shared/hoot-cli'
+import { SESSION_HEADER, type HootIssue } from '../../shared/hoot-cli'
+import type { Issue } from '../../shared/issues'
 import { HootServer } from './hoot-server'
 import { leaveSocket, startTestHoot, type TestHoot } from './test-support'
 
@@ -51,6 +52,21 @@ function request(
 
 const issue = { title: 'New', description: '', status: 'backlog', priority: 0 } as const
 
+/** An issue as the server answers with it: without a parent or sub-issues, unless given. */
+function answered(saved: Issue, relations: Partial<Pick<HootIssue, 'parent' | 'subIssues'>> = {}) {
+  return { ...saved, parent: null, subIssues: [], ...relations }
+}
+
+/** An issue as the server answers with it as another's parent or sub-issue. */
+function related(saved: Issue, project: string | null) {
+  const { id, title, status, projectId } = saved
+  return { id, title, status, projectId, project }
+}
+
+/** The project of a session, as the server answers with it. */
+const gamma = () => ({ id: hoot.gamma.id, name: 'gamma' })
+const hotel = () => ({ id: hoot.hotel.id, name: 'hotel' })
+
 describe('HootServer', () => {
   it("answers with the session's project and its issues", async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
@@ -58,29 +74,29 @@ describe('HootServer', () => {
     const loose = hoot.issues.create({ projectId: null, ...issue, title: 'Loose' })!
     expect(await request('GET', '/issues')).toEqual({
       status: 200,
-      answer: { ok: true, project: { name: 'gamma' }, issues: [alpha] },
+      answer: { ok: true, project: gamma(), issues: [answered(alpha)] },
     })
     expect(await request('GET', '/issues/1')).toEqual({
       status: 200,
-      answer: { ok: true, project: { name: 'gamma' }, issue: alpha },
+      answer: { ok: true, project: gamma(), issue: answered(alpha) },
     })
     // Not the issues of another project or of none, nor numbers no issue has.
     for (const number of [other.id, loose.id, 99]) {
       expect((await request('GET', `/issues/${number}`)).answer).toEqual({
         ok: true,
-        project: { name: 'gamma' },
+        project: gamma(),
         issue: null,
       })
     }
     expect((await request('GET', `/issues/${'9'.repeat(40)}`)).answer.issue).toBeNull()
     expect((await request('GET', '/issues/1', { session: 'hotel-session' })).answer).toEqual({
       ok: true,
-      project: { name: 'hotel' },
+      project: hotel(),
       issue: null,
     })
     expect(
       (await request('GET', `/issues/${other.id}`, { session: 'hotel-session' })).answer,
-    ).toEqual({ ok: true, project: { name: 'hotel' }, issue: other })
+    ).toEqual({ ok: true, project: hotel(), issue: answered(other) })
   })
 
   it('creates an issue in the project, and reports it once it is saved', async () => {
@@ -90,7 +106,7 @@ describe('HootServer', () => {
     expect(status).toBe(201)
     const saved = hoot.issues.getInProject(hoot.gamma.id, 1)
     expect(saved).toMatchObject({ title: 'Gamma', status: 'done', priority: 3 })
-    expect(answer).toEqual({ ok: true, project: { name: 'gamma' }, issue: saved })
+    expect(answer).toEqual({ ok: true, project: gamma(), issue: answered(saved!) })
     expect(hoot.created).toEqual([saved])
   })
 
@@ -132,7 +148,7 @@ describe('HootServer', () => {
     expect(status).toBe(200)
     expect(answer).toEqual({
       ok: true,
-      project: { name: 'gamma' },
+      project: gamma(),
       report: {
         issue: 'ISS-1',
         step: 'Scope',
@@ -204,6 +220,72 @@ describe('HootServer', () => {
     }
   })
 
+  it('answers with the parents and sub-issues of issues, of any project shown, in order', async () => {
+    const parent = hoot.issues.create({ projectId: null, ...issue, title: 'Parent' })!
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const sub = hoot.issues.create({
+      projectId: hoot.hotel.id,
+      ...issue,
+      title: 'Sub',
+      status: 'done',
+    })!
+    const own = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Own' })!
+    hoot.issues.setParents([
+      { issueId: alpha.id, parentId: parent.id },
+      { issueId: sub.id, parentId: alpha.id },
+      { issueId: own.id, parentId: alpha.id },
+    ])
+    const expected = answered(alpha, {
+      parent: related(parent, null),
+      subIssues: [related(sub, 'hotel'), related(own, 'gamma')],
+    })
+    expect((await request('GET', `/issues/${alpha.id}`)).answer.issue).toEqual(expected)
+    expect((await request('GET', '/issues')).answer.issues).toEqual([
+      expected,
+      answered(own, { parent: related(alpha, 'gamma') }),
+    ])
+    // Not those of a project removed from the list.
+    hoot.projects.remove(hoot.hotel.root)
+    expect((await request('GET', `/issues/${alpha.id}`)).answer.issue).toEqual({
+      ...expected,
+      subIssues: [related(own, 'gamma')],
+    })
+  })
+
+  it('changes nothing for a change it cannot take, and says why', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const refused: Array<[string, string, number, string]> = [
+      [`/issues/${alpha.id}`, 'not JSON', 400, 'The request is not JSON.'],
+      [`/issues/${alpha.id}`, JSON.stringify({ parent: 1 }), 400, 'Invalid change.'],
+      [`/issues/${alpha.id}`, JSON.stringify({ parent: 'ISS-1' }), 400, 'Invalid change.'],
+      [`/issues/${alpha.id}`, JSON.stringify({ extra: true }), 400, 'Invalid change.'],
+      [`/issues/${alpha.id}`, JSON.stringify({}), 400, 'Nothing to change.'],
+      [
+        `/issues/${alpha.id}`,
+        JSON.stringify({ parent: '1', removeParent: true }),
+        400,
+        'An issue cannot both get a parent and lose its parent.',
+      ],
+      [
+        `/issues/${'9'.repeat(40)}`,
+        JSON.stringify({ removeParent: true }),
+        404,
+        `There is no issue ISS-${'9'.repeat(40)} in this session's project, gamma.`,
+      ],
+    ]
+    for (const [url, body, status, message] of refused) {
+      expect(await request('PATCH', url, { body })).toEqual({
+        status,
+        answer: { ok: false, message },
+      })
+    }
+    expect(
+      await request('POST', '/issues', { body: JSON.stringify({ ...issue, parent: 'one' }) }),
+    ).toEqual({ status: 400, answer: { ok: false, message: 'Invalid issue.' } })
+    expect(hoot.issues.subIssues()).toEqual({ version: 0, links: [] })
+    expect(hoot.issues.list()).toEqual([alpha])
+  })
+
   it('listens on a socket only the user can connect to, and removes it when it stops', async () => {
     expect(fs.statSync(hoot.socket).mode & 0o777).toBe(0o600)
     expect(fs.statSync(hoot.socket).isSocket()).toBe(true)
@@ -218,6 +300,7 @@ describe('HootServer', () => {
     const server = new HootServer({
       address: socket,
       sessionProject: () => ({ ok: true, project: hoot.gamma }),
+      listProjects: () => hoot.projects.list(),
       issues: hoot.issues,
       issueCreated: () => {},
       reportStep: () => ({ ok: false, message: 'none' }),
@@ -241,6 +324,7 @@ describe('HootServer', () => {
     const server = new HootServer({
       address: socket,
       sessionProject: () => ({ ok: false, message: 'none' }),
+      listProjects: () => [],
       issues: hoot.issues,
       issueCreated: () => {},
       reportStep: () => ({ ok: false, message: 'none' }),

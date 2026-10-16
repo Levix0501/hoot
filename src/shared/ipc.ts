@@ -4,6 +4,7 @@ import type { Appearance } from './appearance'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
+import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
 import type { UpdateStatus } from './updates'
 import type { WorkflowRecord } from './workflows'
@@ -79,6 +80,9 @@ export interface StartSessionRequest {
 }
 
 export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: false; message: string }
+
+/** Whether the parents of issues were changed, or why not. */
+export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
 
 /** Whether a change to an issue's progress through its workflow was made, or why not. */
 export type WorkflowChangeResult = { ok: true } | { ok: false; message: string }
@@ -175,6 +179,10 @@ export const IpcChannel = {
   updateIssue: 'issues:update',
   deleteIssue: 'issues:delete',
   issueCreated: 'issues:created',
+  createSubIssue: 'issues:create-sub-issue',
+  listSubIssues: 'issues:list-sub-issues',
+  setIssueParents: 'issues:set-parents',
+  subIssuesChanged: 'issues:sub-issues-changed',
   listWorkflowRecords: 'workflows:list-records',
   workflowChanged: 'workflows:changed',
   reportStep: 'workflows:report-step',
@@ -361,6 +369,17 @@ export interface HootApi {
   deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
   /** An issue was created other than from the window: by hoot, in a session. */
   onIssueCreated(listener: (issue: Issue) => void): () => void
+  /** Creates an issue as the last sub-issue of a parent. */
+  createSubIssue(parentId: number, issue: NewIssue): Promise<IssueResult>
+  /** The parent of every issue that has one, those of removed projects included. */
+  listSubIssues(): Promise<SubIssues>
+  /** Gives issues other parents, or none, all together or, when one cannot be given, not at all. */
+  setIssueParents(changes: ParentChange[]): Promise<SubIssueChangeResult>
+  /**
+   * The parents of issues changed, from the window or from hoot, or an issue
+   * with a parent or sub-issues was deleted; these are all of them now.
+   */
+  onSubIssuesChanged(listener: (subIssues: SubIssues) => void): () => void
   /**
    * The records of the workflows of the issues without a project and of
    * those of the projects in the list, by issue; an issue without any is

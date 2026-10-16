@@ -135,7 +135,8 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
     }
     const descriptionIssue = descriptionProblem(description, `The description of ${item}`)
     if (descriptionIssue !== null) throw new CliError(descriptionIssue)
-    const statusName = status ?? 'backlog'
+    // Only a missing status is Backlog: null is not a status's name.
+    const statusName = status === undefined ? 'backlog' : status
     if (typeof statusName !== 'string' || statusNamed(statusName) === undefined) {
       throw new CliError(
         `The status of ${item} in ${source} is ${quoted(statusName)}, which is not one of ` +
@@ -153,7 +154,8 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
     }
     /** The issues a field lists, each another item by its place, or an issue by its identifier. */
     const references = (field: 'blockedBy' | 'blocking'): SplitReference[] => {
-      const list = fields[field] ?? []
+      // Only a missing field lists none: null is not an array.
+      const list = fields[field] === undefined ? [] : fields[field]
       if (!Array.isArray(list)) {
         throw new CliError(`The ${quoted(field)} of ${item} in ${source} is not a JSON array.`)
       }

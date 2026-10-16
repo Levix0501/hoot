@@ -3,6 +3,7 @@ import type { BrowserWindow } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AGENTS_PATH_COMMAND, type AgentsState } from '../shared/agents'
 import type { AppInfo } from '../shared/app-info'
+import type { Dependencies } from '../shared/dependencies'
 import { IpcChannel } from '../shared/ipc'
 import type { Issue, NewIssue } from '../shared/issues'
 import type { ParentChange, SubIssues } from '../shared/sub-issues'
@@ -62,6 +63,7 @@ const updates = Object.assign(new EventEmitter(), {
 })
 
 const subIssues: SubIssues = { version: 3, links: [{ issueId: 2, parentId: 1 }] }
+const dependencies: Dependencies = { version: 2, links: [{ issueId: 2, blockedById: 1 }] }
 const created: Issue = {
   id: 4,
   projectId: null,
@@ -75,7 +77,15 @@ const created: Issue = {
 const issues = Object.assign(new EventEmitter(), {
   subIssues: vi.fn<() => SubIssues>(() => subIssues),
   setParents: vi.fn<(changes: ParentChange[]) => void>(),
-  create: vi.fn<(issue: NewIssue, parentId?: number | null) => Issue | null>(() => created),
+  create: vi.fn<
+    (
+      issue: NewIssue,
+      parentId?: number | null,
+      dependencies?: { blockedBy?: number[]; blocking?: number[] },
+    ) => Issue | null
+  >(() => created),
+  dependencies: vi.fn<() => Dependencies>(() => dependencies),
+  changeRelations: vi.fn<(change: unknown) => void>(),
 })
 
 type WorkflowChange = { ok: true } | { ok: false; message: string }
@@ -205,6 +215,65 @@ describe('the messages of sub-issues', () => {
       ok: false,
       message: 'Invalid issue.',
     })
+  })
+})
+
+describe('the messages of dependencies', () => {
+  const issue = { projectId: null, title: 'New', description: '', status: 'backlog', priority: 0 }
+
+  it('give the dependencies, and pass on every change of them to the window', async () => {
+    expect(await invoke(IpcChannel.listDependencies)).toBe(dependencies)
+    const changed: Dependencies = { version: 3, links: [] }
+    issues.emit('dependencies-changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.dependenciesChanged, changed)
+  })
+
+  it('make and remove dependencies, and say why they cannot', async () => {
+    const change = {
+      add: [{ issueId: 3, blockedById: 1 }],
+      remove: [{ issueId: 2, blockedById: 1 }],
+    }
+    expect(await invoke(IpcChannel.changeDependencies, change)).toEqual({ ok: true })
+    expect(issues.changeRelations.mock.calls).toEqual([
+      [{ addDependencies: change.add, removeDependencies: change.remove }],
+    ])
+    issues.changeRelations.mockImplementationOnce(() => {
+      throw new Error(
+        'ISS-3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
+      )
+    })
+    expect(await invoke(IpcChannel.changeDependencies, change)).toEqual({
+      ok: false,
+      message: 'ISS-3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
+    })
+    for (const value of [{ add: [] }, { add: [{ issueId: 1 }], remove: [] }, 'ISS-1']) {
+      expect(await invoke(IpcChannel.changeDependencies, value)).toEqual({
+        ok: false,
+        message: 'Invalid change.',
+      })
+    }
+    expect(issues.changeRelations).toHaveBeenCalledTimes(2)
+  })
+
+  it('create an issue that blocks another, or is blocked by it', async () => {
+    expect(await invoke(IpcChannel.createDependentIssue, issue, { blocking: 3 })).toEqual({
+      ok: true,
+      issue: created,
+    })
+    expect(await invoke(IpcChannel.createDependentIssue, issue, { blockedBy: 3 })).toEqual({
+      ok: true,
+      issue: created,
+    })
+    expect(issues.create.mock.calls).toEqual([
+      [issue, null, { blocking: [3] }],
+      [issue, null, { blockedBy: [3] }],
+    ])
+    for (const dependency of [{}, { blocking: 3, blockedBy: 2 }, { blocking: '3' }]) {
+      expect(await invoke(IpcChannel.createDependentIssue, issue, dependency)).toEqual({
+        ok: false,
+        message: 'Invalid issue.',
+      })
+    }
   })
 })
 

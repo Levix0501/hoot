@@ -8,6 +8,14 @@ import {
 } from '../../shared/agents'
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
+import {
+  blockedByIdsOf,
+  blockingIdsOf,
+  waitCounts,
+  type Dependencies,
+  type Dependency,
+  type WaitCounts,
+} from '../../shared/dependencies'
 import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
 import { issueWorktree } from '../../shared/issue-worktrees'
 import {
@@ -130,12 +138,26 @@ export const emptyNewIssueDraft: NewIssueDraft = {
 export type SubIssueDraft = NewIssueDraft
 
 /**
- * The picker of issues open for an issue: of its parent, for Sub-issue of…,
- * or of issues to become its sub-issues, for Parent of….
+ * The picker of issues open for an issue: of its parent, for Sub-issue of…;
+ * of issues to become its sub-issues, for Parent of…; of an issue it is to be
+ * blocked by, for Blocked by…; or of an issue to be blocked by it, for
+ * Blocking….
  */
 export interface IssuePicker {
-  kind: 'parent' | 'sub-issues'
+  kind: 'parent' | 'sub-issues' | 'blocked-by' | 'blocking'
   issueId: number
+}
+
+/**
+ * The dialog for a new issue with a dependency on an issue, open from its
+ * Blocked by… picker, for a new issue that blocks it (`blocked-by`), or from
+ * its Blocking… picker, for one blocked by it (`blocking`); with the title
+ * typed in the picker's search field.
+ */
+export interface DependentIssueDialog {
+  kind: 'blocked-by' | 'blocking'
+  issueId: number
+  title: string
 }
 
 /** The deletion of a worktree, from checking it until it is deleted or cancelled. */
@@ -193,8 +215,15 @@ export interface AppState {
    * included; the version is -1 until they have been read.
    */
   subIssues: SubIssues
-  /** The picker of issues open for an issue, from Sub-issue of… or Parent of…. */
+  /**
+   * Every dependency, those of the issues of removed projects included; the
+   * version is -1 until they have been read.
+   */
+  dependencies: Dependencies
+  /** The picker of issues open for an issue, from Sub-issue of…, Parent of…, Blocked by… or Blocking…. */
   issuePicker: IssuePicker | null
+  /** The dialog for a new issue with a dependency, open from a picker's last item. */
+  dependentIssueDialog: DependentIssueDialog | null
   /**
    * What is checked in the issue list's Project filter: projects of the list,
    * and `null` for No project. The list shows every issue while nothing is
@@ -376,9 +405,33 @@ export interface AppState {
    * `failure`, when it cannot. Settles with whether they were given.
    */
   setIssueParents(changes: ParentChange[], failure: string): Promise<boolean>
-  /** Opens the picker of a parent (Sub-issue of…) or of sub-issues (Parent of…) for an issue. */
+  /**
+   * Opens the picker of a parent (Sub-issue of…), of sub-issues (Parent of…),
+   * of an issue it is blocked by (Blocked by…) or of one it blocks
+   * (Blocking…) for an issue.
+   */
   openIssuePicker(kind: IssuePicker['kind'], issueId: number): void
   closeIssuePicker(): void
+  /**
+   * Makes and removes dependencies; says why, under `failure`, when they
+   * cannot be. Settles with whether they were.
+   */
+  changeDependencies(
+    change: { add?: Dependency[]; remove?: Dependency[] },
+    failure: string,
+  ): Promise<boolean>
+  /**
+   * Closes the picker, and opens the dialog for a new issue that blocks the
+   * picker's issue (`blocked-by`) or is blocked by it (`blocking`), with a title.
+   */
+  openDependentIssue(kind: DependentIssueDialog['kind'], issueId: number, title: string): void
+  closeDependentIssue(): void
+  /**
+   * Creates an issue from what is entered in the dialog for a new issue with a
+   * dependency, with that dependency, and says so; or says why it cannot.
+   * Settles with the new issue, or `null` when none was created.
+   */
+  createDependentIssue(draft: NewIssueDraft): Promise<Issue | null>
   /** Puts an issue's identifier, such as "ISS-12", on the clipboard. */
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
@@ -599,6 +652,57 @@ export function shownSubIssuesOf(
   return subIssueIdsOf(state.subIssues.links, issueId).flatMap((id) => byId.get(id) ?? [])
 }
 
+/**
+ * The issues Hoot shows that an issue is blocked by, done and canceled ones
+ * too, in the order it became blocked by them.
+ */
+export function shownBlockedByOf(
+  state: Pick<AppState, 'issues' | 'dependencies'>,
+  issueId: number,
+): Issue[] {
+  const byId = new Map(state.issues.map((issue) => [issue.id, issue]))
+  return blockedByIdsOf(state.dependencies.links, issueId).flatMap((id) => byId.get(id) ?? [])
+}
+
+/**
+ * The issues Hoot shows that are blocked by an issue, done and canceled ones
+ * too, in the order they became blocked by it.
+ */
+export function shownBlockingOf(
+  state: Pick<AppState, 'issues' | 'dependencies'>,
+  issueId: number,
+): Issue[] {
+  const byId = new Map(state.issues.map((issue) => [issue.id, issue]))
+  return blockingIdsOf(state.dependencies.links, issueId).flatMap((id) => byId.get(id) ?? [])
+}
+
+const NO_WAITING: WaitCounts = { waitedOn: 0, waiting: 0 }
+
+/** The wait counts of every issue, worked out once for the issues and dependencies they are of. */
+let waitCountCache: {
+  issues: readonly Issue[]
+  links: readonly Dependency[]
+  counts: Map<number, WaitCounts>
+} | null = null
+
+/**
+ * How many issues an issue waits on, and how many wait on it: an issue waits
+ * on an issue it is blocked by while Hoot shows both and neither is done nor
+ * canceled.
+ */
+export function waitCountsOf(
+  state: Pick<AppState, 'issues' | 'dependencies'>,
+  issueId: number,
+): WaitCounts {
+  const { issues } = state
+  const { links } = state.dependencies
+  if (waitCountCache?.issues !== issues || waitCountCache.links !== links) {
+    const shown = new Map(issues.map((issue) => [issue.id, issue]))
+    waitCountCache = { issues, links, counts: waitCounts(shown, links) }
+  }
+  return waitCountCache.counts.get(issueId) ?? NO_WAITING
+}
+
 /** The records of an issue not started, the same array every time. */
 const NO_RECORDS: WorkflowRecord[] = []
 
@@ -708,7 +812,8 @@ export function focusCurrentTerminal(): void {
  * where the picker put it.
  */
 export function focusAfterOverlay(): HTMLElement | boolean {
-  if (useAppStore.getState().issuePicker !== null) return false
+  const { issuePicker, dependentIssueDialog } = useAppStore.getState()
+  if (issuePicker !== null || dependentIssueDialog !== null) return false
   const id = currentSessionId(useAppStore.getState())
   if (id === null) return true
   // A terminal that is not on screen yet takes the focus once it is.
@@ -849,6 +954,10 @@ export const useAppStore = create<AppState>()((set, get) => {
           state.issuePicker !== null && goneIssues.has(state.issuePicker.issueId)
             ? null
             : state.issuePicker,
+        dependentIssueDialog:
+          state.dependentIssueDialog !== null && goneIssues.has(state.dependentIssueDialog.issueId)
+            ? null
+            : state.dependentIssueDialog,
       }
     })
     if (sessionShown) expandProjectOf(get().currentPage)
@@ -928,6 +1037,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (subIssues.version >= get().subIssues.version) set({ subIssues })
   }
 
+  /** Shows the dependencies as they are now, unless newer ones are shown already. */
+  const applyDependencies = (dependencies: Dependencies) => {
+    if (dependencies.version >= get().dependencies.version) set({ dependencies })
+  }
+
   /**
    * Reads the issues again, showing them with the changes to them not saved
    * yet; those of a project that has left the list by then stay out.
@@ -939,6 +1053,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       .listSubIssues()
       .then(applySubIssues, (error: unknown) =>
         console.error('Could not read the parents of the issues:', error),
+      )
+    void api
+      .listDependencies()
+      .then(applyDependencies, (error: unknown) =>
+        console.error('Could not read the dependencies of the issues:', error),
       )
     void api.listIssues().then(
       (issues) =>
@@ -1169,7 +1288,9 @@ export const useAppStore = create<AppState>()((set, get) => {
     issues: [],
     issueWorkflows: {},
     subIssues: { version: -1, links: [] },
+    dependencies: { version: -1, links: [] },
     issuePicker: null,
+    dependentIssueDialog: null,
     checkedProjects: [],
     issueView: 'all',
     collapsedIssueGroups: [],
@@ -1243,6 +1364,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onWorkflowChanged(applyWorkflow)
       // Wherever the change came from: hoot in a session, or this window.
       api.onSubIssuesChanged(applySubIssues)
+      // Wherever the change came from: hoot in a session, or this window.
+      api.onDependenciesChanged(applyDependencies)
       api.onToolsChanged((tools) => set({ tools }))
       api.onAgentsChanged((agents) => set({ agents }))
       // Set as soon as it arrives: a change reported after it is newer.
@@ -1759,6 +1882,8 @@ export const useAppStore = create<AppState>()((set, get) => {
             issues: state.issues.filter((entry) => entry.id !== issueId),
             issueWorkflows,
             issuePicker: state.issuePicker?.issueId === issueId ? null : state.issuePicker,
+            dependentIssueDialog:
+              state.dependentIssueDialog?.issueId === issueId ? null : state.dependentIssueDialog,
           }
         })
         // Its page has gone already if its project left the list meanwhile.
@@ -1811,6 +1936,62 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     closeIssuePicker() {
       set({ issuePicker: null })
+    },
+
+    async changeDependencies({ add = [], remove = [] }, failure) {
+      const result = await api
+        .changeDependencies({ add, remove })
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error(failure, { description: result.message })
+      return result.ok
+    },
+
+    openDependentIssue(kind, issueId, title) {
+      if (!findIssue(issueId)) return
+      set({ issuePicker: null, dependentIssueDialog: { kind, issueId, title } })
+    },
+
+    closeDependentIssue() {
+      set({ dependentIssueDialog: null })
+    },
+
+    async createDependentIssue(draft) {
+      const dialog = get().dependentIssueDialog
+      if (dialog === null) return null
+      let created: Issue | null = null
+      await once('create-dependent', async () => {
+        const result = await api
+          .createDependentIssue(
+            draft,
+            // From Blocked by…, the new issue blocks the dialog's issue.
+            dialog.kind === 'blocked-by'
+              ? { blocking: dialog.issueId }
+              : { blockedBy: dialog.issueId },
+          )
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        if (!result.ok) {
+          toast.error('Could not create the issue.', { description: result.message })
+          return
+        }
+        const { issue } = result
+        set((state) => ({
+          // Unless the issues were read again meanwhile, with it, or its project left the list.
+          issues:
+            state.issues.some((entry) => entry.id === issue.id) ||
+            (issue.projectId !== null &&
+              !state.projects.some((project) => project.id === issue.projectId))
+              ? state.issues
+              : [...state.issues, issue],
+          dependentIssueDialog:
+            state.dependentIssueDialog === dialog ? null : state.dependentIssueDialog,
+        }))
+        created = issue
+        toast.success(`${issueIdentifier(issue.id)} created`, {
+          description: userText(issue.title),
+          action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
+        })
+      })
+      return created
     },
 
     copyIssueIdentifier(issueId) {

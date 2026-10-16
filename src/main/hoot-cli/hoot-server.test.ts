@@ -52,9 +52,12 @@ function request(
 
 const issue = { title: 'New', description: '', status: 'backlog', priority: 0 } as const
 
-/** An issue as the server answers with it: without a parent or sub-issues, unless given. */
-function answered(saved: Issue, relations: Partial<Pick<HootIssue, 'parent' | 'subIssues'>> = {}) {
-  return { ...saved, parent: null, subIssues: [], ...relations }
+/** An issue as the server answers with it: without a parent, sub-issues or dependencies, unless given. */
+function answered(
+  saved: Issue,
+  relations: Partial<Pick<HootIssue, 'parent' | 'subIssues' | 'blockedBy' | 'blocking'>> = {},
+) {
+  return { ...saved, parent: null, subIssues: [], blockedBy: [], blocking: [], ...relations }
 }
 
 /** An issue as the server answers with it as another's parent or sub-issue. */
@@ -252,6 +255,76 @@ describe('HootServer', () => {
     })
   })
 
+  it('answers with the issues an issue is blocked by and those it blocks, of any project shown, in order', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const loose = hoot.issues.create({ projectId: null, ...issue, title: 'Loose' })!
+    const other = hoot.issues.create({ projectId: hoot.hotel.id, ...issue, title: 'Other' })!
+    const own = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Own' })!
+    hoot.issues.changeRelations({
+      addDependencies: [
+        { issueId: alpha.id, blockedById: other.id },
+        { issueId: alpha.id, blockedById: loose.id },
+        { issueId: own.id, blockedById: alpha.id },
+      ],
+    })
+    const expected = answered(alpha, {
+      blockedBy: [related(other, 'hotel'), related(loose, null)],
+      blocking: [related(own, 'gamma')],
+    })
+    expect((await request('GET', `/issues/${alpha.id}`)).answer.issue).toEqual(expected)
+    expect((await request('GET', '/issues')).answer.issues).toEqual([
+      expected,
+      answered(own, { blockedBy: [related(alpha, 'gamma')] }),
+    ])
+    // Not those of a project removed from the list.
+    hoot.projects.remove(hoot.hotel.root)
+    expect((await request('GET', `/issues/${alpha.id}`)).answer.issue).toEqual({
+      ...expected,
+      blockedBy: [related(loose, null)],
+    })
+  })
+
+  it('creates an issue with dependencies, and sub-issues split from an issue', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!
+    const charlie = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Charlie' })!
+    const created = await request('POST', '/issues', {
+      body: JSON.stringify({
+        ...issue,
+        title: 'New',
+        blockedBy: [String(alpha.id)],
+        blocking: [String(beta.id)],
+      }),
+    })
+    expect(created.status).toBe(201)
+    const id = (created.answer.issue as HootIssue).id
+    expect(hoot.issues.dependencies().links).toEqual([
+      { issueId: id, blockedById: alpha.id },
+      { issueId: beta.id, blockedById: id },
+    ])
+    const split = await request('POST', `/issues/${alpha.id}/split`, {
+      body: JSON.stringify({
+        issues: [
+          { ...issue, title: 'S1', blockedBy: [], blocking: [] },
+          {
+            ...issue,
+            title: 'S2',
+            blockedBy: [{ item: 1 }, { issue: String(charlie.id) }],
+            blocking: [],
+          },
+        ],
+      }),
+    })
+    expect(split.status).toBe(201)
+    const [s1, s2] = split.answer.issues as HootIssue[]
+    expect(s2!.blockedBy.map((entry) => entry.id)).toEqual([s1!.id, charlie.id])
+    expect(hoot.issues.subIssues().links).toEqual([
+      { issueId: s1!.id, parentId: alpha.id },
+      { issueId: s2!.id, parentId: alpha.id },
+    ])
+    expect(hoot.created.map((entry) => entry.title)).toEqual(['New', 'S1', 'S2'])
+  })
+
   it('changes nothing for a change it cannot take, and says why', async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
     const refused: Array<[string, string, number, string]> = [
@@ -282,7 +355,50 @@ describe('HootServer', () => {
     expect(
       await request('POST', '/issues', { body: JSON.stringify({ ...issue, parent: 'one' }) }),
     ).toEqual({ status: 400, answer: { ok: false, message: 'Invalid issue.' } })
+    expect(
+      await request('POST', '/issues', { body: JSON.stringify({ ...issue, blockedBy: [1] }) }),
+    ).toEqual({ status: 400, answer: { ok: false, message: 'Invalid issue.' } })
+    expect(
+      await request('POST', '/issues', {
+        body: JSON.stringify({
+          ...issue,
+          blockedBy: [String(alpha.id)],
+          blocking: [String(alpha.id)],
+        }),
+      }),
+    ).toEqual({
+      status: 409,
+      answer: {
+        ok: false,
+        message:
+          `The new issue cannot be blocked by ISS-${alpha.id}, which waits for it already: ` +
+          `ISS-${alpha.id} is blocked by the new issue.`,
+      },
+    })
+    for (const [body, status, message] of [
+      [{ issues: [{ ...issue }] }, 400, 'Invalid issues.'],
+      [
+        { issues: [{ ...issue, blockedBy: [{ item: 2 }], blocking: [] }] },
+        400,
+        'Item 1 names item 2, and there is only 1 item.',
+      ],
+      [
+        { issues: [{ ...issue, blockedBy: [{ item: 1 }], blocking: [] }] },
+        409,
+        'Item 1 cannot be blocked by itself.',
+      ],
+      [
+        { issues: [{ ...issue, title: ' ', blockedBy: [], blocking: [] }] },
+        400,
+        'Item 1 has an empty title: an issue needs one.',
+      ],
+    ] as const) {
+      expect(
+        await request('POST', `/issues/${alpha.id}/split`, { body: JSON.stringify(body) }),
+      ).toEqual({ status, answer: { ok: false, message } })
+    }
     expect(hoot.issues.subIssues()).toEqual({ version: 0, links: [] })
+    expect(hoot.issues.dependencies()).toEqual({ version: 0, links: [] })
     expect(hoot.issues.list()).toEqual([alpha])
   })
 

@@ -226,7 +226,7 @@ describe('the upgrade to sub-issues', () => {
     const tables = ['projects', 'issues', 'workflow_records']
     const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
     db.close()
-    db = openDatabase(file)
+    db = openDatabase(file, MIGRATIONS.slice(0, 3))
     expect(userVersion(db)).toBe(3)
     expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
       before,
@@ -244,6 +244,52 @@ describe('the upgrade to sub-issues', () => {
     link.run(second, first)
     expect(() => link.run(second, first)).toThrow(/UNIQUE constraint/)
     expect(() => link.run(first, 99)).toThrow(/FOREIGN KEY constraint/)
+    db.close()
+  })
+})
+
+describe('the upgrade to dependencies', () => {
+  it('keeps what a database of the version before holds, without any dependency', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 3))
+    db.exec(`
+      INSERT INTO projects (id, root, list_position) VALUES (1, '/work/gamma', 1), (2, '/work/hotel', NULL);
+      INSERT INTO issues (project_id, title, description, status, priority, created_at, completed_at)
+        VALUES (1, 'X', 'Desc', 'todo', 2, 100, NULL), (NULL, 'Y', '', 'done', 0, 200, 300),
+          (2, 'Z', '', 'backlog', 4, 400, NULL), (1, 'W', '', 'todo', 0, 500, NULL);
+      INSERT INTO sub_issues (issue_id, parent_id) VALUES (2, 1), (4, 1), (3, 2);
+      INSERT INTO workflow_records (issue_id, kind, step, outcome, reporter, summary, at)
+        VALUES (1, 'step-started', 'scope', NULL, NULL, NULL, 500),
+          (1, 'step-reported', 'scope', 'no-split', 'agent', 'One piece', 600);
+    `)
+    const tables = ['projects', 'issues', 'sub_issues', 'workflow_records']
+    const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(4)
+    expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
+      before,
+    )
+    expect(db.prepare('SELECT * FROM issue_dependencies').all()).toEqual([])
+    db.close()
+  })
+
+  it('refuses an issue blocked by itself, by an issue twice, or by none, and drops the dependencies of a deleted issue', () => {
+    const db = openDatabase(file)
+    const [first, second, third] = [insertIssue(db, {}), insertIssue(db, {}), insertIssue(db, {})]
+    const depend = db.prepare(
+      'INSERT INTO issue_dependencies (issue_id, blocked_by_id) VALUES (?, ?)',
+    )
+    expect(() => depend.run(first, first)).toThrow(/CHECK constraint/)
+    depend.run(first, second)
+    expect(() => depend.run(first, second)).toThrow(/UNIQUE constraint/)
+    expect(() => depend.run(first, 99)).toThrow(/FOREIGN KEY constraint/)
+    depend.run(second, first)
+    depend.run(third, second)
+    depend.run(first, third)
+    db.exec(`DELETE FROM issues WHERE id = ${second}`)
+    expect(db.prepare('SELECT issue_id, blocked_by_id FROM issue_dependencies').all()).toEqual([
+      { issue_id: first, blocked_by_id: third },
+    ])
     db.close()
   })
 })

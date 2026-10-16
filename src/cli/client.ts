@@ -8,6 +8,8 @@ import {
   type IssueEdit,
   type IssueListAnswer,
   type NewHootIssue,
+  type SplitAnswer,
+  type SplitIssue,
   type StepReportAnswer,
   type StepReportRequest,
 } from '../shared/hoot-cli'
@@ -62,11 +64,19 @@ export class HootClient {
   }
 
   /**
-   * Changes the parent and the sub-issues of the issue with this number,
-   * given in decimal digits, in the session's project.
+   * Changes the parent, the sub-issues and the dependencies of the issue with
+   * this number, given in decimal digits, in the session's project.
    */
   editIssue(digits: string, edit: IssueEdit): Promise<EditedIssueAnswer> {
     return this.ask('PATCH', `/issues/${digits}`, edit)
+  }
+
+  /**
+   * Creates sub-issues of the issue with this number, given in decimal
+   * digits, in the session's project, all together or none.
+   */
+  split(digits: string, issues: SplitIssue[]): Promise<SplitAnswer> {
+    return this.ask('POST', `/issues/${digits}/split`, { issues })
   }
 
   /**

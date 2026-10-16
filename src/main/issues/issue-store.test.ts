@@ -3,11 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Dependencies } from '../../shared/dependencies'
 import { ISSUE_STATUSES, type NewIssue } from '../../shared/issues'
 import type { SubIssues } from '../../shared/sub-issues'
 import { databaseFile, openDatabase } from '../database/database'
 import { ProjectStore } from '../projects/project-store'
-import { IssueStore, SubIssueError } from './issue-store'
+import { DependencyError, IssueStore, SubIssueError, type IssueReference } from './issue-store'
 
 let directory: string
 let file: string
@@ -579,6 +580,240 @@ describe('IssueStore sub-issues', () => {
     expect(() => issues.setParents([{ issueId: p!, parentId: a! }])).toThrow(SubIssueError)
     issues.setParents([{ issueId: a!, parentId: null }])
     expect(told.map((subIssues) => subIssues.version)).toEqual([1, 2])
+    expect(told.at(-1)).toEqual({ version: 2, links: [] })
+  })
+})
+
+/** How a reason names one of the issues created together, by its place from 0. */
+const itemName = (index: number) => `item ${index + 1}`
+
+/** The dependencies, as [issue, blocked by] pairs, in the order they were made. */
+const dependencyPairs = (issues: IssueStore) =>
+  issues.dependencies().links.map((link) => [link.issueId, link.blockedById])
+
+describe('IssueStore dependencies', () => {
+  it('makes and removes dependencies, in the order they were made, kept across starts', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [a, b] = createAll(issues, g.id, ['A', 'B'])
+    const [c] = createAll(issues, h.id, ['C'])
+    const [d] = createAll(issues, null, ['D'])
+    expect(issues.dependencies()).toEqual({ version: 0, links: [] })
+    issues.changeRelations({
+      addDependencies: [
+        { issueId: a!, blockedById: b! },
+        { issueId: a!, blockedById: c! },
+        { issueId: d!, blockedById: a! },
+      ],
+    })
+    expect(dependencyPairs(issues)).toEqual([
+      [a, b],
+      [a, c],
+      [d, a],
+    ])
+    issues.changeRelations({ removeDependencies: [{ issueId: a!, blockedById: b! }] })
+    expect(dependencyPairs(start().issues)).toEqual([
+      [a, c],
+      [d, a],
+    ])
+    // Whatever their projects and statuses become.
+    issues.update(a!, { projectId: h.id, status: 'done' })
+    issues.update(c!, { projectId: null, status: 'canceled' })
+    expect(dependencyPairs(issues)).toEqual([
+      [a, c],
+      [d, a],
+    ])
+  })
+
+  it('refuses a dependency there already, or the removal of one not there, changing nothing', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [a, b, c] = createAll(issues, g.id, ['A', 'B', 'C'])
+    issues.changeRelations({ addDependencies: [{ issueId: a!, blockedById: b! }] })
+    const before = issues.dependencies()
+    expect(() =>
+      issues.changeRelations({
+        addDependencies: [
+          { issueId: c!, blockedById: b! },
+          { issueId: a!, blockedById: b! },
+        ],
+      }),
+    ).toThrow(new DependencyError('ISS-1 is blocked by ISS-2 already.'))
+    expect(() =>
+      issues.changeRelations({ removeDependencies: [{ issueId: b!, blockedById: a! }] }),
+    ).toThrow(new DependencyError('ISS-2 is not blocked by ISS-1.'))
+    expect(() =>
+      issues.changeRelations({ addDependencies: [{ issueId: a!, blockedById: 99 }] }),
+    ).toThrow('The issue no longer exists.')
+    expect(issues.dependencies()).toEqual(before)
+  })
+
+  it('refuses what would break the rules, through the issues of removed projects too, changing nothing', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [a, e, s] = createAll(issues, g.id, ['A', 'E', 'S'])
+    const [b] = createAll(issues, h.id, ['B'])
+    issues.changeRelations({
+      addDependencies: [
+        { issueId: a!, blockedById: b! },
+        { issueId: b!, blockedById: e! },
+      ],
+    })
+    projects.remove('/work/h')
+    const before = issues.dependencies()
+    expect(() =>
+      issues.changeRelations({ addDependencies: [{ issueId: e!, blockedById: a! }] }),
+    ).toThrow(
+      new DependencyError(
+        'ISS-2 cannot be blocked by ISS-1, which waits for it already: ISS-1 is blocked by an ' +
+          'issue Hoot does not show, which is blocked by ISS-2.',
+      ),
+    )
+    // Nor can it give a parent that would.
+    expect(() => issues.setParents([{ issueId: a!, parentId: e! }])).toThrow(DependencyError)
+    expect(issues.dependencies()).toEqual(before)
+    expect(issues.subIssues().links).toEqual([])
+    issues.changeRelations({ addDependencies: [{ issueId: s!, blockedById: a! }] })
+    projects.add('/work/h')
+    expect(dependencyPairs(issues)).toEqual([
+      [a, b],
+      [b, e],
+      [s, a],
+    ])
+  })
+
+  it('makes all the changes of parents and dependencies together, or none', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [a, b, c, d] = createAll(issues, g.id, ['A', 'B', 'C', 'D'])
+    issues.changeRelations({ addDependencies: [{ issueId: a!, blockedById: b! }] })
+    expect(() =>
+      issues.changeRelations({
+        parents: [{ issueId: c!, parentId: a! }],
+        addDependencies: [{ issueId: a!, blockedById: d! }],
+        removeDependencies: [{ issueId: a!, blockedById: b! }],
+      }),
+    ).not.toThrow()
+    expect(() =>
+      issues.changeRelations({
+        parents: [{ issueId: d!, parentId: c! }],
+        addDependencies: [{ issueId: b!, blockedById: c! }],
+      }),
+    ).toThrow(
+      'ISS-4 cannot be a sub-issue of ISS-3: ISS-1 is blocked by ISS-4, which would then be below it.',
+    )
+    expect(pairs(issues)).toEqual([[c, a]])
+    expect(dependencyPairs(issues)).toEqual([[a, d]])
+  })
+
+  it('creates an issue blocked by issues and blocking others, or none when it cannot, taking no number', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [p, b, k] = createAll(issues, g.id, ['P', 'B', 'K'])
+    const created = issues.create(newIssue(g.id, 'N'), null, { blockedBy: [b!], blocking: [k!] })
+    expect(dependencyPairs(issues)).toEqual([
+      [created!.id, b],
+      [k, created!.id],
+    ])
+    expect(() => issues.create(newIssue(g.id, 'Under P'), p!, { blockedBy: [p!] })).toThrow(
+      new DependencyError(
+        'The new issue cannot be blocked by ISS-1, which is above it: an issue waits for the ' +
+          'issues below it, so they would wait for each other.',
+      ),
+    )
+    expect(() =>
+      issues.create(newIssue(g.id, 'Both'), null, { blockedBy: [k!], blocking: [k!] }),
+    ).toThrow(DependencyError)
+    expect(pairs(issues)).toEqual([])
+    expect(issues.create(newIssue(g.id, 'Next'))!.id).toBe(created!.id + 1)
+  })
+
+  it('creates sub-issues together, with dependencies among them and on others, or none of them', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [p, e, c0] = createAll(issues, g.id, ['P', 'E', 'C0'])
+    issues.setParents([{ issueId: c0!, parentId: p! }])
+    const item = (
+      title: string,
+      blockedBy: IssueReference[] = [],
+      blocking: IssueReference[] = [],
+    ) => ({
+      ...newIssue(g.id, title),
+      blockedBy,
+      blocking,
+    })
+    const created = issues.createSubIssues(p!, [
+      item('S1'),
+      item('S2', [{ item: 0 }]),
+      item('S3', [{ item: 0 }, { item: 1 }, { issueId: e! }]),
+    ])!
+    const [s1, s2, s3] = created.map((issue) => issue.id)
+    expect(pairs(issues)).toEqual([
+      [c0, p],
+      [s1, p],
+      [s2, p],
+      [s3, p],
+    ])
+    expect(dependencyPairs(issues)).toEqual([
+      [s2, s1],
+      [s3, s1],
+      [s3, s2],
+      [s3, e],
+    ])
+    const before = { links: pairs(issues), dependencies: dependencyPairs(issues) }
+    for (const [items, message] of [
+      [[item('A', [{ item: 1 }]), item('B', [{ item: 0 }])], 'Item 1 cannot be blocked by item 2'],
+      [[item('A', [{ issueId: p! }])], 'Item 1 cannot be blocked by ISS-1, which is above it'],
+      [[item('A', [{ item: 0 }])], 'Item 1 cannot be blocked by itself.'],
+    ] as const) {
+      expect(() => issues.createSubIssues(p!, items, itemName)).toThrow(message)
+    }
+    expect({ links: pairs(issues), dependencies: dependencyPairs(issues) }).toEqual(before)
+    expect(issues.create(newIssue(g.id, 'Next'))!.id).toBe(s3! + 1)
+  })
+
+  it('drops the dependencies of a deleted issue, both ways and of removed projects too, and tells', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const h = projects.add('/work/h').project
+    const [z, y, a, l] = createAll(issues, g.id, ['Z', 'Y', 'A', 'L'])
+    const [c] = createAll(issues, h.id, ['C'])
+    issues.changeRelations({
+      addDependencies: [
+        { issueId: a!, blockedById: z! },
+        { issueId: c!, blockedById: z! },
+        { issueId: z!, blockedById: y! },
+        { issueId: a!, blockedById: y! },
+      ],
+    })
+    const told: Dependencies[] = []
+    issues.on('dependencies-changed', (dependencies) => told.push(dependencies))
+    expect(issues.delete(l!)).toBe(true)
+    expect(told).toEqual([])
+    projects.remove('/work/h')
+    expect(issues.delete(z!)).toBe(true)
+    expect(dependencyPairs(issues)).toEqual([[a, y]])
+    expect(told).toEqual([{ version: 2, links: [{ issueId: a, blockedById: y }] }])
+  })
+
+  it('tells when the dependencies change, and only then', () => {
+    const { projects, issues } = start()
+    const g = projects.add('/work/g').project
+    const [a, b] = createAll(issues, g.id, ['A', 'B'])
+    const told: Dependencies[] = []
+    issues.on('dependencies-changed', (dependencies) => told.push(dependencies))
+    issues.setParents([{ issueId: a!, parentId: b! }])
+    issues.create(newIssue(g.id, 'C'))
+    issues.update(a!, { status: 'done' })
+    expect(told).toEqual([])
+    issues.create(newIssue(g.id, 'D'), null, { blocking: [b!] })
+    expect(() =>
+      issues.changeRelations({ addDependencies: [{ issueId: b!, blockedById: a! }] }),
+    ).toThrow(DependencyError)
+    issues.changeRelations({ removeDependencies: [{ issueId: b!, blockedById: 4 }] })
+    expect(told.map((dependencies) => dependencies.version)).toEqual([1, 2])
     expect(told.at(-1)).toEqual({ version: 2, links: [] })
   })
 })

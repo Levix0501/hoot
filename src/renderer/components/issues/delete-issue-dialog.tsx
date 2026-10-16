@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import { focusAfterOverlay, shownSubIssuesOf, useAppStore } from '../../store/app-store'
+import {
+  focusAfterOverlay,
+  shownSubIssuesOf,
+  useAppStore,
+  waitCountsOf,
+} from '../../store/app-store'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,10 +23,18 @@ function subIssuesStay(count: number): string {
     : `Its ${count} sub-issues will stay, without a parent.`
 }
 
+/** What becomes of the issues waiting on an issue, by how many there are. */
+function waitingStop(count: number): string {
+  return count === 1
+    ? '1 issue waits on it, and will no longer be blocked by it.'
+    : `${count} issues wait on it, and will no longer be blocked by it.`
+}
+
 /**
  * Asks before an issue is deleted, which cannot be undone: from its page's
  * menu, its row's context menu, or ⌘⌫. It says how many sub-issues the issue
- * has, which stay as top-level issues.
+ * has, which stay as top-level issues, and how many issues wait on it, which
+ * will no longer be blocked by it.
  */
 export function DeleteIssueDialog() {
   const issue = useAppStore((state) =>
@@ -30,12 +43,17 @@ export function DeleteIssueDialog() {
   const subIssueCount = useAppStore((state) =>
     state.issueDeletion === null ? 0 : shownSubIssuesOf(state, state.issueDeletion).length,
   )
+  const waitingCount = useAppStore((state) =>
+    state.issueDeletion === null ? 0 : waitCountsOf(state, state.issueDeletion).waiting,
+  )
   const answerDeleteIssue = useAppStore((state) => state.answerDeleteIssue)
   // Kept while the dialog fades out after the answer.
   const [title, setTitle] = useState('')
   const [count, setCount] = useState(0)
+  const [waiting, setWaiting] = useState(0)
   if (issue && issue.title !== title) setTitle(issue.title)
   if (issue && subIssueCount !== count) setCount(subIssueCount)
+  if (issue && waitingCount !== waiting) setWaiting(waitingCount)
 
   return (
     <AlertDialog
@@ -58,6 +76,11 @@ export function DeleteIssueDialog() {
             {count > 0 && (
               <span className="mt-2 block" data-testid="delete-issue-sub-issues">
                 {subIssuesStay(count)}
+              </span>
+            )}
+            {waiting > 0 && (
+              <span className="mt-2 block" data-testid="delete-issue-waiting" data-count={waiting}>
+                {waitingStop(waiting)}
               </span>
             )}
           </AlertDialogDescription>

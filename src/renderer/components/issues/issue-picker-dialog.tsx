@@ -1,7 +1,8 @@
-import { CornerLeftUpIcon } from 'lucide-react'
+import { CornerLeftUpIcon, PlusIcon } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
+import { dependencyProblem, unpickableForDependency } from '../../../shared/dependencies'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
-import { ancestorsOf, descendantsOf, parentOf } from '../../../shared/sub-issues'
+import { ancestorsOf, descendantsOf, parentOf, withParents } from '../../../shared/sub-issues'
 import { focusAfterOverlay, useAppStore, type IssuePicker } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '../ui/combobox'
@@ -19,23 +20,44 @@ function matches(issue: Issue, query: string): boolean {
 }
 
 /**
- * What the picker lists: the issues Hoot shows, newest first, without the
- * issue itself and, picking its parent, without the issues below it, or,
- * picking its sub-issues, without those above it.
+ * What the picker of a parent or of sub-issues lists: the issues Hoot shows,
+ * newest first, without the issue itself and, picking its parent, without
+ * the issues below it, or, picking its sub-issues, without those above it;
+ * and without those that would put an issue above or below one it has a
+ * dependency with, or have an issue wait for itself.
  */
 function useCandidates(picker: IssuePicker): Issue[] {
   const issues = useAppStore((state) => state.issues)
   const links = useAppStore((state) => state.subIssues.links)
+  const dependencies = useAppStore((state) => state.dependencies.links)
   return useMemo(() => {
     const left =
       picker.kind === 'parent'
         ? descendantsOf(links, picker.issueId)
         : ancestorsOf(links, picker.issueId)
+    /** Whether the issue picked would break the rules of dependencies. */
+    const breaks = (picked: number) => {
+      const change =
+        picker.kind === 'parent'
+          ? { issueId: picker.issueId, parentId: picked }
+          : { issueId: picked, parentId: picker.issueId }
+      return (
+        dependencyProblem(withParents(links, [change]), dependencies, {
+          added: [],
+          moved: [change.issueId],
+        }) !== null
+      )
+    }
     return issues
-      .filter((issue) => issue.id !== picker.issueId && !left.has(issue.id))
+      .filter((issue) => issue.id !== picker.issueId && !left.has(issue.id) && !breaks(issue.id))
       .toSorted((a, b) => b.id - a.id)
-  }, [issues, links, picker])
+  }, [issues, links, dependencies, picker])
 }
+
+/** The last item of the picker of Blocked by… and Blocking…, which creates an issue instead. */
+const CREATE_ITEM = { create: true } as const
+type DependencyItem = Issue | typeof CREATE_ITEM
+const isCreateItem = (item: DependencyItem): item is typeof CREATE_ITEM => item === CREATE_ITEM
 
 /**
  * An issue in the picker's list: its status, its identifier and its title,
@@ -187,6 +209,88 @@ function SubIssuesPicker({ picker, issue }: { picker: IssuePicker; issue: Issue 
   )
 }
 
+/**
+ * Blocked by…: picks an issue that the issue becomes blocked by at once; or
+ * Blocking…: one that becomes blocked by it. Its last item, whatever is
+ * typed, opens the dialog for a new issue with that dependency instead,
+ * titled with what is typed.
+ */
+function DependencyPicker({ picker, issue }: { picker: IssuePicker; issue: Issue }) {
+  const kind = picker.kind === 'blocked-by' ? 'blocked-by' : 'blocking'
+  const issues = useAppStore((state) => state.issues)
+  const links = useAppStore((state) => state.subIssues.links)
+  const dependencies = useAppStore((state) => state.dependencies.links)
+  const changeDependencies = useAppStore((state) => state.changeDependencies)
+  const closeIssuePicker = useAppStore((state) => state.closeIssuePicker)
+  const openDependentIssue = useAppStore((state) => state.openDependentIssue)
+  const [query, setQuery] = useState('')
+  const [busy, setBusy] = useState(false)
+  const items = useMemo((): DependencyItem[] => {
+    const left = unpickableForDependency(links, dependencies, issue.id, kind)
+    // The issue whose identifier is typed comes first, so that Enter picks it.
+    const typed = query.trim().toLowerCase()
+    const exact = (candidate: Issue) => issueIdentifier(candidate.id).toLowerCase() === typed
+    const candidates = issues
+      .filter((candidate) => !left.has(candidate.id))
+      .toSorted((a, b) => Number(exact(b)) - Number(exact(a)) || b.id - a.id)
+    return [...candidates, CREATE_ITEM]
+  }, [issues, links, dependencies, issue.id, kind, query])
+  const identifier = issueIdentifier(issue.id)
+  const createLabel =
+    kind === 'blocked-by'
+      ? `Create new issue blocking ${identifier}…`
+      : `Create new issue blocked by ${identifier}…`
+  const pick = async (picked: DependencyItem) => {
+    if (busy) return
+    if (isCreateItem(picked)) {
+      openDependentIssue(kind, issue.id, query)
+      return
+    }
+    setBusy(true)
+    try {
+      const changed = await changeDependencies(
+        {
+          add: [
+            kind === 'blocked-by'
+              ? { issueId: issue.id, blockedById: picked.id }
+              : { issueId: picked.id, blockedById: issue.id },
+          ],
+        },
+        kind === 'blocked-by'
+          ? `Could not mark ${identifier} as blocked by ${issueIdentifier(picked.id)}.`
+          : `Could not mark ${identifier} as blocking ${issueIdentifier(picked.id)}.`,
+      )
+      if (changed) closeIssuePicker()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Combobox
+      inline
+      open
+      items={items}
+      value={null}
+      onValueChange={(picked: DependencyItem | null, details) => {
+        // Nothing stays picked, nor fills the search field: the picker closes, or says why not.
+        details.cancel()
+        if (picked !== null) void pick(picked)
+      }}
+      onInputValueChange={(value) => setQuery(value)}
+      filter={(item: DependencyItem, typed) => isCreateItem(item) || matches(item, typed)}
+      itemToStringLabel={(item: DependencyItem) => (isCreateItem(item) ? createLabel : item.title)}
+      autoHighlight
+    >
+      <PickerTitle>
+        {kind === 'blocked-by'
+          ? `Mark ${identifier} as blocked by…`
+          : `Mark ${identifier} as blocking…`}
+      </PickerTitle>
+      <PickerList createLabel={createLabel} />
+    </Combobox>
+  )
+}
+
 function PickerTitle({ children }: { children: ReactNode }) {
   return (
     <DialogTitle
@@ -200,9 +304,16 @@ function PickerTitle({ children }: { children: ReactNode }) {
 
 /**
  * The search field over the issues found, each with the identifier of its
- * parent when `parentLabel` gives one.
+ * parent when `parentLabel` gives one, and after them the item that creates
+ * an issue, with its label, when there is one.
  */
-function PickerList({ parentLabel }: { parentLabel?(issue: Issue): string | null }) {
+function PickerList({
+  parentLabel,
+  createLabel,
+}: {
+  parentLabel?(issue: Issue): string | null
+  createLabel?: string
+}) {
   return (
     <>
       <ComboboxInput
@@ -216,20 +327,34 @@ function PickerList({ parentLabel }: { parentLabel?(issue: Issue): string | null
         No issues found.
       </ComboboxEmpty>
       <ComboboxList className="max-h-[min(24rem,50vh)] px-2 pb-2" data-testid="issue-picker-list">
-        {(issue: Issue) => (
-          <Candidate key={issue.id} issue={issue} parent={parentLabel?.(issue) ?? null} />
-        )}
+        {(item: DependencyItem) =>
+          isCreateItem(item) ? (
+            <ComboboxItem
+              key="create"
+              value={item}
+              className="gap-2.5 py-1.5 text-muted-foreground"
+              data-testid="issue-picker-create"
+            >
+              <PlusIcon />
+              <span className="min-w-0 flex-1 truncate">{createLabel}</span>
+            </ComboboxItem>
+          ) : (
+            <Candidate key={item.id} issue={item} parent={parentLabel?.(item) ?? null} />
+          )
+        }
       </ComboboxList>
     </>
   )
 }
 
 /**
- * The picker of Sub-issue of… and Parent of…, as Linear's: a search field
- * over the issues Hoot shows, found by identifier or title. Sub-issue of…
- * makes the issue a sub-issue of the one picked; Parent of… makes the issues
- * checked its sub-issues. Each lists only the issues that can be picked
- * without putting an issue below itself.
+ * The picker of Sub-issue of…, Parent of…, Blocked by… and Blocking…, as
+ * Linear's: a search field over the issues Hoot shows, found by identifier or
+ * title. Sub-issue of… makes the issue a sub-issue of the one picked; Parent
+ * of… makes the issues checked its sub-issues; Blocked by… makes the issue
+ * blocked by the one picked, and Blocking… the one picked blocked by it. Each
+ * lists only the issues that can be picked without putting an issue below
+ * itself, or having one wait for itself.
  */
 export function IssuePickerDialog() {
   const picker = useAppStore((state) => state.issuePicker)
@@ -263,8 +388,14 @@ export function IssuePickerDialog() {
               picker={shown.picker}
               issue={shown.issue}
             />
-          ) : (
+          ) : shown.picker.kind === 'sub-issues' ? (
             <SubIssuesPicker
+              key={`${shown.picker.kind}-${shown.picker.issueId}`}
+              picker={shown.picker}
+              issue={shown.issue}
+            />
+          ) : (
+            <DependencyPicker
               key={`${shown.picker.kind}-${shown.picker.issueId}`}
               picker={shown.picker}
               issue={shown.issue}

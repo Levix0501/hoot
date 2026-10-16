@@ -121,6 +121,8 @@ describe('hoot issue view', () => {
       parent: null,
       subIssues: [],
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
+      blockedBy: [],
+      blocking: [],
     })
     expect(JSON.parse(stdout).createdAt).toBe('2026-10-12T06:03:00.000Z')
     const beta = JSON.parse((await run(['issue', 'view', '2', '--json'])).stdout)
@@ -275,6 +277,8 @@ describe('hoot issue list', () => {
         'parent',
         'subIssues',
         'subIssuesSummary',
+        'blockedBy',
+        'blocking',
       ])
     }
     const started = JSON.parse(
@@ -427,6 +431,8 @@ describe('hoot issue create', () => {
       parent: null,
       subIssues: [],
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
+      blockedBy: [],
+      blocking: [],
     })
     expect(saved().at(-1)).toMatchObject({ status: 'done', createdAt: now, completedAt: now })
     await run(['issue', 'create', '--title', 'Theta', '--status', 'canceled'])
@@ -829,6 +835,8 @@ describe('hoot issue view with sub-issues', () => {
       parent: null,
       subIssues: [],
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
+      blockedBy: [],
+      blocking: [],
     })
   })
 
@@ -869,6 +877,510 @@ describe('hoot issue view with sub-issues', () => {
       identifier: `ISS-${hq.id}`,
       project: 'hotel',
     })
+  })
+})
+
+/** An issue's identifier, such as "ISS-12". */
+const id = (issue: Issue) => `ISS-${issue.id}`
+
+/** An issue object's summary, as the objects of its relations have it, for an issue of gamma. */
+const summaryOf = ({ identifier, number, title, status }: Record<string, unknown>) => ({
+  identifier,
+  number,
+  title,
+  status,
+  project: 'gamma',
+})
+
+/** The dependencies, as [issue, blocked by] pairs of titles, in the order they were made. */
+function dependencyTitles(): Array<[string, string]> {
+  const title = (issueId: number) => hoot.issues.get(issueId)?.title ?? `#${issueId}`
+  return hoot.issues
+    .dependencies()
+    .links.map((link) => [title(link.issueId), title(link.blockedById)] as [string, string])
+}
+
+/** Makes an issue blocked by others. */
+function block(issue: Issue, ...blockers: Issue[]): void {
+  hoot.issues.changeRelations({
+    addDependencies: blockers.map((blocker) => ({ issueId: issue.id, blockedById: blocker.id })),
+  })
+}
+
+/** Expects hoot to refuse, saying so on standard error, and to change no issue, parent or dependency. */
+async function expectRefused(args: string[], message: string, stdin?: string) {
+  const before = {
+    issues: hoot.issues.list(),
+    links: hoot.issues.subIssues().links,
+    dependencies: hoot.issues.dependencies().links,
+  }
+  const { code, stdout, stderr } = await run(args, { stdin })
+  expect({ args, code }).toEqual({ args, code: 1 })
+  expect(stdout).toBe('')
+  expect(stderr).toMatch(/^error: /)
+  expect(stderr).toContain(message)
+  expect({
+    issues: hoot.issues.list(),
+    links: hoot.issues.subIssues().links,
+    dependencies: hoot.issues.dependencies().links,
+  }).toEqual(before)
+  return stderr
+}
+
+describe('the rules of dependencies in hoot', () => {
+  let p: Issue, p1: Issue, p2: Issue, q1: Issue, x: Issue, y: Issue, z: Issue, y1: Issue, w: Issue
+
+  beforeEach(() => {
+    ;[p, p1, p2, q1, x, y, z, y1, w] = ['P', 'P1', 'P2', 'Q1', 'X', 'Y', 'Z', 'Y1', 'W'].map(
+      (title) => addIssue(title, 'todo'),
+    ) as [Issue, Issue, Issue, Issue, Issue, Issue, Issue, Issue, Issue]
+    attach(p, p1, p2)
+    attach(p1, q1)
+    attach(y, y1)
+    block(x, y)
+    block(y, z)
+  })
+
+  it('refuses an issue that would wait for itself, or be blocked by an issue above or below it', async () => {
+    for (const [args, message] of [
+      [
+        ['edit', id(z), '--add-blocked-by', id(x)],
+        `${id(z)} cannot be blocked by ${id(x)}, which waits for it already: ${id(x)} is ` +
+          `blocked by ${id(y)}, which is blocked by ${id(z)}.`,
+      ],
+      [['edit', id(x), '--add-blocking', id(y)], `${id(y)} cannot be blocked by ${id(x)}`],
+      [
+        ['edit', id(y1), '--add-blocked-by', id(x)],
+        `${id(x)} is blocked by ${id(y)}, which is the parent of ${id(y1)}.`,
+      ],
+      [['edit', id(x), '--add-blocked-by', id(x)], `${id(x)} cannot be blocked by itself.`],
+      [['edit', id(p1), '--add-blocked-by', id(p)], `which is above it`],
+      [['edit', id(p), '--add-blocked-by', id(q1)], `which is below it`],
+      [
+        ['edit', id(x), '--parent', id(y)],
+        `${id(x)} cannot be a sub-issue of ${id(y)}: ${id(x)} is blocked by ${id(y)}`,
+      ],
+      [['edit', id(y), '--add-sub-issue', id(x)], `${id(x)} is blocked by ${id(y)}`],
+      [['create', '--title', 'N', '--parent', id(p), '--blocked-by', id(p)], 'which is above it'],
+      [['create', '--title', 'N', '--blocked-by', id(w), '--blocking', id(w)], 'waits for it'],
+    ] as const) {
+      await expectRefused(['issue', ...args], message)
+    }
+    expect(hoot.created).toEqual([])
+  })
+
+  it('makes a dependency within the rules', async () => {
+    expect(await run(['issue', 'edit', `ISS-${x.id}`, '--add-blocked-by', `ISS-${w.id}`])).toEqual({
+      code: 0,
+      stdout: `ISS-${x.id}\n`,
+      stderr: '',
+    })
+    expect(dependencyTitles()).toEqual([
+      ['X', 'Y'],
+      ['Y', 'Z'],
+      ['X', 'W'],
+    ])
+  })
+
+  it('refuses a dependency through an issue of a project removed from the list, without naming it', async () => {
+    const a = addIssue('A', 'todo')
+    const b = addElsewhere(hoot.hotel.id, 'B')
+    const e = addIssue('E', 'todo')
+    block(a, b)
+    block(b, e)
+    hoot.projects.remove(hoot.hotel.root)
+    const stderr = await expectRefused(
+      ['issue', 'edit', `ISS-${e.id}`, '--add-blocked-by', `ISS-${a.id}`],
+      'an issue Hoot does not show',
+    )
+    expect(stderr).not.toContain(`ISS-${b.id}`)
+  })
+})
+
+describe('the limits of dependencies in hoot', () => {
+  it('refuses more than 50 issues blocking an issue, or 50 blocked by one', async () => {
+    const m = addIssue('M', 'todo')
+    const n = addIssue('N', 'todo')
+    const f = addIssue('F', 'todo')
+    const e = addIssue('E', 'todo')
+    const blockers = Array.from({ length: 50 }, (_, index) => addIssue(`M${index + 1}`))
+    const created = await run([
+      'issue',
+      'edit',
+      `ISS-${m.id}`,
+      '--add-blocked-by',
+      blockers.map((issue) => `ISS-${issue.id}`).join(','),
+    ])
+    expect(created.code).toBe(0)
+    for (let index = 1; index <= 50; index++) {
+      const { code } = await run([
+        'issue',
+        'create',
+        '--title',
+        `N${index}`,
+        '--blocked-by',
+        `ISS-${n.id}`,
+      ])
+      expect(code).toBe(0)
+    }
+    await expectRefused(
+      ['issue', 'edit', `ISS-${m.id}`, '--add-blocked-by', `ISS-${f.id}`],
+      `ISS-${m.id} would be blocked by 51 issues, and an issue can be blocked by at most 50.`,
+    )
+    await expectRefused(
+      ['issue', 'edit', `ISS-${n.id}`, '--add-blocking', `ISS-${f.id}`],
+      `ISS-${n.id} would block 51 issues, and an issue can block at most 50.`,
+    )
+    await expectRefused(
+      ['issue', 'create', '--title', 'G1', '--blocked-by', `ISS-${n.id}`],
+      `ISS-${n.id} would block 51 issues`,
+    )
+    await expectRefused(
+      ['issue', 'split', `ISS-${e.id}`, '--file', '-'],
+      `ISS-${n.id} would block 51 issues`,
+      JSON.stringify([{ title: 'S1', blockedBy: [`ISS-${n.id}`] }]),
+    )
+  })
+})
+
+describe('hoot issue create with dependencies', () => {
+  let p: Issue, b1: Issue, b2: Issue, k: Issue, hx: Issue, q: Issue
+
+  beforeEach(() => {
+    p = addIssue('P', 'todo', 2)
+    ;[b1, b2, k] = ['B1', 'B2', 'K'].map((title) => addIssue(title, 'todo')) as [
+      Issue,
+      Issue,
+      Issue,
+    ]
+    hx = addElsewhere(hoot.hotel.id, 'Hx')
+    q = addIssue('Q', 'todo')
+    attach(p, q)
+  })
+
+  it('creates an issue blocked by issues and blocking others', async () => {
+    const { code, stdout } = await run([
+      'issue',
+      'create',
+      '--title',
+      'N1',
+      '--blocked-by',
+      `ISS-${b1.id},ISS-${b2.id}`,
+      '--blocking',
+      `ISS-${k.id}`,
+    ])
+    expect(code).toBe(0)
+    const n1 = saved().at(-1)!
+    expect(stdout).toBe(`ISS-${n1.id}\n`)
+    expect(dependencyTitles()).toEqual([
+      ['N1', 'B1'],
+      ['N1', 'B2'],
+      ['K', 'N1'],
+    ])
+  })
+
+  it('prints the issues it is blocked by and blocks as JSON, with a parent too', async () => {
+    const { code, stdout } = await run([
+      'issue',
+      'create',
+      '--title',
+      'N2',
+      '--parent',
+      `ISS-${p.id}`,
+      '--blocked-by',
+      `${q.id}`,
+      '--json',
+    ])
+    expect(code).toBe(0)
+    const json = JSON.parse(stdout)
+    expect(json.blockedBy).toStrictEqual([
+      { identifier: `ISS-${q.id}`, number: q.id, title: 'Q', status: 'todo', project: 'gamma' },
+    ])
+    expect(json.blocking).toStrictEqual([])
+    expect(json.parent).toMatchObject({ identifier: `ISS-${p.id}` })
+    expect(json.priority).toBe('high')
+  })
+
+  it('refuses an issue not of the project, what is not an issue, and what breaks the rules, creating nothing', async () => {
+    for (const [options, message] of [
+      [
+        ['--blocked-by', `ISS-${hx.id}`],
+        `There is no issue ISS-${hx.id} in this session's project`,
+      ],
+      [['--blocked-by', 'foo'], `"foo" is neither an issue's identifier`],
+      [['--parent', `ISS-${p.id}`, '--blocking', `ISS-${p.id}`], 'which is below it'],
+      [['--blocked-by', `ISS-${k.id}`, '--blocking', `ISS-${k.id}`], 'waits for it already'],
+    ] as const) {
+      await expectRefused(['issue', 'create', '--title', 'N3', ...options], message)
+    }
+    expect(hoot.created).toEqual([])
+  })
+})
+
+describe('hoot issue edit with dependencies', () => {
+  let a: Issue, b: Issue, c: Issue, d: Issue, hx: Issue
+
+  beforeEach(() => {
+    ;[a, b, c, d] = ['A', 'B', 'C', 'D'].map((title) => addIssue(title, 'todo')) as [
+      Issue,
+      Issue,
+      Issue,
+      Issue,
+    ]
+    hx = addElsewhere(hoot.hotel.id, 'Hx')
+  })
+
+  it('makes and removes dependencies both ways, together with the parent', async () => {
+    expect(
+      await run([
+        'issue',
+        'edit',
+        id(a),
+        '--add-blocked-by',
+        `${id(b)},${id(c)}`,
+        '--add-blocking',
+        id(d),
+      ]),
+    ).toEqual({ code: 0, stdout: `${id(a)}\n`, stderr: '' })
+    expect(dependencyTitles()).toEqual([
+      ['A', 'B'],
+      ['A', 'C'],
+      ['D', 'A'],
+    ])
+    expect(
+      (
+        await run([
+          'issue',
+          'edit',
+          id(a),
+          '--remove-blocked-by',
+          id(b),
+          '--remove-blocking',
+          id(d),
+        ])
+      ).code,
+    ).toBe(0)
+    expect(dependencyTitles()).toEqual([['A', 'C']])
+    expect(
+      (await run(['issue', 'edit', id(d), '--parent', id(b), '--add-blocked-by', id(c)])).code,
+    ).toBe(0)
+    expect(subIssueTitles(b)).toEqual(['D'])
+    expect(dependencyTitles()).toEqual([
+      ['A', 'C'],
+      ['D', 'C'],
+    ])
+  })
+
+  it('refuses what it cannot do, changing nothing', async () => {
+    block(a, c)
+    for (const [args, message] of [
+      [[id(a), '--add-blocked-by', id(c)], `${id(a)} is blocked by ${id(c)} already.`],
+      [[id(a), '--remove-blocked-by', id(b)], `${id(a)} is not blocked by ${id(b)}.`],
+      [[id(a), '--remove-blocking', id(d)], `${id(d)} is not blocked by ${id(a)}.`],
+      [
+        [id(a), '--add-blocked-by', id(b), '--remove-blocked-by', id(b)],
+        `${id(a)} cannot both become blocked by ${id(b)} and stop being blocked by it.`,
+      ],
+      [
+        [id(a), '--add-blocking', id(b), '--remove-blocking', id(b)],
+        `${id(b)} cannot both become blocked by ${id(a)} and stop being blocked by it.`,
+      ],
+      [
+        [id(a), '--add-blocked-by', `${id(b)},${id(hx)}`],
+        `There is no issue ${id(hx)} in this session's project, gamma.`,
+      ],
+      [[id(a), '--add-blocking', id(c)], 'waits for it already'],
+      [[id(a), '--add-blocked-by', id(d), '--parent', id(d)], `${id(d)}, which is above it`],
+      [[id(a)], 'Nothing to change'],
+    ] as const) {
+      await expectRefused(['issue', 'edit', ...args], message)
+    }
+    expect(dependencyTitles()).toEqual([['A', 'C']])
+  })
+})
+
+describe('hoot issue view with dependencies', () => {
+  let x: Issue, b1: Issue, b2: Issue, b3: Issue, k1: Issue, z: Issue
+
+  beforeEach(() => {
+    x = addIssue('X', 'todo')
+    b1 = addIssue('B1', 'done')
+    b2 = addElsewhere(hoot.hotel.id, 'B2', 'in_progress')
+    b3 = addElsewhere(null, 'B3', 'todo')
+    k1 = addIssue('K1', 'backlog')
+    z = addIssue('Z', 'todo')
+    block(x, b1, b2, b3)
+    block(k1, x)
+  })
+
+  it("lists the issues it is blocked by and those it blocks, with the projects other than the session's", async () => {
+    const { code, stdout } = await run(['issue', 'view', `ISS-${x.id}`])
+    expect(code).toBe(0)
+    expect(stdout).toBe(
+      [
+        `ISS-${x.id} X`,
+        `Todo · No priority · Created ${localMinute(x.createdAt)}`,
+        '',
+        'Blocked by',
+        `Done         ISS-${b1.id}  B1`,
+        `In Progress  ISS-${b2.id}  B2 (hotel)`,
+        `Todo         ISS-${b3.id}  B3 (No project)`,
+        '',
+        'Blocking',
+        `Backlog  ISS-${k1.id}  K1`,
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('prints them as JSON, in view and list alike', async () => {
+    const json = JSON.parse((await run(['issue', 'view', `ISS-${x.id}`, '--json'])).stdout)
+    expect(json.blockedBy).toStrictEqual([
+      { identifier: `ISS-${b1.id}`, number: b1.id, title: 'B1', status: 'done', project: 'gamma' },
+      {
+        identifier: `ISS-${b2.id}`,
+        number: b2.id,
+        title: 'B2',
+        status: 'in-progress',
+        project: 'hotel',
+      },
+      { identifier: `ISS-${b3.id}`, number: b3.id, title: 'B3', status: 'todo', project: null },
+    ])
+    expect(json.blocking).toStrictEqual([
+      {
+        identifier: `ISS-${k1.id}`,
+        number: k1.id,
+        title: 'K1',
+        status: 'backlog',
+        project: 'gamma',
+      },
+    ])
+    const listed = JSON.parse((await run(['issue', 'list', '--all', '--json'])).stdout)
+    expect(listed.find((issue: { number: number }) => issue.number === x.id)).toStrictEqual(json)
+    expect(listed.find((issue: { number: number }) => issue.number === z.id)).toMatchObject({
+      blockedBy: [],
+      blocking: [],
+    })
+    expect((await run(['issue', 'view', `ISS-${z.id}`])).stdout).toBe(
+      `ISS-${z.id} Z\nTodo · No priority · Created ${localMinute(z.createdAt)}\n`,
+    )
+  })
+
+  it('leaves out the issues of a project removed from the list', async () => {
+    hoot.projects.remove(hoot.hotel.root)
+    const json = JSON.parse((await run(['issue', 'view', `ISS-${x.id}`, '--json'])).stdout)
+    expect(json.blockedBy.map((issue: { title: string }) => issue.title)).toEqual(['B1', 'B3'])
+    expect((await run(['issue', 'view', `ISS-${x.id}`])).stdout).not.toContain(`ISS-${b2.id}`)
+  })
+})
+
+describe('hoot issue split', () => {
+  let p: Issue, e: Issue, hx: Issue, c0: Issue
+  let file: string
+  const plan = () => [
+    { title: 'S1' },
+    { title: 'S2', description: 'Two', status: 'todo', priority: 'low', blockedBy: [1] },
+    { title: 'S3', blockedBy: [1, 2, `ISS-${e.id}`] },
+  ]
+
+  beforeEach(() => {
+    p = addIssue('P', 'todo', 2)
+    e = addIssue('E', 'todo')
+    hx = addElsewhere(hoot.hotel.id, 'Hx')
+    c0 = addIssue('C0', 'todo')
+    attach(p, c0)
+    file = path.join(hoot.directory, 'plan.json')
+    fs.writeFileSync(file, JSON.stringify(plan(), null, 2))
+  })
+
+  it('creates the issues as the last sub-issues, in order, with their dependencies, and prints their identifiers', async () => {
+    const { code, stdout, stderr } = await run(['issue', 'split', `ISS-${p.id}`, '--file', file])
+    expect(stderr).toBe('')
+    expect(code).toBe(0)
+    const [s1, s2, s3] = saved().slice(-3)
+    expect(stdout).toBe(`ISS-${s1!.id}\nISS-${s2!.id}\nISS-${s3!.id}\n`)
+    expect(subIssueTitles(p)).toEqual(['C0', 'S1', 'S2', 'S3'])
+    expect(s1).toMatchObject({ status: 'backlog', priority: 2, description: '' })
+    expect(s2).toMatchObject({ status: 'todo', priority: 4, description: 'Two' })
+    expect(s3).toMatchObject({ status: 'backlog', priority: 2 })
+    expect(dependencyTitles()).toEqual([
+      ['S2', 'S1'],
+      ['S3', 'S1'],
+      ['S3', 'S2'],
+      ['S3', 'E'],
+    ])
+    expect(hoot.created.map((issue) => issue.title)).toEqual(['S1', 'S2', 'S3'])
+  })
+
+  it('reads standard input with -, and prints the new issues as JSON with --json', async () => {
+    const { code, stdout } = await run(['issue', 'split', `${p.id}`, '--file', '-', '--json'], {
+      stdin: `﻿${JSON.stringify(plan())}`,
+    })
+    expect(code).toBe(0)
+    const json = JSON.parse(stdout)
+    expect(json.map((issue: { title: string }) => issue.title)).toEqual(['S1', 'S2', 'S3'])
+    expect(json[1].blockedBy).toStrictEqual([summaryOf(json[0])])
+    expect(json[2].blockedBy).toStrictEqual([
+      summaryOf(json[0]),
+      summaryOf(json[1]),
+      { identifier: `ISS-${e.id}`, number: e.id, title: 'E', status: 'todo', project: 'gamma' },
+    ])
+    expect(json[0].parent).toMatchObject({ identifier: `ISS-${p.id}` })
+  })
+
+  it('refuses what is wrong with the issue or the file, or would break a rule, creating none', async () => {
+    const withItem = (index: number, changes: Record<string, unknown>) =>
+      plan().map((item, at) => (at === index ? { ...item, ...changes } : item))
+    const cases: Array<[unknown, string]> = [
+      [withItem(2, { blockedBy: [3] }), 'Item 3 cannot be blocked by itself.'],
+      [
+        withItem(1, { blockedBy: [1] }).map((item, at) =>
+          at === 0 ? { ...item, blockedBy: [2] } : item,
+        ),
+        'Item 1 cannot be blocked by item 2, which waits for it already',
+      ],
+      [withItem(2, { blockedBy: [4] }), 'which is neither the place of an item, from 1 to 3'],
+      [
+        withItem(2, { blockedBy: [`ISS-${hx.id}`] }),
+        `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+      ],
+      [
+        withItem(2, { blockedBy: [`ISS-${p.id}`] }),
+        `Item 3 cannot be blocked by ISS-${p.id}, which is above it`,
+      ],
+      [plan().map((item, at) => (at === 0 ? {} : item)), 'Item 1 in '],
+      [withItem(1, { status: 'doing' }), 'The status of item 2 in '],
+      [withItem(2, { title: '' }), 'The title of item 3 is empty'],
+      [withItem(0, { priority: 'p1' }), 'The priority of item 1 in '],
+      [withItem(0, { blocked_by: [] }), 'has the field "blocked_by"'],
+      [{ title: 'Not an array' }, 'are not a JSON array'],
+    ]
+    for (const [content, message] of cases) {
+      fs.writeFileSync(file, JSON.stringify(content))
+      await expectRefused(['issue', 'split', `ISS-${p.id}`, '--file', file], message)
+    }
+    fs.writeFileSync(file, 'not JSON')
+    await expectRefused(['issue', 'split', `ISS-${p.id}`, '--file', file], 'are not JSON')
+    fs.writeFileSync(file, JSON.stringify(plan()))
+    await expectRefused(
+      ['issue', 'split', `ISS-${hx.id}`, '--file', file],
+      `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+    )
+    await expectRefused(
+      ['issue', 'split', `ISS-${p.id}`, '--file', path.join(hoot.directory, 'missing.json')],
+      'Could not read the issues from',
+    )
+    await expectRefused(['issue', 'split', `ISS-${p.id}`], "required option '--file <file>'")
+    expect(hoot.created).toEqual([])
+  })
+
+  it('refuses more sub-issues than the parent can have', async () => {
+    for (let index = 0; index < 98; index++) attach(p, addIssue(`C${index + 1}`))
+    await expectRefused(
+      ['issue', 'split', `ISS-${p.id}`, '--file', file],
+      `ISS-${p.id} has 99 sub-issues, and 3 more would make 102: an issue can have at most 100.`,
+    )
+    expect(subIssueTitles(p)).toHaveLength(99)
   })
 })
 
@@ -1083,6 +1595,14 @@ describe('hoot --help and hoot issue --help', () => {
       '--remove-parent',
       '--add-sub-issue <issues>',
       '--remove-sub-issue <issues>',
+      'split',
+      '--file <file>',
+      '--blocked-by <issues>',
+      '--blocking <issues>',
+      '--add-blocked-by <issues>',
+      '--remove-blocked-by <issues>',
+      '--add-blocking <issues>',
+      '--remove-blocking <issues>',
     ]) {
       expect(help).toContain(text)
     }
@@ -1091,6 +1611,13 @@ describe('hoot --help and hoot issue --help', () => {
     expect(help).toMatch(
       /Usage: hoot issue edit .*--parent <issue>.*--remove-parent.*--add-sub-issue <issues>.*--remove-sub-issue <issues>/,
     )
+    expect(help).toMatch(
+      /Usage: hoot issue create .*--blocked-by <issues>.*--blocking <issues>.*Usage: hoot issue edit/,
+    )
+    expect(help).toMatch(
+      /Usage: hoot issue edit .*--add-blocked-by <issues>.*--remove-blocked-by <issues>.*--add-blocking <issues>.*--remove-blocking <issues>/,
+    )
+    expect(help).toMatch(/Usage: hoot issue split \[options\] <issue>.*--file <file>.*--json/)
   })
 
   it('shows the help of a command', async () => {

@@ -1,6 +1,7 @@
 import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
+import type { Dependencies, Dependency } from './dependencies'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
@@ -83,6 +84,15 @@ export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: fals
 
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
+
+/** Whether dependencies were made or removed, or why not. */
+export type DependencyChangeResult = { ok: true } | { ok: false; message: string }
+
+/**
+ * The dependency a new issue is created with: the issue it blocks, which is
+ * then blocked by it, or the issue it is blocked by.
+ */
+export type NewIssueDependency = { blocking: number } | { blockedBy: number }
 
 /** Whether a change to an issue's progress through its workflow was made, or why not. */
 export type WorkflowChangeResult = { ok: true } | { ok: false; message: string }
@@ -183,6 +193,10 @@ export const IpcChannel = {
   listSubIssues: 'issues:list-sub-issues',
   setIssueParents: 'issues:set-parents',
   subIssuesChanged: 'issues:sub-issues-changed',
+  listDependencies: 'issues:list-dependencies',
+  changeDependencies: 'issues:change-dependencies',
+  createDependentIssue: 'issues:create-dependent',
+  dependenciesChanged: 'issues:dependencies-changed',
   listWorkflowRecords: 'workflows:list-records',
   workflowChanged: 'workflows:changed',
   reportStep: 'workflows:report-step',
@@ -380,6 +394,23 @@ export interface HootApi {
    * with a parent or sub-issues was deleted; these are all of them now.
    */
   onSubIssuesChanged(listener: (subIssues: SubIssues) => void): () => void
+  /** Every dependency, those of the issues of removed projects included. */
+  listDependencies(): Promise<Dependencies>
+  /**
+   * Removes dependencies and makes others, all together or, when one cannot
+   * be, not at all.
+   */
+  changeDependencies(change: {
+    add: Dependency[]
+    remove: Dependency[]
+  }): Promise<DependencyChangeResult>
+  /** Creates an issue with a dependency on another, or neither when the dependency cannot be made. */
+  createDependentIssue(issue: NewIssue, dependency: NewIssueDependency): Promise<IssueResult>
+  /**
+   * The dependencies changed, from the window or from hoot, or an issue with
+   * some was deleted; these are all of them now.
+   */
+  onDependenciesChanged(listener: (dependencies: Dependencies) => void): () => void
   /**
    * The records of the workflows of the issues without a project and of
    * those of the projects in the list, by issue; an issue without any is

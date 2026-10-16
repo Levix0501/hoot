@@ -7,8 +7,10 @@
  * - `GET /issues/<number>`: the issue with this number, as in `ISS-12`, if it is in the
  *   project; `null` when it is not.
  * - `POST /issues`: creates an issue in the project, from a `NewHootIssue`.
- * - `PATCH /issues/<number>`: changes the parent and the sub-issues of an
- *   issue of the project, from an `IssueEdit`.
+ * - `PATCH /issues/<number>`: changes the parent, the sub-issues and the
+ *   dependencies of an issue of the project, from an `IssueEdit`.
+ * - `POST /issues/<number>/split`: creates sub-issues of an issue of the
+ *   project, with dependencies, from a `SplitRequest`.
  * - `POST /steps/report`: reports the outcome of the current step of the
  *   workflow of the issue the session was started from, from a
  *   `StepReportRequest`.
@@ -42,8 +44,9 @@ export interface HootProject {
 }
 
 /**
- * An issue's parent or one of its sub-issues, which may belong to another
- * project than the issue, or to none.
+ * An issue's parent, one of its sub-issues, or one of the issues it is
+ * blocked by or blocks, which may belong to another project than the issue,
+ * or to none.
  */
 export interface RelatedIssue {
   /** Its number, as in `ISS-12`. */
@@ -58,13 +61,16 @@ export interface RelatedIssue {
 
 /**
  * An issue of the session's project as hoot gets it: with its parent, unless
- * it is a top-level issue, and its sub-issues, in the order its page lists
- * them. A parent or sub-issue of a project removed from Hoot's list is left
- * out, as Hoot's window leaves it out.
+ * it is a top-level issue; its sub-issues, in the order its page lists them;
+ * and the issues it is blocked by and those it blocks, in the order the
+ * dependencies were made. An issue of a project removed from Hoot's list is
+ * left out, as Hoot's window leaves it out.
  */
 export interface HootIssue extends Issue {
   parent: RelatedIssue | null
   subIssues: RelatedIssue[]
+  blockedBy: RelatedIssue[]
+  blocking: RelatedIssue[]
 }
 
 /**
@@ -72,6 +78,8 @@ export interface HootIssue extends Issue {
  * issue dialog does: on one line, without the whitespace around it. With a
  * parent, given by its number in decimal digits, it is created as the
  * parent's last sub-issue, with the parent's priority unless one is given.
+ * It is blocked by the issues `blockedBy` gives, and blocks those `blocking`
+ * gives, by their numbers.
  */
 export interface NewHootIssue {
   title: string
@@ -79,19 +87,52 @@ export interface NewHootIssue {
   status: IssueStatus
   priority?: IssuePriority
   parent?: string
+  blockedBy?: string[]
+  blocking?: string[]
 }
 
 /**
- * What changes about an issue's parent and sub-issues, each issue given by its
- * number in decimal digits: its parent, or none for `removeParent`; issues
- * that become its last sub-issues, in this order, leaving any other parent
- * they have; and sub-issues of it that become top-level issues.
+ * What changes about an issue's parent, sub-issues and dependencies, each
+ * issue given by its number in decimal digits: its parent, or none for
+ * `removeParent`; issues that become its last sub-issues, in this order,
+ * leaving any other parent they have; sub-issues of it that become top-level
+ * issues; issues it becomes blocked by, or stops being blocked by; and issues
+ * that become blocked by it, or stop being blocked by it.
  */
 export interface IssueEdit {
   parent?: string
   removeParent?: boolean
   addSubIssues?: string[]
   removeSubIssues?: string[]
+  addBlockedBy?: string[]
+  removeBlockedBy?: string[]
+  addBlocking?: string[]
+  removeBlocking?: string[]
+}
+
+/**
+ * An issue a sub-issue to create is blocked by or blocks: another of those
+ * created with it, by its place among them from 1, or an issue of the
+ * project, by its number in decimal digits.
+ */
+export type SplitReference = { item: number } | { issue: string }
+
+/**
+ * A sub-issue to create, as `NewHootIssue` gives one, but for the parent,
+ * which is the issue split.
+ */
+export interface SplitIssue {
+  title: string
+  description: string
+  status: IssueStatus
+  priority?: IssuePriority
+  blockedBy: SplitReference[]
+  blocking: SplitReference[]
+}
+
+/** Sub-issues to create together, in order, after the issue's other sub-issues. */
+export interface SplitRequest {
+  issues: SplitIssue[]
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */
@@ -103,6 +144,7 @@ export type IssueListAnswer = HootAnswer<{ issues: HootIssue[] }>
 export type IssueAnswer = HootAnswer<{ issue: HootIssue | null }>
 export type CreatedIssueAnswer = HootAnswer<{ issue: HootIssue }>
 export type EditedIssueAnswer = HootAnswer<{ issue: HootIssue }>
+export type SplitAnswer = HootAnswer<{ issues: HootIssue[] }>
 
 /** An outcome of the current step, by its name, and the agent's summary of the step, in Markdown. */
 export interface StepReportRequest {

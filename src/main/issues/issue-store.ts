@@ -1,7 +1,15 @@
 import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import {
+  dependencyProblem,
+  hasDependency,
+  withDependencies,
+  type Dependencies,
+  type Dependency,
+} from '../../shared/dependencies'
+import {
   isCompleted,
+  issueIdentifier,
   issueTitle,
   type Issue,
   type IssueChanges,
@@ -50,8 +58,22 @@ const LISTED_PROJECTS = 'SELECT id FROM projects WHERE list_position IS NOT NULL
 /** Limits a statement to the issues Hoot shows: those without a project, and those of the projects in the list. */
 const SHOWN = `(project_id IS NULL OR project_id IN (${LISTED_PROJECTS}))`
 
+/** How an issue Hoot does not show, as one of a removed project, is named in a reason. */
+const UNSHOWN_ISSUE = 'an issue Hoot does not show'
+
 /** Why issues cannot get the parents asked for: it would break the rules of sub-issues. */
 export class SubIssueError extends Error {}
+
+/**
+ * Why dependencies cannot be made or removed as asked: one is there already,
+ * or not there, or they would break the rules of dependencies.
+ */
+export class DependencyError extends Error {}
+
+/** Until they are saved, new issues go by -1, -2 and on, which no issue has, by their place from 0. */
+const placeholder = (index: number) => -(index + 1)
+/** The place of a new issue, from 0, by the id it goes by until it is saved. */
+const placeOf = (id: number) => -id - 1
 
 /** The title to save, or an error when nothing but whitespace was entered. */
 function savedTitle(entered: string): string {
@@ -60,18 +82,53 @@ function savedTitle(entered: string): string {
   return title
 }
 
+/** The issues a new issue is to be blocked by, and those it is to block, by their ids. */
+export interface NewIssueDependencies {
+  blockedBy?: readonly number[]
+  blocking?: readonly number[]
+}
+
+/**
+ * An issue among those created together, by its place among them from 0, or
+ * an issue there is, by its id.
+ */
+export type IssueReference = { item: number } | { issueId: number }
+
+/** One of the sub-issues created together, with the issues it is to be blocked by and to block. */
+export interface NewSubIssue extends NewIssue {
+  blockedBy: readonly IssueReference[]
+  blocking: readonly IssueReference[]
+}
+
+/**
+ * Changes to the parents and dependencies of issues, made together: issues
+ * given other parents, or none, one after another; dependencies removed; and
+ * dependencies made.
+ */
+export interface RelationChange {
+  parents?: readonly ParentChange[]
+  removeDependencies?: readonly Dependency[]
+  addDependencies?: readonly Dependency[]
+}
+
 /**
  * The issues, kept in the database: those without a project, and those of the
- * projects, with the parent of each sub-issue. Only the issues without a
- * project and those of the projects in the list can be read or changed; those
- * of a removed project stay in the database until it is added again, and so
- * do their parents and sub-issues. It says when the parents of issues change,
- * also when an issue with a parent or sub-issues is deleted.
+ * projects, with the parent of each sub-issue and the issues each is blocked
+ * by. Only the issues without a project and those of the projects in the list
+ * can be read or changed; those of a removed project stay in the database
+ * until it is added again, and so do their parents, sub-issues and
+ * dependencies. It says when the parents of issues change, and when their
+ * dependencies do, also when an issue with any is deleted.
  */
-export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues: SubIssues] }> {
+export class IssueStore extends EventEmitter<{
+  'sub-issues-changed': [subIssues: SubIssues]
+  'dependencies-changed': [dependencies: Dependencies]
+}> {
   private readonly statements
   /** Grows with every change of the parents of issues. */
   private subIssueVersion = 0
+  /** Grows with every change of the dependencies. */
+  private dependencyVersion = 0
 
   constructor(
     private readonly db: DatabaseSync,
@@ -106,6 +163,16 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
       linked: db.prepare('SELECT 1 FROM sub_issues WHERE issue_id = ? OR parent_id = ? LIMIT 1'),
       link: db.prepare('INSERT INTO sub_issues (issue_id, parent_id) VALUES (?, ?)'),
       unlink: db.prepare('DELETE FROM sub_issues WHERE issue_id = ?'),
+      dependencies: db.prepare(
+        'SELECT issue_id, blocked_by_id FROM issue_dependencies ORDER BY id',
+      ),
+      dependent: db.prepare(
+        'SELECT 1 FROM issue_dependencies WHERE issue_id = ? OR blocked_by_id = ? LIMIT 1',
+      ),
+      depend: db.prepare('INSERT INTO issue_dependencies (issue_id, blocked_by_id) VALUES (?, ?)'),
+      undepend: db.prepare(
+        'DELETE FROM issue_dependencies WHERE issue_id = ? AND blocked_by_id = ?',
+      ),
     }
   }
 
@@ -135,36 +202,123 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
 
   /**
    * Creates an issue, created now, with the next number: in a project in the
-   * list, or in none; and with a parent, after the parent's other
-   * sub-issues. `null` when the project is not in the list. Throws when the
-   * title is empty, when there is no such parent, and with a `SubIssueError`
-   * when the parent cannot have another sub-issue.
+   * list, or in none; with a parent, after the parent's other sub-issues; and
+   * blocked by issues and blocking others. `null` when the project is not in
+   * the list. Throws, creating nothing, when the title is empty, when the
+   * parent or an issue of a dependency cannot be read, with a
+   * `SubIssueError` when the parent cannot have another sub-issue, and with a
+   * `DependencyError` when the dependencies would break their rules.
    */
-  create(issue: NewIssue, parentId: number | null = null): Issue | null {
-    const title = savedTitle(issue.title)
+  create(
+    issue: NewIssue,
+    parentId: number | null = null,
+    { blockedBy = [], blocking = [] }: NewIssueDependencies = {},
+  ): Issue | null {
+    const created = this.createAll(
+      parentId,
+      [
+        {
+          ...issue,
+          blockedBy: blockedBy.map((issueId) => ({ issueId })),
+          blocking: blocking.map((issueId) => ({ issueId })),
+        },
+      ],
+      () => 'the new issue',
+    )
+    return created?.[0] ?? null
+  }
+
+  /**
+   * Creates issues together as a parent's last sub-issues, in order, each
+   * blocked by issues and blocking others, among them or not; or, when one of
+   * them cannot be, none of them. `null` when a project is not in the list.
+   * Throws, creating nothing, when a title is empty, when the parent or an
+   * issue of a dependency cannot be read, with a `SubIssueError` when the
+   * parent cannot have that many more sub-issues, and with a
+   * `DependencyError` when the dependencies would break their rules; a reason
+   * names each new issue by `itemName`, given its place from 0.
+   */
+  createSubIssues(
+    parentId: number,
+    issues: readonly NewSubIssue[],
+    itemName: (index: number) => string = (index) => `new issue ${index + 1}`,
+  ): Issue[] | null {
+    return this.createAll(parentId, issues, itemName)
+  }
+
+  private createAll(
+    parentId: number | null,
+    issues: readonly NewSubIssue[],
+    itemName: (index: number) => string,
+  ): Issue[] | null {
+    const titles = issues.map((issue) => savedTitle(issue.title))
     const created = transaction(this.db, () => {
-      if (issue.projectId !== null && !this.isListed(issue.projectId)) return null
+      if (issues.some(({ projectId }) => projectId !== null && !this.isListed(projectId))) {
+        return null
+      }
       if (parentId !== null) {
         if (this.get(parentId) === null) throw new Error('The parent issue no longer exists.')
-        const problem = newSubIssueProblem(this.links(), parentId)
+        const problem =
+          issues.length === 0 ? null : newSubIssueProblem(this.links(), parentId, issues.length)
         if (problem !== null) throw new SubIssueError(problem)
       }
-      const now = this.now()
-      const { lastInsertRowid } = this.statements.insert.run(
-        issue.projectId,
-        title,
-        issue.description,
-        issue.status,
-        issue.priority,
-        now,
-        isCompleted(issue.status) ? now : null,
+      const resolve = (reference: IssueReference) => {
+        if ('item' in reference) return placeholder(reference.item)
+        if (this.get(reference.issueId) === null) throw new Error('The issue no longer exists.')
+        return reference.issueId
+      }
+      const added = withDependencies([], {
+        add: issues.flatMap((issue, index) => [
+          ...issue.blockedBy.map((reference) => ({
+            issueId: placeholder(index),
+            blockedById: resolve(reference),
+          })),
+          ...issue.blocking.map((reference) => ({
+            issueId: resolve(reference),
+            blockedById: placeholder(index),
+          })),
+        ]),
+      })
+      const newIds = issues.map((_issue, index) => placeholder(index))
+      const links =
+        parentId === null
+          ? this.links()
+          : withParents(
+              this.links(),
+              newIds.map((issueId) => ({ issueId, parentId })),
+            )
+      const problem = dependencyProblem(
+        links,
+        withDependencies(this.dependencyLinks(), { add: added }),
+        { added, moved: parentId === null ? [] : newIds },
+        (id) => (id < 0 ? itemName(placeOf(id)) : this.nameOf(id)),
       )
-      const id = Number(lastInsertRowid)
-      if (parentId !== null) this.statements.link.run(id, parentId)
-      return this.get(id)
+      if (problem !== null) throw new DependencyError(problem)
+      const now = this.now()
+      const ids = issues.map((issue, index) => {
+        const { lastInsertRowid } = this.statements.insert.run(
+          issue.projectId,
+          titles[index]!,
+          issue.description,
+          issue.status,
+          issue.priority,
+          now,
+          isCompleted(issue.status) ? now : null,
+        )
+        const id = Number(lastInsertRowid)
+        if (parentId !== null) this.statements.link.run(id, parentId)
+        return id
+      })
+      const saved = (id: number) => (id < 0 ? ids[placeOf(id)]! : id)
+      for (const { issueId, blockedById } of added) {
+        this.statements.depend.run(saved(issueId), saved(blockedById))
+      }
+      return { issues: ids.map((id) => this.get(id)!), dependent: added.length > 0 }
     })
-    if (created !== null && parentId !== null) this.subIssuesChanged()
-    return created
+    if (created === null) return null
+    if (parentId !== null && created.issues.length > 0) this.subIssuesChanged()
+    if (created.dependent) this.dependenciesChanged()
+    return created.issues
   }
 
   /**
@@ -200,12 +354,15 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
 
   /**
    * Deletes an issue for good; false when there is no such issue. Its
-   * sub-issues, also those of removed projects, become top-level issues.
+   * sub-issues, also those of removed projects, become top-level issues, and
+   * its dependencies, both ways, go with it.
    */
   delete(id: number): boolean {
     const linked = this.statements.linked.get(id, id) !== undefined
+    const dependent = this.statements.dependent.get(id, id) !== undefined
     const deleted = this.statements.delete.run(id).changes > 0
     if (deleted && linked) this.subIssuesChanged()
+    if (deleted && dependent) this.dependenciesChanged()
     return deleted
   }
 
@@ -214,38 +371,118 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
     return { version: this.subIssueVersion, links: this.links() }
   }
 
+  /** Every dependency, those of the issues of removed projects included, in the order they were made. */
+  dependencies(): Dependencies {
+    return { version: this.dependencyVersion, links: this.dependencyLinks() }
+  }
+
   /**
    * Gives issues other parents, or none, one after another and all together:
    * an issue that gets another parent goes after that parent's other
    * sub-issues. Throws, changing nothing, when an issue or a parent is not
-   * one that can be read, and with a `SubIssueError` when the changes would
-   * break the rules of sub-issues.
+   * one that can be read, with a `SubIssueError` when the changes would
+   * break the rules of sub-issues, and with a `DependencyError` when they
+   * would break those of dependencies.
    */
   setParents(changes: readonly ParentChange[]): void {
+    this.changeRelations({ parents: changes })
+  }
+
+  /**
+   * Changes the parents and the dependencies of issues, all together: gives
+   * issues other parents, or none, one after another, removes dependencies,
+   * and makes others, each once, after the others. Throws, changing nothing,
+   * when an issue is not one that can be read; with a `DependencyError` when
+   * a dependency to remove is not there or one to make is there already; with
+   * a `SubIssueError` when the changes would break the rules of sub-issues;
+   * and with a `DependencyError` when they would break those of
+   * dependencies.
+   */
+  changeRelations({
+    parents = [],
+    removeDependencies = [],
+    addDependencies = [],
+  }: RelationChange): void {
     const changed = transaction(this.db, () => {
-      for (const { issueId, parentId } of changes) {
-        for (const id of parentId === null ? [issueId] : [issueId, parentId]) {
-          if (this.get(id) === null) throw new Error('The issue no longer exists.')
+      const ids = [
+        ...parents.flatMap(({ issueId, parentId }) =>
+          parentId === null ? [issueId] : [issueId, parentId],
+        ),
+        ...[...removeDependencies, ...addDependencies].flatMap(({ issueId, blockedById }) => [
+          issueId,
+          blockedById,
+        ]),
+      ]
+      for (const id of ids) {
+        if (this.get(id) === null) throw new Error('The issue no longer exists.')
+      }
+      const name = (id: number) => this.nameOf(id)
+      const current = this.dependencyLinks()
+      for (const dependency of removeDependencies) {
+        if (!hasDependency(current, dependency)) {
+          throw new DependencyError(
+            `${name(dependency.issueId)} is not blocked by ${name(dependency.blockedById)}.`,
+          )
+        }
+      }
+      const kept = withDependencies(current, { remove: removeDependencies })
+      const added = withDependencies([], { add: addDependencies })
+      for (const dependency of added) {
+        if (hasDependency(kept, dependency)) {
+          throw new DependencyError(
+            `${name(dependency.issueId)} is blocked by ${name(dependency.blockedById)} already.`,
+          )
         }
       }
       const links = this.links()
-      const problem = subIssueProblem(
-        withParents(links, changes),
-        changes.map((change) => change.issueId),
-        // Not naming an issue of a removed project, which Hoot does not show.
-        (id) => this.get(id) !== null,
+      const moved = withParents(links, parents)
+      if (parents.length > 0) {
+        const problem = subIssueProblem(
+          moved,
+          parents.map((change) => change.issueId),
+          // Not naming an issue of a removed project, which Hoot does not show.
+          (id) => this.get(id) !== null,
+        )
+        if (problem !== null) throw new SubIssueError(problem)
+      }
+      const problem = dependencyProblem(
+        moved,
+        withDependencies(kept, { add: added }),
+        {
+          added,
+          moved: [...new Set(parents.map((change) => change.issueId))].filter((id) => {
+            const parentId = parentOf(moved, id)
+            return parentId !== null && parentId !== parentOf(links, id)
+          }),
+        },
+        name,
       )
-      if (problem !== null) throw new SubIssueError(problem)
-      let current = links
-      for (const change of changes) {
-        if (parentOf(current, change.issueId) === change.parentId) continue
-        current = withParents(current, [change])
+      if (problem !== null) throw new DependencyError(problem)
+      let applied = links
+      for (const change of parents) {
+        if (parentOf(applied, change.issueId) === change.parentId) continue
+        applied = withParents(applied, [change])
         this.statements.unlink.run(change.issueId)
         if (change.parentId !== null) this.statements.link.run(change.issueId, change.parentId)
       }
-      return current !== links
+      for (const { issueId, blockedById } of removeDependencies) {
+        this.statements.undepend.run(issueId, blockedById)
+      }
+      for (const { issueId, blockedById } of added) {
+        this.statements.depend.run(issueId, blockedById)
+      }
+      return {
+        parents: applied !== links,
+        dependencies: removeDependencies.length + added.length > 0,
+      }
     })
-    if (changed) this.subIssuesChanged()
+    if (changed.parents) this.subIssuesChanged()
+    if (changed.dependencies) this.dependenciesChanged()
+  }
+
+  /** How a reason names an issue: by its identifier, unless Hoot does not show it. */
+  private nameOf(id: number): string {
+    return this.get(id) === null ? UNSHOWN_ISSUE : issueIdentifier(id)
   }
 
   private links(): SubIssueLink[] {
@@ -254,9 +491,23 @@ export class IssueStore extends EventEmitter<{ 'sub-issues-changed': [subIssues:
     ).map((row) => ({ issueId: row.issue_id, parentId: row.parent_id }))
   }
 
+  private dependencyLinks(): Dependency[] {
+    return (
+      this.statements.dependencies.all() as unknown as Array<{
+        issue_id: number
+        blocked_by_id: number
+      }>
+    ).map((row) => ({ issueId: row.issue_id, blockedById: row.blocked_by_id }))
+  }
+
   private subIssuesChanged(): void {
     this.subIssueVersion++
     this.emit('sub-issues-changed', this.subIssues())
+  }
+
+  private dependenciesChanged(): void {
+    this.dependencyVersion++
+    this.emit('dependencies-changed', this.dependencies())
   }
 
   /** Whether a project is in the list. */

@@ -205,12 +205,14 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   those without one last, then newest first; done and canceled issues are listed the most recently
   completed first. A row shows the issue's priority, its identifier (such as `ISS-12`), its status,
   its title, followed in smaller, lighter text by the [step](#issues) it is at, or **Finished**,
-  once work on it has started, the name of its project if it has one, and the day it was created,
-  and ends with the [start button](#issues) of an issue that is neither done nor canceled. Click a
-  group's header to collapse or expand it, or its `+` to create an issue with its status. Click an
-  issue to show its page; right-click it to change its status, priority or project, copy its
-  identifier or title, give it a parent or sub-issues or take it from its parent (see
-  [Sub-issues](#issues)), or delete it.
+  once work on it has started, how many issues it waits on (a red blocked icon and the count) and
+  how many wait on it (a blocking icon and the count; see [Dependencies](#issues)), the name of its
+  project if it has one, and the day it was created, and ends with the [start button](#issues) of
+  an issue that is neither done nor canceled. Click a group's header to collapse or expand it, or
+  its `+` to create an issue with its status. Click an issue to show its page; right-click it to
+  change its status, priority or project, copy its identifier or title, give it a parent or
+  sub-issues or take it from its parent (see [Sub-issues](#issues)), mark it as blocked by an issue
+  or blocking one, or delete it.
 - **The Project dropdown**, at the right end of the row of views, picks whose issues the list
   shows. Check any of its choices, **No project** and the projects (in the sidebar's order), to
   show only the issues of those checked: the issues without a project while **No project** is
@@ -235,7 +237,8 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   stays for the next issue, keeping the status, the priority and the project. An issue without a
   project can be created also while no project is in the list.
 - **An issue's page** shows its title and description, with its status, priority, project and
-  [step](#issues) beside them (under the title when the window is narrow), and its activity; above
+  [step](#issues), and the issues it is blocked by and those it blocks, beside them (under the title
+  when the window is narrow), and its activity; above
   them stands the start button of an issue that is neither done nor canceled. Its title row says
   **Issues ›**, the issue's identifier and its title. Edit the title and the description
   where they show; they are saved as you type. The description is formatted as you type GitHub
@@ -252,9 +255,11 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   the list as it is shown, and the count beside them says where the issue is in it; when the list
   does not show the issue, they go through every issue in the order of **All issues** with nothing
   checked. The `⋯` menu copies the issue's identifier or title, gives it a parent or sub-issues or
-  takes it from its parent (see Sub-issues below), or deletes the issue for good, after asking;
-  the list is shown then. Deleting an issue with sub-issues says how many there are: they stay, as
-  top-level issues, with their own sub-issues.
+  takes it from its parent (see Sub-issues below), marks it as blocked by an issue or blocking one
+  (see Dependencies below), or deletes the issue for good, after asking; the list is shown then.
+  Deleting an issue with sub-issues says how many there are: they stay, as top-level issues, with
+  their own sub-issues. Deleting an issue that issues wait on says how many: they are no longer
+  blocked by it, and its dependencies go with it.
 - **Sub-issues**: as in Linear and GitHub, an issue can have a parent, whose sub-issue it is,
   and sub-issues of its own, any level deep: up to 8 levels below a top-level issue, an issue
   without a parent, and up to 100 sub-issues each. A parent and its sub-issues may belong to
@@ -276,6 +281,28 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   makes it a top-level issue. A change that would break a limit changes nothing, and says why.
   The issues of a project removed from the list are not shown, nor counted, as anyone's parent or
   sub-issue, but keep their place, and are back in it when the project is added again.
+- **Dependencies**: as in Linear and GitHub, an issue can be blocked by other issues, which it waits
+  for, and block others. Under its properties, an issue's page lists under **Blocked by** the
+  issues it is blocked by, and under **Blocking** those it blocks, done and canceled ones too, each
+  with its status and title, and its project when that is not the issue's (**No project** for
+  none); click one to show its page, or the `✕` at its end, which shows while you point at it, to
+  remove the dependency. An issue waits on an issue it is blocked by while neither is done nor
+  canceled: its status then has a small red badge, and its row on the list counts those it waits
+  on and those that wait on it. **Blocked by…** and **Blocking…** in the `⋯` menu and the row's
+  menu pick, in a list you can search by identifier or title, an issue that the issue becomes
+  blocked by, or one that becomes blocked by it, at once; the list leaves out what the rules below
+  do not allow. Its last item, whatever you type, **Create new issue blocking ISS-12…** (or
+  **blocked by**), opens a dialog for a new issue with that dependency, titled with what you typed,
+  in the backlog, without a priority, in the issue's project, all of which you can change;
+  **Create** (⌘ Enter) creates it, and Esc closes it without creating anything. The new issue
+  dialog's draft is not touched. Dependencies may join issues of different projects, or of none,
+  and stay when the issues move. An issue waits for the issues it is blocked by and, as a parent,
+  for its sub-issues, so no issue can wait for itself, through others or not, nor be blocked by an
+  issue above or below it, and no parent can be given that would make either happen; an issue is
+  blocked by at most 50 issues and blocks at most 50. A change that would break a rule changes
+  nothing, and says why. The dependencies of the issues of a project removed from the list are not
+  shown nor counted, but still count for the rules, and are back when it is added again. Starting
+  work on an issue and its activity are the same whatever its dependencies.
 - **Keys**: on an Issues page, unless you are typing in a field or the description, or a menu or
   dialog is open: C opens the new issue dialog; J and K (and on a list ↓ and ↑) move to the next
   and previous issue; Enter shows the issue moved to on a list, and Tab moves from its row to its
@@ -413,7 +440,10 @@ hoot issue list                # the issues neither done nor canceled
 hoot issue list --status todo --status in-progress
 hoot issue create --title "Fix the login bug" --description-file notes.md --priority high
 hoot issue create --title "Write the tests" --parent ISS-12   # a sub-issue of ISS-12
+hoot issue create --title "Ship it" --blocked-by ISS-14,ISS-15
 hoot issue edit ISS-12 --add-sub-issue ISS-14,ISS-15
+hoot issue edit ISS-15 --add-blocked-by ISS-14 --remove-blocking ISS-16
+hoot issue split ISS-12 --file plan.json   # sub-issues of ISS-12, with their dependencies
 hoot step report no-split --summary-file scope.md   # in a session started from an issue
 ```
 
@@ -423,8 +453,10 @@ hoot step report no-split --summary-file scope.md   # in a session started from 
   `Sub-issue of ISS-4 Ship it (Todo)`; then, if it has a description, a blank line and the
   description as it is written, in Markdown; then, if it has sub-issues, a blank line,
   `Sub-issues · 1/3 (33%)` (how many of those not canceled are done) and a line for each, with
-  its status, identifier and title. A parent or sub-issue of another project than the session's
-  is followed by its project's name, or **No project**, in parentheses.
+  its status, identifier and title; then, if it is blocked by issues, a blank line, `Blocked by`
+  and a line for each, the same way, and if it blocks issues, a blank line, `Blocking` and a line
+  for each. A related issue of another project than the session's is followed by its project's
+  name, or **No project**, in parentheses.
 - **`hoot issue list`** lists the project's issues that are neither done nor canceled, one per
   line with its identifier, status, priority and title, in the order of **All issues** with only
   the project checked. `--all` lists every issue, and `--status <name>`, given once for each
@@ -437,15 +469,37 @@ hoot step report no-split --summary-file scope.md   # in a session started from 
   line, each line break a space, and without the whitespace around it; with the next number; and
   completed as it is created when it is done or canceled. With `--parent <issue>`, an issue of the
   project, it is created as that issue's last sub-issue, with its priority unless `--priority` is
-  given.
-- **`hoot issue edit <issue>`** changes an issue's parent and sub-issues, all together or, when
-  one change cannot be made, not at all, and prints its identifier: `--parent <issue>` makes it a
-  sub-issue of another issue of the project, `--remove-parent` a top-level issue,
-  `--add-sub-issue <issues>` makes issues of the project, separated by commas, its last
-  sub-issues in that order, and `--remove-sub-issue <issues>` makes sub-issues of it top-level
-  issues. It refuses what would put an issue below itself, more than 100 sub-issues under an
-  issue or an issue more than 8 levels below a top-level one, removing a parent the issue does not
-  have or a sub-issue it does not have, and an edit without any of these options.
+  given. `--blocked-by <issues>` makes it blocked by issues of the project, separated by commas,
+  and `--blocking <issues>` makes issues of the project blocked by it; it is created with them, or
+  not at all when they would break the rules of [dependencies](#issues).
+- **`hoot issue edit <issue>`** changes an issue's parent, sub-issues and dependencies, all
+  together or, when one change cannot be made, not at all, and prints its identifier:
+  `--parent <issue>` makes it a sub-issue of another issue of the project, `--remove-parent` a
+  top-level issue, `--add-sub-issue <issues>` makes issues of the project, separated by commas, its
+  last sub-issues in that order, and `--remove-sub-issue <issues>` makes sub-issues of it top-level
+  issues; `--add-blocked-by <issues>` and `--remove-blocked-by <issues>` make it blocked, or no
+  longer blocked, by issues of the project, and `--add-blocking <issues>` and
+  `--remove-blocking <issues>` make issues of the project blocked, or no longer blocked, by it. It
+  refuses what would put an issue below itself, more than 100 sub-issues under an issue or an issue
+  more than 8 levels below a top-level one, removing a parent the issue does not have or a
+  sub-issue it does not have, making a dependency there already or removing one that is not, the
+  same issue both added and removed, what would break the rules of [dependencies](#issues), and an
+  edit without any of these options.
+- **`hoot issue split <issue> --file <file>`** creates, from a JSON array in the UTF-8 file (`-`
+  reads standard input), an issue for each object as the issue's last sub-issues, in order, all
+  together or, when one cannot be created, none, and prints their identifiers, one per line.
+  Each object has `title`, and may have `description`, `status` and `priority` (by their names),
+  each created as `hoot issue create --parent <issue>` creates it, and `blockedBy` and `blocking`,
+  the issues it is blocked by and those it blocks: each the place of another object in the array,
+  from 1, or the identifier of an issue of the project, such as `"ISS-12"`.
+
+  ```json
+  [
+    { "title": "Parse the input" },
+    { "title": "Report errors", "status": "todo", "blockedBy": [1, "ISS-9"] }
+  ]
+  ```
+
 - **`hoot step report <outcome>`**, in a session started from an issue's start button, reports the
   outcome of the step of the issue's workflow that the session is in, by its name, such as
   `no-split`, whatever project and status the issue has now. Its summary, in Markdown, is
@@ -461,24 +515,26 @@ hoot step report no-split --summary-file scope.md   # in a session started from 
   or by starting over, saying where the issue is now.
 - **Names**: the statuses are `backlog`, `todo`, `in-progress`, `done` and `canceled`; the
   priorities `none`, `urgent`, `high`, `medium` and `low`.
-- **`--json`** prints the issue, or the list as an array, as JSON objects with exactly
-  `identifier`, `number`, `title`, `description`, `status`, `priority`, `createdAt`,
-  `completedAt`, `parent`, `subIssues` and `subIssuesSummary`, the times in UTC in ISO 8601,
-  `completedAt` being `null` while the issue is neither done nor canceled. `parent` (`null` for a
-  top-level issue) and each of `subIssues` have `identifier`, `number`, `title`, `status` and
-  `project` (its name, or `null` for none); `subIssuesSummary` has `total` (the sub-issues not
-  canceled), `completed` (those done) and `percentCompleted`, rounded down. A parent or sub-issue
-  of a project removed from Hoot's list is left out, as the window leaves it out. `hoot --help`,
-  `hoot issue --help` and `hoot step --help` explain all of this.
+- **`--json`** prints the issue, or the list (and the issues `split` creates) as an array, as JSON
+  objects with exactly `identifier`, `number`, `title`, `description`, `status`, `priority`,
+  `createdAt`, `completedAt`, `parent`, `subIssues`, `subIssuesSummary`, `blockedBy` and
+  `blocking`, the times in UTC in ISO 8601, `completedAt` being `null` while the issue is neither
+  done nor canceled. `parent` (`null` for a top-level issue) and each of `subIssues`, `blockedBy`
+  (the issues it is blocked by) and `blocking` (those it blocks) have `identifier`, `number`,
+  `title`, `status` and `project` (its name, or `null` for none); `subIssuesSummary` has `total`
+  (the sub-issues not canceled), `completed` (those done) and `percentCompleted`, rounded down. A
+  related issue of a project removed from Hoot's list is left out, as the window leaves it out.
+  `hoot --help`, `hoot issue --help` and `hoot step --help` explain all of this.
 - **In the window**, an issue `hoot` creates shows at once: in the counts of its project's row and
   of the **Issues** row, on the list when what is checked and the view show it, among the
-  issues an issue's page steps through, and among its parent's sub-issues. Parents and sub-issues
-  `hoot` changes show at once too. Nothing else changes there: no message pops up, the page, the
+  issues an issue's page steps through, and among its parent's sub-issues. Parents, sub-issues and
+  dependencies `hoot` changes show at once too. Nothing else changes there: no message pops up, the page, the
   sidebar and the keyboard focus stay as they are, and so does what you are typing. Hoot does not
   record that `hoot`, or which session, created an issue.
 - **When it cannot** do what it is asked, `hoot` says why on standard error and exits with code 1,
   without creating, changing or recording anything: when an issue is not in the project, a name,
-  option or command is wrong, a parent or sub-issue would break the limits of sub-issues, a step
+  option, command or file is wrong, a parent, sub-issue or dependency would break the rules of
+  sub-issues or dependencies, a step
   cannot be reported, the Hoot that started the session is not running any more, or it does not run
   in a session Hoot started.
 - **Agents** are told about `hoot` only by the first message of a session started from an issue,

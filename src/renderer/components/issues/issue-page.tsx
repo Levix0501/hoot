@@ -5,8 +5,10 @@ import {
   CornerLeftUpIcon,
   DeleteIcon,
   EllipsisIcon,
+  FlagIcon,
   LinkIcon,
   ListTreeIcon,
+  OctagonMinusIcon,
   Trash2Icon,
   UnlinkIcon,
 } from 'lucide-react'
@@ -37,7 +39,8 @@ import { useIssueShortcuts } from './use-issue-shortcuts'
 
 /**
  * The issue's menu in the title row: copying it, giving it a parent or
- * sub-issues, taking it from its parent, and deleting it.
+ * sub-issues, taking it from its parent, marking it as blocked by an issue or
+ * blocking one, and deleting it.
  */
 function IssueMenu({ issue }: { issue: Issue }) {
   const copyIssueIdentifier = useAppStore((state) => state.copyIssueIdentifier)
@@ -109,6 +112,20 @@ function IssueMenu({ issue }: { issue: Issue }) {
             Remove parent
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem
+          onClick={() => openIssuePicker('blocked-by', issue.id)}
+          data-testid="issue-menu-blocked-by"
+        >
+          <OctagonMinusIcon />
+          Blocked by…
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => openIssuePicker('blocking', issue.id)}
+          data-testid="issue-menu-blocking"
+        >
+          <FlagIcon />
+          Blocking…
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"

@@ -1,5 +1,12 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'
-import { HOOT_ENV, type HootAnswer, type IssueEdit } from '../shared/hoot-cli'
+import { MAX_BLOCKED_BY, MAX_BLOCKING } from '../shared/dependencies'
+import {
+  HOOT_ENV,
+  type HootAnswer,
+  type IssueEdit,
+  type SplitIssue,
+  type SplitReference,
+} from '../shared/hoot-cli'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
   ISSUE_TITLE_MAX_LENGTH,
@@ -54,6 +61,126 @@ function givenIssues(list: string): string[] {
 
 const quantity = new Intl.NumberFormat('en-US')
 
+/** Why a title cannot be saved, said of `what`, such as "The title"; `null` when it can. */
+function titleProblem(title: string, what: string): string | null {
+  if (title.length > ISSUE_TITLE_MAX_LENGTH) {
+    return (
+      `${what} is ${quantity.format(title.length)} characters long; ` +
+      `Hoot saves titles of up to ${quantity.format(ISSUE_TITLE_MAX_LENGTH)}.`
+    )
+  }
+  if (issueTitle(title) === '') return `${what} is empty: an issue needs one.`
+  return null
+}
+
+/** Why a description cannot be saved, said of `what`, such as "The description"; `null` when it can. */
+function descriptionProblem(description: string, what: string): string | null {
+  if (description.length <= ISSUE_DESCRIPTION_MAX_LENGTH) return null
+  return (
+    `${what} is ${quantity.format(description.length)} characters long; ` +
+    `Hoot saves descriptions of up to ${quantity.format(ISSUE_DESCRIPTION_MAX_LENGTH)}.`
+  )
+}
+
+/** The fields an issue of `hoot issue split` may have. */
+const SPLIT_FIELDS = ['title', 'description', 'status', 'priority', 'blockedBy', 'blocking']
+
+/** A JSON value as a message quotes it. */
+const quoted = (value: unknown) => JSON.stringify(value)
+
+/**
+ * The sub-issues `hoot issue split` is to create, from the JSON of `source`:
+ * an array with an object for each, or a `CliError` saying what is wrong.
+ */
+export function splitIssues(text: string, source: string): SplitIssue[] {
+  let value: unknown
+  try {
+    // A byte order mark is not part of the JSON.
+    value = JSON.parse(text.replace(/^\uFEFF/, ''))
+  } catch (error) {
+    throw new CliError(
+      `The issues in ${source} are not JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (!Array.isArray(value)) {
+    throw new CliError(
+      `The issues in ${source} are not a JSON array, with an object for each issue.`,
+    )
+  }
+  const count = value.length
+  return value.map((entry: unknown, index): SplitIssue => {
+    const item = `item ${index + 1}`
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new CliError(`Item ${index + 1} in ${source} is not a JSON object.`)
+    }
+    const fields = entry as Record<string, unknown>
+    for (const key of Object.keys(fields)) {
+      if (!SPLIT_FIELDS.includes(key)) {
+        throw new CliError(
+          `Item ${index + 1} in ${source} has the field ${quoted(key)}, which an issue does not ` +
+            `have: it has "title", and may have "description", "status", "priority", ` +
+            `"blockedBy" and "blocking".`,
+        )
+      }
+    }
+    const { title, description = '', status, priority } = fields
+    if (title === undefined) throw new CliError(`Item ${index + 1} in ${source} has no "title".`)
+    if (typeof title !== 'string') {
+      throw new CliError(`The title of ${item} in ${source} is not a string.`)
+    }
+    const titleIssue = titleProblem(title, `The title of ${item}`)
+    if (titleIssue !== null) throw new CliError(titleIssue)
+    if (typeof description !== 'string') {
+      throw new CliError(`The description of ${item} in ${source} is not a string.`)
+    }
+    const descriptionIssue = descriptionProblem(description, `The description of ${item}`)
+    if (descriptionIssue !== null) throw new CliError(descriptionIssue)
+    const statusName = status ?? 'backlog'
+    if (typeof statusName !== 'string' || statusNamed(statusName) === undefined) {
+      throw new CliError(
+        `The status of ${item} in ${source} is ${quoted(statusName)}, which is not one of ` +
+          `${STATUS_NAME_LIST.join(', ')}.`,
+      )
+    }
+    if (
+      priority !== undefined &&
+      (typeof priority !== 'string' || priorityNamed(priority) === undefined)
+    ) {
+      throw new CliError(
+        `The priority of ${item} in ${source} is ${quoted(priority)}, which is not one of ` +
+          `${PRIORITY_NAME_LIST.join(', ')}.`,
+      )
+    }
+    /** The issues a field lists, each another item by its place, or an issue by its identifier. */
+    const references = (field: 'blockedBy' | 'blocking'): SplitReference[] => {
+      const list = fields[field] ?? []
+      if (!Array.isArray(list)) {
+        throw new CliError(`The ${quoted(field)} of ${item} in ${source} is not a JSON array.`)
+      }
+      return list.map((given: unknown) => {
+        if (typeof given === 'number' && Number.isInteger(given) && given >= 1 && given <= count) {
+          return { item: given }
+        }
+        const digits = typeof given === 'string' ? /^ISS-(\d+)$/.exec(given)?.[1] : undefined
+        if (digits !== undefined) return { issue: digits }
+        throw new CliError(
+          `The ${quoted(field)} of ${item} in ${source} has ${quoted(given)}, which is neither ` +
+            `the place of an item, from 1 to ${count}, nor the identifier of an issue, such as ` +
+            '"ISS-12".',
+        )
+      })
+    }
+    return {
+      title,
+      description,
+      status: statusNamed(statusName)!,
+      ...(priority === undefined ? {} : { priority: priorityNamed(priority as string)! }),
+      blockedBy: references('blockedBy'),
+      blocking: references('blocking'),
+    }
+  })
+}
+
 /** What Hoot answered, or a `CliError` with why it could not do what was asked. */
 function answered<T extends HootAnswer<object>>(answer: T): Extract<T, { ok: true }> {
   if (!answer.ok) throw new CliError(answer.message)
@@ -70,12 +197,12 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 }
 
 /**
- * Builds hoot's commands: `hoot issue view`, `list`, `create` and `edit`,
- * modeled on `gh issue`, which read or create the issues of the project of
- * the Hoot session hoot runs in, and change their parents and sub-issues; and
- * `hoot step report`, which reports a step of the workflow of the issue the
- * session was started from. Each works through the Hoot that started the
- * session.
+ * Builds hoot's commands: `hoot issue view`, `list`, `create`, `edit` and
+ * `split`, modeled on `gh issue`, which read or create the issues of the
+ * project of the Hoot session hoot runs in, and change their parents,
+ * sub-issues and dependencies; and `hoot step report`, which reports a step
+ * of the workflow of the issue the session was started from. Each works
+ * through the Hoot that started the session.
  */
 export function hootProgram(io: CliIo): Command {
   /** The Hoot and the session that the session's environment names. */
@@ -108,8 +235,8 @@ export function hootProgram(io: CliIo): Command {
   const program = new Command('hoot')
     .description(
       'Read and create the issues of the project of the Hoot session that hoot runs in, change ' +
-        'their parents and sub-issues, and report the steps of the workflow of the issue the ' +
-        'session was started from.',
+        'their parents, sub-issues and dependencies, split an issue into sub-issues, and report ' +
+        'the steps of the workflow of the issue the session was started from.',
     )
     .configureOutput({
       writeOut: (text) => io.write(text),
@@ -125,7 +252,8 @@ export function hootProgram(io: CliIo): Command {
   const issueCommand: Command = program
     .command('issue')
     .description(
-      "Show, list and create the issues of the session's project, and change their parents and sub-issues",
+      "Show, list and create the issues of the session's project, change their parents, " +
+        'sub-issues and dependencies, and split an issue into sub-issues',
     )
     // Every command's usage, so that this help says all there is.
     .addHelpText('after', () =>
@@ -136,7 +264,8 @@ export function hootProgram(io: CliIo): Command {
     .command('view')
     .description(
       'Show an issue: its identifier and title; its status, priority and creation time; the issue ' +
-        'it is a sub-issue of; its description; and its sub-issues',
+        'it is a sub-issue of; its description; its sub-issues; and the issues it is blocked by ' +
+        'and those it blocks',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option('--json', 'print the issue as a JSON object')
@@ -212,6 +341,14 @@ export function hootProgram(io: CliIo): Command {
       'create it as a sub-issue of this issue of the project, after its other sub-issues: the ' +
         "parent's identifier, such as ISS-12, or its number",
     )
+    .option(
+      '--blocked-by <issues>',
+      'make it blocked by these issues of the project, separated by commas, which it waits for',
+    )
+    .option(
+      '--blocking <issues>',
+      'make these issues of the project, separated by commas, blocked by it, so that they wait for it',
+    )
     .option('--json', 'print the new issue as a JSON object instead of its identifier')
     .action(
       async (
@@ -222,29 +359,25 @@ export function hootProgram(io: CliIo): Command {
           status: string
           priority: string
           parent?: string
+          blockedBy?: string
+          blocking?: string
           json?: boolean
         },
         command: Command,
       ) => {
         const { title } = options
         const parent = options.parent === undefined ? undefined : givenIssue(options.parent)
-        if (title.length > ISSUE_TITLE_MAX_LENGTH) {
-          throw new CliError(
-            `The title is ${quantity.format(title.length)} characters long; ` +
-              `Hoot saves titles of up to ${quantity.format(ISSUE_TITLE_MAX_LENGTH)}.`,
-          )
-        }
-        if (issueTitle(title) === '') throw new CliError('The title is empty: an issue needs one.')
+        const blockedBy =
+          options.blockedBy === undefined ? undefined : givenIssues(options.blockedBy)
+        const blocking = options.blocking === undefined ? undefined : givenIssues(options.blocking)
+        const titleIssue = titleProblem(title, 'The title')
+        if (titleIssue !== null) throw new CliError(titleIssue)
         const description =
           options.descriptionFile === undefined
             ? (options.description ?? '')
             : await readText(options.descriptionFile, 'description')
-        if (description.length > ISSUE_DESCRIPTION_MAX_LENGTH) {
-          throw new CliError(
-            `The description is ${quantity.format(description.length)} characters long; ` +
-              `Hoot saves descriptions of up to ${quantity.format(ISSUE_DESCRIPTION_MAX_LENGTH)}.`,
-          )
-        }
+        const descriptionIssue = descriptionProblem(description, 'The description')
+        if (descriptionIssue !== null) throw new CliError(descriptionIssue)
         // A sub-issue takes its parent's priority unless one is given.
         const priorityGiven =
           parent === undefined || command.getOptionValueSource('priority') !== 'default'
@@ -255,6 +388,8 @@ export function hootProgram(io: CliIo): Command {
             status: statusNamed(options.status)!,
             ...(priorityGiven ? { priority: priorityNamed(options.priority)! } : {}),
             ...(parent === undefined ? {} : { parent }),
+            ...(blockedBy === undefined ? {} : { blockedBy }),
+            ...(blocking === undefined ? {} : { blocking }),
           }),
         )
         io.write(options.json ? jsonText(issueJson(created)) : `${issueIdentifier(created.id)}\n`)
@@ -264,10 +399,13 @@ export function hootProgram(io: CliIo): Command {
   issueCommand
     .command('edit')
     .description(
-      'Change the parent and the sub-issues of an issue, all together or, when one of the ' +
-        `changes cannot be made, not at all, and print its identifier. An issue has at most ` +
-        `${MAX_SUB_ISSUES} sub-issues and is at most ${MAX_SUB_ISSUE_LEVEL} levels below a ` +
-        'top-level issue, and cannot be below itself',
+      'Change the parent, the sub-issues and the dependencies of an issue, all together or, when ' +
+        `one of the changes cannot be made, not at all, and print its identifier. An issue has at ` +
+        `most ${MAX_SUB_ISSUES} sub-issues and is at most ${MAX_SUB_ISSUE_LEVEL} levels below a ` +
+        'top-level issue, and cannot be below itself. An issue waits for the issues it is blocked ' +
+        `by and, as a parent, for its sub-issues; it is blocked by at most ${MAX_BLOCKED_BY} ` +
+        `issues and blocks at most ${MAX_BLOCKING}, cannot be blocked by an issue above or below ` +
+        'it, and cannot wait for itself',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .addOption(
@@ -287,6 +425,22 @@ export function hootProgram(io: CliIo): Command {
       '--remove-sub-issue <issues>',
       'make these sub-issues of it, separated by commas, top-level issues',
     )
+    .option(
+      '--add-blocked-by <issues>',
+      'make it blocked by these issues of the project, separated by commas, which it waits for',
+    )
+    .option(
+      '--remove-blocked-by <issues>',
+      'make it no longer blocked by these issues, separated by commas',
+    )
+    .option(
+      '--add-blocking <issues>',
+      'make these issues of the project, separated by commas, blocked by it, so that they wait for it',
+    )
+    .option(
+      '--remove-blocking <issues>',
+      'make these issues, separated by commas, no longer blocked by it',
+    )
     .action(
       async (
         text: string,
@@ -295,6 +449,10 @@ export function hootProgram(io: CliIo): Command {
           removeParent?: boolean
           addSubIssue?: string
           removeSubIssue?: string
+          addBlockedBy?: string
+          removeBlockedBy?: string
+          addBlocking?: string
+          removeBlocking?: string
         },
       ) => {
         const digits = givenIssue(text)
@@ -305,15 +463,60 @@ export function hootProgram(io: CliIo): Command {
         if (options.removeSubIssue !== undefined) {
           edit.removeSubIssues = givenIssues(options.removeSubIssue)
         }
+        if (options.addBlockedBy !== undefined) {
+          edit.addBlockedBy = givenIssues(options.addBlockedBy)
+        }
+        if (options.removeBlockedBy !== undefined) {
+          edit.removeBlockedBy = givenIssues(options.removeBlockedBy)
+        }
+        if (options.addBlocking !== undefined) edit.addBlocking = givenIssues(options.addBlocking)
+        if (options.removeBlocking !== undefined) {
+          edit.removeBlocking = givenIssues(options.removeBlocking)
+        }
         if (Object.keys(edit).length === 0) {
           throw new CliError(
-            'Nothing to change: give --parent, --remove-parent, --add-sub-issue or --remove-sub-issue.',
+            'Nothing to change: give --parent, --remove-parent, --add-sub-issue, ' +
+              '--remove-sub-issue, --add-blocked-by, --remove-blocked-by, --add-blocking or ' +
+              '--remove-blocking.',
           )
         }
         const { issue: edited } = answered(await connect().editIssue(digits, edit))
         io.write(`${issueIdentifier(edited.id)}\n`)
       },
     )
+
+  issueCommand
+    .command('split')
+    .description(
+      'Split an issue: create the issues a JSON file lists as its last sub-issues, in order, ' +
+        'each blocked by the issues it lists and blocking others, all together or, when one of ' +
+        'them cannot be created, none; and print their identifiers, in order. Each is created as ' +
+        '"hoot issue create --parent <issue>" creates one, with the same rules',
+    )
+    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .requiredOption(
+      '--file <file>',
+      'read the issues from a UTF-8 file, or from standard input with -: a JSON array with an ' +
+        'object for each issue, with "title", and optionally "description", "status" and ' +
+        '"priority" (by their names), "blockedBy", the issues it is blocked by, and "blocking", ' +
+        'those it blocks: arrays of the places of other issues in the array, from 1, and the ' +
+        'identifiers of issues of the project, such as "ISS-12"',
+    )
+    .option(
+      '--json',
+      'print the new issues as a JSON array of objects instead of their identifiers',
+    )
+    .action(async (text: string, options: { file: string; json?: boolean }) => {
+      const digits = givenIssue(text)
+      const source = options.file === '-' ? 'standard input' : options.file
+      const issues = splitIssues(await readText(options.file, 'issues'), source)
+      const { issues: created } = answered(await connect().split(digits, issues))
+      io.write(
+        options.json
+          ? jsonText(created.map(issueJson))
+          : created.map((issue) => `${issueIdentifier(issue.id)}\n`).join(''),
+      )
+    })
 
   const stepCommand: Command = program
     .command('step')

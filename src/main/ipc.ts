@@ -16,6 +16,8 @@ import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
   type AddProjectResult,
+  type DependencyChangeResult,
+  type NewIssueDependency,
   type StartSessionRequest,
   type StartSessionResult,
   type StartupState,
@@ -30,6 +32,7 @@ import {
   type IssueResult,
   type NewIssue,
 } from '../shared/issues'
+import type { Dependency } from '../shared/dependencies'
 import { browserLink } from '../shared/links'
 import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
@@ -116,6 +119,18 @@ const parentChanges = z
   .array(z.strictObject({ issueId: rowId, parentId: rowId.nullable() }))
   .min(1)
   .max(1_000) satisfies z.ZodType<ParentChange[]>
+const dependency = z.strictObject({
+  issueId: rowId,
+  blockedById: rowId,
+}) satisfies z.ZodType<Dependency>
+const dependencyChange = z.strictObject({
+  add: z.array(dependency).max(1_000),
+  remove: z.array(dependency).max(1_000),
+})
+const newIssueDependency = z.union([
+  z.strictObject({ blocking: rowId }),
+  z.strictObject({ blockedBy: rowId }),
+]) satisfies z.ZodType<NewIssueDependency>
 const issueChanges = z.strictObject({
   title: issueTitle.optional(),
   description: issueDescription.optional(),
@@ -595,6 +610,41 @@ export function registerIpc(deps: IpcDependencies): void {
     } catch (error) {
       return { ok: false, message: errorMessage(error) }
     }
+  })
+
+  handle(IpcChannel.listDependencies, () => deps.issues.dependencies())
+  // Wherever the change came from: hoot in a session, or this window.
+  deps.issues.on('dependencies-changed', (dependencies) =>
+    send(IpcChannel.dependenciesChanged, dependencies),
+  )
+
+  handle(IpcChannel.changeDependencies, (_event, value): DependencyChangeResult => {
+    const parsed = dependencyChange.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid change.' }
+    try {
+      deps.issues.changeRelations({
+        removeDependencies: parsed.data.remove,
+        addDependencies: parsed.data.add,
+      })
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
+  })
+
+  handle(IpcChannel.createDependentIssue, (_event, ...args): IssueResult => {
+    const parsed = z.tuple([newIssue, newIssueDependency]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
+    const [issue, made] = parsed.data
+    return changeIssue(
+      () =>
+        deps.issues.create(
+          issue,
+          null,
+          'blocking' in made ? { blocking: [made.blocking] } : { blockedBy: [made.blockedBy] },
+        ),
+      'The project is not in the list.',
+    )
   })
 
   handle(IpcChannel.deleteIssue, (_event, value) => {

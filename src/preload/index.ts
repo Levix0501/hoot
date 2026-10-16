@@ -103,6 +103,11 @@ const api: HootApi = {
   listSubIssues: () => ipcRenderer.invoke(IpcChannel.listSubIssues),
   setIssueParents: (changes) => ipcRenderer.invoke(IpcChannel.setIssueParents, changes),
   onSubIssuesChanged: (listener) => subscribe(IpcChannel.subIssuesChanged, listener),
+  listDependencies: () => ipcRenderer.invoke(IpcChannel.listDependencies),
+  changeDependencies: (change) => ipcRenderer.invoke(IpcChannel.changeDependencies, change),
+  createDependentIssue: (issue, dependency) =>
+    ipcRenderer.invoke(IpcChannel.createDependentIssue, issue, dependency),
+  onDependenciesChanged: (listener) => subscribe(IpcChannel.dependenciesChanged, listener),
   listWorkflowRecords: () => ipcRenderer.invoke(IpcChannel.listWorkflowRecords),
   onWorkflowChanged: (listener) => subscribe(IpcChannel.workflowChanged, listener),
   reportStep: (issueId, run, outcome) =>

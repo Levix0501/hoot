@@ -87,4 +87,21 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX sub_issues_by_parent ON sub_issues (parent_id, id);
   `,
+  // 4: dependencies between issues.
+  `
+  -- That an issue is blocked by another, which it waits for, one row per
+  -- dependency, in the order they were made. The issues may belong to
+  -- different projects, or to none. Deleting either issue deletes the row.
+  CREATE TABLE issue_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- The issue that waits.
+    issue_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    -- The issue it waits for.
+    blocked_by_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    UNIQUE (issue_id, blocked_by_id),
+    CHECK (issue_id <> blocked_by_id)
+  ) STRICT;
+
+  CREATE INDEX issue_dependencies_by_blocker ON issue_dependencies (blocked_by_id, id);
+  `,
 ]

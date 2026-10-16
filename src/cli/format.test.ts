@@ -15,6 +15,8 @@ const issue: HootIssue = {
   completedAt: null,
   parent: null,
   subIssues: [],
+  blockedBy: [],
+  blocking: [],
 }
 
 const gamma: HootProject = { id: 3, name: 'gamma' }
@@ -65,6 +67,8 @@ describe('issueJson', () => {
       parent: null,
       subIssues: [],
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
+      blockedBy: [],
+      blocking: [],
     })
     expect(
       issueJson({ ...issue, status: 'canceled', completedAt: Date.UTC(2026, 9, 13) }),
@@ -100,6 +104,21 @@ describe('issueJson', () => {
     ])
     expect(json.subIssuesSummary).toStrictEqual({ total: 3, completed: 1, percentCompleted: 33 })
     expect(Object.keys(json.subIssuesSummary)).toEqual(['total', 'completed', 'percentCompleted'])
+  })
+
+  it('has the issues it is blocked by and those it blocks, in order, as its sub-issues', () => {
+    const json = issueJson({
+      ...issue,
+      blockedBy: [related(30, 'done'), related(31, 'todo', { id: 5, name: 'hotel' })],
+      blocking: [related(32, 'backlog', null)],
+    })
+    expect(json.blockedBy).toStrictEqual([
+      { identifier: 'ISS-30', number: 30, title: 'Issue 30', status: 'done', project: 'gamma' },
+      { identifier: 'ISS-31', number: 31, title: 'Issue 31', status: 'todo', project: 'hotel' },
+    ])
+    expect(json.blocking).toStrictEqual([
+      { identifier: 'ISS-32', number: 32, title: 'Issue 32', status: 'backlog', project: null },
+    ])
   })
 
   it('rounds the percentage down, and counts nothing for sub-issues all canceled', () => {
@@ -166,6 +185,56 @@ describe('issueText', () => {
         'Todo  ISS-5  Issue 5',
         '',
       ].join('\n'),
+    )
+  })
+})
+
+describe('issueText with dependencies', () => {
+  it('lists the issues it is blocked by and those it blocks last, each in a section of its own', () => {
+    const created = `Created ${localMinute(issue.createdAt)}`
+    expect(
+      issueText(
+        {
+          ...family,
+          blockedBy: [
+            related(30, 'done'),
+            related(131, 'in_progress', { id: 5, name: 'hotel' }),
+            related(32, 'todo', null),
+          ],
+          blocking: [related(33, 'backlog')],
+        },
+        gamma,
+      ),
+    ).toBe(
+      [
+        'ISS-12 Restore sessions',
+        `In Progress · Medium · ${created}`,
+        'Sub-issue of ISS-4 Issue 4 (Todo · No project)',
+        '',
+        'About it',
+        '',
+        'Sub-issues · 1/3 (33%)',
+        'Done         ISS-20   Issue 20',
+        'In Progress  ISS-21   Issue 21 (hotel)',
+        'Canceled     ISS-103  Issue 103',
+        'Backlog      ISS-22   Issue 22 (No project)',
+        '',
+        'Blocked by',
+        'Done         ISS-30   Issue 30',
+        'In Progress  ISS-131  Issue 131 (hotel)',
+        'Todo         ISS-32   Issue 32 (No project)',
+        '',
+        'Blocking',
+        'Backlog  ISS-33  Issue 33',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('leaves out a section without issues', () => {
+    const created = `Created ${localMinute(issue.createdAt)}`
+    expect(issueText({ ...issue, blocking: [related(5, 'todo')] }, gamma)).toBe(
+      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nBlocking\nTodo  ISS-5  Issue 5\n`,
     )
   })
 })

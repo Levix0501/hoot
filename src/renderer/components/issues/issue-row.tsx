@@ -2,8 +2,10 @@ import {
   CopyIcon,
   CornerLeftUpIcon,
   DeleteIcon,
+  FlagIcon,
   LinkIcon,
   ListTreeIcon,
+  OctagonMinusIcon,
   Trash2Icon,
   UnlinkIcon,
 } from 'lucide-react'
@@ -20,11 +22,13 @@ import {
 import { progressLabel } from '../../lib/issue-workflow'
 import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
+import { cn } from '../../lib/utils'
 import {
   focusAfterOverlay,
   issueRecordsOf,
   shownParentOf,
   useAppStore,
+  waitCountsOf,
 } from '../../store/app-store'
 import {
   ContextMenu,
@@ -103,15 +107,42 @@ function PropertySubmenu<T extends string | number | null>({
   )
 }
 
+/** A count of issues, as a title says it: "1 issue", "2 issues". */
+const issueCount = (count: number) => (count === 1 ? '1 issue' : `${count} issues`)
+
+/**
+ * How many issues an issue waits on (`blocked`), with a red icon, or how
+ * many wait on it (`blocking`), as Linear's rows show them.
+ */
+function WaitCount({ kind, count }: { kind: 'blocked' | 'blocking'; count: number }) {
+  const Icon = kind === 'blocked' ? OctagonMinusIcon : FlagIcon
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-xs text-muted-foreground tabular-nums"
+      title={
+        kind === 'blocked' ? `Blocked by ${issueCount(count)}` : `Blocking ${issueCount(count)}`
+      }
+      data-testid={`issue-row-${kind}`}
+      data-count={count}
+    >
+      <Icon
+        aria-hidden
+        className={cn('size-3', kind === 'blocked' ? 'text-red-500' : 'text-orange-500')}
+      />
+      {count}
+    </span>
+  )
+}
+
 /**
  * An issue in the list, as Linear shows it: its priority, its identifier, its
  * status, its title, followed by the step of its workflow it is at, or
- * Finished, once it has started, its project if any, and when it was
- * created, and at the end, for an issue neither done nor canceled, its start
- * button. Click it to
- * show its page; right-click it to change its status, priority or project,
- * copy it, give it a parent or sub-issues, take it from its parent, or
- * delete it.
+ * Finished, once it has started, how many issues it waits on and how many
+ * wait on it, its project if any, and when it was created, and at the end,
+ * for an issue neither done nor canceled, its start button. Click it to show
+ * its page; right-click it to change its status, priority or project, copy
+ * it, give it a parent or sub-issues, take it from its parent, mark it as
+ * blocked by an issue or blocking one, or delete it.
  */
 export function IssueRow({
   issue,
@@ -139,6 +170,8 @@ export function IssueRow({
   const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
   const [menuOpen, setMenuOpen] = useState(false)
   const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
+  const waitedOn = useAppStore((state) => waitCountsOf(state, issue.id).waitedOn)
+  const waiting = useAppStore((state) => waitCountsOf(state, issue.id).waiting)
 
   return (
     <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -190,6 +223,8 @@ export function IssueRow({
               </span>
             </span>
           )}
+          {waitedOn > 0 && <WaitCount kind="blocked" count={waitedOn} />}
+          {waiting > 0 && <WaitCount kind="blocking" count={waiting} />}
           {project && (
             <span
               className="max-w-[30%] shrink-0 truncate text-xs text-muted-foreground"
@@ -287,6 +322,20 @@ export function IssueRow({
             Remove parent
           </ContextMenuItem>
         )}
+        <ContextMenuItem
+          onClick={() => openIssuePicker('blocked-by', issue.id)}
+          data-testid="issue-menu-blocked-by"
+        >
+          <OctagonMinusIcon />
+          Blocked by…
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => openIssuePicker('blocking', issue.id)}
+          data-testid="issue-menu-blocking"
+        >
+          <FlagIcon />
+          Blocking…
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           variant="destructive"

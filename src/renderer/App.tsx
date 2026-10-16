@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { CloseSessionDialog } from './components/close-session-dialog'
 import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
 import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
+import { DependentIssueDialogView } from './components/issues/dependent-issue-dialog'
 import { IssuePickerDialog } from './components/issues/issue-picker-dialog'
 import { NewIssueDialog } from './components/issues/new-issue-dialog'
 import { MainArea } from './components/main-area'
@@ -95,6 +96,7 @@ export function App() {
       <NewIssueDialog />
       <DeleteIssueDialog />
       <IssuePickerDialog />
+      <DependentIssueDialogView />
       <QuitDialog />
       {/* Below the main area's top row, clear of its buttons and of the ended-session bar. */}
       <Toaster position="top-right" offset={{ top: 60, right: 16 }} />

@@ -3,7 +3,10 @@ import { issueIdentifier, PRIORITY_LABELS, STATUS_LABELS, type Issue } from '../
 import { percentCompleted, subIssueProgress } from '../shared/sub-issues'
 import { PRIORITY_NAMES, STATUS_NAMES } from './names'
 
-/** An issue's parent or one of its sub-issues as hoot prints it with `--json`. */
+/**
+ * An issue's parent, one of its sub-issues, or one of the issues it is
+ * blocked by or blocks, as hoot prints it with `--json`.
+ */
 export interface RelatedIssueJson {
   /** Such as "ISS-12". */
   identifier: string
@@ -41,6 +44,10 @@ export interface IssueJson {
    * and the percentage done, rounded down: 0 without any.
    */
   subIssuesSummary: { total: number; completed: number; percentCompleted: number }
+  /** The issues it is blocked by, in the order it became blocked by them. */
+  blockedBy: RelatedIssueJson[]
+  /** The issues it blocks, in the order they became blocked by it. */
+  blocking: RelatedIssueJson[]
 }
 
 function relatedJson(issue: RelatedIssue): RelatedIssueJson {
@@ -71,6 +78,8 @@ export function issueJson(issue: HootIssue): IssueJson {
       completed: progress.completed,
       percentCompleted: percentCompleted(progress),
     },
+    blockedBy: issue.blockedBy.map(relatedJson),
+    blocking: issue.blocking.map(relatedJson),
   }
 }
 
@@ -91,8 +100,9 @@ export function localMinute(time: number): string {
 }
 
 /**
- * What follows the title of an issue's parent or sub-issue: in parentheses,
- * its project's name, or No project, when that is not the session's project.
+ * What follows the title of an issue's parent, sub-issue, or an issue it is
+ * blocked by or blocks: in parentheses, its project's name, or No project,
+ * when that is not the session's project.
  */
 function projectNote(issue: RelatedIssue, project: HootProject): string | null {
   if (issue.projectId === project.id) return null
@@ -103,10 +113,12 @@ function projectNote(issue: RelatedIssue, project: HootProject): string | null {
  * An issue as `hoot issue view` prints it: its identifier and title; its
  * status, priority and creation time; the issue it is a sub-issue of, if
  * any, such as `Sub-issue of ISS-4 Ship it (Todo)`; its description as it is
- * saved, after a blank line, when it has one; and, after a blank line, its
+ * saved, after a blank line, when it has one; after a blank line, its
  * sub-issues when it has any: their progress, such as `Sub-issues · 1/3
  * (33%)`, then the status, identifier and title of each, in the order its
- * page lists them. A parent or sub-issue of another project than the
+ * page lists them; and, each after a blank line, `Blocked by` and the issues
+ * it is blocked by, and `Blocking` and those it blocks, when it has any, one
+ * line each as its sub-issues. A related issue of another project than the
  * session's is followed by its project's name, or No project, in
  * parentheses.
  */
@@ -137,10 +149,12 @@ export function issueText(issue: HootIssue, project: HootProject): string {
       `\nSub-issues · ${progress.completed}/${progress.total} (${percentCompleted(progress)}%)\n` +
       relatedRows(issue.subIssues, project)
   }
+  if (issue.blockedBy.length > 0) text += `\nBlocked by\n${relatedRows(issue.blockedBy, project)}`
+  if (issue.blocking.length > 0) text += `\nBlocking\n${relatedRows(issue.blocking, project)}`
   return text
 }
 
-/** Sub-issues, one line each, in columns: the status, the identifier and the title. */
+/** Related issues, one line each, in columns: the status, the identifier and the title. */
 function relatedRows(issues: readonly RelatedIssue[], project: HootProject): string {
   const rows = issues.map((issue) => {
     const note = projectNote(issue, project)

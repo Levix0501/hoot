@@ -177,12 +177,13 @@ export function subIssueProblem(
 }
 
 /**
- * Why an issue cannot get a new sub-issue, given the parents of all issues;
- * `null` when it can.
+ * Why an issue cannot get `count` new sub-issues, given the parents of all
+ * issues; `null` when it can.
  */
 export function newSubIssueProblem(
   links: readonly SubIssueLink[],
   parentId: number,
+  count = 1,
 ): string | null {
   const parents = new Map(links.map((link) => [link.issueId, link.parentId]))
   if (levelOf(parents, parentId) >= MAX_SUB_ISSUE_LEVEL) {
@@ -191,8 +192,12 @@ export function newSubIssueProblem(
       `the deepest an issue can be, so it cannot have sub-issues.`
     )
   }
-  if (subIssueIdsOf(links, parentId).length >= MAX_SUB_ISSUES) {
-    return `${issueIdentifier(parentId)} has ${MAX_SUB_ISSUES} sub-issues, the most an issue can have.`
+  const existing = subIssueIdsOf(links, parentId).length
+  if (existing + count > MAX_SUB_ISSUES) {
+    return existing >= MAX_SUB_ISSUES
+      ? `${issueIdentifier(parentId)} has ${MAX_SUB_ISSUES} sub-issues, the most an issue can have.`
+      : `${issueIdentifier(parentId)} has ${existing} sub-issues, and ${count} more would make ` +
+          `${existing + count}: an issue can have at most ${MAX_SUB_ISSUES}.`
   }
   return null
 }

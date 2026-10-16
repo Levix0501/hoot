@@ -13,15 +13,29 @@ import {
   type IssueListAnswer,
   type NewHootIssue,
   type RelatedIssue,
+  type SplitAnswer,
+  type SplitIssue,
+  type SplitRequest,
   type StepReportAnswer,
   type StepReportRequest,
 } from '../../shared/hoot-cli'
+import { blockedByIdsOf, blockingIdsOf, type Dependency } from '../../shared/dependencies'
 import type { Project } from '../../shared/ipc'
-import { issueIdentifier, oneLineTitle, type Issue } from '../../shared/issues'
+import {
+  issueIdentifier,
+  issueTitle as savedTitle,
+  oneLineTitle,
+  type Issue,
+} from '../../shared/issues'
 import { parentOf, type ParentChange } from '../../shared/sub-issues'
 import { STEP_SUMMARY_MAX_LENGTH } from '../../shared/workflows'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from '../issues/issue-schemas'
-import { SubIssueError, type IssueStore } from '../issues/issue-store'
+import {
+  DependencyError,
+  SubIssueError,
+  type IssueReference,
+  type IssueStore,
+} from '../issues/issue-store'
 import type { StepReportResult } from '../workflows/workflow-executor'
 
 /**
@@ -32,6 +46,7 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024
 
 /** An issue's number in decimal digits, as hoot passes it on from the command line. */
 const issueDigits = z.string().regex(/^\d{1,100}$/)
+const issueList = z.array(issueDigits).max(1_000)
 
 const newHootIssue = z.strictObject({
   title: issueTitle,
@@ -39,14 +54,39 @@ const newHootIssue = z.strictObject({
   status: issueStatus,
   priority: issuePriority.optional(),
   parent: issueDigits.optional(),
+  blockedBy: issueList.optional(),
+  blocking: issueList.optional(),
 }) satisfies z.ZodType<NewHootIssue>
 
 const issueEdit = z.strictObject({
   parent: issueDigits.optional(),
   removeParent: z.boolean().optional(),
-  addSubIssues: z.array(issueDigits).max(1_000).optional(),
-  removeSubIssues: z.array(issueDigits).max(1_000).optional(),
+  addSubIssues: issueList.optional(),
+  removeSubIssues: issueList.optional(),
+  addBlockedBy: issueList.optional(),
+  removeBlockedBy: issueList.optional(),
+  addBlocking: issueList.optional(),
+  removeBlocking: issueList.optional(),
 }) satisfies z.ZodType<IssueEdit>
+
+const splitReference = z.union([
+  z.strictObject({ item: z.number().int().min(1).max(1_000) }),
+  z.strictObject({ issue: issueDigits }),
+])
+const splitRequest = z.strictObject({
+  issues: z
+    .array(
+      z.strictObject({
+        title: issueTitle,
+        description: issueDescription,
+        status: issueStatus,
+        priority: issuePriority.optional(),
+        blockedBy: z.array(splitReference).max(1_000),
+        blocking: z.array(splitReference).max(1_000),
+      }) satisfies z.ZodType<SplitIssue>,
+    )
+    .max(1_000),
+}) satisfies z.ZodType<SplitRequest>
 
 const stepReportRequest = z.strictObject({
   outcome: z.string().max(1_000),
@@ -70,7 +110,14 @@ export interface HootServerOptions {
   listProjects(): Project[]
   issues: Pick<
     IssueStore,
-    'list' | 'listInProject' | 'getInProject' | 'create' | 'subIssues' | 'setParents'
+    | 'list'
+    | 'listInProject'
+    | 'getInProject'
+    | 'create'
+    | 'createSubIssues'
+    | 'subIssues'
+    | 'dependencies'
+    | 'changeRelations'
   >
   /** Called with each issue hoot creates, once it is saved. */
   issueCreated(issue: Issue): void
@@ -121,13 +168,27 @@ function noSuchIssue(digits: string, project: HootProject): string {
   return `There is no issue ISS-${digits} in this session's project, ${project.name}.`
 }
 
+/** The status of an answer to a change that cannot be made, by what was thrown. */
+function refusal(error: unknown): number {
+  // Such as a parent with all the sub-issues it can have, or an issue that would wait for itself.
+  return error instanceof SubIssueError || error instanceof DependencyError ? 409 : 400
+}
+
+/** Something wrong with what was asked, which an answer says. */
+class Refusal extends Error {
+  constructor(readonly reply: Reply) {
+    super(reply.answer.ok ? '' : reply.answer.message)
+  }
+}
+
 /**
  * Answers hoot, run in a session this Hoot started: it reads the issues of the
- * session's project, creates issues in it, changes their parents and
- * sub-issues, and reports the steps of the
- * workflow of the issue the session was started from. It listens only where the
- * sessions' environment tells hoot to connect, through a Unix domain socket
- * that only the user can connect to, or on Windows a named pipe.
+ * session's project, creates issues in it, alone or as the sub-issues an
+ * issue is split into, changes their parents, sub-issues and dependencies,
+ * and reports the steps of the workflow of the issue the session was started
+ * from. It listens only where the sessions' environment tells hoot to
+ * connect, through a Unix domain socket that only the user can connect to, or
+ * on Windows a named pipe.
  */
 export class HootServer {
   private readonly server = http.createServer(
@@ -184,13 +245,26 @@ export class HootServer {
   }
 
   /**
-   * Issues with their parents and sub-issues, those Hoot shows: without the
-   * issues of projects removed from the list.
+   * The issues of the project with these numbers, in decimal digits, by
+   * their ids; a `Refusal` when one is not.
+   */
+  private issuesOf(projectId: number, project: HootProject, list: readonly string[]): number[] {
+    return list.map((digits) => {
+      const found = this.issueOf(projectId, digits)
+      if (found === null) throw new Refusal(failure(404, noSuchIssue(digits, project)))
+      return found.id
+    })
+  }
+
+  /**
+   * Issues with their parents, sub-issues and dependencies, those Hoot shows:
+   * without the issues of projects removed from the list.
    */
   private withRelations(issues: readonly Issue[]): HootIssue[] {
     const shown = new Map(this.options.issues.list().map((issue) => [issue.id, issue]))
     const names = new Map(this.options.listProjects().map((project) => [project.id, project.name]))
     const { links } = this.options.issues.subIssues()
+    const dependencies = this.options.issues.dependencies().links
     const related = (id: number): RelatedIssue[] => {
       const issue = shown.get(id)
       if (issue === undefined) return []
@@ -208,6 +282,8 @@ export class HootServer {
         ...issue,
         parent: parentId === null ? null : (related(parentId)[0] ?? null),
         subIssues: (children.get(issue.id) ?? []).flatMap(related),
+        blockedBy: blockedByIdsOf(dependencies, issue.id).flatMap(related),
+        blocking: blockingIdsOf(dependencies, issue.id).flatMap(related),
       }
     })
   }
@@ -217,10 +293,9 @@ export class HootServer {
     try {
       reply = await this.handle(request)
     } catch (error) {
-      reply =
-        error instanceof RequestError
-          ? failure(error.status, error.message)
-          : failure(500, errorMessage(error))
+      if (error instanceof Refusal) reply = error.reply
+      else if (error instanceof RequestError) reply = failure(error.status, error.message)
+      else reply = failure(500, errorMessage(error))
     }
     const body = JSON.stringify(reply.answer)
     response.writeHead(reply.status, {
@@ -264,11 +339,21 @@ export class HootServer {
     if (pathname === '/issues' && request.method === 'POST') {
       const parsed = newHootIssue.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid issue.')
-      const { parent: parentDigits, priority, ...fields } = parsed.data
+      const {
+        parent: parentDigits,
+        priority,
+        blockedBy = [],
+        blocking = [],
+        ...fields
+      } = parsed.data
       let parent: Issue | null = null
       if (parentDigits !== undefined) {
         parent = this.issueOf(projectId, parentDigits)
         if (parent === null) return failure(404, noSuchIssue(parentDigits, project))
+      }
+      const dependencies = {
+        blockedBy: this.issuesOf(projectId, project, blockedBy),
+        blocking: this.issuesOf(projectId, project, blocking),
       }
       let issue: Issue | null
       try {
@@ -281,10 +366,11 @@ export class HootServer {
             title: oneLineTitle(fields.title),
           },
           parent?.id ?? null,
+          dependencies,
         )
       } catch (error) {
         // Such as a title of nothing but whitespace, or a parent with all the sub-issues it can have.
-        return failure(error instanceof SubIssueError ? 409 : 400, errorMessage(error))
+        return failure(refusal(error), errorMessage(error))
       }
       if (issue === null) return failure(404, "The session's project is no longer in Hoot's list.")
       try {
@@ -307,6 +393,13 @@ export class HootServer {
       return this.edit(projectId, project, numbered[1]!, parsed.data)
     }
 
+    const split = /^\/issues\/(\d+)\/split$/.exec(pathname)
+    if (split && request.method === 'POST') {
+      const parsed = splitRequest.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid issues.')
+      return this.split(projectId, project, split[1]!, parsed.data.issues)
+    }
+
     if (pathname === '/steps/report' && request.method === 'POST') {
       const parsed = stepReportRequest.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid report.')
@@ -321,16 +414,28 @@ export class HootServer {
   }
 
   /**
-   * Changes the parent and the sub-issues of an issue of the project, all
-   * together or not at all.
+   * Changes the parent, the sub-issues and the dependencies of an issue of
+   * the project, all together or not at all.
    */
   private edit(projectId: number, project: HootProject, digits: string, edit: IssueEdit): Reply {
-    const { parent, removeParent = false, addSubIssues = [], removeSubIssues = [] } = edit
-    if (
-      parent === undefined &&
-      !removeParent &&
-      addSubIssues.length + removeSubIssues.length === 0
-    ) {
+    const {
+      parent,
+      removeParent = false,
+      addSubIssues = [],
+      removeSubIssues = [],
+      addBlockedBy = [],
+      removeBlockedBy = [],
+      addBlocking = [],
+      removeBlocking = [],
+    } = edit
+    const listed =
+      addSubIssues.length +
+      removeSubIssues.length +
+      addBlockedBy.length +
+      removeBlockedBy.length +
+      addBlocking.length +
+      removeBlocking.length
+    if (parent === undefined && !removeParent && listed === 0) {
       return failure(400, 'Nothing to change.')
     }
     if (parent !== undefined && removeParent) {
@@ -339,7 +444,15 @@ export class HootServer {
     const issue = this.issueOf(projectId, digits)
     if (issue === null) return failure(404, noSuchIssue(digits, project))
     const ids = new Map<string, number>()
-    for (const given of [parent, ...addSubIssues, ...removeSubIssues]) {
+    for (const given of [
+      parent,
+      ...addSubIssues,
+      ...removeSubIssues,
+      ...addBlockedBy,
+      ...removeBlockedBy,
+      ...addBlocking,
+      ...removeBlocking,
+    ]) {
       if (given === undefined) continue
       const found = this.issueOf(projectId, given)
       if (found === null) return failure(404, noSuchIssue(given, project))
@@ -370,10 +483,38 @@ export class HootServer {
       ...(removeParent ? [{ issueId: issue.id, parentId: null }] : []),
       ...added.map((id) => ({ issueId: id, parentId: issue.id })),
     ]
+    const of = (list: readonly string[]) => list.map((given) => ids.get(given)!)
+    const blockedBy = (id: number): Dependency => ({ issueId: issue.id, blockedById: id })
+    const blocking = (id: number): Dependency => ({ issueId: id, blockedById: issue.id })
+    for (const id of of(removeBlockedBy)) {
+      if (of(addBlockedBy).includes(id)) {
+        return failure(
+          409,
+          `${identifier} cannot both become blocked by ${issueIdentifier(id)} and stop being ` +
+            'blocked by it.',
+        )
+      }
+    }
+    for (const id of of(removeBlocking)) {
+      if (of(addBlocking).includes(id)) {
+        return failure(
+          409,
+          `${issueIdentifier(id)} cannot both become blocked by ${identifier} and stop being ` +
+            'blocked by it.',
+        )
+      }
+    }
     try {
-      this.options.issues.setParents(changes)
+      this.options.issues.changeRelations({
+        parents: changes,
+        removeDependencies: [
+          ...of(removeBlockedBy).map(blockedBy),
+          ...of(removeBlocking).map(blocking),
+        ],
+        addDependencies: [...of(addBlockedBy).map(blockedBy), ...of(addBlocking).map(blocking)],
+      })
     } catch (error) {
-      return failure(error instanceof SubIssueError ? 409 : 400, errorMessage(error))
+      return failure(refusal(error), errorMessage(error))
     }
     const answer: EditedIssueAnswer = {
       ok: true,
@@ -383,5 +524,70 @@ export class HootServer {
       ])[0]!,
     }
     return { status: 200, answer }
+  }
+
+  /**
+   * Creates sub-issues of an issue of the project, all together or, when one
+   * of them cannot be created, none, and reports each once it is saved.
+   */
+  private split(
+    projectId: number,
+    project: HootProject,
+    digits: string,
+    issues: readonly SplitIssue[],
+  ): Reply {
+    const parent = this.issueOf(projectId, digits)
+    if (parent === null) return failure(404, noSuchIssue(digits, project))
+    const reference = (given: SplitIssue['blockedBy'][number], index: number): IssueReference => {
+      if ('issue' in given) return { issueId: this.issuesOf(projectId, project, [given.issue])[0]! }
+      if (given.item > issues.length) {
+        throw new Refusal(
+          failure(
+            400,
+            `Item ${index + 1} names item ${given.item}, and there ${
+              issues.length === 1 ? 'is only 1 item' : `are only ${issues.length} items`
+            }.`,
+          ),
+        )
+      }
+      return { item: given.item - 1 }
+    }
+    const items = issues.map((issue, index) => {
+      // As the new issue dialog creates it, whose title field takes the title on one line.
+      const title = oneLineTitle(issue.title)
+      if (savedTitle(title) === '') {
+        throw new Refusal(failure(400, `Item ${index + 1} has an empty title: an issue needs one.`))
+      }
+      return {
+        projectId,
+        title,
+        description: issue.description,
+        status: issue.status,
+        priority: issue.priority ?? parent.priority,
+        blockedBy: issue.blockedBy.map((given) => reference(given, index)),
+        blocking: issue.blocking.map((given) => reference(given, index)),
+      }
+    })
+    let created: Issue[] | null
+    try {
+      created = this.options.issues.createSubIssues(
+        parent.id,
+        items,
+        (index) => `item ${index + 1}`,
+      )
+    } catch (error) {
+      return failure(refusal(error), errorMessage(error))
+    }
+    if (created === null) return failure(404, "The session's project is no longer in Hoot's list.")
+    for (const issue of created) {
+      try {
+        this.options.issueCreated(issue)
+      } catch (error) {
+        // The issue is saved all the same; the window shows it once it reads the issues again.
+        console.error('Could not show the issue hoot created:', error)
+      }
+    }
+    const answer: SplitAnswer = { ok: true, project, issues: this.withRelations(created) }
+    return { status: 201, answer }
   }
 }

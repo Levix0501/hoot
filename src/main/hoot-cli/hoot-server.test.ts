@@ -203,6 +203,31 @@ describe('HootServer', () => {
     }
   })
 
+  it('refuses a label both given and taken off before changing the parent, which the window is told of', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!
+    hoot.labels.createLabel({ name: 'x' })
+    const told: unknown[] = []
+    hoot.issues.on('sub-issues-changed', (subIssues) => told.push(subIssues.links))
+    hoot.issues.on('dependencies-changed', (dependencies) => told.push(dependencies.links))
+    const answer = await request('PATCH', `/issues/${beta.id}`, {
+      body: JSON.stringify({
+        parent: String(alpha.id),
+        addBlockedBy: [String(alpha.id)],
+        addLabels: ['x'],
+        removeLabels: ['X'],
+      }),
+    })
+    expect(answer).toEqual({
+      status: 409,
+      answer: { ok: false, message: `x cannot both be given to ISS-${beta.id} and taken off it.` },
+    })
+    expect(told).toEqual([])
+    expect(hoot.issues.subIssues().links).toEqual([])
+    expect(hoot.issues.dependencies().links).toEqual([])
+    expect(hoot.labels.labelsOf(beta.id)).toEqual([])
+  })
+
   it('starts a session for an issue of the project, unless it cannot be started now', async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
     const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!

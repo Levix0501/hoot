@@ -34,7 +34,7 @@ import {
   oneLineTitle,
   type Issue,
 } from '../../shared/issues'
-import type { NamedLabel } from '../../shared/labels'
+import { labelText as writtenLabel, type NamedLabel } from '../../shared/labels'
 import { startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, type ParentChange } from '../../shared/sub-issues'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from '../issues/issue-schemas'
@@ -660,6 +660,17 @@ export class HootServer {
     }
     const labelsAdded = this.labelsNamed(addLabels)
     const labelsRemoved = this.labelsNamed(removeLabels)
+    // Refused before anything changes: the store of the issues tells the
+    // window of the parents and dependencies it changed before the labels
+    // would be refused, and the window would show them though none is saved.
+    const both = labelsRemoved.findIndex((id) => labelsAdded.includes(id))
+    if (both !== -1) {
+      const label = this.labelNamed(removeLabels[both]!)
+      return failure(
+        409,
+        `${writtenLabel(label.name, label.group)} cannot both be given to ${identifier} and taken off it.`,
+      )
+    }
     try {
       this.options.together(() => {
         if (parent !== undefined || removeParent || listed > 0) {

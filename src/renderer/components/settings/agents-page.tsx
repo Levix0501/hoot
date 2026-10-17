@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import {
   AGENTS_PATH_COMMAND,
   CANCELLED_MESSAGE,
+  INSTALL_NEEDS_NODE_MESSAGE,
   installMethodLabel,
   type AgentState,
   type InstallTarget,
@@ -31,7 +32,7 @@ function unknownAgent(id: CodingToolDefinition['id']): AgentState {
 
 /** Where a path is cut when it does not fit: before its last two segments, or its last. */
 function splitForTruncation(text: string): [head: string, tail: string] {
-  const slashes = [...text.matchAll(/\//g)].map((match) => match.index)
+  const slashes = [...text.matchAll(/[\\/]/g)].map((match) => match.index)
   const cut = slashes.length >= 3 ? slashes.at(-2) : slashes.at(-1)
   if (cut === undefined || cut <= 0) return ['', text]
   return [text.slice(0, cut), text.slice(cut)]
@@ -129,6 +130,8 @@ function AgentDescription({ agent, target }: { agent: AgentState; target: Instal
     ]
   } else if (target?.kind === 'hoot') {
     content = ["Not installed · Install puts it in ~/.hoot/agents, only for Hoot's sessions"]
+  } else if (target?.kind === 'node-required') {
+    content = ['Not installed · ', INSTALL_NEEDS_NODE_MESSAGE]
   } else {
     // Not looked for yet.
     content = [' ']
@@ -252,7 +255,7 @@ function AgentRow({
   const updateAgent = useAppStore((state) => state.updateAgent)
   const cancel = useAppStore((state) => state.cancelAgentOperation)
   const [versionOutputOpen, setVersionOutputOpen] = useState(false)
-  const status = agentRowStatus(agent)
+  const status = agentRowStatus(agent, target)
   const id = tool.id
   const statusId = `agent-status-${id}`
   // Once clicked, it waits for the command to end, which npm does once it has
@@ -304,6 +307,9 @@ function AgentRow({
           Install
         </Button>
       )
+      break
+    case 'needs-node':
+      right = <StatusText testId={statusId}>{INSTALL_NEEDS_NODE_MESSAGE}</StatusText>
       break
     case 'does-not-run':
       right = (

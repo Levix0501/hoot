@@ -120,6 +120,8 @@ function setup(
     withNpm?: boolean
     latest?: Partial<Record<CodingToolId, string | null>>
     sessions?: () => string[]
+    /** The platform Hoot runs on, as it is on the computer by default. */
+    platform?: NodeJS.Platform
     /** Runs each time the login shell environment is read, before it is. */
     beforeLoginEnvironment?: () => Promise<void>
   } = {},
@@ -162,6 +164,7 @@ function setup(
       return latest === undefined ? '2.0.0' : latest
     },
     runningSessions: () => options.sessions?.() ?? [],
+    platform: options.platform,
   })
   const states: AgentsState[] = []
   service.on('changed', (state) => states.push(state))
@@ -257,6 +260,12 @@ describe('AgentService detection', () => {
     expect(service.getState().installTarget?.kind).toBe('hoot')
   })
 
+  it('shows that Install needs Node.js and npm where Hoot has no npm to install with', async () => {
+    const { service } = setup({ withNpm: false, platform: 'win32' })
+    await service.detect()
+    expect(service.getState().installTarget).toEqual({ kind: 'node-required' })
+  })
+
   it('tells an installation that does not run, and keeps what it wrote', async () => {
     write(
       path.join(prefix, 'bin', 'opencode'),
@@ -350,6 +359,20 @@ describe('AgentService installs', () => {
     expect(run?.path).toBe(`/usr/bin:/bin:${paths.nodeDirectory}:${paths.binDirectory}`)
     // Nothing went into the computer's global folder.
     expect(fs.readdirSync(path.join(prefix, 'lib', 'node_modules'))).toEqual([])
+  })
+
+  it('fails, saying Node.js and npm are needed, where Hoot has no npm to install with', async () => {
+    const { service, paths, agent, ended } = setup({ withNpm: false, platform: 'win32' })
+    await service.detect()
+    service.install('claude')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      kind: 'install',
+      status: 'failed',
+      message: '✕ Install failed: Install needs Node.js and npm',
+    })
+    // Hoot installed nothing of its own: outside macOS it has no npm of its own.
+    expect(fs.existsSync(paths.directory)).toBe(false)
   })
 
   it('fails when npm fails, with the last lines of what it wrote and all of it', async () => {

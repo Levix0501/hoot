@@ -4,7 +4,7 @@ import path from 'node:path'
 import { cmdShim as pnpmCmdShim } from '@zkochan/cmd-shim'
 import cmdShim from 'cmd-shim'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { commandProgram } from './command-program'
+import { commandProgram, commandTarget } from './command-program'
 
 let root: string
 /** A global folder of npm without Node.js, as `%APPDATA%\npm`. */
@@ -114,5 +114,37 @@ describe('commandProgram', () => {
         `${command} is neither a program nor a command that npm or pnpm installed.`,
       )
     }
+  })
+})
+
+describe('commandTarget', () => {
+  it('tells what a batch file of npm or pnpm points to, and leaves other commands alone', async () => {
+    expect(await commandTarget('/opt/homebrew/bin/claude', 'darwin')).toBe(
+      '/opt/homebrew/bin/claude',
+    )
+    expect(await commandTarget(path.join(npm, 'claude.CMD'), 'win32')).toBe(claudeProgram(npm))
+    expect(await commandTarget(path.join(pnpm, 'opencode.cmd'), 'win32')).toBe(opencodeScript())
+    // A program, and a batch file that no package manager made.
+    expect(await commandTarget('C:\\Users\\me\\.local\\bin\\claude.exe', 'win32')).toBe(
+      'C:\\Users\\me\\.local\\bin\\claude.exe',
+    )
+    expect(await commandTarget(ownBatchFile, 'win32')).toBe(ownBatchFile)
+  })
+
+  it("tells what npm's own batch file, which the Node.js installer writes, runs", async () => {
+    const installer = path.join(root, 'installer-nodejs')
+    const npmCmd = write(
+      path.join(installer, 'npm.cmd'),
+      '@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\node_modules\\npm\\bin\\npm-cli.js" %*\r\n',
+    )
+    const npmCli = write(
+      path.join(installer, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      '// npm\n',
+    )
+    expect(await commandTarget(npmCmd, 'win32')).toBe(npmCli)
+    // The same batch file without npm beside it is one Hoot cannot read: it
+    // counts as a command of its own.
+    const loose = write(path.join(root, 'loose-npm', 'npm.cmd'), '@ECHO off\r\necho npm\r\n')
+    expect(await commandTarget(loose, 'win32')).toBe(loose)
   })
 })

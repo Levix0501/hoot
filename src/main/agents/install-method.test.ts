@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getCodingTool } from '../../shared/tools'
-import { detectInstallMethod, type InstallMethodContext } from './install-method'
+import { detectInstallMethod, npmPrefixOf, type InstallMethodContext } from './install-method'
 
 let root: string
 let home: string
@@ -167,5 +167,60 @@ describe('detectInstallMethod', () => {
     expect(await detectInstallMethod(getCodingTool('claude'), command, context())).toEqual({
       kind: 'unknown',
     })
+  })
+})
+
+describe('npmPrefixOf', () => {
+  it('tells the global folder a package was installed into, on each platform', () => {
+    expect(
+      npmPrefixOf(
+        '/usr/local/lib/node_modules/@openai/codex/bin/codex.js',
+        '@openai/codex',
+        'darwin',
+      ),
+    ).toBe('/usr/local')
+    // At the root of the file system, the global folder is the root itself.
+    expect(
+      npmPrefixOf('/lib/node_modules/@openai/codex/bin/codex.js', '@openai/codex', 'linux'),
+    ).toBe('/')
+    expect(
+      npmPrefixOf(
+        '/Users/me/.hoot/agents/lib/node_modules/@openai/codex/bin/codex.js',
+        '@openai/codex',
+        'darwin',
+      ),
+    ).toBe('/Users/me/.hoot/agents')
+
+    // On Windows the global folder holds packages in `node_modules` itself.
+    expect(
+      npmPrefixOf(
+        'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js',
+        '@openai/codex',
+        'win32',
+      ),
+    ).toBe('C:\\Users\\me\\AppData\\Roaming\\npm')
+    // Node.js's npm installs its packages into the folder of Node.js itself.
+    expect(
+      npmPrefixOf('D:\\software\\node\\node_modules\\npm\\bin\\npm-cli.js', 'npm', 'win32'),
+    ).toBe('D:\\software\\node')
+    expect(
+      npmPrefixOf(
+        'D:\\software\\node\\node_modules\\@openai\\codex\\bin\\codex.js',
+        '@openai/codex',
+        'win32',
+      ),
+    ).toBe('D:\\software\\node')
+
+    // A file that is in no global folder.
+    expect(npmPrefixOf('/usr/local/bin/claude', '@anthropic-ai/claude-code', 'darwin')).toBeNull()
+    expect(npmPrefixOf('C:\\tools\\claude.exe', '@anthropic-ai/claude-code', 'win32')).toBeNull()
+    // Another package's file, in the same folder, is no match.
+    expect(
+      npmPrefixOf(
+        '/usr/local/lib/node_modules/other/bin/claude',
+        '@anthropic-ai/claude-code',
+        'darwin',
+      ),
+    ).toBeNull()
   })
 })

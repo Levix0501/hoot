@@ -1,5 +1,6 @@
 import { parseVersion } from '../../shared/agents'
 import type { Env } from '../env/env'
+import { commandProgram, type CommandProgram } from '../tools/command-program'
 import { runCommand } from './processes'
 import { terminalText } from './terminal-text'
 
@@ -17,15 +18,28 @@ export interface VersionReading {
 /**
  * Runs an agent's command with `--version` and reads the version it reports.
  * It does not run when it cannot start, does not exit with 0, or reports no
- * version; what it wrote is kept then, followed by how it ended.
+ * version; what it wrote is kept then, followed by how it ended. On Windows,
+ * where the command npm or pnpm made is a batch file, what that points to
+ * runs instead (see `commandProgram`).
  */
 export async function readVersion(
   command: string,
   env: Env,
   cwd: string,
+  platform: NodeJS.Platform = process.platform,
   timeoutMs = VERSION_TIMEOUT_MS,
 ): Promise<VersionReading> {
-  const result = await runCommand({ file: command, args: ['--version'], env, cwd }, timeoutMs)
+  let program: CommandProgram
+  try {
+    program = await commandProgram(command, env, platform)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return { version: null, output: `It could not start: ${reason}` }
+  }
+  const result = await runCommand(
+    { file: program.file, args: [...program.args, '--version'], env, cwd },
+    timeoutMs,
+  )
   const output = await terminalText(result.output)
   const version = parseVersion(output)
   if (result.code === 0 && version !== null) return { version, output: '' }

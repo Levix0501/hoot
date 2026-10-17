@@ -196,7 +196,7 @@ export interface HootApi {
   fileManager: string
   /**
    * Whether Hoot manages agents here: shows the Agents page in the settings,
-   * and sends to it from the new session menu. On macOS only.
+   * and sends to it from the new session menu. On macOS and Windows.
    */
   manageAgents: boolean
   getStartupState(): Promise<StartupState>

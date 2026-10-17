@@ -68,11 +68,17 @@ export function lastOnSessionPath(paths: AgentPaths): string[] {
 }
 
 /**
- * An environment as a session's process has it for running agents: with
- * Hoot's `node` and Hoot's folder of agents' commands last on PATH, and Hoot's
- * executable named for that `node`.
+ * An environment as a session's process has it for running agents: on macOS,
+ * with Hoot's `node` and Hoot's folder of agents' commands last on PATH, and
+ * Hoot's executable named for that `node`; elsewhere nothing changes, Hoot
+ * having no `node` of its own there.
  */
-export function withHootNode(env: Env, paths: AgentPaths): Env {
+export function withHootNode(
+  env: Env,
+  paths: AgentPaths,
+  platform: NodeJS.Platform = process.platform,
+): Env {
+  if (platform !== 'darwin') return env
   const result: Env = { ...env, [HOOT_ENV.node]: paths.executable }
   for (const directory of lastOnSessionPath(paths)) appendToPath(result, directory, 'darwin')
   return result
@@ -102,7 +108,30 @@ export function homeDisplayPath(file: string, home: string, canonicalHome: strin
   return displayPath(displayPath(file, home), canonicalHome)
 }
 
+/**
+ * Whether two paths name the same file: as written, and on Windows also when
+ * they differ in case alone, which its file systems do not tell apart.
+ */
+export function samePath(
+  a: string,
+  b: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+/** The rules by which paths are written on `platform`. */
+function pathRules(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix
+}
+
 /** Whether a path is inside a folder, below it rather than the folder itself. */
-export function isInside(file: string, directory: string): boolean {
-  return file.startsWith(directory.endsWith('/') ? directory : `${directory}/`)
+export function isInside(
+  file: string,
+  directory: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const paths = pathRules(platform)
+  const relative = paths.relative(paths.resolve(directory), paths.resolve(file))
+  return relative !== '' && !relative.startsWith('..') && !paths.isAbsolute(relative)
 }

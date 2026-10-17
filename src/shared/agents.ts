@@ -62,11 +62,14 @@ export interface AgentState {
 
 /**
  * Where Install puts an agent: in the global folder of the computer's npm,
- * when it can use that npm, or else in Hoot's folder of agents.
+ * when it can use that npm; else, on macOS, where Hoot installs it into
+ * Hoot's folder of agents with the npm that comes with it; or nowhere, which
+ * is the case on Windows alone, where agents come from Node.js's npm.
  */
 export type InstallTarget =
   | { kind: 'npm'; prefix: string; displayPrefix: string }
   | { kind: 'hoot'; directory: string; displayDirectory: string }
+  | { kind: 'node-required' }
 
 export interface AgentsState {
   /** Claude Code, Codex and OpenCode, in this order. */
@@ -89,6 +92,13 @@ export interface AgentOperationSummary {
  * and bash, which the Agents page copies for whoever wants them outside Hoot.
  */
 export const AGENTS_PATH_COMMAND = 'export PATH="$HOME/.hoot/agents/bin:$PATH"'
+
+/**
+ * What the Agents page says about Install where Hoot has no npm to install
+ * with: on Windows, where Hoot installs nothing itself, agents are installed
+ * with the npm that comes with the computer's Node.js.
+ */
+export const INSTALL_NEEDS_NODE_MESSAGE = 'Install needs Node.js and npm'
 
 /**
  * The version a command reports in what it writes for `--version`, such as

@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { Env } from '../env/env'
 import { prependToPath } from '../env/session-env'
 import { findCommand } from '../tools/find-command'
+import { commandProgram, type CommandProgram } from '../tools/command-program'
 import { canonicalPath } from './agent-paths'
 import { runCommand } from './processes'
 
@@ -26,11 +27,23 @@ export interface ComputerNpm {
 /**
  * The global folder of an npm, as `npm prefix -g` says, run with `env`; or
  * `null` when it does not run or does not say. The folder is returned as it
- * is on disk.
+ * is on disk. On Windows, where its command is a batch file, what that points
+ * to runs instead (see `commandProgram`).
  */
-export async function npmGlobalFolder(npm: string, env: Env, cwd: string): Promise<string | null> {
+export async function npmGlobalFolder(
+  npm: string,
+  env: Env,
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | null> {
+  let program: CommandProgram
+  try {
+    program = await commandProgram(npm, env, platform)
+  } catch {
+    return null
+  }
   const result = await runCommand(
-    { file: npm, args: ['prefix', '-g'], env, cwd },
+    { file: program.file, args: [...program.args, 'prefix', '-g'], env, cwd },
     PREFIX_TIMEOUT_MS,
   )
   if (result.code !== 0) return null
@@ -43,10 +56,15 @@ export async function npmGlobalFolder(npm: string, env: Env, cwd: string): Promi
  * in another global folder: run with its own folder first on PATH, so that it
  * runs with the node beside it.
  */
-export function npmGlobalFolderOf(npm: string, env: Env, cwd: string): Promise<string | null> {
+export function npmGlobalFolderOf(
+  npm: string,
+  env: Env,
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | null> {
   const ownEnv = { ...env }
-  prependToPath(ownEnv, path.dirname(npm), 'darwin')
-  return npmGlobalFolder(npm, ownEnv, cwd)
+  prependToPath(ownEnv, path.dirname(npm), platform)
+  return npmGlobalFolder(npm, ownEnv, cwd, platform)
 }
 
 /**
@@ -73,16 +91,24 @@ export async function canCreateFilesIn(directory: string): Promise<boolean> {
 /**
  * The computer's npm, the first on the login shell PATH, if it runs: where
  * its global folder is, and whether the user can install packages into it,
- * which npm puts in its `lib/node_modules` folder and their commands in its
- * `bin` folder.
+ * which npm puts in its `lib/node_modules` folder, with their commands in its
+ * `bin` folder; on Windows, in its `node_modules` folder and in the global
+ * folder itself.
  */
-export async function findComputerNpm(env: Env, cwd: string): Promise<ComputerNpm | null> {
+export async function findComputerNpm(
+  env: Env,
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<ComputerNpm | null> {
   const npm = await findCommand('npm', env)
   if (npm === null) return null
-  const prefix = await npmGlobalFolder(npm, env, cwd)
+  const prefix = await npmGlobalFolder(npm, env, cwd, platform)
   if (prefix === null) return null
-  const usable =
-    (await canCreateFilesIn(path.join(prefix, 'lib', 'node_modules'))) &&
-    (await canCreateFilesIn(path.join(prefix, 'bin')))
+  const modules =
+    platform === 'win32'
+      ? path.join(prefix, 'node_modules')
+      : path.join(prefix, 'lib', 'node_modules')
+  const commands = platform === 'win32' ? prefix : path.join(prefix, 'bin')
+  const usable = (await canCreateFilesIn(modules)) && (await canCreateFilesIn(commands))
   return { path: npm, prefix, usable }
 }

@@ -36,7 +36,7 @@ describe('readVersion', () => {
       output: 'no version here\nIt reported no version.',
     })
     const slow = script('slow', 'sleep 5')
-    expect(await readVersion(slow, {}, root, 100)).toEqual({
+    expect(await readVersion(slow, {}, root, process.platform, 100)).toEqual({
       version: null,
       output: 'It did not finish within 0.1 seconds.',
     })

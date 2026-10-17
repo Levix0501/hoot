@@ -15,7 +15,7 @@ import { AboutPage } from './about-page'
 import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
 
-/** The pages of the settings, in the order of their list: Agents on macOS only, About last. */
+/** The pages of the settings, in the order of their list: Agents where Hoot manages them, About last. */
 const SECTIONS: ReadonlyArray<{
   id: SettingsSection
   label: string

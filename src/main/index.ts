@@ -62,10 +62,12 @@ const hootCli = hootCliSetup({
   executable: process.execPath,
   mainDirectory: import.meta.dirname,
 })
-// Hoot installs and updates agents on macOS only. The agents it installs
-// itself, when the computer has no npm it can use, live in the home folder,
-// so that an installed Hoot and one run from its repository share them.
-const manageAgents = process.platform === 'darwin'
+// Whether Hoot's own folder of agents goes on PATH and holds the agents Hoot
+// installs itself: on macOS alone, where Hoot installs agents with the npm
+// that comes with it, into the home folder, so that an installed Hoot and one
+// run from its repository share them. On Windows Hoot manages agents with the
+// computer's npm, from Node.js, and installs nothing of its own.
+const hootOwnsAgents = process.platform === 'darwin'
 const agentFolders = agentPaths({
   home: os.homedir(),
   packaged: app.isPackaged,
@@ -99,7 +101,7 @@ const tools = new ToolService({
   shell: shell.file,
   baseEnv,
   cwd: os.homedir(),
-  agentsBinDirectory: manageAgents ? agentFolders.binDirectory : null,
+  agentsBinDirectory: hootOwnsAgents ? agentFolders.binDirectory : null,
 })
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
@@ -120,7 +122,7 @@ const sessions = new SessionManager({
         permissionLevel: (tool) => permissionLevels.level(tool),
         temporaryFolder: app.getPath('temp'),
         hoot: { ...hootCli, sessionId },
-        agents: manageAgents
+        agents: hootOwnsAgents
           ? { binDirectory: agentFolders.binDirectory, lastOnPath: lastOnSessionPath(agentFolders) }
           : null,
       },

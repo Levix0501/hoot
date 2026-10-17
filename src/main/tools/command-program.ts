@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import readCmdShim from 'read-cmd-shim'
 import which from 'which'
@@ -19,16 +20,40 @@ const CMD_FILE = /\.cmd$/i
 /**
  * The file that a shim of npm or pnpm points to, or `null` when the file is
  * no such shim. read-cmd-shim knows a shim by its extension spelled `.cmd`,
- * which `which` spells as PATHEXT does, usually `.CMD`.
+ * which `which` spells as PATHEXT does, usually `.CMD`. npm's own command,
+ * which the Node.js installer writes, is a batch file of a kind read-cmd-shim
+ * does not know: it runs the npm-cli.js beside it.
  */
 async function shimTarget(shim: string): Promise<string | null> {
+  const cmd = shim.replace(CMD_FILE, '.cmd')
   try {
-    const target = await readCmdShim(shim.replace(CMD_FILE, '.cmd'))
+    const target = await readCmdShim(cmd)
     // Named relative to the shim's folder, with `\` between folders.
     return path.resolve(path.dirname(shim), ...target.split('\\'))
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOTASHIM') return null
-    throw error
+    if ((error as NodeJS.ErrnoException).code !== 'ENOTASHIM') throw error
+  }
+  if (path.basename(cmd).toLowerCase() !== 'npm.cmd') return null
+  const npmCli = path.join(path.dirname(shim), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  return (await fs.stat(npmCli).catch(() => null))?.isFile() ? npmCli : null
+}
+
+/**
+ * The file that decides how a command was installed, and which runs what the
+ * command runs: on Windows, the file a batch file of npm or pnpm points to,
+ * where its package lives; elsewhere, and for a command that is no such batch
+ * file, the command itself. A batch file that cannot be read counts as a
+ * command of its own, so that reading how it was installed never fails.
+ */
+export async function commandTarget(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string> {
+  if (platform !== 'win32' || !CMD_FILE.test(command)) return command
+  try {
+    return (await shimTarget(command)) ?? command
+  } catch {
+    return command
   }
 }
 
@@ -48,8 +73,8 @@ export async function commandProgram(
   platform: NodeJS.Platform = process.platform,
 ): Promise<CommandProgram> {
   if (platform !== 'win32' || PROGRAM_FILE.test(command)) return { file: command, args: [] }
-  const target = CMD_FILE.test(command) ? await shimTarget(command) : null
-  if (target === null) {
+  const target = await commandTarget(command, platform)
+  if (target === command) {
     throw new Error(`${command} is neither a program nor a command that npm or pnpm installed.`)
   }
   if (PROGRAM_FILE.test(target)) return { file: target, args: [] }

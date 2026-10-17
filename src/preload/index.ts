@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { fileManagerName } from '../shared/file-manager'
 import { IpcChannel, type HootApi } from '../shared/ipc'
+import { managesAgents } from '../shared/managed-agents'
 import { windowControlsFromArguments } from '../shared/window-controls'
 
 function subscribe<Args extends unknown[]>(
@@ -18,7 +19,7 @@ const api: HootApi = {
   testHooks: process.argv.includes('--hoot-test-hooks'),
   windowControls: windowControlsFromArguments(process.argv),
   fileManager: fileManagerName(process.platform),
-  manageAgents: process.platform === 'darwin',
+  manageAgents: managesAgents(process.platform),
   getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),
   getAppInfo: () => ipcRenderer.invoke(IpcChannel.getAppInfo),
   revealDatabase: () => ipcRenderer.send(IpcChannel.revealDatabase),

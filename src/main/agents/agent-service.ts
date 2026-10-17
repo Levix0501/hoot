@@ -4,6 +4,7 @@ import path from 'node:path'
 import {
   failedMessage,
   installedMessage,
+  INSTALL_NEEDS_NODE_MESSAGE,
   isNewerVersion,
   updatedMessage,
   type AgentInstallation,
@@ -17,6 +18,7 @@ import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../.
 import type { Env } from '../env/env'
 import { prependToPath } from '../env/session-env'
 import type { Detection, LoginEnvironment } from '../tools/tool-service'
+import { commandProgram } from '../tools/command-program'
 import { canonicalPath, homeDisplayPath, withHootNode, type AgentPaths } from './agent-paths'
 import {
   detectInstallMethod,
@@ -48,6 +50,8 @@ export interface AgentServiceOptions {
   latestVersion(npmPackage: string): Promise<string | null>
   /** The ids of an agent's sessions that are starting or running. */
   runningSessions(id: CodingToolId): string[]
+  /** The platform Hoot runs on: what its commands are, and where agents live. */
+  platform?: NodeJS.Platform
 }
 
 /** An agent's installation, with what updating it needs. */
@@ -176,10 +180,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    */
   private quitting = false
   private progressTimer: NodeJS.Timeout | null = null
+  private readonly platform: NodeJS.Platform
 
   constructor(private readonly options: AgentServiceOptions) {
     super()
     this.canonicalHome = canonicalPath(options.home)
+    this.platform = options.platform ?? process.platform
   }
 
   getState(): AgentsState {
@@ -357,7 +363,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     }
     try {
       const detection = await this.options.detectTools()
-      const npm = await findComputerNpm(detection.login.env, this.options.home)
+      const npm = await findComputerNpm(detection.login.env, this.options.home, this.platform)
       this.installTarget = await this.targetOf(npm)
       return await Promise.all(
         records.map(async (record, index) => {
@@ -400,9 +406,10 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   }
 
   private async targetOf(npm: ComputerNpm | null): Promise<InstallTarget> {
-    if (npm?.usable) {
+    if (npm?.usable && (this.platform === 'darwin' || this.platform === 'win32')) {
       return { kind: 'npm', prefix: npm.prefix, displayPrefix: await this.displayPath(npm.prefix) }
     }
+    if (this.platform !== 'darwin') return { kind: 'node-required' }
     const directory = this.options.paths.directory
     return { kind: 'hoot', directory, displayDirectory: await this.displayPath(directory) }
   }
@@ -423,10 +430,11 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         agentsDirectory: paths.directory,
         env,
         computerNpm: npm,
-        npmGlobalFolder: (other) => npmGlobalFolderOf(other, env, home),
+        npmGlobalFolder: (other) => npmGlobalFolderOf(other, env, home, this.platform),
+        platform: this.platform,
       }),
       // As a session runs it, so that the Codex in Hoot's folder of agents finds a node.
-      readVersion(command, withHootNode(env, paths), home),
+      readVersion(command, withHootNode(env, paths, this.platform), home, this.platform),
       this.displayPath(command),
     ])
     return {
@@ -554,14 +562,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const latest = `${tool.npmPackage}@latest`
     const npmArgs = ['install', '-g', latest, '--loglevel=http']
     if (kind === 'install') {
-      const npm = await findComputerNpm(env, home)
-      if (npm?.usable) {
-        return {
-          name: 'npm',
-          command: { file: npm.path, args: npmArgs, env, cwd: home },
-          intoAgentsDirectory: false,
-        }
-      }
+      const npm = await findComputerNpm(env, home, this.platform)
+      if (npm?.usable) return this.npmPlan(npm.path, npmArgs, env)
       return this.hootNpmPlan(latest, env)
     }
     if (before === null) throw new OperationFailure(`${tool.label} is not installed`)
@@ -571,12 +573,10 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       case 'npm': {
         const npmEnv = { ...env }
         // Another global folder's npm runs with the node beside it.
-        if (!method.computer) prependToPath(npmEnv, path.dirname(method.npm), 'darwin')
-        return {
-          name: 'npm',
-          command: { file: method.npm, args: npmArgs, env: npmEnv, cwd: home },
-          intoAgentsDirectory: false,
+        if (!method.computer) {
+          prependToPath(npmEnv, path.dirname(method.npm), this.platform)
         }
+        return this.npmPlan(method.npm, npmArgs, npmEnv)
       }
       case 'hoot':
         return this.hootNpmPlan(latest, env)
@@ -607,11 +607,31 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   }
 
   /**
+   * An operation that runs an npm the computer has. On Windows its command is
+   * a batch file, which runs as what it points to (see `commandProgram`).
+   */
+  private async npmPlan(npm: string, args: string[], env: Env): Promise<Plan> {
+    const program = await commandProgram(npm, env, this.platform)
+    return {
+      name: 'npm',
+      command: {
+        file: program.file,
+        args: [...program.args, ...args],
+        env,
+        cwd: this.options.home,
+      },
+      intoAgentsDirectory: false,
+    }
+  }
+
+  /**
    * The npm that comes with Hoot, run by Hoot's executable as Node.js, which
    * installs into Hoot's folder of agents. Its packages' install scripts find
-   * Hoot's `node` last on PATH.
+   * Hoot's `node` last on PATH. There is no such npm outside macOS, where
+   * Hoot installs with the computer's npm alone.
    */
   private hootNpmPlan(latest: string, env: Env): Plan {
+    if (this.platform !== 'darwin') throw new OperationFailure(INSTALL_NEEDS_NODE_MESSAGE)
     const { paths, home } = this.options
     return {
       name: 'npm',
@@ -626,7 +646,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           latest,
           '--loglevel=http',
         ],
-        env: { ...withHootNode(env, paths), ELECTRON_RUN_AS_NODE: '1' },
+        env: { ...withHootNode(env, paths, this.platform), ELECTRON_RUN_AS_NODE: '1' },
         cwd: home,
       },
       intoAgentsDirectory: true,

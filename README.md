@@ -4,8 +4,8 @@ Hoot is a desktop app for developers who use coding CLIs such as Claude Code, Co
 OpenCode. Add local projects, then run coding tools and shells for them in terminals embedded in
 the Hoot window, as many at a time as you like.
 
-Hoot supports macOS. Hoot for Windows is a preview: it adds projects and starts sessions, but has
-no [Agents](#agents) page.
+Hoot supports macOS. Hoot for Windows is a preview: it adds projects, starts sessions, and installs
+and updates [agents](#agents) with the npm of the computer's Node.js.
 
 ## Features
 
@@ -47,7 +47,7 @@ no [Agents](#agents) page.
   Hoot's own `node` (Hoot's executable run as Node.js, for a Mac without Node.js) and
   `~/.hoot/agents/bin`, so that a `node` or an agent of yours comes first. Tools that are not
   installed are shown disabled, with **Install in Settings…** below them, which shows the
-  [Agents](#agents) page (on Windows, their install command instead), and **Re-detect Tools**, the
+  [Agents](#agents) page, and **Re-detect Tools**, the
   last item of the new session menu, looks for them again at any time (on Windows, in the folders
   `Path` had when Hoot started).
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
@@ -111,7 +111,7 @@ no [Agents](#agents) page.
 
 **Settings** at the bottom of the sidebar, **Hoot > Settings…** or ⌘, shows the settings in place
 of the sidebar and the shown page: their list on the left, as wide as the sidebar, and their page
-on the right: **Appearance** and, on macOS, **Agents**. Click one to show it; the settings show
+on the right: **Appearance** and **Agents**. Click one to show it; the settings show
 the page shown last whenever they are shown again (Appearance, after Hoot starts), and
 **Install in Settings…** in the new session menu always shows Agents. Switching between their
 pages is not a step for going back and forward. The sidebar button and Back and Forward are not at
@@ -133,28 +133,33 @@ project, and ⌘W and ⌘B do nothing. Changes apply at once; there is nothing t
 
 ### Agents
 
-On macOS, the **Agents** page lists Claude Code, Codex and OpenCode. Each row shows the agent's
+The **Agents** page lists Claude Code, Codex and OpenCode. Each row shows the agent's
 version, how it was installed (**npm**, **Installed by Hoot · only in Hoot's sessions**,
 **Homebrew** or **Official installer**) and its command's path (with `~` for your home folder,
 cut in the middle when it is long, and in full when you point at it); or **Not installed** and
 where **Install** would put it. On the right it says **Up to date**, offers **Install** or
 **Update to** the latest version, or says **Checking…**, **Couldn't check for updates**,
 **Update it the way you installed it**, or **Installed, but it doesn't run** (click it to see what
-the command wrote for `--version`). Showing the page, and **Re-detect** at its top right, read your login
+the command wrote for `--version`). Where Hoot has no npm to install agents with, it says
+**Install needs Node.js and npm** instead of **Install**: install Node.js, which comes with npm,
+and the page offers it. Showing the page, and **Re-detect** at its top right, read your login
 shell environment again, look for each agent (the first on its `PATH`, else in
-`~/.hoot/agents/bin`; the one sessions run), run it with `--version`, and read the latest version.
+`~/.hoot/agents/bin` on macOS, where Hoot installs its own; the one sessions run), run it with
+`--version`, and read the latest version.
 The latest version is the one the `latest` tag names on registry.npmjs.org, whatever registry your
 npm uses; Hoot asks registry.npmjs.org only then, never in the background.
 
 - **Install** installs the npm package's latest version (`@anthropic-ai/claude-code`,
   `@openai/codex`, `@opencode/cli`) with npm, never with an agent's install script. When the first
   `npm` on your login shell's `PATH` runs and you can create files in its global folder's
-  `lib/node_modules` and `bin`, Hoot runs `npm install -g <package>@latest` with it, as you would
-  in a terminal. Otherwise it uses the npm that comes with Hoot, run by Hoot's own executable as
+  `lib/node_modules` and `bin` (on Windows, its `node_modules` and the global folder itself), Hoot
+  runs `npm install -g <package>@latest` with it, as you would in a terminal. Otherwise, on macOS,
+  it uses the npm that comes with Hoot, run by Hoot's own executable as
   Node.js, which installs into `~/.hoot/agents`: those agents work in Hoot's sessions only, and the
   row has a button that copies the line that puts `~/.hoot/agents/bin` on `PATH` in zsh or bash,
   for your terminals. Neither changes your shell's configuration files, and either works without
-  Node.js on your Mac: Hoot's `node` runs agents that need one, such as Codex.
+  Node.js on your Mac: Hoot's `node` runs agents that need one, such as Codex. On Windows, where
+  Hoot has no npm of its own, it installs with the computer's npm alone, from Node.js.
 - **Update to** updates the installation the row shows, in its place, the way it was
   installed: `npm install -g <package>@latest` with the npm of its global folder (with Hoot's npm
   for one in `~/.hoot/agents`), `brew upgrade --cask` or `--formula` for the cask or formula it
@@ -178,8 +183,8 @@ npm uses; Hoot asks registry.npmjs.org only then, never in the background.
 - npm, Hoot's included, uses your npm configuration (such as the registry and the proxy in
   `~/.npmrc`); Hoot adds none of its own.
 
-Leaving the page or the settings does not stop an install or an update. Hoot for Windows has no
-Agents page.
+Leaving the page or the settings does not stop an install or an update. On Windows, installs and
+updates run the npm of the computer's Node.js, and Hoot keeps no agents of its own.
 
 ## Issues
 
@@ -504,7 +509,9 @@ versions are prereleases for now.
 - **Mac**: take the DMG for your Mac's chip, `arm64` for Apple Silicon or `x64` for Intel. Open it
   and drag Hoot to Applications. Hoot is signed and notarized, so it opens like any other app.
 - **Windows**: Hoot for Windows is a preview. It adds projects, with Git on `PATH` (where Git for
-  Windows puts it by default), and starts sessions, but has no Agents page. Run the installer
+  Windows puts it by default), starts sessions, and has the [Agents](#agents) page, which installs
+  and updates agents with the npm of your Node.js (install Node.js first; the page says so when it
+  is missing). Run the installer
   (`Hoot-Setup-<version>.exe`): it installs Hoot for you alone, in `%LOCALAPPDATA%\Programs\Hoot`,
   without asking anything. The installer is not signed, so Microsoft Defender SmartScreen may say
   "Windows protected your PC": click **More info**, then **Run anyway**. It cannot be installed on a
@@ -651,10 +658,11 @@ it does on Windows: it shows on a Mac whether anything in the row would be cover
 | hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`                                     |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
-node-pty, the only runtime dependency. The app also carries, as files of their own beside the
+node-pty, the only runtime dependency. The macOS app also carries, as files of their own beside the
 launchers of `hoot`, the launcher of its `node` (`resources/node`) and npm (from the `npm`
 package, pinned in `package.json`), which installs [agents](#agents) into `~/.hoot/agents`, a
-folder that an installed Hoot and one run from the repository share. Hoot keeps its data in the
+folder that an installed Hoot and one run from the repository share; on Windows Hoot uses the
+computer's Node.js and npm instead, and carries neither. Hoot keeps its data in the
 app's user data folder: `~/Library/Application Support/Hoot` for the installed app, and
 `~/Library/Application Support/Hoot-dev` for runs from the repository.
 

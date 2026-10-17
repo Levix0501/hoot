@@ -10,6 +10,7 @@ import {
   homeDisplayPath,
   isInside,
   lastOnSessionPath,
+  samePath,
   withHootNode,
 } from './agent-paths'
 
@@ -50,11 +51,14 @@ describe('agentPaths', () => {
       executable: '/M/Hoot',
     })
     expect(lastOnSessionPath(paths)).toEqual(['/R/node', '/Users/me/.hoot/agents/bin'])
-    expect(withHootNode({ PATH: '/usr/bin', HOME: '/Users/me' }, paths)).toEqual({
+    expect(withHootNode({ PATH: '/usr/bin', HOME: '/Users/me' }, paths, 'darwin')).toEqual({
       PATH: '/usr/bin:/R/node:/Users/me/.hoot/agents/bin',
       HOME: '/Users/me',
       HOOT_NODE: '/M/Hoot',
     })
+    // Elsewhere Hoot has no node of its own, and changes nothing.
+    const env = { PATH: 'C:\\tools', HOME: 'C:\\Users\\me' }
+    expect(withHootNode(env, paths, 'win32')).toBe(env)
   })
 })
 
@@ -87,6 +91,31 @@ describe('paths as they are on disk and as Hoot shows them', () => {
     expect(isInside('/a/b/c', '/a/b')).toBe(true)
     expect(isInside('/a/b', '/a/b')).toBe(false)
     expect(isInside('/a/bc', '/a/b')).toBe(false)
+    // On Windows a path is written with backslashes, and case does not matter.
+    expect(
+      isInside('C:\\Users\\me\\.hoot\\agents\\bin', 'C:\\Users\\me\\.hoot\\agents', 'win32'),
+    ).toBe(true)
+    expect(
+      isInside('c:\\users\\ME\\.hoot\\agents\\bin', 'C:\\Users\\me\\.hoot\\agents', 'win32'),
+    ).toBe(true)
+    expect(isInside('C:\\Users\\me\\.hoot\\agents', 'C:\\Users\\me\\.hoot\\agents', 'win32')).toBe(
+      false,
+    )
+    expect(isInside('C:\\Users\\other', 'C:\\Users\\me', 'win32')).toBe(false)
+  })
+
+  it('tells two paths that name the same file', () => {
+    expect(samePath('/a/b', '/a/b', 'darwin')).toBe(true)
+    // Case matters outside Windows.
+    expect(samePath('/a/b', '/A/b', 'darwin')).toBe(false)
+    expect(
+      samePath(
+        'C:\\Users\\me\\AppData\\Roaming\\npm',
+        'c:\\users\\ME\\appdata\\roaming\\NPM',
+        'win32',
+      ),
+    ).toBe(true)
+    expect(samePath('C:\\a', 'C:\\b', 'win32')).toBe(false)
   })
 })
 

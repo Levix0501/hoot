@@ -8,8 +8,8 @@ import {
   type IssueView,
 } from '../../../shared/issues'
 import { VIEW_OPTIONS } from '../../lib/issue-properties'
-import { isOnList, listProject } from '../../lib/project-choices'
-import { useAppStore } from '../../store/app-store'
+import { listProject } from '../../lib/project-choices'
+import { isListed, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../ui/empty'
 import { Kbd } from '../ui/kbd'
@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { IssueGroup } from './issue-group'
 import { IssuesBreadcrumb, IssuesTopRow } from './issues-top-row'
+import { LabelFilter } from './labels'
 import { ProjectFilter } from './project-filter'
 import { PriorityPicker, StatusPicker } from './property-picker'
 import { useNow } from './relative-time'
@@ -40,9 +41,10 @@ function issueIdOf(row: Element): number {
 
 /**
  * The issue list, as Linear lists issues: the issues of the projects checked
- * in its Project filter (all of them while nothing is checked), in one of its
- * views (all, active or backlog), grouped by status, the closest to done
- * first. J and K (or the arrow keys) move through the issues, Enter shows
+ * in its Project filter (all of them while nothing is checked) with the
+ * labels checked in its Label filter (any of them, or all of them; every
+ * issue while none is checked), in one of its views (all, active or
+ * backlog), grouped by status, the closest to done first. J and K (or the arrow keys) move through the issues, Enter shows
  * one, S and P change the status and the priority of the one with the focus
  * or the pointer, and C creates an issue: for the project checked, when that
  * is all that is checked.
@@ -52,7 +54,7 @@ export function IssueListPage() {
   const collapsed = useAppStore((state) => state.collapsedIssueGroups)
   const checked = useAppStore((state) => state.checkedProjects)
   const issues = useAppStore(
-    useShallow((state) => state.issues.filter((issue) => isOnList(issue, state.checkedProjects))),
+    useShallow((state) => state.issues.filter((issue) => isListed(state, issue))),
   )
   const setIssueView = useAppStore((state) => state.setIssueView)
   const openNewIssue = useAppStore((state) => state.openNewIssue)
@@ -193,6 +195,7 @@ export function IssueListPage() {
             ))}
           </TabsList>
           <div className="flex-1" />
+          <LabelFilter />
           <ProjectFilter />
         </div>
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="issues-scroll">

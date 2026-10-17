@@ -279,18 +279,9 @@ export class IssueStore extends EventEmitter<{
           })),
         ]),
       })
-      const newIds = issues.map((_issue, index) => placeholder(index))
-      const links =
-        parentId === null
-          ? this.links()
-          : withParents(
-              this.links(),
-              newIds.map((issueId) => ({ issueId, parentId })),
-            )
       const problem = dependencyProblem(
-        links,
         withDependencies(this.dependencyLinks(), { add: added }),
-        { added, moved: parentId === null ? [] : newIds },
+        added,
         (id) => (id < 0 ? itemName(placeOf(id)) : this.nameOf(id)),
       )
       if (problem !== null) throw new DependencyError(problem)
@@ -358,9 +349,11 @@ export class IssueStore extends EventEmitter<{
    * its dependencies, both ways, go with it.
    */
   delete(id: number): boolean {
-    const linked = this.statements.linked.get(id, id) !== undefined
-    const dependent = this.statements.dependent.get(id, id) !== undefined
-    const deleted = this.statements.delete.run(id).changes > 0
+    const { deleted, linked, dependent } = transaction(this.db, () => ({
+      linked: this.statements.linked.get(id, id) !== undefined,
+      dependent: this.statements.dependent.get(id, id) !== undefined,
+      deleted: this.statements.delete.run(id).changes > 0,
+    }))
     if (deleted && linked) this.subIssuesChanged()
     if (deleted && dependent) this.dependenciesChanged()
     return deleted
@@ -445,18 +438,7 @@ export class IssueStore extends EventEmitter<{
         )
         if (problem !== null) throw new SubIssueError(problem)
       }
-      const problem = dependencyProblem(
-        moved,
-        withDependencies(kept, { add: added }),
-        {
-          added,
-          moved: [...new Set(parents.map((change) => change.issueId))].filter((id) => {
-            const parentId = parentOf(moved, id)
-            return parentId !== null && parentId !== parentOf(links, id)
-          }),
-        },
-        name,
-      )
+      const problem = dependencyProblem(withDependencies(kept, { add: added }), added, name)
       if (problem !== null) throw new DependencyError(problem)
       let applied = links
       for (const change of parents) {

@@ -1,37 +1,13 @@
-import {
-  ChevronDownIcon,
-  CircleArrowRightIcon,
-  FolderIcon,
-  RotateCcwIcon,
-  WorkflowIcon,
-  XIcon,
-} from 'lucide-react'
+import { FolderIcon, XIcon } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import type { Dependency } from '../../../shared/dependencies'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
-import { firstStep, workflowProgress, workflowStep } from '../../../shared/workflows'
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
-import { progressLabel } from '../../lib/issue-workflow'
 import { cn } from '../../lib/utils'
-import {
-  focusAfterOverlay,
-  isIssueStarting,
-  issueRecordsOf,
-  shownBlockedByOf,
-  shownBlockingOf,
-  useAppStore,
-  waitCountsOf,
-} from '../../store/app-store'
+import { shownBlockedByOf, shownBlockingOf, useAppStore, waitCountsOf } from '../../store/app-store'
 import { Button } from '../ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
+import { IssueLabels } from './labels'
 import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
 
 /**
@@ -40,90 +16,6 @@ import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
  */
 const PROPERTY_BUTTON =
   'justify-start @max-2xl/issue:rounded-full @max-2xl/issue:border-border @2xl/issue:w-full'
-
-/**
- * Where the issue is in its workflow: Not started, the step it is at, or
- * Finished. Once it has started, it opens a menu that reports an outcome of
- * the step it is at, as the user picks it, or starts the workflow over; both
- * apply at once. It does not open while the issue is being started, whose
- * session starts at the step the issue was at when its start button was
- * clicked.
- */
-function StepProperty({ issue }: { issue: Issue }) {
-  const reportStep = useAppStore((state) => state.reportStep)
-  const startOverWorkflow = useAppStore((state) => state.startOverWorkflow)
-  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
-  const starting = useAppStore((state) => isIssueStarting(state, issue.id))
-  const label = progressLabel(progress, ISSUE_WORKFLOW)
-  const content = (
-    <>
-      <WorkflowIcon className="text-muted-foreground" />
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-left',
-          progress.kind === 'not-started' && 'text-muted-foreground',
-        )}
-        data-testid="issue-step-label"
-      >
-        {label}
-      </span>
-    </>
-  )
-  const buttonProps = {
-    variant: 'ghost',
-    size: 'sm',
-    'aria-label': `Step: ${label}`,
-    'data-testid': 'issue-step',
-    'data-progress': progress.kind,
-  } as const
-  // As the other properties that open something show.
-  const chevron = <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
-  if (progress.kind === 'not-started' || starting) {
-    // Nothing to report or start over yet, or not while the issue is being
-    // started; it looks as it does otherwise, as the other properties do.
-    return (
-      <Button {...buttonProps} className={cn(PROPERTY_BUTTON, 'disabled:opacity-100')} disabled>
-        {content}
-        {progress.kind !== 'not-started' && chevron}
-      </Button>
-    )
-  }
-  const step = progress.kind === 'at-step' ? workflowStep(ISSUE_WORKFLOW, progress.step) : undefined
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={<Button {...buttonProps} className={PROPERTY_BUTTON} />}>
-        {content}
-        {chevron}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        className="w-auto min-w-(--anchor-width) [app-region:no-drag]"
-        finalFocus={focusAfterOverlay}
-        data-testid="issue-step-menu"
-      >
-        {progress.kind === 'at-step' &&
-          step?.outcomes.map((outcome) => (
-            <DropdownMenuItem
-              key={outcome.name}
-              onClick={() => void reportStep(issue.id, progress.run, outcome.name)}
-              data-testid="issue-step-report"
-              data-outcome={outcome.name}
-            >
-              <CircleArrowRightIcon />
-              Report {outcome.label}
-            </DropdownMenuItem>
-          ))}
-        {step !== undefined && <DropdownMenuSeparator />}
-        <DropdownMenuItem
-          onClick={() => void startOverWorkflow(issue.id)}
-          data-testid="issue-step-start-over"
-        >
-          <RotateCcwIcon />
-          Start over from {firstStep(ISSUE_WORKFLOW).name}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
 
 /**
  * The issues an issue is blocked by, or those it blocks, as Linear lists them
@@ -215,8 +107,7 @@ function DependencySection({
 
 /**
  * An issue's status, priority and project, each a button that opens its
- * picker, and the step of its workflow it is at; then the issues it is
- * blocked by and those it blocks. The status shows a red badge while the
+ * picker; its labels; then the issues it is blocked by and those it blocks. The status shows a red badge while the
  * issue waits on an issue. The status and priority pickers also open with S
  * and P, through `open` and `onOpenChange`.
  */
@@ -333,7 +224,7 @@ export function IssueProperties({
           {project ? project.name : 'Add to project'}
         </span>
       </ProjectPicker>
-      <StepProperty issue={issue} />
+      <IssueLabels issue={issue} />
       <DependencySection issue={issue} kind="blocked-by" issues={blockedBy} />
       <DependencySection issue={issue} kind="blocking" issues={blocking} />
     </section>

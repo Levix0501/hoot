@@ -3,7 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { databaseFile, migrate, openDatabase, transaction, userVersion } from './database'
+import {
+  databaseFile,
+  migrate,
+  observeTransactions,
+  openDatabase,
+  transaction,
+  userVersion,
+} from './database'
 import { MIGRATIONS } from './migrations'
 
 let directory: string
@@ -264,7 +271,7 @@ describe('the upgrade to dependencies', () => {
     const tables = ['projects', 'issues', 'sub_issues', 'workflow_records']
     const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
     db.close()
-    db = openDatabase(file)
+    db = openDatabase(file, MIGRATIONS.slice(0, 4))
     expect(userVersion(db)).toBe(4)
     expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
       before,
@@ -294,6 +301,79 @@ describe('the upgrade to dependencies', () => {
   })
 })
 
+describe('the upgrade to labels', () => {
+  it('drops the records of the workflows and keeps everything else, no issue with a label', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 4))
+    db.exec(`
+      INSERT INTO projects (id, root, list_position) VALUES (1, '/work/gamma', 1), (2, '/work/hotel', NULL);
+      INSERT INTO issues (project_id, title, description, status, priority, created_at, completed_at)
+        VALUES (1, 'E1', 'Desc', 'todo', 2, 100, NULL), (1, 'E2', '', 'done', 0, 200, 300),
+          (2, 'E3', '', 'backlog', 4, 400, NULL);
+      INSERT INTO sub_issues (issue_id, parent_id) VALUES (2, 1);
+      INSERT INTO issue_dependencies (issue_id, blocked_by_id) VALUES (3, 1);
+      INSERT INTO workflow_records (issue_id, kind, step, outcome, reporter, summary, at)
+        VALUES (1, 'step-started', 'scope', NULL, NULL, NULL, 500),
+          (1, 'step-reported', 'scope', 'no-split', 'agent', 'One piece', 600),
+          (1, 'step-started', 'design', NULL, NULL, NULL, 600);
+    `)
+    const tables = ['projects', 'issues', 'sub_issues', 'issue_dependencies']
+    const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(5)
+    expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
+      before,
+    )
+    expect(
+      db.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'workflow_records%'").all(),
+    ).toEqual([])
+    for (const table of ['label_groups', 'labels', 'issue_labels', 'label_events']) {
+      expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([])
+    }
+    db.close()
+  })
+
+  it('upgrades a database of the first release, at version 1, too', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 1))
+    db.exec(`
+      INSERT INTO projects (id, root, list_position) VALUES (1, '/work/gamma', 1);
+      INSERT INTO issues (project_id, title, description, status, priority, created_at, completed_at)
+        VALUES (1, 'X', 'Desc', 'todo', 2, 100, NULL);
+    `)
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
+    expect(db.prepare('SELECT title FROM issues').all()).toEqual([{ title: 'X' }])
+    db.close()
+  })
+
+  it('refuses names taken whatever their case, colors that are not hexadecimal, and an issue with a label twice', () => {
+    const db = openDatabase(file)
+    const issue = insertIssue(db, {})
+    const label = db.prepare(
+      'INSERT INTO labels (name, name_key, color, description, group_id) VALUES (?, ?, ?, ?, ?)',
+    )
+    label.run('Bug', 'bug', 'ff8800', '', null)
+    expect(() => label.run('bug', 'bug', 'ff8800', '', null)).toThrow(/UNIQUE constraint/)
+    expect(() => label.run('x', 'x', 'red', '', null)).toThrow(/CHECK constraint/)
+    expect(() => label.run('y', 'y', 'FF8800', '', null)).toThrow(/CHECK constraint/)
+    expect(() => label.run('z', 'z', 'ff8800', '', 99)).toThrow(/FOREIGN KEY constraint/)
+    const carry = db.prepare('INSERT INTO issue_labels (issue_id, label_id) VALUES (?, ?)')
+    carry.run(issue, 1)
+    expect(() => carry.run(issue, 1)).toThrow(/UNIQUE constraint|PRIMARY KEY/)
+    // A group deleted leaves its labels without one; a label deleted, its issues without it.
+    db.exec(`
+      INSERT INTO label_groups (name, name_key) VALUES ('Kind', 'kind');
+      UPDATE labels SET group_id = 1;
+      DELETE FROM label_groups;
+    `)
+    expect(db.prepare('SELECT group_id FROM labels').all()).toEqual([{ group_id: null }])
+    db.exec('DELETE FROM labels')
+    expect(db.prepare('SELECT * FROM issue_labels').all()).toEqual([])
+    db.close()
+  })
+})
+
 describe('migrate', () => {
   it('does nothing to a database at the latest version', () => {
     const db = new DatabaseSync(':memory:')
@@ -317,6 +397,56 @@ describe('transaction', () => {
     ).toThrow('stop')
     expect(db.isTransaction).toBe(false)
     expect(db.prepare('SELECT x FROM t').all()).toEqual([{ x: 1 }])
+    db.close()
+  })
+
+  it('runs inside another in a savepoint, whose changes alone a throw rolls back', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE t (x)')
+    transaction(db, () => {
+      db.exec('INSERT INTO t VALUES (1)')
+      expect(() =>
+        transaction(db, () => {
+          db.exec('INSERT INTO t VALUES (2)')
+          throw new Error('inner')
+        }),
+      ).toThrow('inner')
+      transaction(db, () => db.exec('INSERT INTO t VALUES (3)'))
+    })
+    expect(db.prepare('SELECT x FROM t').all()).toEqual([{ x: 1 }, { x: 3 }])
+    expect(() =>
+      transaction(db, () => {
+        transaction(db, () => db.exec('INSERT INTO t VALUES (4)'))
+        throw new Error('outer')
+      }),
+    ).toThrow('outer')
+    expect(db.prepare('SELECT x FROM t').all()).toEqual([{ x: 1 }, { x: 3 }])
+    db.close()
+  })
+
+  it('tells its observers, once for the outermost, before its changes, before it commits and once it ended', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE t (x)')
+    const told: string[] = []
+    const stop = observeTransactions(db, {
+      begin: () => told.push('begin'),
+      beforeCommit: () => {
+        told.push('before commit')
+        db.exec('INSERT INTO t VALUES (9)')
+      },
+      end: (committed) => told.push(committed ? 'committed' : 'rolled back'),
+    })
+    transaction(db, () => transaction(db, () => db.exec('INSERT INTO t VALUES (1)')))
+    expect(() =>
+      transaction(db, () => {
+        throw new Error('stop')
+      }),
+    ).toThrow('stop')
+    expect(told).toEqual(['begin', 'before commit', 'committed', 'begin', 'rolled back'])
+    expect(db.prepare('SELECT x FROM t').all()).toEqual([{ x: 1 }, { x: 9 }])
+    stop()
+    transaction(db, () => db.exec('INSERT INTO t VALUES (2)'))
+    expect(told).toHaveLength(5)
     db.close()
   })
 })

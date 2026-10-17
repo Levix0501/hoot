@@ -6,27 +6,26 @@ import {
   LinkIcon,
   ListTreeIcon,
   OctagonMinusIcon,
+  SquarePlusIcon,
   Trash2Icon,
   UnlinkIcon,
 } from 'lucide-react'
 import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
-import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
-import { workflowProgress } from '../../../shared/workflows'
 import {
   optionOfDigit,
   PRIORITY_OPTIONS,
   STATUS_OPTIONS,
   type PropertyOption,
 } from '../../lib/issue-properties'
-import { progressLabel } from '../../lib/issue-workflow'
 import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
 import { cn } from '../../lib/utils'
 import {
   focusAfterOverlay,
-  issueRecordsOf,
+  issueLabelsOf,
   shownParentOf,
+  startBlockersOf,
   useAppStore,
   waitCountsOf,
 } from '../../store/app-store'
@@ -45,6 +44,7 @@ import {
 } from '../ui/context-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
 import { IssueStartButton } from './issue-start-button'
+import { LabelChip } from './labels'
 import { PriorityOptionIcon, ProjectOptionIcon, StatusOptionIcon } from './property-picker'
 
 /**
@@ -136,13 +136,13 @@ function WaitCount({ kind, count }: { kind: 'blocked' | 'blocking'; count: numbe
 
 /**
  * An issue in the list, as Linear shows it: its priority, its identifier, its
- * status, its title, followed by the step of its workflow it is at, or
- * Finished, once it has started, how many issues it waits on and how many
- * wait on it, its project if any, and when it was created, and at the end,
- * for an issue neither done nor canceled, its start button. Click it to show
- * its page; right-click it to change its status, priority or project, copy
- * it, give it a parent or sub-issues, take it from its parent, mark it as
- * blocked by an issue or blocking one, or delete it.
+ * status, its title, followed by its labels, how many issues it waits on and
+ * how many wait on it, its project if any, and when it was created, and at
+ * the end, for an issue neither done nor canceled, its start button. Click it
+ * to show its page; right-click it to change its status, priority or
+ * project, start a new session for it, copy it, give it a parent or
+ * sub-issues, take it from its parent, mark it as blocked by an issue or
+ * blocking one, or delete it.
  */
 export function IssueRow({
   issue,
@@ -169,7 +169,9 @@ export function IssueRow({
   const setIssueParents = useAppStore((state) => state.setIssueParents)
   const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
   const [menuOpen, setMenuOpen] = useState(false)
-  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
+  const labels = useAppStore((state) => issueLabelsOf(state, issue.id))
+  const startNewSession = useAppStore((state) => state.startNewSession)
+  const canStart = useAppStore((state) => startBlockersOf(state, issue).length === 0)
   const waitedOn = useAppStore((state) => waitCountsOf(state, issue.id).waitedOn)
   const waiting = useAppStore((state) => waitCountsOf(state, issue.id).waiting)
 
@@ -200,7 +202,7 @@ export function IssueRow({
             {issueIdentifier(issue.id)}
           </span>
           <StatusIcon status={issue.status} />
-          {progress.kind === 'not-started' ? (
+          {labels.length === 0 ? (
             <span
               className="min-w-0 flex-1 truncate font-medium"
               data-user-text=""
@@ -209,7 +211,7 @@ export function IssueRow({
               {issue.title}
             </span>
           ) : (
-            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="flex min-w-0 flex-1 items-center gap-2">
               {/* Room for the ink of its last letter, which its width would cut. */}
               <span
                 className="min-w-0 truncate pr-0.5 font-medium"
@@ -218,8 +220,13 @@ export function IssueRow({
               >
                 {issue.title}
               </span>
-              <span className="shrink-0 text-xs text-muted-foreground" data-testid="issue-row-step">
-                {progressLabel(progress, ISSUE_WORKFLOW)}
+              <span
+                className="flex max-w-[45%] shrink-0 items-center gap-1 overflow-hidden"
+                data-testid="issue-row-labels"
+              >
+                {labels.map((label) => (
+                  <LabelChip key={label.id} label={label} className="h-5 shrink-0" />
+                ))}
               </span>
             </span>
           )}
@@ -278,6 +285,15 @@ export function IssueRow({
           onChange={(projectId) => updateIssue(issue.id, { projectId })}
           close={() => setMenuOpen(false)}
         />
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={!canStart}
+          onClick={() => void startNewSession(issue.id)}
+          data-testid="issue-menu-start-new-session"
+        >
+          <SquarePlusIcon />
+          Start new session
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => copyIssueIdentifier(issue.id)}

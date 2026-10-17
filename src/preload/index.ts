@@ -108,11 +108,21 @@ const api: HootApi = {
   createDependentIssue: (issue, dependency) =>
     ipcRenderer.invoke(IpcChannel.createDependentIssue, issue, dependency),
   onDependenciesChanged: (listener) => subscribe(IpcChannel.dependenciesChanged, listener),
-  listWorkflowRecords: () => ipcRenderer.invoke(IpcChannel.listWorkflowRecords),
-  onWorkflowChanged: (listener) => subscribe(IpcChannel.workflowChanged, listener),
-  reportStep: (issueId, run, outcome) =>
-    ipcRenderer.invoke(IpcChannel.reportStep, issueId, run, outcome),
-  startOverWorkflow: (issueId) => ipcRenderer.invoke(IpcChannel.startOverWorkflow, issueId),
+  onIssuesChanged: (listener) => subscribe(IpcChannel.issuesChanged, listener),
+  listLabels: () => ipcRenderer.invoke(IpcChannel.listLabels),
+  onLabelsChanged: (listener) => subscribe(IpcChannel.labelsChanged, listener),
+  listLabelEvents: () => ipcRenderer.invoke(IpcChannel.listLabelEvents),
+  onLabelEventsAdded: (listener) => subscribe(IpcChannel.labelEventsAdded, listener),
+  createLabel: (label) => ipcRenderer.invoke(IpcChannel.createLabel, label),
+  editLabel: (id, changes) => ipcRenderer.invoke(IpcChannel.editLabel, id, changes),
+  deleteLabel: (id) => ipcRenderer.invoke(IpcChannel.deleteLabel, id),
+  createLabelGroup: (name) => ipcRenderer.invoke(IpcChannel.createLabelGroup, name),
+  deleteLabelGroup: (id) => ipcRenderer.invoke(IpcChannel.deleteLabelGroup, id),
+  changeIssueLabels: (issueId, change) =>
+    ipcRenderer.invoke(IpcChannel.changeIssueLabels, issueId, change),
+  onSessionStartRequested: (listener) => subscribe(IpcChannel.sessionStartRequested, listener),
+  answerSessionStart: (requestId, answer) =>
+    ipcRenderer.send(IpcChannel.answerSessionStart, requestId, answer),
   writeClipboardText: (text) => ipcRenderer.send(IpcChannel.writeClipboardText, text),
   openExternalLink: (url) => ipcRenderer.send(IpcChannel.openExternalLink, url),
 }

@@ -7,8 +7,9 @@ import type { Dependencies } from '../shared/dependencies'
 import { IpcChannel } from '../shared/ipc'
 import type { Issue, NewIssue } from '../shared/issues'
 import type { ParentChange, SubIssues } from '../shared/sub-issues'
+import type { Labels } from '../shared/labels'
 import type { UpdateStatus } from '../shared/updates'
-import type { WorkflowRecord } from '../shared/workflows'
+import { LabelError } from './labels/label-store'
 
 type Listener = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -86,18 +87,33 @@ const issues = Object.assign(new EventEmitter(), {
   >(() => created),
   dependencies: vi.fn<() => Dependencies>(() => dependencies),
   changeRelations: vi.fn<(change: unknown) => void>(),
+  get: vi.fn<(id: number) => Issue | null>((id) => (id === 3 ? created : null)),
 })
 
-type WorkflowChange = { ok: true } | { ok: false; message: string }
-const workflows = Object.assign(new EventEmitter(), {
-  listShown: vi.fn<() => Record<number, WorkflowRecord[]>>(() => ({
-    3: [{ kind: 'started-over', id: 1, at: 0 }],
+const workflows = new EventEmitter()
+
+const snapshot: Labels = { version: 1, groups: [], labels: [], issueLabels: [] }
+const labels = Object.assign(new EventEmitter(), {
+  snapshot: vi.fn<() => Labels>(() => snapshot),
+  eventsOfShown: vi.fn<() => unknown[]>(() => []),
+  createLabel: vi.fn<(label: { name: string }) => unknown>((label) => ({
+    id: 9,
+    name: label.name,
+    color: 'ff8800',
+    description: '',
+    groupId: null,
+    group: null,
   })),
-  reportByUser: vi.fn<(issueId: number, run: number, outcome: string) => WorkflowChange>(() => ({
-    ok: true,
-  })),
-  startOver: vi.fn<(issueId: number) => WorkflowChange>(() => ({ ok: true })),
+  editLabel: vi.fn<(id: number, changes: unknown) => void>(),
+  deleteLabel: vi.fn<(id: number) => void>(() => {
+    throw new LabelError('Scope belongs to the workflow Spec-driven.')
+  }),
+  createGroup: vi.fn<(name: string) => unknown>((name) => ({ id: 2, name, workflow: null })),
+  deleteGroup: vi.fn<(id: number) => void>(),
+  changeIssueLabels: vi.fn<(issueId: number, change: unknown, actor: string) => void>(),
 })
+
+const sessionStarts = { answer: vi.fn<(requestId: string, answer: unknown) => void>() }
 
 beforeEach(() => {
   electron.handlers.clear()
@@ -106,6 +122,7 @@ beforeEach(() => {
   agents.removeAllListeners()
   updates.removeAllListeners()
   workflows.removeAllListeners()
+  labels.removeAllListeners()
   issues.removeAllListeners()
   registerIpc({
     issues,
@@ -119,47 +136,95 @@ beforeEach(() => {
     updates,
     worktrees: emitter(),
     workflows,
+    labels,
+    sessionStarts,
   } as unknown as Parameters<typeof registerIpc>[0])
 })
 
 const invoke = (channel: string, ...args: unknown[]) =>
   electron.handlers.get(channel)?.(trusted, ...args)
 
-describe("the messages of the issues' workflows", () => {
-  it('give the records, and pass on every change of them to the window', async () => {
-    expect(await invoke(IpcChannel.listWorkflowRecords)).toEqual({
-      3: [{ kind: 'started-over', id: 1, at: 0 }],
+describe('the messages of labels', () => {
+  it('give the labels and their activity, and pass on every change of them to the window', async () => {
+    expect(await invoke(IpcChannel.listLabels)).toBe(snapshot)
+    expect(await invoke(IpcChannel.listLabelEvents)).toEqual([])
+    const changed = { ...snapshot, version: 2 }
+    labels.emit('changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.labelsChanged, changed)
+    labels.emit('events-added', [{ id: 1 }])
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.labelEventsAdded, [{ id: 1 }])
+    workflows.emit('issues-completed', [created])
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.issuesChanged, [created])
+  })
+
+  it('create, change and delete labels and groups, saying why they cannot', async () => {
+    expect(
+      await invoke(IpcChannel.createLabel, {
+        name: 'bug',
+        color: 'ff8800',
+        description: '',
+        groupId: null,
+        issueId: 3,
+      }),
+    ).toEqual({
+      ok: true,
+      label: { id: 9, name: 'bug', color: 'ff8800', description: '', groupId: null },
     })
-    const records = [{ kind: 'step-started', id: 2, step: 'scope', at: 1 }]
-    workflows.emit('changed', 3, records)
-    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.workflowChanged, 3, records)
-  })
-
-  it('report an outcome the user picked, and start a workflow over, for the issue named', async () => {
-    expect(await invoke(IpcChannel.reportStep, 3, 2, 'no-split')).toEqual({ ok: true })
-    expect(await invoke(IpcChannel.startOverWorkflow, 3)).toEqual({ ok: true })
-    expect(workflows.reportByUser.mock.calls).toEqual([[3, 2, 'no-split']])
-    expect(workflows.startOver.mock.calls).toEqual([[3]])
-  })
-
-  it('take only an issue, a run and an outcome', async () => {
-    for (const args of [
-      [3, 2],
-      ['3', 2, 'no-split'],
-      [3, 2, ''],
-      [3, -1, 'no-split'],
-    ]) {
-      expect(await invoke(IpcChannel.reportStep, ...args)).toEqual({
-        ok: false,
-        message: 'Invalid report.',
-      })
-    }
-    expect(await invoke(IpcChannel.startOverWorkflow, 'ISS-3')).toEqual({
+    expect(labels.createLabel.mock.calls).toEqual([
+      [
+        { name: 'bug', color: 'ff8800', description: '', groupId: null },
+        { issueId: 3, actor: 'user' },
+      ],
+    ])
+    expect(await invoke(IpcChannel.editLabel, 9, { name: 'flaw', groupId: null })).toEqual({
+      ok: true,
+    })
+    expect(await invoke(IpcChannel.deleteLabel, 1)).toEqual({
       ok: false,
-      message: 'Invalid issue.',
+      message: 'Scope belongs to the workflow Spec-driven.',
     })
-    expect(workflows.reportByUser).not.toHaveBeenCalled()
-    expect(workflows.startOver).not.toHaveBeenCalled()
+    expect(await invoke(IpcChannel.createLabelGroup, 'Kind')).toEqual({
+      ok: true,
+      group: { id: 2, name: 'Kind', workflow: null },
+    })
+    expect(await invoke(IpcChannel.deleteLabelGroup, 2)).toEqual({ ok: true })
+    expect(await invoke(IpcChannel.editLabel, 9, { extra: 1 })).toEqual({
+      ok: false,
+      message: 'Invalid change.',
+    })
+    expect(await invoke(IpcChannel.createLabel, { name: 'x' })).toEqual({
+      ok: false,
+      message: 'Invalid label.',
+    })
+  })
+
+  it("change an issue's labels as the user does, only for an issue there is", async () => {
+    expect(await invoke(IpcChannel.changeIssueLabels, 3, { add: [1], remove: [2] })).toEqual({
+      ok: true,
+    })
+    expect(labels.changeIssueLabels.mock.calls).toEqual([[3, { add: [1], remove: [2] }, 'user']])
+    expect(await invoke(IpcChannel.changeIssueLabels, 4, { add: [1], remove: [] })).toEqual({
+      ok: false,
+      message: 'The issue no longer exists.',
+    })
+    expect(await invoke(IpcChannel.changeIssueLabels, 3, { add: ['x'], remove: [] })).toEqual({
+      ok: false,
+      message: 'Invalid change.',
+    })
+  })
+})
+
+describe('the answers to the sessions hoot asks for', () => {
+  it('pass on what the window says, and only that', () => {
+    const answer = electron.listeners.get(IpcChannel.answerSessionStart)!
+    answer(trusted, 'r1', { ok: true, worktreePath: '/w' })
+    answer(trusted, 'r2', { ok: false, message: 'No.' })
+    answer(trusted, 'r3', { ok: true })
+    answer({ sender: {} }, 'r4', { ok: true, worktreePath: '/w' })
+    expect(sessionStarts.answer.mock.calls).toEqual([
+      ['r1', { ok: true, worktreePath: '/w' }],
+      ['r2', { ok: false, message: 'No.' }],
+    ])
   })
 })
 

@@ -3,12 +3,12 @@ import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { Dependencies, Dependency } from './dependencies'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
+import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
 import type { PermissionLevelSettings } from './permission-levels'
 import type { QuitReason, SessionInfo } from './session'
 import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
 import type { UpdateStatus } from './updates'
-import type { WorkflowRecord } from './workflows'
 import type { WindowControls } from './window-controls'
 import type {
   CreateIssueWorktreeResult,
@@ -65,11 +65,23 @@ export interface StartSessionRequest {
   worktreePath: string | null
   toolId: ToolId
   /**
-   * The issue whose start button started the session, a Claude Code session
-   * in one of the project's worktrees, which is sent the issue; `null` for
-   * every other session.
+   * The issue the session is started from, a Claude Code session in one of
+   * the project's worktrees, which is sent the issue; `null` for every other
+   * session.
    */
   issueId: number | null
+  /**
+   * Who opened a session started from an issue: the user, with its start
+   * button or Start new session, or an agent, with `hoot session start`.
+   * The user when it is left out.
+   */
+  startedBy?: LabelActor
+  /**
+   * The first message of a session started from an issue, given by
+   * `hoot session start --prompt-file`, instead of the one of the issue's
+   * workflow.
+   */
+  prompt?: string
   /**
    * The id of the permission level the tool starts at, as it was picked when
    * the session was asked for; without it, the level picked when the session
@@ -94,8 +106,55 @@ export type DependencyChangeResult = { ok: true } | { ok: false; message: string
  */
 export type NewIssueDependency = { blocking: number } | { blockedBy: number }
 
-/** Whether a change to an issue's progress through its workflow was made, or why not. */
-export type WorkflowChangeResult = { ok: true } | { ok: false; message: string }
+/** Whether labels or groups were created, changed or deleted, or given to an issue, or why not. */
+export type LabelChangeResult = { ok: true } | { ok: false; message: string }
+
+/** A label created, or why none was. */
+export type CreateLabelResult = { ok: true; label: Label } | { ok: false; message: string }
+
+/** A group created, or why none was. */
+export type CreateLabelGroupResult =
+  | { ok: true; group: LabelGroup }
+  | { ok: false; message: string }
+
+/** A label to create, from the window: its name as entered, color, description and group. */
+export interface NewLabelRequest {
+  name: string
+  color: string
+  description: string
+  groupId: number | null
+  /** An issue to give the new label to, as the label picker of an issue's page does. */
+  issueId?: number
+}
+
+/** What changes about a label, from the window; what is left out stays as it is. */
+export interface LabelChangeRequest {
+  name?: string
+  color?: string
+  description?: string
+  groupId?: number | null
+}
+
+/** Labels to give an issue, in order, and labels to take off it, by id. */
+export interface IssueLabelsRequest {
+  add: number[]
+  remove: number[]
+}
+
+/**
+ * That hoot asked for a session for an issue, with `hoot session start`:
+ * the window starts it as the issue's start button does, without showing
+ * it, and answers with `answerSessionStart` under the request's id.
+ */
+export interface SessionStartRequest {
+  requestId: string
+  issueId: number
+  /** The first message, instead of the one of the issue's workflow; `null` for that one. */
+  prompt: string | null
+}
+
+/** How a session asked for by hoot started: the worktree it runs in, or why it did not start. */
+export type SessionStartAnswer = { ok: true; worktreePath: string } | { ok: false; message: string }
 
 export interface WindowState {
   /** Whether the sidebar is expanded, as it was when Hoot last showed or hid it. */
@@ -197,10 +256,19 @@ export const IpcChannel = {
   changeDependencies: 'issues:change-dependencies',
   createDependentIssue: 'issues:create-dependent',
   dependenciesChanged: 'issues:dependencies-changed',
-  listWorkflowRecords: 'workflows:list-records',
-  workflowChanged: 'workflows:changed',
-  reportStep: 'workflows:report-step',
-  startOverWorkflow: 'workflows:start-over',
+  issuesChanged: 'issues:changed',
+  changeIssueLabels: 'issues:change-labels',
+  listLabels: 'labels:list',
+  labelsChanged: 'labels:changed',
+  listLabelEvents: 'labels:list-events',
+  labelEventsAdded: 'labels:events-added',
+  createLabel: 'labels:create',
+  editLabel: 'labels:edit',
+  deleteLabel: 'labels:delete',
+  createLabelGroup: 'labels:create-group',
+  deleteLabelGroup: 'labels:delete-group',
+  sessionStartRequested: 'session:start-requested',
+  answerSessionStart: 'session:answer-start',
   writeClipboardText: 'clipboard:write-text',
   openExternalLink: 'links:open-external',
 } as const
@@ -412,20 +480,33 @@ export interface HootApi {
    */
   onDependenciesChanged(listener: (dependencies: Dependencies) => void): () => void
   /**
-   * The records of the workflows of the issues without a project and of
-   * those of the projects in the list, by issue; an issue without any is
-   * left out.
+   * Issues changed other than from the window, as when Hoot completed them
+   * once their sub-issues were completed; these are them as they are now.
    */
-  listWorkflowRecords(): Promise<Record<number, WorkflowRecord[]>>
-  /** An issue's workflow records changed; these are all of them now. */
-  onWorkflowChanged(listener: (issueId: number, records: WorkflowRecord[]) => void): () => void
-  /**
-   * Records an outcome the user picked for the run of a step `run` of an
-   * issue, without a summary, unless the issue has moved on from that run.
-   */
-  reportStep(issueId: number, run: number, outcome: string): Promise<WorkflowChangeResult>
-  /** Starts an issue's workflow over: it is not started again, and keeps its records. */
-  startOverWorkflow(issueId: number): Promise<WorkflowChangeResult>
+  onIssuesChanged(listener: (issues: Issue[]) => void): () => void
+  /** Every label and group, and the labels of every issue, those of removed projects included. */
+  listLabels(): Promise<Labels>
+  /** The labels changed, from the window or from hoot; these are all of them now. */
+  onLabelsChanged(listener: (labels: Labels) => void): () => void
+  /** The activity of the labels of the issues Hoot shows, in the order it happened. */
+  listLabelEvents(): Promise<LabelEvent[]>
+  /** Issues were given labels or had labels taken off: these entries of their activity are new. */
+  onLabelEventsAdded(listener: (events: LabelEvent[]) => void): () => void
+  /** Creates a label, and gives it to the issue the request names, if any. */
+  createLabel(label: NewLabelRequest): Promise<CreateLabelResult>
+  /** Changes a label's name, color, description or group. */
+  editLabel(id: number, changes: LabelChangeRequest): Promise<LabelChangeResult>
+  /** Deletes a label, which every issue carrying it no longer does. */
+  deleteLabel(id: number): Promise<LabelChangeResult>
+  createLabelGroup(name: string): Promise<CreateLabelGroupResult>
+  /** Deletes a group; its labels stay, without a group. */
+  deleteLabelGroup(id: number): Promise<LabelChangeResult>
+  /** Gives an issue labels and takes others off it, as the user does. */
+  changeIssueLabels(issueId: number, change: IssueLabelsRequest): Promise<LabelChangeResult>
+  /** hoot asked for a session for an issue, which the window starts without showing it. */
+  onSessionStartRequested(listener: (request: SessionStartRequest) => void): () => void
+  /** Says how a session that hoot asked for started. */
+  answerSessionStart(requestId: string, answer: SessionStartAnswer): void
   /**
    * Puts text on the clipboard. Through the main process, which can write it
    * while the window does not have the focus.

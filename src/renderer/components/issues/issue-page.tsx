@@ -9,14 +9,21 @@ import {
   LinkIcon,
   ListTreeIcon,
   OctagonMinusIcon,
+  SquarePlusIcon,
   Trash2Icon,
   UnlinkIcon,
 } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { isIssueOpen, issueTitle, type Issue } from '../../../shared/issues'
-import { issuePageOrder, isOnList } from '../../lib/project-choices'
-import { focusAfterOverlay, shownParentOf, useAppStore } from '../../store/app-store'
+import { issuePageOrder } from '../../lib/project-choices'
+import {
+  focusAfterOverlay,
+  isListed,
+  shownParentOf,
+  startBlockersOf,
+  useAppStore,
+} from '../../store/app-store'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -38,9 +45,9 @@ import { TitleField } from './title-field'
 import { useIssueShortcuts } from './use-issue-shortcuts'
 
 /**
- * The issue's menu in the title row: copying it, giving it a parent or
- * sub-issues, taking it from its parent, marking it as blocked by an issue or
- * blocking one, and deleting it.
+ * The issue's menu in the title row: starting a new session for it, copying
+ * it, giving it a parent or sub-issues, taking it from its parent, marking it
+ * as blocked by an issue or blocking one, and deleting it.
  */
 function IssueMenu({ issue }: { issue: Issue }) {
   const copyIssueIdentifier = useAppStore((state) => state.copyIssueIdentifier)
@@ -49,6 +56,8 @@ function IssueMenu({ issue }: { issue: Issue }) {
   const openIssuePicker = useAppStore((state) => state.openIssuePicker)
   const setIssueParents = useAppStore((state) => state.setIssueParents)
   const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
+  const startNewSession = useAppStore((state) => state.startNewSession)
+  const canStart = useAppStore((state) => startBlockersOf(state, issue).length === 0)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -68,6 +77,15 @@ function IssueMenu({ issue }: { issue: Issue }) {
         className="w-auto min-w-48 [app-region:no-drag]"
         finalFocus={focusAfterOverlay}
       >
+        <DropdownMenuItem
+          disabled={!canStart}
+          onClick={() => void startNewSession(issue.id)}
+          data-testid="issue-menu-start-new-session"
+        >
+          <SquarePlusIcon />
+          Start new session
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => copyIssueIdentifier(issue.id)}
           data-testid="issue-menu-copy-id"
@@ -223,9 +241,7 @@ export function IssuePage({ issueId }: { issueId: number }) {
   const view = useAppStore((state) => state.issueView)
   const issues = useAppStore((state) => state.issues)
   const listed = useAppStore(
-    useShallow((state) =>
-      state.issues.filter((candidate) => isOnList(candidate, state.checkedProjects)),
-    ),
+    useShallow((state) => state.issues.filter((candidate) => isListed(state, candidate))),
   )
   const showIssue = useAppStore((state) => state.showIssue)
   const showIssueList = useAppStore((state) => state.showIssueList)

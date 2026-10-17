@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import { SESSION_HEADER, type HootIssue } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import { HootServer } from './hoot-server'
@@ -57,7 +56,15 @@ function answered(
   saved: Issue,
   relations: Partial<Pick<HootIssue, 'parent' | 'subIssues' | 'blockedBy' | 'blocking'>> = {},
 ) {
-  return { ...saved, parent: null, subIssues: [], blockedBy: [], blocking: [], ...relations }
+  return {
+    ...saved,
+    parent: null,
+    subIssues: [],
+    blockedBy: [],
+    blocking: [],
+    labels: [],
+    ...relations,
+  }
 }
 
 /** An issue as the server answers with it as another's parent or sub-issue. */
@@ -141,64 +148,86 @@ describe('HootServer', () => {
     expect(hoot.created).toEqual([])
   })
 
-  it("reports a step of the workflow of the session's issue, and answers with what comes next", async () => {
-    const started = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
-    hoot.startIssueSession('issue-session', started.id)
-    const { status, answer } = await request('POST', '/steps/report', {
-      session: 'issue-session',
-      body: JSON.stringify({ outcome: 'no-split', summary: 'Fits.' }),
+  it('creates, changes and deletes labels, and gives and takes them off issues, by name', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const created = await request('POST', '/labels', {
+      body: JSON.stringify({ name: 'bug', color: 'EB5757', description: 'Broken' }),
     })
-    expect(status).toBe(200)
-    expect(answer).toEqual({
-      ok: true,
-      project: gamma(),
-      report: {
-        issue: 'ISS-1',
-        step: 'Scope',
-        outcome: 'No split',
-        next: BUILT_IN_WORKFLOW.steps[1],
-      },
-    })
-    expect(
-      await request('POST', '/steps/report', {
-        session: 'issue-session',
-        body: JSON.stringify({ outcome: 'done', summary: 'x' }),
-      }),
-    ).toEqual({
-      status: 409,
+    expect(created).toEqual({
+      status: 201,
       answer: {
-        ok: false,
-        message: 'done is not an outcome of Design.\nOutcomes: implement, split',
+        ok: true,
+        project: gamma(),
+        label: { name: 'bug', color: 'eb5757', description: 'Broken', group: null },
       },
     })
     expect(
       (
-        await request('POST', '/steps/report', {
-          body: JSON.stringify({ outcome: 'no-split', summary: 'x' }),
+        await request('PATCH', `/issues/${alpha.id}`, {
+          body: JSON.stringify({ addLabels: ['BUG', 'Design'] }),
         })
-      ).answer,
-    ).toEqual({ ok: false, message: 'this session was not started from an issue.' })
+      ).answer.issue,
+    ).toMatchObject({
+      labels: [
+        { name: 'bug', group: null },
+        { name: 'Design', group: 'Spec-driven' },
+      ],
+    })
+    expect(
+      await request('PATCH', `/labels/${encodeURIComponent('bug')}`, {
+        body: JSON.stringify({ name: 'flaw' }),
+      }),
+    ).toMatchObject({ status: 200, answer: { label: { name: 'flaw' } } })
+    expect(await request('DELETE', '/labels/flaw')).toEqual({
+      status: 200,
+      answer: { ok: true, project: gamma() },
+    })
+    expect(hoot.labels.labelsOf(alpha.id).map((label) => label.name)).toEqual(['Design'])
+    for (const [method, url, body, status, message] of [
+      ['DELETE', '/labels/Scope', undefined, 409, 'belongs to the workflow Spec-driven'],
+      ['DELETE', '/labels/nope', undefined, 404, 'There is no label named "nope".'],
+      ['PATCH', '/labels/Scope', JSON.stringify({}), 400, 'Nothing to change.'],
+      ['POST', '/labels', JSON.stringify({ name: 'scope' }), 409, 'There is a label named'],
+      ['POST', '/labels', JSON.stringify({ name: 'z', color: 'red' }), 409, 'is not a color'],
+      [
+        'PATCH',
+        `/issues/${alpha.id}`,
+        JSON.stringify({ addLabels: ['nope'] }),
+        404,
+        'There is no label named "nope".',
+      ],
+    ] as const) {
+      const answer = await request(method, url, body === undefined ? {} : { body })
+      expect(answer.status).toBe(status)
+      expect(answer.answer.message).toContain(message)
+    }
   })
 
-  it('reports nothing from a request it cannot take', async () => {
-    const started = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
-    hoot.startIssueSession('issue-session', started.id)
-    const before = hoot.workflows.records(started.id)
-    for (const body of [
-      'not JSON',
-      JSON.stringify({ outcome: 'no-split' }),
-      JSON.stringify({ outcome: 'no-split', summary: ' \n ' }),
-      JSON.stringify({ outcome: 'no-split', summary: 'x'.repeat(1_000_001) }),
-      JSON.stringify({ outcome: 'no-split', summary: 'x', extra: true }),
-    ]) {
-      const { status, answer } = await request('POST', '/steps/report', {
-        session: 'issue-session',
-        body,
-      })
-      expect(status).toBe(400)
-      expect(answer.ok).toBe(false)
+  it('starts a session for an issue of the project, unless it cannot be started now', async () => {
+    const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
+    const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!
+    expect(
+      await request('POST', '/sessions', {
+        body: JSON.stringify({ issue: String(alpha.id), prompt: 'Hello' }),
+      }),
+    ).toEqual({
+      status: 201,
+      answer: { ok: true, project: gamma(), worktreePath: `/worktrees/gamma/iss-${alpha.id}` },
+    })
+    expect(hoot.startedSessions).toEqual([{ issueId: alpha.id, prompt: 'Hello' }])
+    hoot.issues.changeRelations({ addDependencies: [{ issueId: beta.id, blockedById: alpha.id }] })
+    const refused = await request('POST', '/sessions', {
+      body: JSON.stringify({ issue: String(beta.id) }),
+    })
+    expect(refused.status).toBe(409)
+    expect(refused.answer.message).toBe(
+      `Work on ISS-${beta.id} cannot be started now:\n` +
+        `- It waits on ISS-${alpha.id}, which is neither done nor canceled.`,
+    )
+    for (const body of ['not JSON', JSON.stringify({ issue: 'ISS-1' }), JSON.stringify({})]) {
+      expect((await request('POST', '/sessions', { body })).status).toBe(400)
     }
-    expect(hoot.workflows.records(started.id)).toEqual(before)
+    expect(hoot.startedSessions).toHaveLength(1)
   })
 
   it('answers only for a session it knows, and only what it knows', async () => {
@@ -284,7 +313,7 @@ describe('HootServer', () => {
     })
   })
 
-  it('creates an issue with dependencies, and sub-issues split from an issue', async () => {
+  it('creates an issue with dependencies, and sub-issues of an issue all at once', async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
     const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!
     const charlie = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Charlie' })!
@@ -302,15 +331,16 @@ describe('HootServer', () => {
       { issueId: id, blockedById: alpha.id },
       { issueId: beta.id, blockedById: id },
     ])
-    const split = await request('POST', `/issues/${alpha.id}/split`, {
+    const split = await request('POST', `/issues/${alpha.id}/sub-issues`, {
       body: JSON.stringify({
         issues: [
-          { ...issue, title: 'S1', blockedBy: [], blocking: [] },
+          { ...issue, title: 'S1', blockedBy: [], blocking: [], labels: [] },
           {
             ...issue,
             title: 'S2',
             blockedBy: [{ item: 1 }, { issue: String(charlie.id) }],
-            blocking: [],
+            blocking: [{ issue: String(alpha.id) }],
+            labels: ['Implement'],
           },
         ],
       }),
@@ -318,6 +348,8 @@ describe('HootServer', () => {
     expect(split.status).toBe(201)
     const [s1, s2] = split.answer.issues as HootIssue[]
     expect(s2!.blockedBy.map((entry) => entry.id)).toEqual([s1!.id, charlie.id])
+    expect(s2!.blocking.map((entry) => entry.id)).toEqual([alpha.id])
+    expect(s2!.labels.map((label) => label.name)).toEqual(['Implement'])
     expect(hoot.issues.subIssues().links).toEqual([
       { issueId: s1!.id, parentId: alpha.id },
       { issueId: s2!.id, parentId: alpha.id },
@@ -378,23 +410,28 @@ describe('HootServer', () => {
     for (const [body, status, message] of [
       [{ issues: [{ ...issue }] }, 400, 'Invalid issues.'],
       [
-        { issues: [{ ...issue, blockedBy: [{ item: 2 }], blocking: [] }] },
+        { issues: [{ ...issue, blockedBy: [{ item: 2 }], blocking: [], labels: [] }] },
         400,
         'Item 1 names item 2, and there is only 1 item.',
       ],
       [
-        { issues: [{ ...issue, blockedBy: [{ item: 1 }], blocking: [] }] },
+        { issues: [{ ...issue, blockedBy: [{ item: 1 }], blocking: [], labels: [] }] },
         409,
         'Item 1 cannot be blocked by itself.',
       ],
       [
-        { issues: [{ ...issue, title: ' ', blockedBy: [], blocking: [] }] },
+        { issues: [{ ...issue, title: ' ', blockedBy: [], blocking: [], labels: [] }] },
         400,
         'Item 1 has an empty title: an issue needs one.',
       ],
+      [
+        { issues: [{ ...issue, blockedBy: [], blocking: [], labels: ['nope'] }] },
+        404,
+        'There is no label named "nope". Run "hoot label list" for the labels there are.',
+      ],
     ] as const) {
       expect(
-        await request('POST', `/issues/${alpha.id}/split`, { body: JSON.stringify(body) }),
+        await request('POST', `/issues/${alpha.id}/sub-issues`, { body: JSON.stringify(body) }),
       ).toEqual({ status, answer: { ok: false, message } })
     }
     expect(hoot.issues.subIssues()).toEqual({ version: 0, links: [] })
@@ -418,8 +455,11 @@ describe('HootServer', () => {
       sessionProject: () => ({ ok: true, project: hoot.gamma }),
       listProjects: () => hoot.projects.list(),
       issues: hoot.issues,
+      labels: hoot.labels,
+      together: (body) => body(),
       issueCreated: () => {},
-      reportStep: () => ({ ok: false, message: 'none' }),
+      startBlockers: () => [],
+      startSession: async () => ({ ok: false, message: 'none' }),
     })
     await server.start()
     const answer = await new Promise<string>((resolve, reject) => {
@@ -442,8 +482,11 @@ describe('HootServer', () => {
       sessionProject: () => ({ ok: false, message: 'none' }),
       listProjects: () => [],
       issues: hoot.issues,
+      labels: hoot.labels,
+      together: (body) => body(),
       issueCreated: () => {},
-      reportStep: () => ({ ok: false, message: 'none' }),
+      startBlockers: () => [],
+      startSession: async () => ({ ok: false, message: 'none' }),
     })
     await server.stop()
     const started = server.start()

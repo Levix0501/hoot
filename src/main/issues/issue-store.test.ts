@@ -671,10 +671,10 @@ describe('IssueStore dependencies', () => {
           'issue Hoot does not show, which is blocked by ISS-2.',
       ),
     )
-    // Nor can it give a parent that would.
-    expect(() => issues.setParents([{ issueId: a!, parentId: e! }])).toThrow(DependencyError)
     expect(issues.dependencies()).toEqual(before)
-    expect(issues.subIssues().links).toEqual([])
+    // Parents count for nothing in the rules: one is given whatever the dependencies.
+    issues.setParents([{ issueId: a!, parentId: e! }])
+    expect(pairs(issues)).toEqual([[a, e]])
     issues.changeRelations({ addDependencies: [{ issueId: s!, blockedById: a! }] })
     projects.add('/work/h')
     expect(dependencyPairs(issues)).toEqual([
@@ -699,13 +699,26 @@ describe('IssueStore dependencies', () => {
     expect(() =>
       issues.changeRelations({
         parents: [{ issueId: d!, parentId: c! }],
-        addDependencies: [{ issueId: b!, blockedById: c! }],
+        addDependencies: [{ issueId: d!, blockedById: a! }],
       }),
     ).toThrow(
-      'ISS-4 cannot be a sub-issue of ISS-3: ISS-1 is blocked by ISS-4, which would then be below it.',
+      'ISS-4 cannot be blocked by ISS-1, which waits for it already: ISS-1 is blocked by ISS-4.',
     )
     expect(pairs(issues)).toEqual([[c, a]])
     expect(dependencyPairs(issues)).toEqual([[a, d]])
+    // An issue can be blocked by an issue above or below it, and block one.
+    issues.changeRelations({
+      parents: [{ issueId: d!, parentId: c! }],
+      addDependencies: [
+        { issueId: a!, blockedById: c! },
+        { issueId: d!, blockedById: c! },
+      ],
+    })
+    expect(dependencyPairs(issues)).toEqual([
+      [a, d],
+      [a, c],
+      [d, c],
+    ])
   })
 
   it('creates an issue blocked by issues and blocking others, or none when it cannot, taking no number', () => {
@@ -717,17 +730,14 @@ describe('IssueStore dependencies', () => {
       [created!.id, b],
       [k, created!.id],
     ])
-    expect(() => issues.create(newIssue(g.id, 'Under P'), p!, { blockedBy: [p!] })).toThrow(
-      new DependencyError(
-        'The new issue cannot be blocked by ISS-1, which is above it: an issue waits for the ' +
-          'issues below it, so they would wait for each other.',
-      ),
-    )
     expect(() =>
       issues.create(newIssue(g.id, 'Both'), null, { blockedBy: [k!], blocking: [k!] }),
     ).toThrow(DependencyError)
     expect(pairs(issues)).toEqual([])
     expect(issues.create(newIssue(g.id, 'Next'))!.id).toBe(created!.id + 1)
+    // A sub-issue can be blocked by its parent, or block it.
+    const under = issues.create(newIssue(g.id, 'Under P'), p!, { blockedBy: [p!] })!
+    expect(dependencyPairs(issues).at(-1)).toEqual([under.id, p])
   })
 
   it('creates sub-issues together, with dependencies among them and on others, or none of them', () => {
@@ -765,13 +775,15 @@ describe('IssueStore dependencies', () => {
     const before = { links: pairs(issues), dependencies: dependencyPairs(issues) }
     for (const [items, message] of [
       [[item('A', [{ item: 1 }]), item('B', [{ item: 0 }])], 'Item 1 cannot be blocked by item 2'],
-      [[item('A', [{ issueId: p! }])], 'Item 1 cannot be blocked by ISS-1, which is above it'],
       [[item('A', [{ item: 0 }])], 'Item 1 cannot be blocked by itself.'],
     ] as const) {
       expect(() => issues.createSubIssues(p!, items, itemName)).toThrow(message)
     }
     expect({ links: pairs(issues), dependencies: dependencyPairs(issues) }).toEqual(before)
     expect(issues.create(newIssue(g.id, 'Next'))!.id).toBe(s3! + 1)
+    // Sub-issues created together can block their parent, as a split written back does.
+    const blocking = issues.createSubIssues(p!, [item('S4', [], [{ issueId: p! }])])!
+    expect(dependencyPairs(issues).at(-1)).toEqual([p, blocking[0]!.id])
   })
 
   it('drops the dependencies of a deleted issue, both ways and of removed projects too, and tells', () => {
@@ -810,7 +822,7 @@ describe('IssueStore dependencies', () => {
     expect(told).toEqual([])
     issues.create(newIssue(g.id, 'D'), null, { blocking: [b!] })
     expect(() =>
-      issues.changeRelations({ addDependencies: [{ issueId: b!, blockedById: a! }] }),
+      issues.changeRelations({ addDependencies: [{ issueId: b!, blockedById: b! }] }),
     ).toThrow(DependencyError)
     issues.changeRelations({ removeDependencies: [{ issueId: b!, blockedById: 4 }] })
     expect(told.map((dependencies) => dependencies.version)).toEqual([1, 2])

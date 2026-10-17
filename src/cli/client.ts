@@ -1,17 +1,21 @@
 import http from 'node:http'
 import {
   SESSION_HEADER,
+  type BatchAnswer,
+  type BatchIssue,
   type CreatedIssueAnswer,
+  type DeletedLabelAnswer,
   type EditedIssueAnswer,
   type HootAnswer,
   type IssueAnswer,
   type IssueEdit,
   type IssueListAnswer,
+  type LabelAnswer,
+  type LabelEdit,
+  type LabelListAnswer,
   type NewHootIssue,
-  type SplitAnswer,
-  type SplitIssue,
-  type StepReportAnswer,
-  type StepReportRequest,
+  type NewHootLabel,
+  type SessionAnswer,
 } from '../shared/hoot-cli'
 
 /** Something hoot cannot do, and why; it ends hoot with exit code 1. */
@@ -19,6 +23,12 @@ export class CliError extends Error {}
 
 /** How long hoot waits for Hoot to answer. */
 const ANSWER_TIMEOUT_MS = 30_000
+
+/**
+ * How long hoot waits for a session to start, which may need a worktree
+ * created first: a little longer than Hoot waits for its window.
+ */
+const SESSION_TIMEOUT_MS = 6 * 60_000
 
 /** Why hoot could not reach Hoot, by the error that the connection ended with. */
 export function connectionProblem(error: NodeJS.ErrnoException): string {
@@ -64,8 +74,9 @@ export class HootClient {
   }
 
   /**
-   * Changes the parent, the sub-issues and the dependencies of the issue with
-   * this number, given in decimal digits, in the session's project.
+   * Changes the parent, the sub-issues, the dependencies and the labels of
+   * the issue with this number, given in decimal digits, in the session's
+   * project.
    */
   editIssue(digits: string, edit: IssueEdit): Promise<EditedIssueAnswer> {
     return this.ask('PATCH', `/issues/${digits}`, edit)
@@ -75,16 +86,40 @@ export class HootClient {
    * Creates sub-issues of the issue with this number, given in decimal
    * digits, in the session's project, all together or none.
    */
-  split(digits: string, issues: SplitIssue[]): Promise<SplitAnswer> {
-    return this.ask('POST', `/issues/${digits}/split`, { issues })
+  createBatch(digits: string, issues: BatchIssue[]): Promise<BatchAnswer> {
+    return this.ask('POST', `/issues/${digits}/sub-issues`, { issues })
+  }
+
+  /** Every label. */
+  listLabels(): Promise<LabelListAnswer> {
+    return this.ask('GET', '/labels')
+  }
+
+  createLabel(label: NewHootLabel): Promise<LabelAnswer> {
+    return this.ask('POST', '/labels', label)
+  }
+
+  /** Changes the label with this name. */
+  editLabel(name: string, edit: LabelEdit): Promise<LabelAnswer> {
+    return this.ask('PATCH', `/labels/${encodeURIComponent(name)}`, edit)
+  }
+
+  /** Deletes the label with this name. */
+  deleteLabel(name: string): Promise<DeletedLabelAnswer> {
+    return this.ask('DELETE', `/labels/${encodeURIComponent(name)}`)
   }
 
   /**
-   * Reports an outcome of the current step of the workflow of the issue the
-   * session was started from.
+   * Starts a session for the issue with this number, given in decimal digits,
+   * in the session's project, with this first message when one is given.
    */
-  reportStep(report: StepReportRequest): Promise<StepReportAnswer> {
-    return this.ask('POST', '/steps/report', report)
+  startSession(digits: string, prompt: string | null): Promise<SessionAnswer> {
+    return this.ask(
+      'POST',
+      '/sessions',
+      { issue: digits, ...(prompt === null ? {} : { prompt }) },
+      SESSION_TIMEOUT_MS,
+    )
   }
 
   /** Sends a request, and settles with Hoot's answer; rejects with a `CliError` when there is none. */
@@ -92,6 +127,7 @@ export class HootClient {
     method: string,
     path: string,
     body?: unknown,
+    timeoutMs: number = ANSWER_TIMEOUT_MS,
   ): Promise<T> {
     const payload = body === undefined ? undefined : JSON.stringify(body)
     const headers: http.OutgoingHttpHeaders = { [SESSION_HEADER]: this.sessionId }
@@ -115,7 +151,7 @@ export class HootClient {
           })
         },
       )
-      request.setTimeout(ANSWER_TIMEOUT_MS, () =>
+      request.setTimeout(timeoutMs, () =>
         request.destroy(new CliError('Hoot did not answer in time.')),
       )
       request.on('error', (error: NodeJS.ErrnoException) =>

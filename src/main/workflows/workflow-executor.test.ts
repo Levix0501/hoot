@@ -4,16 +4,13 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
-import { PICKED_IN_HOOT } from '../../shared/workflow-text'
-import {
-  workflowProgress,
-  type WorkflowDefinition,
-  type WorkflowRecord,
-} from '../../shared/workflows'
+import type { Issue, IssueStatus } from '../../shared/issues'
+import type { WorkflowDefinition } from '../../shared/workflows'
 import { databaseFile, openDatabase } from '../database/database'
 import { IssueStore } from '../issues/issue-store'
+import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
-import { NOT_FROM_AN_ISSUE, WorkflowExecutor } from './workflow-executor'
+import { WorkflowExecutor } from './workflow-executor'
 
 let directory: string
 let clock: number
@@ -31,435 +28,304 @@ afterEach(() => {
 
 /**
  * Opens the database the way Hoot does when it starts, with a clock the test
- * sets, the project gamma and an issue in it, and the executor of a workflow,
- * the built-in one unless another is given, which records each change.
+ * sets, the projects gamma and hotel, the labels, and the executor of a
+ * workflow, the built-in one unless another is given, which records the
+ * issues it completes.
  */
 function start(workflow: WorkflowDefinition = BUILT_IN_WORKFLOW) {
   const db = openDatabase(databaseFile(directory))
   databases.push(db)
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)
-  const executor = new WorkflowExecutor(db, workflow, () => clock)
-  const gamma = projects.list()[0] ?? projects.add('/work/gamma').project
-  const issue =
-    issues.list()[0] ??
-    issues.create({
-      projectId: gamma.id,
-      title: 'Fix the login bug',
-      description: '',
-      status: 'todo',
-      priority: 0,
-    })!
-  const changes: Array<[number, WorkflowRecord[]]> = []
-  executor.on('changed', (issueId, records) => changes.push([issueId, records]))
-  return { db, projects, issues, executor, gamma, issue, changes }
+  const labels = new LabelStore(db, () => clock)
+  const executor = new WorkflowExecutor(db, workflow, labels, () => clock)
+  const gamma = projects.find('/work/gamma') ?? projects.add('/work/gamma').project
+  const hotel = projects.find('/work/hotel') ?? projects.add('/work/hotel').project
+  const completed: Issue[][] = []
+  executor.on('issues-completed', (done) => completed.push(done))
+  /** Creates an issue in gamma, or in another project, with a parent when one is given. */
+  const add = (
+    title: string,
+    status: IssueStatus = 'todo',
+    parent: Issue | null = null,
+    projectId: number = gamma.id,
+  ) =>
+    issues.create({ projectId, title, description: '', status, priority: 0 }, parent?.id ?? null)!
+  const label = (name: string) => labels.findByName(name)!.id
+  /** Gives an issue labels, by name, as the user does. */
+  const give = (issue: Issue, ...names: string[]) =>
+    labels.changeIssueLabels(issue.id, { add: names.map(label) }, 'user')
+  const status = (issue: Issue) => issues.get(issue.id)?.status
+  return { db, projects, issues, labels, executor, gamma, hotel, completed, add, give, status }
 }
 
-/** The steps an issue's records say it went through, and its progress, in short. */
-function story(executor: WorkflowExecutor, issueId: number): string[] {
-  return executor.records(issueId).map((record) => {
-    switch (record.kind) {
-      case 'step-started':
-        return `start ${record.step} @${record.at}`
-      case 'step-reported':
-        return `${record.step} → ${record.outcome} by ${record.reporter} @${record.at}`
-      case 'started-over':
-        return `start over @${record.at}`
+describe('the workflow group', () => {
+  it("puts the workflow's group and labels in place when it starts, and keeps them once there", () => {
+    const { labels, db } = start()
+    expect(labels.list().map((label) => [label.group, label.name, label.color])).toEqual([
+      ['Spec-driven', 'Scope', '4ea7fc'],
+      ['Spec-driven', 'Design', 'bb87fc'],
+      ['Spec-driven', 'Implement', 'f2c94c'],
+      ['Spec-driven', 'Split', '95a2b3'],
+      ['Spec-driven', 'Implemented', '4cb782'],
+    ])
+    expect(labels.snapshot().groups).toEqual([
+      { id: 1, name: 'Spec-driven', workflow: 'Spec-driven' },
+    ])
+    db.close()
+    databases.pop()
+    const again = start()
+    expect(again.labels.list()).toHaveLength(5)
+    expect(again.labels.snapshot().groups).toHaveLength(1)
+  })
+
+  it('gives the labels the colors and descriptions of the workflow as it is now', () => {
+    start().db.close()
+    databases.pop()
+    const changed: WorkflowDefinition = {
+      ...BUILT_IN_WORKFLOW,
+      endLabels: BUILT_IN_WORKFLOW.endLabels.map((end) =>
+        end.name === 'Split' ? { ...end, color: '000000', description: 'Now' } : end,
+      ),
     }
+    const { labels } = start(changed)
+    expect(labels.findByName('Split')).toMatchObject({ color: '000000', description: 'Now' })
+    expect(labels.list()).toHaveLength(5)
   })
-}
+})
 
-describe('a session started from an issue', () => {
-  it('starts the first step of an issue not started, at the time it started', () => {
-    const { executor, issue, changes } = start()
-    clock = 2_000
-    executor.sessionStarted('s1', issue.id)
-    expect(story(executor, issue.id)).toEqual(['start scope @2000'])
-    expect(changes).toEqual([[issue.id, executor.records(issue.id)]])
-    expect(workflowProgress(executor.records(issue.id))).toMatchObject({
+describe('progress', () => {
+  it("is the label of the workflow's group an issue carries, and nothing else", () => {
+    const { executor, add, give } = start()
+    const issue = add('A')
+    expect(executor.progress(issue.id)).toEqual({ kind: 'not-started' })
+    give(issue, 'Design')
+    expect(executor.progress(issue.id)).toMatchObject({
       kind: 'at-step',
-      step: 'scope',
-      startedAt: 2_000,
+      step: { name: 'Design' },
     })
-  })
-
-  it('starts nothing new for an issue at a step, or finished', () => {
-    const { executor, issue, changes } = start()
-    executor.sessionStarted('s1', issue.id)
-    executor.forgetSession('s1')
-    executor.sessionStarted('s2', issue.id)
-    expect(story(executor, issue.id)).toEqual(['start scope @1000'])
-    expect(changes).toHaveLength(1)
-    expect(executor.reportFromSession('s2', issue.id, 'split', 'Two parts.').ok).toBe(true)
-    executor.sessionStarted('s3', issue.id)
-    expect(story(executor, issue.id)).toEqual(['start scope @1000', 'scope → split by agent @1000'])
-  })
-
-  it('starts at the first step, or the step the issue is at, and refuses a finished workflow', () => {
-    const { executor, issue } = start()
-    expect(executor.sessionStart(issue.id)).toEqual({
-      ok: true,
-      step: BUILT_IN_WORKFLOW.steps[0],
-      stepsFile: null,
-    })
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'no-split', 'Fits.\n')
-    expect(executor.sessionStart(issue.id)).toEqual({
-      ok: true,
-      step: BUILT_IN_WORKFLOW.steps[1],
-      stepsFile: '## Scope · No split\n\nFits.\n',
-    })
-    executor.reportFromSession('s1', issue.id, 'implement', 'Decided.')
-    executor.reportFromSession('s1', issue.id, 'done', 'Changed it.')
-    expect(executor.sessionStart(issue.id)).toEqual({
-      ok: false,
-      message: 'The workflow for this issue is finished.',
-    })
-  })
-
-  it("writes what this round's outcomes found, those the user picked too, once one has a summary", () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    const scope = workflowProgress(executor.records(issue.id))
-    if (scope.kind !== 'at-step') throw new Error('Not at a step.')
-    executor.reportByUser(issue.id, scope.run, 'no-split')
-    // Only an outcome the user picked: nothing to write.
-    expect(executor.sessionStart(issue.id)).toMatchObject({ ok: true, stepsFile: null })
-    executor.startOver(issue.id)
-    executor.sessionStarted('s2', issue.id)
-    executor.reportFromSession('s2', issue.id, 'no-split', 'Fits again.')
-    const design = workflowProgress(executor.records(issue.id))
-    if (design.kind !== 'at-step') throw new Error('Not at a step.')
-    executor.reportByUser(issue.id, design.run, 'implement')
-    // Since the workflow started over.
-    expect(executor.sessionStart(issue.id)).toEqual({
-      ok: true,
-      step: BUILT_IN_WORKFLOW.steps[2],
-      stepsFile: `## Scope · No split\n\nFits again.\n\n## Design · Implement directly\n\n${PICKED_IN_HOOT}\n`,
+    give(issue, 'Implemented')
+    expect(executor.progress(issue.id)).toMatchObject({
+      kind: 'finished',
+      label: { name: 'Implemented' },
     })
   })
 })
 
-describe('reportFromSession', () => {
-  it('records the outcome and its summary, and starts the step it leads to, at the time of the report', () => {
-    const { executor, issue, changes } = start()
-    executor.sessionStarted('s1', issue.id)
+describe('sessionStart', () => {
+  it('starts at the first step for an issue not started, and at the step of its label otherwise', () => {
+    const { executor, add, give } = start()
+    const issue = add('A')
+    const first = executor.sessionStart(issue.id, 'ISS-1')
+    expect(first.ok && first.step.name).toBe('Scope')
+    give(issue, 'Design')
+    const design = executor.sessionStart(issue.id, 'ISS-1')
+    expect(design.ok && design.step.name).toBe('Design')
+    if (!design.ok) return
+    expect(design.workflowFile.startsWith('# Spec-driven\n')).toBe(true)
+    const message = design.firstMessage({
+      issueFile: '/w/.hoot/tmp/issue-1/issue.md',
+      workflowFile: '/w/.hoot/tmp/issue-1/workflow.md',
+      branch: 'iss-1-a',
+    })
+    expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
+    expect(message).toContain('`/w/.hoot/tmp/issue-1/workflow.md`')
+    expect(message).toContain('the branch `iss-1-a`')
+    expect(message).toContain('This session starts at the step Design')
+    expect(message).toContain('`hoot issue edit ISS-1 --add-label Implement`')
+  })
+
+  it('refuses an issue whose workflow is finished', () => {
+    const { executor, add, give } = start()
+    const issue = add('A')
+    give(issue, 'Split')
+    expect(executor.sessionStart(issue.id, 'ISS-1')).toEqual({
+      ok: false,
+      message: 'The workflow of ISS-1 is finished: it has the label Split.',
+    })
+  })
+})
+
+describe('sessionStarted', () => {
+  it('gives an issue not started the first step’s label, by whoever opened the session, and nothing else', () => {
+    const { executor, labels, add, give, status } = start()
+    const user = add('A', 'backlog')
+    const agent = add('B')
+    clock = 2_000
+    executor.sessionStarted(user.id, 'user')
+    executor.sessionStarted(agent.id, 'agent')
+    executor.sessionStarted(agent.id, 'agent')
+    const at = add('C')
+    give(at, 'Implement')
+    executor.sessionStarted(at.id, 'user')
+    expect(labels.labelsOf(user.id).map((label) => label.name)).toEqual(['Scope'])
+    expect(labels.labelsOf(at.id).map((label) => label.name)).toEqual(['Implement'])
+    expect(
+      labels.eventsOfShown().map((event) => [event.issueId, event.kind, event.label, event.actor]),
+    ).toEqual([
+      [user.id, 'added', 'Spec-driven › Scope', 'user'],
+      [agent.id, 'added', 'Spec-driven › Scope', 'agent'],
+      [at.id, 'added', 'Spec-driven › Implement', 'user'],
+    ])
+    // Its status is the window's to change.
+    expect(status(user)).toBe('backlog')
+    // An issue deleted meanwhile is given nothing.
+    expect(() => executor.sessionStarted(999, 'user')).not.toThrow()
+  })
+})
+
+describe('completing an issue split once its sub-issues are', () => {
+  it('changes nothing of the issue when it is given Split, or of others when labels change', () => {
+    const { add, give, status, issues, completed } = start()
+    const p = add('P', 'in_progress')
+    const s1 = add('S1', 'todo', p)
+    add('S2', 'todo', p)
+    give(p, 'Split')
+    expect(status(p)).toBe('in_progress')
+    give(s1, 'Implemented')
+    expect(status(s1)).toBe('todo')
+    expect(issues.list().map((issue) => issue.status)).toEqual(['in_progress', 'todo', 'todo'])
+    expect(completed).toEqual([])
+  })
+
+  it('makes it Done once all are completed and one is done, and Canceled once all are canceled', () => {
+    const { add, give, status, issues, completed } = start()
+    const p = add('P', 'in_progress')
+    const s1 = add('S1', 'todo', p)
+    const s2 = add('S2', 'todo', p)
+    give(p, 'Split')
+    issues.update(s1.id, { status: 'done' })
+    expect(status(p)).toBe('in_progress')
     clock = 5_000
-    const result = executor.reportFromSession('s1', issue.id, 'no-split', '# Why\n\nFits.\n')
-    expect(result).toEqual({
-      ok: true,
-      report: {
-        issue: `ISS-${issue.id}`,
-        step: 'Scope',
-        outcome: 'No split',
-        next: BUILT_IN_WORKFLOW.steps[1],
-      },
-    })
-    expect(story(executor, issue.id)).toEqual([
-      'start scope @1000',
-      'scope → no-split by agent @5000',
-      'start design @5000',
-    ])
-    expect(executor.records(issue.id)[1]).toMatchObject({ summary: '# Why\n\nFits.\n' })
-    expect(changes.at(-1)).toEqual([issue.id, executor.records(issue.id)])
-    // The session is in the new run, and goes on reporting.
-    clock = 6_000
-    expect(executor.reportFromSession('s1', issue.id, 'implement', 'Decided.')).toMatchObject({
-      ok: true,
-      report: { step: 'Design', outcome: 'Implement directly', next: { name: 'Implement' } },
-    })
+    issues.update(s2.id, { status: 'canceled' })
+    expect(issues.get(p.id)).toMatchObject({ status: 'done', completedAt: 5_000 })
+    expect(completed).toEqual([[issues.get(p.id)]])
+    const q = add('Q', 'todo')
+    const t1 = add('T1', 'todo', q)
+    const t2 = add('T2', 'todo', q)
+    give(q, 'Split')
+    issues.update(t1.id, { status: 'canceled' })
+    issues.update(t2.id, { status: 'canceled' })
+    expect(status(q)).toBe('canceled')
   })
 
-  it('finishes the workflow with an outcome that leads to no step', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'split', '1. A\n2. B')).toEqual({
-      ok: true,
-      report: { issue: `ISS-${issue.id}`, step: 'Scope', outcome: 'Split', next: null },
-    })
-    expect(workflowProgress(executor.records(issue.id))).toEqual({ kind: 'finished' })
+  it('completes it only when the condition comes to hold, not again when it holds still', () => {
+    const { add, give, status, issues } = start()
+    const p = add('P', 'in_progress')
+    const s1 = add('S1', 'todo', p)
+    const s2 = add('S2', 'todo', p)
+    give(p, 'Split')
+    issues.update(s1.id, { status: 'done' })
+    issues.update(s2.id, { status: 'canceled' })
+    expect(status(p)).toBe('done')
+    issues.update(s1.id, { status: 'todo' })
+    expect(status(p)).toBe('done')
+    issues.update(p.id, { status: 'in_progress' })
+    expect(status(p)).toBe('in_progress')
+    issues.update(s1.id, { status: 'done' })
+    expect(status(p)).toBe('done')
+    // Back to in progress by the user, with all its sub-issues completed: it stays so.
+    issues.update(p.id, { status: 'in_progress' })
+    add('S3', 'done', p)
+    expect(status(p)).toBe('in_progress')
   })
 
-  it('keeps the summary exactly as it is given', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    const summary = '﻿  Line\r\n\0end\n\n'
-    executor.reportFromSession('s1', issue.id, 'no-split', summary)
-    expect(executor.records(issue.id)[1]).toMatchObject({ summary })
-  })
-
-  it('refuses a session not started from an issue, and an issue that no longer exists', () => {
-    const { executor, issues, issue, changes } = start()
-    expect(executor.reportFromSession('shell', null, 'no-split', 'x')).toEqual({
-      ok: false,
-      message: NOT_FROM_AN_ISSUE,
-    })
-    expect(NOT_FROM_AN_ISSUE).toBe('this session was not started from an issue.')
-    executor.sessionStarted('s1', issue.id)
-    issues.delete(issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'no-split', 'x')).toEqual({
-      ok: false,
-      message: `ISS-${issue.id} no longer exists in Hoot.`,
-    })
-    expect(changes).toHaveLength(1)
-  })
-
-  it('refuses a finished workflow', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'split', 'Split.')
-    const before = executor.records(issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'split', 'Again.')).toEqual({
-      ok: false,
-      message: `The workflow for ISS-${issue.id} is finished; there is no step left to report.`,
-    })
-    expect(executor.records(issue.id)).toEqual(before)
-  })
-
-  it("refuses an outcome the step does not have, and lists the step's outcomes", () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    const before = executor.records(issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'done', 'x')).toEqual({
-      ok: false,
-      message: 'done is not an outcome of Scope.\nOutcomes: no-split, split',
-    })
-    expect(executor.records(issue.id)).toEqual(before)
-    executor.reportFromSession('s1', issue.id, 'no-split', 'x')
-    expect(executor.reportFromSession('s1', issue.id, 'done', 'x')).toEqual({
-      ok: false,
-      message: 'done is not an outcome of Design.\nOutcomes: implement, split',
-    })
-  })
-
-  it('refuses a session whose issue was moved on in Hoot, and says where it is now', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'no-split', 'Fits.')
-    const design = workflowProgress(executor.records(issue.id))
-    if (design.kind !== 'at-step') throw new Error('Not at a step.')
-    expect(executor.reportByUser(issue.id, design.run, 'implement')).toEqual({ ok: true })
-    const before = executor.records(issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'implement', 'x')).toEqual({
-      ok: false,
-      message: `ISS-${issue.id} was moved on in Hoot; it is now at Implement. Close this session and start the issue again to continue.`,
-    })
-    // Also with an outcome of the step the issue is at now.
-    expect(executor.reportFromSession('s1', issue.id, 'done', 'x').ok).toBe(false)
-    expect(executor.records(issue.id)).toEqual(before)
-    executor.startOver(issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'no-split', 'x')).toEqual({
-      ok: false,
-      message: `ISS-${issue.id} was moved on in Hoot; it is now Not started. Close this session and start the issue again to continue.`,
-    })
-  })
-
-  it('refuses a session of the issue that started before the current run', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('old', issue.id)
-    executor.startOver(issue.id)
-    executor.sessionStarted('new', issue.id)
-    expect(executor.reportFromSession('old', issue.id, 'no-split', 'x').ok).toBe(false)
-    expect(executor.reportFromSession('new', issue.id, 'no-split', 'x').ok).toBe(true)
-    // A session Hoot was not told of is in no run.
-    expect(executor.reportFromSession('unknown', issue.id, 'implement', 'x').ok).toBe(false)
-  })
-
-  it('reports whatever the status and project of the issue are now', () => {
-    const { executor, issues, projects, issue } = start()
-    const hotel = projects.add('/work/hotel').project
-    executor.sessionStarted('s1', issue.id)
-    issues.update(issue.id, { status: 'done', projectId: hotel.id })
-    expect(executor.reportFromSession('s1', issue.id, 'no-split', 'x').ok).toBe(true)
+  it('counts only the sub-issues Hoot shows, and completes it when a project leaves the list', () => {
+    const { add, give, status, projects, hotel } = start()
+    const r = add('R', 'todo')
+    add('U1', 'done', r)
+    add('U2', 'todo', r, hotel.id)
+    give(r, 'Split')
+    expect(status(r)).toBe('todo')
     projects.remove(hotel.root)
-    expect(executor.reportFromSession('s1', issue.id, 'implement', 'x').ok).toBe(true)
-    expect(issues.update(issue.id, {})).toBeNull()
-  })
-})
-
-describe('reportByUser', () => {
-  it('records the outcome without a summary, as the user picked it, and starts the step it leads to', () => {
-    const { executor, issue, changes } = start()
-    executor.sessionStarted('s1', issue.id)
-    const scope = workflowProgress(executor.records(issue.id))
-    if (scope.kind !== 'at-step') throw new Error('Not at a step.')
-    clock = 3_000
-    expect(executor.reportByUser(issue.id, scope.run, 'no-split')).toEqual({ ok: true })
-    expect(story(executor, issue.id)).toEqual([
-      'start scope @1000',
-      'scope → no-split by user @3000',
-      'start design @3000',
-    ])
-    expect(executor.records(issue.id)[1]).toMatchObject({ summary: null })
-    expect(changes.at(-1)).toEqual([issue.id, executor.records(issue.id)])
+    expect(status(r)).toBe('done')
   })
 
-  it('refuses a run that is no longer current, and an outcome the step does not have', () => {
-    const { executor, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    const scope = workflowProgress(executor.records(issue.id))
-    if (scope.kind !== 'at-step') throw new Error('Not at a step.')
-    expect(executor.reportByUser(issue.id, scope.run, 'implement')).toEqual({
-      ok: false,
-      message: 'implement is not an outcome of Scope.\nOutcomes: no-split, split',
-    })
-    executor.reportFromSession('s1', issue.id, 'no-split', 'x')
-    expect(executor.reportByUser(issue.id, scope.run, 'no-split')).toEqual({
-      ok: false,
-      message: `ISS-${issue.id} has moved on to another step meanwhile.`,
-    })
-    expect(executor.reportByUser(issue.id + 1, scope.run, 'no-split').ok).toBe(false)
-  })
-})
-
-describe('startOver', () => {
-  it('makes the issue not started again, keeping its records', () => {
-    const { executor, issue, changes } = start()
-    expect(executor.startOver(issue.id)).toEqual({
-      ok: false,
-      message: `ISS-${issue.id} has not started.`,
-    })
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'split', 'Split.')
-    clock = 9_000
-    expect(executor.startOver(issue.id)).toEqual({ ok: true })
-    expect(story(executor, issue.id)).toEqual([
-      'start scope @1000',
-      'scope → split by agent @1000',
-      'start over @9000',
-    ])
-    expect(workflowProgress(executor.records(issue.id))).toEqual({ kind: 'not-started' })
-    expect(changes.at(-1)).toEqual([issue.id, executor.records(issue.id)])
-    // Started again, it starts at the first step.
-    executor.sessionStarted('s2', issue.id)
-    expect(story(executor, issue.id).at(-1)).toBe('start scope @9000')
-  })
-})
-
-describe('the records', () => {
-  it('stay when Hoot starts again, and when the issue changes', () => {
-    const { executor, issue, issues } = start()
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'no-split', 'Fits.')
-    const before = executor.records(issue.id)
-    issues.update(issue.id, { status: 'done', title: 'Renamed', projectId: null })
-    issues.update(issue.id, { status: 'in_progress' })
-    const restarted = start()
-    expect(restarted.issue.id).toBe(issue.id)
-    expect(restarted.executor.records(issue.id)).toEqual(before)
+  it('needs a label that says so, and at least one sub-issue', () => {
+    const { add, give, status, issues } = start()
+    const w = add('W', 'todo')
+    const v1 = add('V1', 'todo', w)
+    issues.update(v1.id, { status: 'done' })
+    expect(status(w)).toBe('todo')
+    const x = add('X', 'todo')
+    give(x, 'Implemented')
+    const y1 = add('Y1', 'todo', x)
+    issues.update(y1.id, { status: 'done' })
+    expect(status(x)).toBe('todo')
+    const lone = add('Lone', 'todo')
+    give(lone, 'Split')
+    expect(status(lone)).toBe('todo')
   })
 
-  it('go with their issue when it is deleted', () => {
-    const { db, executor, issues, issue } = start()
-    executor.sessionStarted('s1', issue.id)
-    executor.reportFromSession('s1', issue.id, 'split', 'Split.')
-    issues.delete(issue.id)
-    expect(executor.records(issue.id)).toEqual([])
-    expect(db.prepare('SELECT COUNT(*) AS count FROM workflow_records').get()).toEqual({
-      count: 0,
-    })
+  it('completes it when a sub-issue is deleted or leaves it, and when it is given Split', () => {
+    const { add, give, status, issues } = start()
+    const z = add('Z', 'todo')
+    const z1 = add('Z1', 'todo', z)
+    add('Z2', 'done', z)
+    give(z, 'Split')
+    issues.delete(z1.id)
+    expect(status(z)).toBe('done')
+    const m = add('M', 'todo')
+    const m1 = add('M1', 'todo', m)
+    add('M2', 'done', m)
+    give(m, 'Split')
+    issues.setParents([{ issueId: m1.id, parentId: null }])
+    expect(status(m)).toBe('done')
+    const n = add('N', 'todo')
+    add('N1', 'done', n)
+    give(n, 'Split')
+    expect(status(n)).toBe('done')
   })
 
-  it('are listed for the issues Hoot shows, by issue', () => {
-    const { executor, issues, projects, issue } = start()
-    const hotel = projects.add('/work/hotel').project
-    const other = issues.create({
-      projectId: hotel.id,
-      title: 'Other',
-      description: '',
-      status: 'todo',
-      priority: 0,
-    })!
-    const loose = issues.create({
-      projectId: null,
-      title: 'Loose',
-      description: '',
-      status: 'todo',
-      priority: 0,
-    })!
-    for (const id of [issue.id, other.id, loose.id]) executor.sessionStarted(`s${id}`, id)
-    expect(Object.keys(executor.listShown()).map(Number)).toEqual([issue.id, other.id, loose.id])
-    projects.remove(hotel.root)
-    expect(executor.listShown()).toEqual({
-      [issue.id]: executor.records(issue.id),
-      [loose.id]: executor.records(loose.id),
-    })
+  it('completes the parents of an issue completed so, in turn', () => {
+    const { add, give, status, issues } = start()
+    const top = add('Top', 'todo')
+    const middle = add('Middle', 'todo', top)
+    const leaf = add('Leaf', 'todo', middle)
+    give(top, 'Split')
+    give(middle, 'Split')
+    issues.update(leaf.id, { status: 'done' })
+    expect(status(middle)).toBe('done')
+    expect(status(top)).toBe('done')
   })
 
-  it('refuse what does not fit their kind', () => {
-    const { db, issue } = start()
-    const insert = (
-      kind: string,
-      step: string | null,
-      outcome: string | null,
-      reporter: string | null,
-      summary: string | null,
-    ) =>
-      db
-        .prepare(
-          `INSERT INTO workflow_records (issue_id, kind, step, outcome, reporter, summary, at)
-           VALUES (?, ?, ?, ?, ?, ?, 0)`,
-        )
-        .run(issue.id, kind, step, outcome, reporter, summary)
-    expect(() => insert('step-started', null, null, null, null)).toThrow(/CHECK constraint/)
-    expect(() => insert('step-reported', 'scope', 'split', 'agent', null)).toThrow(/CHECK/)
-    expect(() => insert('step-reported', 'scope', 'split', 'user', 'S')).toThrow(/CHECK/)
-    expect(() => insert('step-reported', 'scope', 'split', 'robot', null)).toThrow(/CHECK/)
-    expect(() => insert('started-over', 'scope', null, null, null)).toThrow(/CHECK/)
-    expect(() => insert('paused', 'scope', null, null, null)).toThrow(/CHECK/)
+  it('completes nothing in a change that is rolled back', () => {
+    const { add, give, status, issues, completed } = start()
+    const p = add('P', 'todo')
+    const s1 = add('S1', 'todo', p)
+    add('S2', 'done', p)
+    give(p, 'Split')
     expect(() =>
-      db
-        .prepare(
-          `INSERT INTO workflow_records (issue_id, kind, at) VALUES (999, 'started-over', 0)`,
-        )
-        .run(),
-    ).toThrow(/FOREIGN KEY/)
+      issues.changeRelations({
+        parents: [{ issueId: s1.id, parentId: null }],
+        addDependencies: [{ issueId: p.id, blockedById: p.id }],
+      }),
+    ).toThrow('cannot be blocked by itself')
+    expect(status(p)).toBe('todo')
+    expect(completed).toEqual([])
   })
-})
 
-describe('any workflow', () => {
-  it('runs as its definition says', () => {
+  it('follows the declaration of the definition it runs, whatever the label is named', () => {
     const workflow: WorkflowDefinition = {
-      name: 'Loop',
+      name: 'Other',
+      group: 'Other',
       steps: [
         {
-          id: 'try',
-          name: 'Try',
-          prompt: 'Try it.',
-          outcomes: [
-            { name: 'again', label: 'Again', instruction: 'try again.', next: 'try' },
-            { name: 'check', label: 'Check', instruction: 'check it.', next: 'check' },
-          ],
-        },
-        {
-          id: 'check',
-          name: 'Check',
-          prompt: 'Check it.',
-          outcomes: [{ name: 'ok', label: 'Fine', instruction: 'it is fine.', next: null }],
+          name: 'Do',
+          label: { name: 'Doing', color: '4ea7fc', description: '' },
+          prompt: 'Do it.',
+          outcomes: [{ label: 'Parted', instruction: 'Parted.', goOn: false }],
         },
       ],
+      endLabels: [
+        { name: 'Parted', color: '95a2b3', description: '', completeWithSubIssues: true },
+      ],
     }
-    const { executor, issue } = start(workflow)
-    executor.sessionStarted('s1', issue.id)
-    expect(executor.reportFromSession('s1', issue.id, 'again', 'Once.')).toMatchObject({
-      ok: true,
-      report: { step: 'Try', outcome: 'Again', next: { name: 'Try' } },
-    })
-    expect(executor.reportFromSession('s1', issue.id, 'check', 'Twice.')).toMatchObject({
-      ok: true,
-      report: { next: { name: 'Check' } },
-    })
-    expect(executor.reportFromSession('s1', issue.id, 'ok', 'Done.')).toMatchObject({
-      ok: true,
-      report: { step: 'Check', outcome: 'Fine', next: null },
-    })
-    expect(story(executor, issue.id)).toEqual([
-      'start try @1000',
-      'try → again by agent @1000',
-      'start try @1000',
-      'try → check by agent @1000',
-      'start check @1000',
-      'check → ok by agent @1000',
-    ])
+    const { add, give, status, issues } = start(workflow)
+    const p = add('P', 'todo')
+    const s = add('S', 'todo', p)
+    give(p, 'Parted')
+    issues.update(s.id, { status: 'done' })
+    expect(status(p)).toBe('done')
   })
 })

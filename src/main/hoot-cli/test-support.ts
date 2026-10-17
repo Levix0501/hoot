@@ -5,18 +5,35 @@ import os from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
+import { waitedOnIds } from '../../shared/dependencies'
+import type { ToolsState } from '../../shared/ipc'
 import type { Issue } from '../../shared/issues'
-import { databaseFile, openDatabase } from '../database/database'
+import { startBlockers } from '../../shared/start-blockers'
+import { databaseFile, openDatabase, transaction } from '../database/database'
 import { IssueStore } from '../issues/issue-store'
+import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
 import { WorkflowExecutor } from '../workflows/workflow-executor'
-import { HootServer } from './hoot-server'
+import { HootServer, type StartedSession } from './hoot-server'
+
+/** The tools state once a detection has found Claude Code. */
+export const CLAUDE_FOUND: ToolsState = {
+  detecting: false,
+  tools: [
+    { id: 'claude', available: true, path: '/bin/claude' },
+    { id: 'shell', available: true, path: '/bin/zsh' },
+  ],
+  error: null,
+}
 
 /**
  * A Hoot for hoot to talk to in tests: its database in a temporary folder,
- * with the projects `gamma` and `hotel`, a session in each, the executor of
- * the issues' workflow, and the server that answers hoot, listening on a
- * socket in the same folder.
+ * with the projects `gamma` and `hotel`, a session in each, the labels, the
+ * executor of the issues' workflow, and the server that answers hoot,
+ * listening on a socket in the same folder. Sessions it is asked for are
+ * started as `setStartSession` says, by default in the worktree
+ * `/worktrees/<project>/iss-<n>`, giving the issue the first step's label as
+ * the window does.
  */
 export async function startTestHoot() {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-cli-')))
@@ -24,7 +41,17 @@ export async function startTestHoot() {
   let clock = Date.UTC(2026, 9, 12, 6, 3)
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)
-  const workflows = new WorkflowExecutor(db, ISSUE_WORKFLOW, () => clock)
+  const labels = new LabelStore(db, () => clock)
+  const workflows = new WorkflowExecutor(db, ISSUE_WORKFLOW, labels, () => clock)
+  let tools: ToolsState = CLAUDE_FOUND
+  /** The sessions asked for, in order: the issue and the first message given, if any. */
+  const startedSessions: Array<{ issueId: number; prompt: string | null }> = []
+  let startSession = async (issueId: number): Promise<StartedSession> => {
+    const issue = issues.get(issueId)!
+    const project = projects.list().find((candidate) => candidate.id === issue.projectId)!
+    workflows.sessionStarted(issueId, 'agent')
+    return { ok: true, worktreePath: `/worktrees/${project.name}/iss-${issueId}` }
+  }
   const gamma = projects.add('/work/gamma').project
   const hotel = projects.add('/work/hotel').project
   /** The project root of each session Hoot knows, by the session's id. */
@@ -32,8 +59,6 @@ export async function startTestHoot() {
     ['gamma-session', gamma.root],
     ['hotel-session', hotel.root],
   ])
-  /** The issue each session started from an issue's start button was started from, by its id. */
-  const sessionIssues = new Map<string, number>()
   const created: Issue[] = []
   const socket = path.join(directory, 'hoot.sock')
   const server = new HootServer({
@@ -45,14 +70,24 @@ export async function startTestHoot() {
     },
     listProjects: () => projects.list(),
     issues,
+    labels,
+    together: (body) => transaction(db, body),
     issueCreated: (issue) => created.push(issue),
-    reportStep: (sessionId, outcome, summary) =>
-      workflows.reportFromSession(
-        sessionId,
-        sessionIssues.get(sessionId) ?? null,
-        outcome,
-        summary,
+    startBlockers: (issue) =>
+      startBlockers(
+        tools,
+        issue,
+        waitedOnIds(
+          new Map(issues.list().map((shown) => [shown.id, shown])),
+          issues.dependencies().links,
+          issue.id,
+        ),
+        workflows.progress(issue.id),
       ),
+    startSession: (issueId, prompt) => {
+      startedSessions.push({ issueId, prompt })
+      return startSession(issueId)
+    },
   })
   await server.start()
   return {
@@ -64,16 +99,17 @@ export async function startTestHoot() {
     gamma,
     hotel,
     sessions,
+    labels,
     workflows,
-    /**
-     * Starts a session in a project, by default gamma, as an issue's start
-     * button does: the session is started from the issue, and starts work
-     * on it.
-     */
-    startIssueSession(sessionId: string, issueId: number, root: string = gamma.root) {
-      sessions.set(sessionId, root)
-      sessionIssues.set(sessionId, issueId)
-      workflows.sessionStarted(sessionId, issueId)
+    /** The sessions hoot asked for, in order. */
+    startedSessions,
+    /** Sets what Hoot knows of the tools from now on. */
+    setTools(state: ToolsState) {
+      tools = state
+    },
+    /** Sets how the sessions hoot asks for start from now on. */
+    setStartSession(start: (issueId: number) => Promise<StartedSession>) {
+      startSession = start
     },
     /** The issues the server reported created, in order. */
     created,

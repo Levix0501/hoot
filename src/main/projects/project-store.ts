@@ -66,6 +66,6 @@ export class ProjectStore {
 
   /** Takes a project out of the list; its row and issues stay. */
   remove(root: string): boolean {
-    return this.statements.unlist.run(root).changes > 0
+    return transaction(this.db, () => this.statements.unlist.run(root).changes > 0)
   }
 }

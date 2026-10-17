@@ -1,5 +1,4 @@
 import { issueIdentifier, isIssueOpen, type Issue } from './issues'
-import { ancestorsOf, descendantsOf, type SubIssueLink } from './sub-issues'
 
 /** The most issues an issue can be blocked by, as on GitHub. */
 export const MAX_BLOCKED_BY = 50
@@ -57,36 +56,23 @@ export function withDependencies(
   return result
 }
 
-/**
- * A step from an issue to one it waits for directly: an issue it is blocked
- * by, or, for a parent, one of its sub-issues.
- */
+/** A step from an issue to one it waits for directly: an issue it is blocked by. */
 export interface WaitStep {
   from: number
   to: number
-  kind: 'blocked-by' | 'parent-of'
 }
 
 /**
- * What each issue waits for directly, given every parent and every
- * dependency: the issues it is blocked by, and its sub-issues, since a parent
- * waits for its sub-issues.
+ * What each issue waits for directly, given every dependency: the issues it
+ * is blocked by. Parents and sub-issues count for nothing here.
  */
-export function waitSteps(
-  subIssueLinks: readonly SubIssueLink[],
-  dependencies: readonly Dependency[],
-): Map<number, WaitStep[]> {
+export function waitSteps(dependencies: readonly Dependency[]): Map<number, WaitStep[]> {
   const steps = new Map<number, WaitStep[]>()
-  const add = (step: WaitStep) => {
-    const from = steps.get(step.from)
-    if (from) from.push(step)
-    else steps.set(step.from, [step])
-  }
   for (const { issueId, blockedById } of dependencies) {
-    add({ from: issueId, to: blockedById, kind: 'blocked-by' })
-  }
-  for (const { issueId, parentId } of subIssueLinks) {
-    add({ from: parentId, to: issueId, kind: 'parent-of' })
+    const step = { from: issueId, to: blockedById }
+    const from = steps.get(issueId)
+    if (from) from.push(step)
+    else steps.set(issueId, [step])
   }
   return steps
 }
@@ -163,67 +149,43 @@ export function waitingFor(
   return reached
 }
 
-/** What changed, in the parents and the dependencies checked by `dependencyProblem`. */
-export interface RelationChanges {
-  /** The dependencies made. */
-  added: readonly Dependency[]
-  /** The issues given another parent, which is not none. */
-  moved: readonly number[]
-}
-
 /** Text that starts a sentence, with its first letter in upper case. */
 function sentence(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-/** A way an issue waits for another, in words: "ISS-1 is blocked by ISS-2, which is the parent of ISS-3". */
+/** A way an issue waits for another, in words: "ISS-1 is blocked by ISS-2, which is blocked by ISS-3". */
 function pathText(path: readonly WaitStep[], name: (issueId: number) => string): string {
-  const verb = (step: WaitStep) =>
-    step.kind === 'blocked-by' ? 'is blocked by' : 'is the parent of'
   return path
     .map((step, index) =>
       index === 0
-        ? `${name(step.from)} ${verb(step)} ${name(step.to)}`
-        : `which ${verb(step)} ${name(step.to)}`,
+        ? `${name(step.from)} is blocked by ${name(step.to)}`
+        : `which is blocked by ${name(step.to)}`,
     )
     .join(', ')
 }
 
 /**
- * Why the parents and dependencies of issues, once `changes` are made, break
- * the rules of dependencies; `null` when they do not. An issue waits for
- * those it is blocked by and, as a parent, for its sub-issues. No issue can
- * wait for itself, through others or not; none can be blocked by an issue
- * above or below it; and none can be blocked by more than `MAX_BLOCKED_BY`
- * issues or block more than `MAX_BLOCKING`. `subIssueLinks` and
- * `dependencies` are all of them once the changes are made, those of issues
- * of removed projects included, and only what `changes` touch is checked.
- * Issues are named by `name`, which can name those Hoot does not show without
- * their identifier.
+ * Why the dependencies, once `added` are made, break the rules of
+ * dependencies; `null` when they do not. No issue can wait for itself,
+ * through others or not, and none can be blocked by more than
+ * `MAX_BLOCKED_BY` issues or block more than `MAX_BLOCKING`. Parents and
+ * sub-issues count for nothing: an issue can be blocked by an issue above or
+ * below it, and block one. `dependencies` are all of them once the
+ * dependencies are made, those of issues of removed projects included, and
+ * only what `added` touches is checked. Issues are named by `name`, which can
+ * name those Hoot does not show without their identifier.
  */
 export function dependencyProblem(
-  subIssueLinks: readonly SubIssueLink[],
   dependencies: readonly Dependency[],
-  changes: RelationChanges,
+  added: readonly Dependency[],
   name: (issueId: number) => string = issueIdentifier,
 ): string | null {
-  const steps = waitSteps(subIssueLinks, dependencies)
-  for (const { issueId, blockedById } of changes.added) {
+  const steps = waitSteps(dependencies)
+  for (const { issueId, blockedById } of added) {
     const issue = name(issueId)
     const blocker = name(blockedById)
     if (issueId === blockedById) return `${sentence(issue)} cannot be blocked by itself.`
-    if (ancestorsOf(subIssueLinks, issueId).has(blockedById)) {
-      return (
-        `${sentence(issue)} cannot be blocked by ${blocker}, which is above it: an issue ` +
-        'waits for the issues below it, so they would wait for each other.'
-      )
-    }
-    if (descendantsOf(subIssueLinks, issueId).has(blockedById)) {
-      return (
-        `${sentence(issue)} cannot be blocked by ${blocker}, which is below it: an issue ` +
-        'waits for the issues below it already.'
-      )
-    }
     const path = waitPath(steps, blockedById, issueId)
     if (path !== null) {
       return (
@@ -232,32 +194,7 @@ export function dependencyProblem(
       )
     }
   }
-  for (const issueId of changes.moved) {
-    const parentId = subIssueLinks.find((link) => link.issueId === issueId)?.parentId
-    if (parentId === undefined) continue
-    const issue = name(issueId)
-    const parent = name(parentId)
-    const below = new Set([issueId, ...descendantsOf(subIssueLinks, issueId)])
-    const above = ancestorsOf(subIssueLinks, issueId)
-    for (const dependency of dependencies) {
-      const up = below.has(dependency.issueId) && above.has(dependency.blockedById)
-      const down = above.has(dependency.issueId) && below.has(dependency.blockedById)
-      if (!up && !down) continue
-      return (
-        `${sentence(issue)} cannot be a sub-issue of ${parent}: ${name(dependency.issueId)} is ` +
-        `blocked by ${name(dependency.blockedById)}, which would then be ` +
-        `${up ? 'above' : 'below'} it.`
-      )
-    }
-    const path = waitPath(steps, issueId, parentId)
-    if (path !== null) {
-      return (
-        `${sentence(issue)} cannot be a sub-issue of ${parent}, which would then wait for it ` +
-        `while it waits for ${parent}: ${pathText(path, name)}.`
-      )
-    }
-  }
-  for (const issueId of new Set(changes.added.map((dependency) => dependency.issueId))) {
+  for (const issueId of new Set(added.map((dependency) => dependency.issueId))) {
     const count = blockedByIdsOf(dependencies, issueId).length
     if (count > MAX_BLOCKED_BY) {
       return (
@@ -266,7 +203,7 @@ export function dependencyProblem(
       )
     }
   }
-  for (const blockedById of new Set(changes.added.map((dependency) => dependency.blockedById))) {
+  for (const blockedById of new Set(added.map((dependency) => dependency.blockedById))) {
     const count = blockingIdsOf(dependencies, blockedById).length
     if (count > MAX_BLOCKING) {
       return (
@@ -313,23 +250,38 @@ export function waitCounts(
 }
 
 /**
+ * The issues an issue waits on, in the order it became blocked by them: those
+ * it is blocked by while Hoot shows both and neither is done nor canceled.
+ * `shown` are the issues Hoot shows.
+ */
+export function waitedOnIds(
+  shown: ReadonlyMap<number, Pick<Issue, 'status'>>,
+  links: readonly Dependency[],
+  issueId: number,
+): number[] {
+  const issue = shown.get(issueId)
+  if (!issue || !isIssueOpen(issue)) return []
+  return blockedByIdsOf(links, issueId).filter((id) => {
+    const blocker = shown.get(id)
+    return blocker !== undefined && isIssueOpen(blocker)
+  })
+}
+
+/**
  * The issues that cannot be picked to block an issue (`blocked-by`) or to be
- * blocked by it (`blocking`): the issue itself, those above and below it,
- * those it has the dependency with already, and those the dependency would
- * have wait for themselves, through all the issues, those Hoot does not show
- * included.
+ * blocked by it (`blocking`): the issue itself, those it has the dependency
+ * with already, and those the dependency would have wait for themselves,
+ * through all the issues, those Hoot does not show included. Its parent,
+ * sub-issues and the issues above and below it can be picked as any other.
  */
 export function unpickableForDependency(
-  subIssueLinks: readonly SubIssueLink[],
   dependencies: readonly Dependency[],
   issueId: number,
   kind: 'blocked-by' | 'blocking',
 ): Set<number> {
-  const steps = waitSteps(subIssueLinks, dependencies)
+  const steps = waitSteps(dependencies)
   return new Set([
     issueId,
-    ...ancestorsOf(subIssueLinks, issueId),
-    ...descendantsOf(subIssueLinks, issueId),
     ...(kind === 'blocked-by'
       ? [...blockedByIdsOf(dependencies, issueId), ...waitingFor(steps, issueId)]
       : [...blockingIdsOf(dependencies, issueId), ...waitedForBy(steps, issueId)]),

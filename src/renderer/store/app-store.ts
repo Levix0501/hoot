@@ -8,15 +8,24 @@ import {
 } from '../../shared/agents'
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
+import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
 import {
   blockedByIdsOf,
   blockingIdsOf,
   waitCounts,
+  waitedOnIds,
   type Dependencies,
   type Dependency,
   type WaitCounts,
 } from '../../shared/dependencies'
-import type { Project, SessionCommand, ToolsState } from '../../shared/ipc'
+import type {
+  LabelChangeRequest,
+  NewLabelRequest,
+  Project,
+  SessionCommand,
+  SessionStartAnswer,
+  ToolsState,
+} from '../../shared/ipc'
 import { issueWorktree } from '../../shared/issue-worktrees'
 import {
   isCompleted,
@@ -30,6 +39,13 @@ import {
   type IssueStatus,
   type IssueView,
 } from '../../shared/issues'
+import {
+  labelsOfIssue,
+  type LabelActor,
+  type LabelEvent,
+  type Labels,
+  type NamedLabel,
+} from '../../shared/labels'
 import type { PermissionLevelSettings } from '../../shared/permission-levels'
 import {
   isNormalExit,
@@ -38,18 +54,18 @@ import {
   type SessionInfo,
 } from '../../shared/session'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
+import { startBlockers, startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
-import { workflowProgress, type WorkflowRecord } from '../../shared/workflows'
+import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
 import type {
   CreateIssueWorktreeResult,
   WorktreeInfo,
   WorktreeInspection,
 } from '../../shared/worktrees'
 import { api } from '../lib/api'
-import { isStartUnderWay, startState } from '../lib/issue-start'
-import type { ProjectChoice } from '../lib/project-choices'
+import { isOnList, type ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import {
   createSessionTerminal,
@@ -77,8 +93,14 @@ import {
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
-/** The pages of the settings: Appearance, on macOS Agents, and About. */
-export type SettingsSection = 'appearance' | 'agents' | 'about'
+/** The pages of the settings: Appearance, on macOS Agents, Labels, and About. */
+export type SettingsSection = 'appearance' | 'agents' | 'labels' | 'about'
+
+/**
+ * How the issue list's Label filter matches the labels checked in it: issues
+ * with any of them, or with all of them.
+ */
+export type LabelMatch = 'any' | 'all'
 
 /** A session as the window shows it. */
 export interface UiSession {
@@ -88,8 +110,8 @@ export interface UiSession {
   worktreePath: string | null
   toolId: ToolId
   /**
-   * The issue whose start button started the session, which Claude Code is
-   * sent when it starts; `null` for any other session.
+   * The issue the session was opened from, which Claude Code is sent when it
+   * starts; `null` for any other session.
    */
   issueId: number | null
   /**
@@ -110,6 +132,9 @@ export interface UiSession {
   /** Set once the session is being closed, until it is gone. */
   closing: boolean
 }
+
+/** Whether a session's process started, or why it did not. */
+export type LaunchResult = { ok: true } | { ok: false; message: string }
 
 /** What is entered in the new issue dialog, before the issue is created. */
 export interface NewIssueDraft {
@@ -194,9 +219,9 @@ export interface AppState {
    */
   startingIssues: readonly number[]
   /**
-   * The issues whose start button was clicked to start a session for them,
-   * from the click until their session shows in the sidebar, starting, or
-   * the start ends without one (see `isIssueStarting`).
+   * The issues whose start button or Start new session was clicked to start
+   * a session for them, from the click until their session shows in the
+   * sidebar, or the start ends without one: one entry for each start.
    */
   issueStarts: readonly number[]
   /** What the window shows; `null` for the empty page. */
@@ -206,10 +231,15 @@ export interface AppState {
   /** The issues without a project, and those of the projects in the list. */
   issues: Issue[]
   /**
-   * The records of the issues' progress through their workflow, by issue id,
-   * in the order they were made; an issue without any is not started.
+   * Every label and group, and the labels of every issue, those of removed
+   * projects included; the version is -1 until they have been read.
    */
-  issueWorkflows: Record<number, WorkflowRecord[]>
+  labels: Labels
+  /**
+   * The activity of the labels of the issues Hoot shows, by issue id, in the
+   * order it happened.
+   */
+  labelEvents: Record<number, LabelEvent[]>
   /**
    * The parent of every issue that has one, those of removed projects
    * included; the version is -1 until they have been read.
@@ -230,6 +260,13 @@ export interface AppState {
    * checked, as when Hoot starts.
    */
   checkedProjects: ProjectChoice[]
+  /**
+   * The labels checked in the issue list's Label filter, by id. The list
+   * shows every issue while none is checked, as when Hoot starts.
+   */
+  checkedLabels: number[]
+  /** Whether the Label filter shows the issues with any of its labels, or with all of them. */
+  labelMatch: LabelMatch
   /** The view the issue list shows: all issues when Hoot starts. */
   issueView: IssueView
   /** The status groups the issue list has collapsed: none when Hoot starts. */
@@ -314,16 +351,29 @@ export interface AppState {
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
    * Starts work on an open issue, as its start button does. While a session
-   * started from the issue is in the sidebar, shows that session, whatever
-   * project the issue belongs to since. Otherwise, unless Claude Code or the
-   * issue's project is missing, saves the changes to the issue made so far,
-   * then starts Claude Code, at the permission level picked now, in the
-   * issue's worktree in the project it belongs to, after creating one when it
-   * has none; the session is shown once it is added, whatever page is shown
-   * by then, and is sent the issue.
+   * opened from the issue is in the sidebar, shows the one opened last,
+   * whatever project the issue belongs to since. Otherwise, unless work on
+   * it cannot be started now, opens a session for it as `startNewSession`
+   * does.
    */
   startIssue(issueId: number): Promise<void>
-  launchSession(id: string, cols: number, rows: number): Promise<void>
+  /**
+   * Opens another session for an issue, as its Start new session does,
+   * unless work on it cannot be started now, when it says why: saves the
+   * changes to the issue made so far, then starts Claude Code, at the
+   * permission level picked now, in the issue's worktree in the project it
+   * belongs to, after creating one when it has none; the session is shown
+   * once it is added, whatever page is shown by then, and is sent the issue.
+   */
+  startNewSession(issueId: number): Promise<void>
+  /**
+   * Starts a session for an issue as hoot asked, as `startNewSession` does,
+   * without showing it, with `prompt` as its first message when one is
+   * given; settles once it has started, or could not.
+   */
+  startSessionForAgent(issueId: number, prompt: string | null): Promise<SessionStartAnswer>
+  /** Starts a session's process; settles with whether it started, and why not. */
+  launchSession(id: string, cols: number, rows: number): Promise<LaunchResult>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
   runShortcut(shortcut: SessionShortcut): void
@@ -355,6 +405,9 @@ export interface AppState {
   showProjectIssues(projectId: number): void
   /** Checks these in the issue list's Project filter, and nothing else. */
   setCheckedProjects(checked: readonly ProjectChoice[]): void
+  /** Checks these labels in the issue list's Label filter, and no other. */
+  setCheckedLabels(checked: readonly number[]): void
+  setLabelMatch(match: LabelMatch): void
   /** Shows another view of the issue list; not recorded in the history. */
   setIssueView(view: IssueView): void
   /** Expands or collapses a status group of the issue list. */
@@ -436,12 +489,27 @@ export interface AppState {
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
   /**
-   * Reports an outcome of the run of a step `run` that an issue is at, as
-   * the user picked it, without a summary; says why when it cannot.
+   * Gives an issue labels and takes others off it, as the user does; says
+   * why when it cannot. Settles with whether it did.
    */
-  reportStep(issueId: number, run: number, outcome: string): Promise<void>
-  /** Starts an issue's workflow over; says why when it cannot. */
-  startOverWorkflow(issueId: number): Promise<void>
+  changeIssueLabels(
+    issueId: number,
+    change: { add?: number[]; remove?: number[] },
+  ): Promise<boolean>
+  /**
+   * Creates a label from what is entered, and says why when it cannot;
+   * gives it to the issue the request names, if any. Settles with whether it
+   * did.
+   */
+  createLabel(label: NewLabelRequest): Promise<boolean>
+  /** Changes a label; says why when it cannot. Settles with whether it did. */
+  editLabel(id: number, changes: LabelChangeRequest): Promise<boolean>
+  /** Deletes a label, which every issue carrying it no longer does; says why when it cannot. */
+  deleteLabel(id: number): Promise<boolean>
+  /** Creates a group of labels; says why when it cannot. Settles with whether it did. */
+  createLabelGroup(name: string): Promise<boolean>
+  /** Deletes a group, whose labels stay without one; says why when it cannot. */
+  deleteLabelGroup(id: number): Promise<boolean>
   /**
    * Expands or collapses the sidebar, and saves its state; not while the
    * settings are shown in its place.
@@ -618,17 +686,17 @@ export function issueWorktreeOf(
   return project ? issueWorktree(state.worktrees[project.root] ?? [], issue.id) : null
 }
 
-/**
- * Whether work on an issue is being started: from the click on its start
- * button until the session it starts has started, or could not start.
- * Meanwhile its Step row cannot be clicked, so that the session starts at
- * the step the issue was at when the button was clicked.
- */
-export function isIssueStarting(
-  state: Pick<AppState, 'issueStarts' | 'sessions'>,
+/** A session that could not be started for an issue, and why. */
+function fail(message: string): SessionStartAnswer {
+  return { ok: false, message }
+}
+
+/** The session opened last from an issue that is in the sidebar, if any. */
+export function latestIssueSession(
+  state: Pick<AppState, 'sessions'>,
   issueId: number,
-): boolean {
-  return isStartUnderWay(issueId, state.issueStarts, state.sessions)
+): UiSession | undefined {
+  return state.sessions.findLast((session) => session.issueId === issueId)
 }
 
 /** An issue's parent, unless it has none or Hoot does not show it, as of a removed project. */
@@ -703,18 +771,108 @@ export function waitCountsOf(
   return waitCountCache.counts.get(issueId) ?? NO_WAITING
 }
 
-/** The records of an issue not started, the same array every time. */
-const NO_RECORDS: WorkflowRecord[] = []
+/** The labels of every issue, worked out once for the labels they are of. */
+let issueLabelCache: { labels: Labels; byIssue: Map<number, NamedLabel[]> } | null = null
+
+const NO_LABELS: NamedLabel[] = []
 
 /**
- * An issue's records of its progress through its workflow, in the order they
- * were made; none for an issue not started.
+ * The labels an issue carries, with their groups' names, in the order Hoot
+ * lists labels; the same array for as long as they stay the same.
  */
-export function issueRecordsOf(
-  state: Pick<AppState, 'issueWorkflows'>,
+export function issueLabelsOf(state: Pick<AppState, 'labels'>, issueId: number): NamedLabel[] {
+  if (issueLabelCache?.labels !== state.labels) {
+    issueLabelCache = { labels: state.labels, byIssue: new Map() }
+  }
+  const cached = issueLabelCache.byIssue.get(issueId)
+  if (cached) return cached
+  const found = labelsOfIssue(state.labels, issueId)
+  const labels = found.length === 0 ? NO_LABELS : found
+  issueLabelCache.byIssue.set(issueId, labels)
+  return labels
+}
+
+/** The id of the group of the workflow every issue follows, once the labels have been read. */
+function workflowGroupId(labels: Labels): number | undefined {
+  return labels.groups.find((group) => group.workflow === ISSUE_WORKFLOW.name)?.id
+}
+
+/** The progress of every issue, worked out once for the labels it is of. */
+let progressCache: { labels: Labels; byIssue: Map<number, WorkflowProgress> } | null = null
+
+/**
+ * Where an issue is in its workflow: by the label of the workflow's group it
+ * carries; the same object for as long as its labels stay the same.
+ */
+export function issueProgressOf(
+  state: Pick<AppState, 'labels'>,
   issueId: number,
-): WorkflowRecord[] {
-  return state.issueWorkflows[issueId] ?? NO_RECORDS
+): WorkflowProgress {
+  if (progressCache?.labels !== state.labels) {
+    progressCache = { labels: state.labels, byIssue: new Map() }
+  }
+  const cached = progressCache.byIssue.get(issueId)
+  if (cached) return cached
+  const groupId = workflowGroupId(state.labels)
+  const progress = workflowProgress(
+    ISSUE_WORKFLOW,
+    issueLabelsOf(state, issueId)
+      .filter((label) => groupId !== undefined && label.groupId === groupId)
+      .map((label) => label.name),
+  )
+  progressCache.byIssue.set(issueId, progress)
+  return progress
+}
+
+/** The activity of an issue's labels, in the order it happened. */
+const NO_EVENTS: LabelEvent[] = []
+export function labelEventsOf(state: Pick<AppState, 'labelEvents'>, issueId: number): LabelEvent[] {
+  return state.labelEvents[issueId] ?? NO_EVENTS
+}
+
+/**
+ * Whether the issue list shows an issue for what is checked in its Project
+ * and Label filters: of a project checked, or any while none is; and with
+ * any or all of the labels checked, as the filter matches them, or any
+ * while none is.
+ */
+export function isListed(
+  state: Pick<AppState, 'checkedProjects' | 'checkedLabels' | 'labelMatch' | 'labels'>,
+  issue: Pick<Issue, 'id' | 'projectId'>,
+): boolean {
+  if (!isOnList(issue, state.checkedProjects)) return false
+  if (state.checkedLabels.length === 0) return true
+  const carried = new Set(issueLabelsOf(state, issue.id).map((label) => label.id))
+  return state.labelMatch === 'all'
+    ? state.checkedLabels.every((id) => carried.has(id))
+    : state.checkedLabels.some((id) => carried.has(id))
+}
+
+/** The issues Hoot shows by id, worked out once for the issues they are of. */
+let shownIssueCache: { issues: readonly Issue[]; shown: Map<number, Issue> } | null = null
+
+/**
+ * Every reason work on an issue cannot be started now: Claude Code is being
+ * checked for or is not installed, it has no project, it waits on issues, or
+ * its workflow is finished. None when it can be.
+ */
+export function startBlockersOf(
+  state: Pick<AppState, 'tools' | 'issues' | 'dependencies' | 'labels'>,
+  issue: Pick<Issue, 'id' | 'projectId'>,
+): StartBlocker[] {
+  if (shownIssueCache?.issues !== state.issues) {
+    shownIssueCache = {
+      issues: state.issues,
+      shown: new Map(state.issues.map((entry) => [entry.id, entry])),
+    }
+  }
+  const { shown } = shownIssueCache
+  return startBlockers(
+    state.tools,
+    issue,
+    waitedOnIds(shown, state.dependencies.links, issue.id),
+    issueProgressOf(state, issue.id),
+  )
 }
 
 /** Says why the worktree of an issue could not be created, with Git's own words in its font. */
@@ -995,41 +1153,61 @@ export const useAppStore = create<AppState>()((set, get) => {
   let issuesRead = false
 
   /**
-   * For each reading of the workflows' records under way, the issues whose
-   * records changed since it began.
+   * Shows the labels as they are now, unless newer ones are shown already;
+   * the Label filter forgets the labels deleted.
    */
-  const workflowReads = new Set<Set<number>>()
-
-  /**
-   * Reads the records of the issues' workflows again; those that changed
-   * while they were read stay as the change left them, which is newer.
-   */
-  const loadWorkflows = () => {
-    const changed = new Set<number>()
-    workflowReads.add(changed)
-    void api
-      .listWorkflowRecords()
-      .then(
-        (records) =>
-          set((state) => ({
-            issueWorkflows: {
-              ...records,
-              ...Object.fromEntries(
-                [...changed]
-                  .filter((id) => state.issueWorkflows[id] !== undefined)
-                  .map((id) => [id, state.issueWorkflows[id]!]),
-              ),
-            },
-          })),
-        (error: unknown) => console.error("Could not read the issues' workflows:", error),
-      )
-      .finally(() => workflowReads.delete(changed))
+  const applyLabels = (labels: Labels) => {
+    if (labels.version < get().labels.version) return
+    const ids = new Set(labels.labels.map((label) => label.id))
+    set((state) => {
+      const checked = state.checkedLabels.filter((id) => ids.has(id))
+      return {
+        labels,
+        checkedLabels:
+          checked.length === state.checkedLabels.length ? state.checkedLabels : checked,
+      }
+    })
   }
 
-  /** Shows an issue's records as they are now, which are newer than any reading under way. */
-  const applyWorkflow = (issueId: number, records: WorkflowRecord[]) => {
-    for (const changed of workflowReads) changed.add(issueId)
-    set((state) => ({ issueWorkflows: { ...state.issueWorkflows, [issueId]: records } }))
+  /** Adds entries to the activity of the labels of their issues, each once. */
+  const addLabelEvents = (events: readonly LabelEvent[]) => {
+    if (events.length === 0) return
+    set((state) => {
+      const labelEvents = { ...state.labelEvents }
+      for (const event of events) {
+        const known = labelEvents[event.issueId] ?? []
+        if (known.some((entry) => entry.id === event.id)) continue
+        labelEvents[event.issueId] = [...known, event].toSorted((a, b) => a.id - b.id)
+      }
+      return { labelEvents }
+    })
+  }
+
+  /** Reads the labels and the activity of the issues' labels again. */
+  const loadLabels = () => {
+    void api
+      .listLabels()
+      .then(applyLabels, (error: unknown) => console.error('Could not read the labels:', error))
+    void api
+      .listLabelEvents()
+      .then(addLabelEvents, (error: unknown) =>
+        console.error("Could not read the activity of the issues' labels:", error),
+      )
+  }
+
+  /**
+   * Shows issues as Hoot changed them other than from the window, with the
+   * changes to them not saved yet; an issue the window does not show stays
+   * out.
+   */
+  const applyChangedIssues = (changed: readonly Issue[]) => {
+    set((state) => {
+      let { issues } = state
+      for (const issue of changed) {
+        issues = withIssue(issues, withChanges(issue, unsavedChanges.get(issue.id)))
+      }
+      return { issues }
+    })
   }
 
   /** Shows the parents of issues as they are now, unless newer ones are shown already. */
@@ -1048,7 +1226,7 @@ export const useAppStore = create<AppState>()((set, get) => {
    */
   const loadIssues = () => {
     issuesRead = true
-    loadWorkflows()
+    loadLabels()
     void api
       .listSubIssues()
       .then(applySubIssues, (error: unknown) =>
@@ -1156,8 +1334,9 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
-   * Adds a session, which is shown at once; its terminal view starts the
-   * process with the size the terminal has on screen.
+   * Adds a session, which is shown at once unless `show` is false; its
+   * terminal view starts the process with the size the terminal has on
+   * screen, once it is shown. Returns its id.
    */
   const addSession = (
     projectRoot: string,
@@ -1165,10 +1344,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     worktreePath: string | null,
     issueId: number | null = null,
     permissionLevel: string | null = null,
-  ) => {
+    show = true,
+  ): string => {
     const id = crypto.randomUUID()
     openTerminal(id)
-    getSessionTerminal(currentSessionId(get()))?.terminal.blur()
+    if (show) getSessionTerminal(currentSessionId(get()))?.terminal.blur()
     set((state) => ({
       sessions: [
         ...state.sessions,
@@ -1186,11 +1366,17 @@ export const useAppStore = create<AppState>()((set, get) => {
           closing: false,
         },
       ],
-      currentPage: sessionPage(id),
-      history: visit(state.history, sessionPage(id)),
-      newIssueDialogOpen: false,
+      ...(show
+        ? {
+            currentPage: sessionPage(id),
+            history: visit(state.history, sessionPage(id)),
+            newIssueDialogOpen: false,
+          }
+        : {}),
     }))
+    // Its row shows in the sidebar, also when its project was collapsed.
     expandProjectOf(sessionPage(id))
+    return id
   }
 
   const closeCurrent = () => {
@@ -1270,6 +1456,104 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
   }
 
+  /** How each session opened from an issue is to start, by its id, until it starts. */
+  const launchOptions = new Map<string, { by: LabelActor; prompt: string | null }>()
+  /** The sessions whose process has been asked to start, which is asked only once. */
+  const launchesRequested = new Set<string>()
+  /**
+   * The sessions being opened for each issue, one after another, so that a
+   * second one finds the worktree the first created.
+   */
+  const issueSessionQueues = new Map<number, Promise<void>>()
+
+  /** Runs `task` once the sessions opened for the issue before it have been. */
+  const queuedForIssue = <T>(issueId: number, task: () => Promise<T>): Promise<T> => {
+    const before = issueSessionQueues.get(issueId) ?? Promise.resolve()
+    const run = before.then(task)
+    const settled = run.then(
+      () => {},
+      () => {},
+    )
+    issueSessionQueues.set(issueId, settled)
+    void settled.then(() => {
+      if (issueSessionQueues.get(issueId) === settled) issueSessionQueues.delete(issueId)
+    })
+    return run
+  }
+
+  /**
+   * Opens a session for an issue: saves the changes to the issue made so
+   * far, then starts Claude Code, at the permission level picked now, in the
+   * issue's worktree in the project it belongs to, after creating one when it
+   * has none. A session for the user is shown once it is added and started
+   * by its terminal view; one for an agent is started at once, without being
+   * shown, and nothing is said in the window of why it could not start.
+   */
+  const openIssueSession = (
+    issueId: number,
+    { show, by, prompt }: { show: boolean; by: LabelActor; prompt: string | null },
+  ): Promise<SessionStartAnswer> => {
+    const quiet = by === 'agent'
+    const identifier = issueIdentifier(issueId)
+    // The session starts at the level picked now, also when that changes while its worktree is created.
+    const permissionLevel = get().permissionLevels?.claude ?? null
+    return queuedForIssue(issueId, async () => {
+      // The worktree is named after the issue as it is saved, which Claude Code is sent.
+      for (const flush of issueEditorFlushes) flush()
+      await get().whenIssueSaved(issueId)
+      const saved = findIssue(issueId)
+      if (!saved) return fail(`${identifier} no longer exists.`)
+      const project = get().projects.find((candidate) => candidate.id === saved.projectId)
+      if (!project) return fail(`${identifier} has no project, in which its worktree would be.`)
+      // As Git lists them now, which the sidebar then shows too.
+      let worktrees: WorktreeInfo[] | null
+      try {
+        worktrees = await api.readWorktrees(project.root)
+      } catch (error) {
+        if (!quiet) {
+          toast.error(`Could not start work on ${identifier}.`, {
+            description: errorMessage(error),
+          })
+        }
+        return fail(errorMessage(error))
+      }
+      if (worktrees === null) return fail(`${project.name} is no longer in Hoot's list.`)
+      let worktreePath = issueWorktree(worktrees, issueId)?.path ?? null
+      if (worktreePath === null) {
+        // Creating a worktree takes a while, which the start button shows.
+        setStarting(issueId, true)
+        try {
+          const result = await api
+            .createIssueWorktree(project.root, issueId)
+            .catch((error: unknown) => ({
+              ok: false as const,
+              reason: 'failed' as const,
+              message: errorMessage(error),
+            }))
+          if (!result.ok) {
+            if (!quiet) failToCreateIssueWorktree(issueId, result)
+            return fail(`Could not create a worktree for ${identifier}: ${result.message}`)
+          }
+          // Unless its project left the list meanwhile.
+          if (!get().projects.some((candidate) => candidate.id === project.id)) {
+            return fail(`${project.name} is no longer in Hoot's list.`)
+          }
+          if (result.warning && !quiet) warnAboutWorktree(result.warning)
+          worktreePath = result.path
+        } finally {
+          setStarting(issueId, false)
+        }
+      }
+      const id = addSession(project.root, 'claude', worktreePath, issueId, permissionLevel, show)
+      launchOptions.set(id, { by, prompt })
+      if (show) return { ok: true, worktreePath }
+      // Not shown, its terminal view does not start it: it starts with the terminal's size.
+      const terminal = terminals.get(id)?.terminal
+      const launched = await get().launchSession(id, terminal?.cols ?? 80, terminal?.rows ?? 24)
+      return launched.ok ? { ok: true, worktreePath } : launched
+    })
+  }
+
   return {
     initialized: false,
     projects: [],
@@ -1286,12 +1570,15 @@ export const useAppStore = create<AppState>()((set, get) => {
     currentPage: null,
     history: emptyHistory,
     issues: [],
-    issueWorkflows: {},
+    labels: { version: -1, groups: [], labels: [], issueLabels: [] },
+    labelEvents: {},
     subIssues: { version: -1, links: [] },
     dependencies: { version: -1, links: [] },
     issuePicker: null,
     dependentIssueDialog: null,
     checkedProjects: [],
+    checkedLabels: [],
+    labelMatch: 'any',
     issueView: 'all',
     collapsedIssueGroups: [],
     newIssueDialogOpen: false,
@@ -1360,8 +1647,18 @@ export const useAppStore = create<AppState>()((set, get) => {
             : state,
         ),
       )
-      // Wherever the change came from: a session's agent, or this window.
-      api.onWorkflowChanged(applyWorkflow)
+      // Wherever the change came from: hoot in a session, or this window.
+      api.onLabelsChanged(applyLabels)
+      api.onLabelEventsAdded(addLabelEvents)
+      // As when Hoot completed an issue once its sub-issues were.
+      api.onIssuesChanged(applyChangedIssues)
+      // hoot asked for a session for an issue: started without being shown.
+      api.onSessionStartRequested(({ requestId, issueId, prompt }) => {
+        void get()
+          .startSessionForAgent(issueId, prompt)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+          .then((answer) => api.answerSessionStart(requestId, answer))
+      })
       // Wherever the change came from: hoot in a session, or this window.
       api.onSubIssuesChanged(applySubIssues)
       // Wherever the change came from: hoot in a session, or this window.
@@ -1527,88 +1824,60 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     async startIssue(issueId) {
-      const started = get().sessions.find((session) => session.issueId === issueId)
-      if (started) {
-        get().selectSession(started.id)
+      const latest = latestIssueSession(get(), issueId)
+      if (latest) {
+        get().selectSession(latest.id)
         return
       }
-      const state = get()
       // Clicking again while the issue's session is being started does nothing.
-      if (state.issueStarts.includes(issueId)) return
+      if (get().issueStarts.includes(issueId)) return
       const issue = findIssue(issueId)
       if (!issue || !isIssueOpen(issue)) return
-      const expected = startState(issue, {
-        sessionId: null,
-        tools: state.tools,
-        worktreePath: issueWorktreeOf(state, issue)?.path ?? null,
-        progress: workflowProgress(issueRecordsOf(state, issueId)),
-      })
-      if (expected.kind !== 'worktree' && expected.kind !== 'new-worktree') return
-      // The session starts at the level picked at the click, also when that
-      // changes while its worktree is created.
-      const permissionLevel = state.permissionLevels?.claude ?? null
-      // Under way until its session shows, which keeps it under way while it
-      // starts, or until the start ends without one.
+      if (startBlockersOf(get(), issue).length > 0) return
+      await get().startNewSession(issueId)
+    },
+
+    async startNewSession(issueId) {
+      const issue = findIssue(issueId)
+      if (!issue) return
+      const blockers = startBlockersOf(get(), issue)
+      if (blockers.length > 0) {
+        toast.error(`Could not start a session for ${issueIdentifier(issueId)}.`, {
+          description: blockers.map(startBlockerText).join(' '),
+        })
+        return
+      }
+      // Under way until its session shows, or until the start ends without one.
       setIssueStart(issueId, true)
-      // Creating a worktree takes a while, which the button shows from the click.
-      if (expected.kind === 'new-worktree') setStarting(issueId, true)
       try {
-        // The worktree is named after the issue as it is saved, which Claude Code is sent.
-        for (const flush of issueEditorFlushes) flush()
-        await get().whenIssueSaved(issueId)
-        const saved = findIssue(issueId)
-        const project = get().projects.find((candidate) => candidate.id === saved?.projectId)
-        if (!saved || !isIssueOpen(saved) || !project) return
-        // As Git lists them now, which the sidebar then shows too.
-        let worktrees: WorktreeInfo[] | null
-        try {
-          worktrees = await api.readWorktrees(project.root)
-        } catch (error) {
-          toast.error(`Could not start work on ${issueIdentifier(issueId)}.`, {
-            description: errorMessage(error),
-          })
-          return
-        }
-        if (worktrees === null) return
-        const worktree = issueWorktree(worktrees, issueId)
-        if (worktree !== null) {
-          setStarting(issueId, false)
-          addSession(project.root, 'claude', worktree.path, issueId, permissionLevel)
-          return
-        }
-        setStarting(issueId, true)
-        const result = await api
-          .createIssueWorktree(project.root, issueId)
-          .catch((error: unknown) => ({
-            ok: false as const,
-            reason: 'failed' as const,
-            message: errorMessage(error),
-          }))
-        if (!result.ok) {
-          failToCreateIssueWorktree(issueId, result)
-          return
-        }
-        // Unless its project left the list meanwhile.
-        if (!get().projects.some((candidate) => candidate.id === project.id)) return
-        // The new worktree's row shows below the project, also when it was collapsed.
-        get().setProjectExpanded(project.id, true)
-        if (result.warning) warnAboutWorktree(result.warning)
-        addSession(project.root, 'claude', result.path, issueId, permissionLevel)
+        await openIssueSession(issueId, { show: true, by: 'user', prompt: null })
       } finally {
         setIssueStart(issueId, false)
-        setStarting(issueId, false)
       }
+    },
+
+    startSessionForAgent(issueId, prompt) {
+      return openIssueSession(issueId, { show: false, by: 'agent', prompt })
     },
 
     async launchSession(id, cols, rows) {
       const session = findSession(id)
-      if (!session || session.status !== 'starting' || session.closing) return
+      if (!session || session.status !== 'starting' || session.closing) {
+        return { ok: false, message: 'The session was closed before it started.' }
+      }
+      // Once, whether its terminal view or hoot's request starts it.
+      if (launchesRequested.has(id)) return { ok: false, message: 'The session is starting.' }
+      launchesRequested.add(id)
+      const options = launchOptions.get(id)
+      launchOptions.delete(id)
       const result = await api.startSession({
         id,
         projectRoot: session.projectRoot,
         worktreePath: session.worktreePath,
         toolId: session.toolId,
         issueId: session.issueId,
+        ...(options === undefined ? {} : { startedBy: options.by }),
+        ...(options === undefined || options.prompt === null ? {} : { prompt: options.prompt }),
         ...(session.permissionLevel === null ? {} : { permissionLevel: session.permissionLevel }),
         cols,
         rows,
@@ -1621,7 +1890,9 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       const started = findSession(id)
       // Closed while it was starting.
-      if (!started || started.closing) return
+      if (!started || started.closing) {
+        return result.ok ? { ok: true } : { ok: false, message: result.message }
+      }
       if (result.ok) {
         // Session events may already have moved the session on (it can exit right away).
         if (started.status === 'starting') {
@@ -1638,12 +1909,16 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (size && (size.cols !== cols || size.rows !== rows)) {
           api.resizeSession(id, size.cols, size.rows)
         }
-        return
+        return { ok: true }
       }
-      toast.error(`Could not start ${getTool(session.toolId).label}.`, {
-        description: result.message,
-      })
+      // hoot, which asked for it, says why.
+      if (options?.by !== 'agent') {
+        toast.error(`Could not start ${getTool(session.toolId).label}.`, {
+          description: result.message,
+        })
+      }
       removeSessions([id])
+      return { ok: false, message: result.message }
     },
 
     selectSession(id) {
@@ -1748,6 +2023,15 @@ export const useAppStore = create<AppState>()((set, get) => {
           (choice) => choice === null || projects.some((project) => project.id === choice),
         ),
       })
+    },
+
+    setCheckedLabels(checked) {
+      const ids = new Set(get().labels.labels.map((label) => label.id))
+      set({ checkedLabels: checked.filter((id) => ids.has(id)) })
+    },
+
+    setLabelMatch(match) {
+      set({ labelMatch: match })
     },
 
     setIssueView(view) {
@@ -1876,11 +2160,11 @@ export const useAppStore = create<AppState>()((set, get) => {
           return
         }
         set((state) => {
-          // Its records went with it.
-          const { [issueId]: _deleted, ...issueWorkflows } = state.issueWorkflows
+          // Its activity went with it.
+          const { [issueId]: _deleted, ...labelEvents } = state.labelEvents
           return {
             issues: state.issues.filter((entry) => entry.id !== issueId),
-            issueWorkflows,
+            labelEvents,
             issuePicker: state.issuePicker?.issueId === issueId ? null : state.issuePicker,
             dependentIssueDialog:
               state.dependentIssueDialog?.issueId === issueId ? null : state.dependentIssueDialog,
@@ -2003,24 +2287,56 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (issue) copyText(issue.title)
     },
 
-    async reportStep(issueId, run, outcome) {
-      await once(`report:${issueId}`, async () => {
-        const result = await api
-          .reportStep(issueId, run, outcome)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (!result.ok) toast.error('Could not report the step.', { description: result.message })
-      })
+    async changeIssueLabels(issueId, { add = [], remove = [] }) {
+      const result = await api
+        .changeIssueLabels(issueId, { add, remove })
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error(`Could not change the labels of ${issueIdentifier(issueId)}.`, {
+          description: result.message,
+        })
+      }
+      return result.ok
     },
 
-    async startOverWorkflow(issueId) {
-      await once(`start-over:${issueId}`, async () => {
-        const result = await api
-          .startOverWorkflow(issueId)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (!result.ok) {
-          toast.error('Could not start the workflow over.', { description: result.message })
-        }
-      })
+    async createLabel(label) {
+      const result = await api
+        .createLabel(label)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not create the label.', { description: result.message })
+      return result.ok
+    },
+
+    async editLabel(id, changes) {
+      const result = await api
+        .editLabel(id, changes)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not change the label.', { description: result.message })
+      return result.ok
+    },
+
+    async deleteLabel(id) {
+      const result = await api
+        .deleteLabel(id)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not delete the label.', { description: result.message })
+      return result.ok
+    },
+
+    async createLabelGroup(name) {
+      const result = await api
+        .createLabelGroup(name)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not create the group.', { description: result.message })
+      return result.ok
+    },
+
+    async deleteLabelGroup(id) {
+      const result = await api
+        .deleteLabelGroup(id)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not delete the group.', { description: result.message })
+      return result.ok
     },
 
     setSidebarOpen(open) {

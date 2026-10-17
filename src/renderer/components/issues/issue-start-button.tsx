@@ -1,20 +1,51 @@
 import { SendIcon } from 'lucide-react'
+import { useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
-import type { Issue } from '../../../shared/issues'
+import { issueIdentifier, type Issue } from '../../../shared/issues'
+import type { StartBlocker } from '../../../shared/start-blockers'
 import { getTool } from '../../../shared/tools'
-import { WORKFLOW_FINISHED } from '../../../shared/workflow-text'
-import { workflowProgress } from '../../../shared/workflows'
-import { startHint, startState, type StartBlocker } from '../../lib/issue-start'
+import { startHint, startState } from '../../lib/issue-start'
 import { cn } from '../../lib/utils'
-import { issueRecordsOf, issueWorktreeOf, useAppStore } from '../../store/app-store'
+import {
+  issueProgressOf,
+  issueWorktreeOf,
+  latestIssueSession,
+  startBlockersOf,
+  useAppStore,
+} from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
 import { Button } from '../ui/button'
 import { Spinner } from '../ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
+/** The issues an issue waits on, each with its identifier and title, as the tooltip lists them. */
+function WaitingNote({ issueIds }: { issueIds: readonly number[] }) {
+  const issues = useAppStore(
+    useShallow((state) =>
+      issueIds.flatMap((id) => state.issues.find((issue) => issue.id === id) ?? []),
+    ),
+  )
+  return (
+    <div className="grid gap-0.5" data-testid="issue-start-waiting">
+      <p>It waits on issues that are neither done nor canceled:</p>
+      <ul className="grid gap-0.5">
+        {issues.map((issue) => (
+          <li key={issue.id} className="flex min-w-0 gap-1.5" data-issue-id={issue.id}>
+            <span className="shrink-0 tabular-nums">{issueIdentifier(issue.id)}</span>
+            <span className="min-w-0 truncate" data-user-text="">
+              {issue.title}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** What the tooltip of a start button that cannot be used says about one of the reasons. */
 function BlockerNote({ blocker }: { blocker: StartBlocker }) {
-  switch (blocker) {
+  switch (blocker.kind) {
     case 'checking':
       return <p>Hoot is still checking whether Claude Code is installed.</p>
     case 'not-installed':
@@ -28,23 +59,26 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
       return (
         <p>Set a Project for this issue first: its worktree is created in the issue's project.</p>
       )
+    case 'waiting':
+      return <WaitingNote issueIds={blocker.issueIds} />
     case 'finished':
-      return <p>{WORKFLOW_FINISHED}</p>
+      return <p>Its workflow is finished: it has the label {blocker.label}.</p>
   }
 }
 
 /**
  * The start button of an open issue, at the end of its row in the issue list
- * and on its page, where it is the same button. It starts work on the issue
- * with Claude Code, at the first step of the issue's workflow or at the step
- * it is at, in the issue's worktree, which it creates when there is none;
- * while the session started from the issue is in the sidebar, it shows that
- * session instead. Once the workflow is finished, it cannot be used. It has
- * only an icon: a paper plane, which turns into Claude Code's mark under the
- * pointer or with the keyboard focus while it can be used, and into a
- * spinner while the issue's worktree is created. Its tooltip says what it
- * does, or why it cannot be used now, also while it is disabled: the
- * tooltip's trigger wraps the button.
+ * and on its page, where it is the same button. While a session opened from
+ * the issue is in the sidebar, it shows the one opened last. Otherwise it
+ * starts work on the issue with Claude Code, at the step of its workflow it
+ * is at, or the first, in the issue's worktree, which it creates when there
+ * is none; it cannot be used while Claude Code is not found, the issue has
+ * no project, waits on issues or its workflow is finished. It has only an
+ * icon: a paper plane, which turns into Claude Code's mark under the pointer
+ * or with the keyboard focus while it can be used, and into a spinner while
+ * the issue's worktree is created. Its tooltip says what it does, or why it
+ * cannot be used now, also while it is disabled: the tooltip's trigger
+ * wraps the button.
  */
 export function IssueStartButton({
   issue,
@@ -56,15 +90,15 @@ export function IssueStartButton({
   /** Places the button, as its row or its page needs. */
   className?: string
 }) {
-  const sessionId = useAppStore(
-    (state) => state.sessions.find((session) => session.issueId === issue.id)?.id ?? null,
-  )
-  const tools = useAppStore((state) => state.tools)
+  const sessionId = useAppStore((state) => latestIssueSession(state, issue.id)?.id ?? null)
+  // As text, which stays the same while the reasons do.
+  const blockerText = useAppStore((state) => JSON.stringify(startBlockersOf(state, issue)))
+  const blockers = useMemo(() => JSON.parse(blockerText) as StartBlocker[], [blockerText])
   const worktreePath = useAppStore((state) => issueWorktreeOf(state, issue)?.path ?? null)
   const starting = useAppStore((state) => state.startingIssues.includes(issue.id))
   const startIssue = useAppStore((state) => state.startIssue)
-  const progress = workflowProgress(useAppStore((state) => issueRecordsOf(state, issue.id)))
-  const action = startState(issue, { sessionId, tools, worktreePath, progress })
+  const progress = useAppStore((state) => issueProgressOf(state, issue.id))
+  const action = startState({ sessionId, blockers, worktreePath })
   const hint = action.kind === 'blocked' ? null : startHint(action, progress, ISSUE_WORKFLOW)
 
   return (
@@ -108,9 +142,9 @@ export function IssueStartButton({
         {action.kind !== 'blocked' ? (
           hint
         ) : (
-          <div className="grid gap-1">
+          <div className="grid max-w-80 gap-1">
             {action.blockers.map((blocker) => (
-              <BlockerNote key={blocker} blocker={blocker} />
+              <BlockerNote key={blocker.kind} blocker={blocker} />
             ))}
           </div>
         )}

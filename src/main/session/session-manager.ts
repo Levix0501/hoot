@@ -142,15 +142,6 @@ export class SessionManager extends EventEmitter<{
     return this.records.get(id)?.info.projectRoot ?? null
   }
 
-  /**
-   * The issue whose start button started a session that is starting,
-   * running, or has ended without being closed; `null` for any other session
-   * and any other id.
-   */
-  issueOf(id: string): number | null {
-    return this.records.get(id)?.info.issueId ?? null
-  }
-
   /** Whether a session of the project, in its main worktree or any other, is starting or running. */
   isRunningIn(projectRoot: string): boolean {
     return [...this.records.values()].some(

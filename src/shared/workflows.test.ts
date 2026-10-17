@@ -2,35 +2,39 @@ import { describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW, ISSUE_WORKFLOW } from './built-in-workflow'
 import { checkedWorkflow, checkWorkflow } from './workflow-check'
 import {
+  endLabelNamed,
   firstStep,
-  outcomeLabel,
-  reportsThisRound,
-  stepName,
+  stepOfLabel,
+  workflowLabels,
   workflowProgress,
   type WorkflowDefinition,
-  type WorkflowRecord,
 } from './workflows'
 
-/** A small workflow of two steps, written as JSON would have it. */
+/** A small workflow of two steps and two end labels, written as JSON would have it. */
 function sample(): WorkflowDefinition {
   return {
     name: 'Sample',
+    group: 'Sample',
     steps: [
       {
-        id: 'look',
         name: 'Look',
+        label: { name: 'Looking', color: '4ea7fc', description: 'Reading it' },
         prompt: 'Look: read the issue.',
         outcomes: [
-          { name: 'go', label: 'Go', instruction: 'go on.', next: 'make' },
-          { name: 'stop', label: 'Stop', instruction: 'stop here.', next: null },
+          { label: 'Making', instruction: 'Go on.', goOn: true },
+          { label: 'Dropped', instruction: 'Stop here.', goOn: false },
         ],
       },
       {
-        id: 'make',
         name: 'Make',
+        label: { name: 'Making', color: 'bb87fc', description: '' },
         prompt: 'Make: build it.',
-        outcomes: [{ name: 'done', label: 'Made', instruction: 'it is made.', next: null }],
+        outcomes: [{ label: 'Made', instruction: 'It is made.', goOn: false }],
       },
+    ],
+    endLabels: [
+      { name: 'Made', color: '4cb782', description: '', completeWithSubIssues: false },
+      { name: 'Dropped', color: '95a2b3', description: '', completeWithSubIssues: true },
     ],
   }
 }
@@ -47,30 +51,82 @@ describe('the built-in workflow', () => {
     expect(checkWorkflow(read)).toEqual({ ok: true, workflow: BUILT_IN_WORKFLOW })
   })
 
-  it('goes Scope, Design, Implement, with the outcomes in their order and where each leads', () => {
+  it('is Spec-driven, with the group Spec-driven, and goes Scope, Design, Implement', () => {
+    expect(BUILT_IN_WORKFLOW.name).toBe('Spec-driven')
+    expect(BUILT_IN_WORKFLOW.group).toBe('Spec-driven')
+    expect(BUILT_IN_WORKFLOW.steps.map((step) => [step.name, step.label.name])).toEqual([
+      ['Scope', 'Scope'],
+      ['Design', 'Design'],
+      ['Implement', 'Implement'],
+    ])
+    expect(workflowLabels(BUILT_IN_WORKFLOW).map((label) => label.name)).toEqual([
+      'Scope',
+      'Design',
+      'Implement',
+      'Split',
+      'Implemented',
+    ])
+    expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Scope')
+  })
+
+  it('has the outcomes of each step in their order, with the label each changes to and whether it goes on', () => {
     expect(
       BUILT_IN_WORKFLOW.steps.map((step) => ({
         step: step.name,
-        outcomes: step.outcomes.map(({ name, label, next }) => [name, label, next]),
+        outcomes: step.outcomes.map(({ label, goOn }) => [label, goOn]),
       })),
     ).toEqual([
       {
         step: 'Scope',
         outcomes: [
-          ['no-split', 'No split', 'design'],
-          ['split', 'Split', null],
+          ['Design', true],
+          ['Split', false],
         ],
       },
       {
         step: 'Design',
         outcomes: [
-          ['implement', 'Implement directly', 'implement'],
-          ['split', 'Split', null],
+          ['Implement', true],
+          ['Split', false],
         ],
       },
-      { step: 'Implement', outcomes: [['done', 'Implemented', null]] },
+      { step: 'Implement', outcomes: [['Implemented', false]] },
     ])
-    expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Scope')
+  })
+
+  it('completes an issue split once its sub-issues are, and not one implemented', () => {
+    expect(
+      BUILT_IN_WORKFLOW.endLabels.map(({ name, completeWithSubIssues }) => [
+        name,
+        completeWithSubIssues,
+      ]),
+    ).toEqual([
+      ['Split', true],
+      ['Implemented', false],
+    ])
+  })
+
+  it('tells the agent what each outcome means, and how to write a split back', () => {
+    const [scope, design, implement] = BUILT_IN_WORKFLOW.steps
+    expect(scope!.outcomes[0]!.instruction).toBe('I confirmed that the issue is one piece of work.')
+    expect(design!.outcomes[0]!.instruction).toBe(
+      'I confirmed the summary, and the issue fits one session.',
+    )
+    expect(implement!.outcomes[0]!.instruction).toBe('The issue is implemented.')
+    for (const [outcome, start] of [
+      [scope!.outcomes[1]!, 'Design'],
+      [design!.outcomes[1]!, 'Implement'],
+    ] as const) {
+      const { instruction } = outcome
+      expect(instruction).toContain('with one `hoot issue create-batch {issue} --file <file>`')
+      expect(instruction).toContain(`\`"labels": ["${start}"]\``)
+      expect(instruction).toContain('`"status": "todo"`')
+      expect(instruction).toContain('`"blocking": ["{issue}"]`')
+      expect(instruction).toContain(
+        'in `"blockedBy"`, as I confirmed the order, the issues it waits on',
+      )
+      expect(instruction).toContain('Do not start sessions for the sub-issues.')
+    }
   })
 
   it('is the workflow every issue follows', () => {
@@ -79,8 +135,15 @@ describe('the built-in workflow', () => {
 })
 
 describe('checkWorkflow', () => {
-  it('takes a definition of any steps and outcomes, as it was given', () => {
+  it('takes a definition of any steps, outcomes and end labels, as it was given', () => {
     expect(checkWorkflow(sample())).toEqual({ ok: true, workflow: sample() })
+    expect(checkWorkflow({ ...sample(), endLabels: [] }).ok).toBe(false)
+    const none = sample()
+    none.endLabels = []
+    none.steps = [
+      { ...none.steps[1]!, outcomes: [{ label: 'Making', instruction: 'Again.', goOn: true }] },
+    ]
+    expect(checkWorkflow(none).ok).toBe(true)
   })
 
   it('refuses what is not a definition, or has more than one', () => {
@@ -90,10 +153,7 @@ describe('checkWorkflow', () => {
   })
 
   it('refuses a workflow without steps, and a step without outcomes', () => {
-    expect(checkWorkflow({ ...sample(), steps: [] })).toEqual({
-      ok: false,
-      problems: ['steps: The workflow has no step.'],
-    })
+    expect(checkWorkflow({ ...sample(), steps: [] }).ok).toBe(false)
     const workflow = sample()
     workflow.steps[1]!.outcomes = []
     expect(checkWorkflow(workflow)).toEqual({
@@ -102,59 +162,59 @@ describe('checkWorkflow', () => {
     })
   })
 
-  it('refuses an outcome that leads to a step the workflow does not have', () => {
+  it('refuses an outcome that changes to a label the workflow does not have', () => {
     const workflow = sample()
-    workflow.steps[0]!.outcomes[0]!.next = 'build'
+    workflow.steps[0]!.outcomes[0]!.label = 'Building'
     expect(checkWorkflow(workflow)).toEqual({
       ok: false,
-      problems: ['steps.0.outcomes.0.next: The outcome "go" leads to no step: "build".'],
+      problems: [
+        'steps.0.outcomes.0.label: The outcome changes to "Building", which is no label of the workflow.',
+      ],
     })
   })
 
-  it('refuses two steps with an id or a name, and two outcomes of a step with a name', () => {
-    const ids = sample()
-    ids.steps[1]!.id = 'look'
-    const names = sample()
-    names.steps[1]!.name = 'Look'
-    const outcomes = sample()
-    outcomes.steps[0]!.outcomes[1]!.name = 'go'
-    expect(checkWorkflow(ids).ok).toBe(false)
-    expect(checkWorkflow(names)).toEqual({
-      ok: false,
-      problems: ['steps.1.name: Two steps have the name "Look".'],
-    })
-    expect(checkWorkflow(outcomes)).toEqual({
-      ok: false,
-      problems: ['steps.0.outcomes.1.name: Look has two outcomes named "go".'],
-    })
-    // The same outcome name in two steps is fine.
-    const shared = sample()
-    shared.steps[1]!.outcomes[0]!.name = 'go'
-    expect(checkWorkflow(shared).ok).toBe(true)
+  it('refuses an outcome that goes on after an end label', () => {
+    const workflow = sample()
+    workflow.steps[1]!.outcomes[0]!.goOn = true
+    expect(checkWorkflow(workflow).ok).toBe(false)
   })
 
-  it('refuses ids and outcome names that are not lower-case words joined by dashes', () => {
-    for (const name of ['', 'No-split', 'no split', '-no', 'no--split', 'no_split']) {
+  it('refuses two steps with a name, and two labels with a name, whatever its case', () => {
+    const steps = sample()
+    steps.steps[1]!.name = 'look'
+    const labels = sample()
+    labels.endLabels[1]!.name = 'making'
+    expect(checkWorkflow(steps)).toEqual({
+      ok: false,
+      problems: ['steps.1.name: Two steps have the name "look".'],
+    })
+    expect(checkWorkflow(labels).ok).toBe(false)
+  })
+
+  it('refuses a color that is not six lower-case hexadecimal digits, and a name with a comma', () => {
+    for (const color of ['red', '#4ea7fc', '4EA7FC', '4ea7f']) {
       const workflow = sample()
-      workflow.steps[0]!.outcomes[0]!.name = name
+      workflow.steps[0]!.label.color = color
       expect(checkWorkflow(workflow).ok).toBe(false)
-      const step = sample()
-      step.steps[0]!.id = name
-      expect(checkWorkflow(step).ok).toBe(false)
     }
+    const comma = sample()
+    comma.endLabels[0]!.name = 'Made,well'
+    expect(checkWorkflow(comma).ok).toBe(false)
   })
 
-  it('refuses empty text, text with whitespace around it, and names and outcomes on more than one line', () => {
+  it('refuses empty text, text with whitespace around it, and names on more than one line', () => {
     const cases: Array<(workflow: WorkflowDefinition) => void> = [
       (workflow) => (workflow.name = ''),
+      (workflow) => (workflow.group = ''),
       (workflow) => (workflow.steps[0]!.name = ' Look'),
       (workflow) => (workflow.steps[0]!.name = 'Lo\nok'),
+      (workflow) => (workflow.steps[0]!.label.name = 'Lo\nok'),
       (workflow) => (workflow.steps[0]!.prompt = ''),
       (workflow) => (workflow.steps[0]!.prompt = 'Look.\n'),
       (workflow) => (workflow.steps[0]!.prompt = 'Look.\r\nNow.'),
       (workflow) => (workflow.steps[0]!.prompt = 'Look\0.'),
-      (workflow) => (workflow.steps[0]!.outcomes[0]!.label = ''),
-      (workflow) => (workflow.steps[0]!.outcomes[0]!.instruction = 'go\non.'),
+      (workflow) => (workflow.steps[0]!.outcomes[0]!.instruction = ''),
+      (workflow) => (workflow.endLabels[0]!.description = 'Made\nwell'),
     ]
     for (const change of cases) {
       const workflow = sample()
@@ -169,70 +229,30 @@ describe('checkWorkflow', () => {
   })
 })
 
-/** The record of a run of a step that started. */
-const started = (id: number, step: string, at = id): WorkflowRecord => ({
-  kind: 'step-started',
-  id,
-  step,
-  at,
-})
-
-/** The record of an outcome the agent reported. */
-const reported = (id: number, step: string, outcome: string): WorkflowRecord => ({
-  kind: 'step-reported',
-  id,
-  step,
-  outcome,
-  summary: 'S',
-  reporter: 'agent',
-  at: id,
-})
-
 describe('workflowProgress', () => {
-  it('is not started without records, and after the workflow started over', () => {
-    expect(workflowProgress([])).toEqual({ kind: 'not-started' })
-    expect(workflowProgress([started(1, 'look'), { kind: 'started-over', id: 2, at: 2 }])).toEqual({
-      kind: 'not-started',
-    })
+  it('is not started without a label of the workflow', () => {
+    expect(workflowProgress(sample(), [])).toEqual({ kind: 'not-started' })
+    expect(workflowProgress(sample(), ['bug'])).toEqual({ kind: 'not-started' })
   })
 
-  it('is at the step whose run started last', () => {
-    expect(workflowProgress([started(1, 'look', 10)])).toEqual({
+  it("is at the step of a step's label, whatever its case", () => {
+    expect(workflowProgress(sample(), ['making'])).toEqual({
       kind: 'at-step',
-      step: 'look',
-      run: 1,
-      startedAt: 10,
+      step: sample().steps[1],
     })
-    expect(
-      workflowProgress([started(1, 'look'), reported(2, 'look', 'go'), started(3, 'make', 2)]),
-    ).toEqual({ kind: 'at-step', step: 'make', run: 3, startedAt: 2 })
   })
 
-  it('is finished once an outcome was reported that no run followed', () => {
-    expect(workflowProgress([started(1, 'look'), reported(2, 'look', 'stop')])).toEqual({
+  it('is finished with an end label', () => {
+    expect(workflowProgress(sample(), ['bug', 'Dropped'])).toEqual({
       kind: 'finished',
+      label: sample().endLabels[1],
     })
   })
 
-  it('lists the outcomes reported since the workflow last started over', () => {
-    const records = [
-      started(1, 'look'),
-      reported(2, 'look', 'stop'),
-      { kind: 'started-over', id: 3, at: 3 } as const,
-      started(4, 'look'),
-      reported(5, 'look', 'go'),
-      started(6, 'make'),
-    ]
-    expect(reportsThisRound(records).map((record) => record.id)).toEqual([5])
-    expect(reportsThisRound(records.slice(0, 2)).map((record) => record.id)).toEqual([2])
-    expect(reportsThisRound([])).toEqual([])
-  })
-
-  it('names steps and outcomes as the workflow does, or by their ids when it no longer has them', () => {
-    expect(stepName(sample(), 'make')).toBe('Make')
-    expect(stepName(sample(), 'gone')).toBe('gone')
-    expect(outcomeLabel(sample(), 'make', 'done')).toBe('Made')
-    expect(outcomeLabel(sample(), 'make', 'gone')).toBe('gone')
-    expect(outcomeLabel(sample(), 'gone', 'done')).toBe('done')
+  it("finds steps and end labels by their labels' names", () => {
+    expect(stepOfLabel(sample(), 'LOOKING')?.name).toBe('Look')
+    expect(stepOfLabel(sample(), 'Made')).toBeUndefined()
+    expect(endLabelNamed(sample(), 'made')?.name).toBe('Made')
+    expect(endLabelNamed(sample(), 'Looking')).toBeUndefined()
   })
 })

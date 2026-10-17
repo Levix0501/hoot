@@ -6,7 +6,9 @@ import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { ISSUE_WORKFLOW } from '../shared/built-in-workflow'
+import { waitedOnIds } from '../shared/dependencies'
 import { IpcChannel, type SessionCommand } from '../shared/ipc'
+import { startBlockers } from '../shared/start-blockers'
 import {
   WINDOWS_LAYOUT_SWITCH,
   windowControlsArgument,
@@ -17,7 +19,7 @@ import { AgentService } from './agents/agent-service'
 import { fetchLatestVersion } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
-import { databaseFile, openDatabase } from './database/database'
+import { databaseFile, openDatabase, transaction } from './database/database'
 import { captureBaseEnv } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
 import { gitEnvironment } from './git/git'
@@ -25,12 +27,14 @@ import { HootServer } from './hoot-cli/hoot-server'
 import { hootCliSetup } from './hoot-cli/setup'
 import { registerDatabaseErrorIpc, registerIpc } from './ipc'
 import { IssueStore } from './issues/issue-store'
+import { LabelStore } from './labels/label-store'
 import { resolveProjectRoot } from './projects/project-root'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
 import { resolveLaunch } from './session/launch'
 import { SessionManager } from './session/session-manager'
+import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
 import { PermissionLevelStore } from './settings/permission-level-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
@@ -366,7 +370,16 @@ if (!app.requestSingleInstanceLock()) {
 function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
-  const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW)
+  const labels = new LabelStore(database)
+  // Puts the workflow's group of labels in place, before anything reads the labels.
+  const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW, labels)
+  // hoot's sessions, which the window starts as an issue's start button does.
+  const sessionStarts = new SessionStartRequests((request) => {
+    const window = getWindow()
+    if (!window) return false
+    window.webContents.send(IpcChannel.sessionStartRequested, request)
+    return true
+  })
   // Only projects in the list are kept collapsed, so that a project added later is expanded.
   sidebar.retainProjects(projects.list().map((project) => project.id))
   registerIpc({
@@ -380,6 +393,7 @@ function startWithDatabase(database: DatabaseSync): void {
     }),
     projects,
     issues,
+    labels,
     tools,
     agents,
     permissionLevels,
@@ -390,6 +404,7 @@ function startWithDatabase(database: DatabaseSync): void {
     updates,
     worktrees,
     workflows,
+    sessionStarts,
     resolveProjectRoot: async (directory) => {
       const git = await gitExecutable()
       if (git === null) return { kind: 'error', message: GIT_NOT_FOUND }
@@ -415,11 +430,23 @@ function startWithDatabase(database: DatabaseSync): void {
     },
     listProjects: () => projects.list(),
     issues,
+    labels,
+    together: (body) => transaction(database, body),
     // The window shows it at once, and nothing else changes there.
     issueCreated: (issue) => getWindow()?.webContents.send(IpcChannel.issueCreated, issue),
-    // For the issue the session was started from; the window shows the change at once.
-    reportStep: (sessionId, outcome, summary) =>
-      workflows.reportFromSession(sessionId, sessions.issueOf(sessionId), outcome, summary),
+    // As the issue's start button tells them.
+    startBlockers: (issue) =>
+      startBlockers(
+        tools.getState(),
+        issue,
+        waitedOnIds(
+          new Map(issues.list().map((shown) => [shown.id, shown])),
+          issues.dependencies().links,
+          issue.id,
+        ),
+        workflows.progress(issue.id),
+      ),
+    startSession: (issueId, prompt) => sessionStarts.request(issueId, prompt),
   })
   hootServer.start().catch((error: unknown) => {
     console.error(`Could not listen for hoot on ${hootCli.socket}:`, error)

@@ -3,21 +3,28 @@ import http from 'node:http'
 import { z } from 'zod'
 import {
   SESSION_HEADER,
+  type BatchAnswer,
+  type BatchIssue,
+  type BatchRequest,
   type CreatedIssueAnswer,
+  type DeletedLabelAnswer,
   type EditedIssueAnswer,
   type HootAnswer,
   type HootIssue,
+  type HootLabel,
   type HootProject,
+  MAX_PROMPT_LENGTH,
   type IssueAnswer,
   type IssueEdit,
   type IssueListAnswer,
+  type LabelAnswer,
+  type LabelEdit,
+  type LabelListAnswer,
   type NewHootIssue,
+  type NewHootLabel,
   type RelatedIssue,
-  type SplitAnswer,
-  type SplitIssue,
-  type SplitRequest,
-  type StepReportAnswer,
-  type StepReportRequest,
+  type SessionAnswer,
+  type SessionRequest,
 } from '../../shared/hoot-cli'
 import { blockedByIdsOf, blockingIdsOf, type Dependency } from '../../shared/dependencies'
 import type { Project } from '../../shared/ipc'
@@ -27,8 +34,9 @@ import {
   oneLineTitle,
   type Issue,
 } from '../../shared/issues'
+import type { NamedLabel } from '../../shared/labels'
+import { startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, type ParentChange } from '../../shared/sub-issues'
-import { STEP_SUMMARY_MAX_LENGTH } from '../../shared/workflows'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from '../issues/issue-schemas'
 import {
   DependencyError,
@@ -36,7 +44,7 @@ import {
   type IssueReference,
   type IssueStore,
 } from '../issues/issue-store'
-import type { StepReportResult } from '../workflows/workflow-executor'
+import { LabelError, type LabelStore } from '../labels/label-store'
 
 /**
  * The most a request may send: a new issue at the longest Hoot saves, even
@@ -47,6 +55,8 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024
 /** An issue's number in decimal digits, as hoot passes it on from the command line. */
 const issueDigits = z.string().regex(/^\d{1,100}$/)
 const issueList = z.array(issueDigits).max(1_000)
+/** Names of labels, as hoot passes them on from the command line. */
+const labelNames = z.array(z.string().max(1_000)).max(1_000)
 
 const newHootIssue = z.strictObject({
   title: issueTitle,
@@ -56,6 +66,7 @@ const newHootIssue = z.strictObject({
   parent: issueDigits.optional(),
   blockedBy: issueList.optional(),
   blocking: issueList.optional(),
+  labels: labelNames.optional(),
 }) satisfies z.ZodType<NewHootIssue>
 
 const issueEdit = z.strictObject({
@@ -67,13 +78,15 @@ const issueEdit = z.strictObject({
   removeBlockedBy: issueList.optional(),
   addBlocking: issueList.optional(),
   removeBlocking: issueList.optional(),
+  addLabels: labelNames.optional(),
+  removeLabels: labelNames.optional(),
 }) satisfies z.ZodType<IssueEdit>
 
-const splitReference = z.union([
+const batchReference = z.union([
   z.strictObject({ item: z.number().int().min(1).max(1_000) }),
   z.strictObject({ issue: issueDigits }),
 ])
-const splitRequest = z.strictObject({
+const batchRequest = z.strictObject({
   issues: z
     .array(
       z.strictObject({
@@ -81,24 +94,36 @@ const splitRequest = z.strictObject({
         description: issueDescription,
         status: issueStatus,
         priority: issuePriority.optional(),
-        blockedBy: z.array(splitReference).max(1_000),
-        blocking: z.array(splitReference).max(1_000),
-      }) satisfies z.ZodType<SplitIssue>,
+        blockedBy: z.array(batchReference).max(1_000),
+        blocking: z.array(batchReference).max(1_000),
+        labels: labelNames,
+      }) satisfies z.ZodType<BatchIssue>,
     )
     .max(1_000),
-}) satisfies z.ZodType<SplitRequest>
+}) satisfies z.ZodType<BatchRequest>
 
-const stepReportRequest = z.strictObject({
-  outcome: z.string().max(1_000),
-  // Not empty, and not only whitespace.
-  summary: z
-    .string()
-    .max(STEP_SUMMARY_MAX_LENGTH)
-    .refine((summary) => summary.trim() !== ''),
-}) satisfies z.ZodType<StepReportRequest>
+const labelText = z.string().max(100_000)
+const newHootLabel = z.strictObject({
+  name: labelText,
+  color: labelText.optional(),
+  description: labelText.optional(),
+}) satisfies z.ZodType<NewHootLabel>
+const labelEdit = z.strictObject({
+  name: labelText.optional(),
+  color: labelText.optional(),
+  description: labelText.optional(),
+}) satisfies z.ZodType<LabelEdit>
+
+const sessionRequest = z.strictObject({
+  issue: issueDigits,
+  prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+}) satisfies z.ZodType<SessionRequest>
 
 /** The project a session runs for, or why there is none. */
 export type SessionProject = { ok: true; project: Project } | { ok: false; message: string }
+
+/** A session started for an issue: the root of the worktree it runs in; or why it did not start. */
+export type StartedSession = { ok: true; worktreePath: string } | { ok: false; message: string }
 
 export interface HootServerOptions {
   /** Where to listen: the path of a Unix domain socket, or on Windows of a named pipe. */
@@ -119,13 +144,28 @@ export interface HootServerOptions {
     | 'dependencies'
     | 'changeRelations'
   >
+  labels: Pick<
+    LabelStore,
+    | 'list'
+    | 'labelsOf'
+    | 'findByName'
+    | 'createLabel'
+    | 'editLabel'
+    | 'deleteLabel'
+    | 'changeIssueLabels'
+  >
+  /** Makes the changes `body` makes all together, or, when it throws, none of them. */
+  together<T>(body: () => T): T
   /** Called with each issue hoot creates, once it is saved. */
   issueCreated(issue: Issue): void
+  /** Why work on an issue cannot be started now; none when it can. */
+  startBlockers(issue: Issue): StartBlocker[]
   /**
-   * Reports an outcome, with the agent's summary, of the current step of the
-   * workflow of the issue the session with this id was started from.
+   * Starts a session for an issue, as its start button does, without showing
+   * it, with `prompt` as its first message when one is given; settles once
+   * it has started, or could not.
    */
-  reportStep(sessionId: string, outcome: string, summary: string): StepReportResult
+  startSession(issueId: number, prompt: string | null): Promise<StartedSession>
 }
 
 type Reply = { status: number; answer: HootAnswer<object> }
@@ -168,10 +208,19 @@ function noSuchIssue(digits: string, project: HootProject): string {
   return `There is no issue ISS-${digits} in this session's project, ${project.name}.`
 }
 
+/** What hoot says when no label has this name. */
+function noSuchLabel(name: string): string {
+  return `There is no label named "${name}". Run "hoot label list" for the labels there are.`
+}
+
 /** The status of an answer to a change that cannot be made, by what was thrown. */
 function refusal(error: unknown): number {
-  // Such as a parent with all the sub-issues it can have, or an issue that would wait for itself.
-  return error instanceof SubIssueError || error instanceof DependencyError ? 409 : 400
+  // Such as a parent with all the sub-issues it can have, an issue that would wait for itself, or a label name taken.
+  return error instanceof SubIssueError ||
+    error instanceof DependencyError ||
+    error instanceof LabelError
+    ? 409
+    : 400
 }
 
 /** Something wrong with what was asked, which an answer says. */
@@ -181,12 +230,22 @@ class Refusal extends Error {
   }
 }
 
+/** A label as hoot gets it. */
+function hootLabel(label: NamedLabel): HootLabel {
+  return {
+    name: label.name,
+    color: label.color,
+    description: label.description,
+    group: label.group,
+  }
+}
+
 /**
  * Answers hoot, run in a session this Hoot started: it reads the issues of the
- * session's project, creates issues in it, alone or as the sub-issues an
- * issue is split into, changes their parents, sub-issues and dependencies,
- * and reports the steps of the workflow of the issue the session was started
- * from. It listens only where the sessions' environment tells hoot to
+ * session's project, creates issues in it, alone or as sub-issues of an issue
+ * all at once, changes their parents, sub-issues, dependencies and labels,
+ * reads, creates, changes and deletes labels, and starts sessions for the
+ * issues. It listens only where the sessions' environment tells hoot to
  * connect, through a Unix domain socket that only the user can connect to, or
  * on Windows a named pipe.
  */
@@ -256,9 +315,25 @@ export class HootServer {
     })
   }
 
+  /** The ids of the labels with these names; a `Refusal` when one has none. */
+  private labelsNamed(names: readonly string[]): number[] {
+    return names.map((name) => {
+      const found = this.options.labels.findByName(name)
+      if (found === undefined) throw new Refusal(failure(404, noSuchLabel(name)))
+      return found.id
+    })
+  }
+
+  /** The label with this name; a `Refusal` when there is none. */
+  private labelNamed(name: string): NamedLabel {
+    const found = this.options.labels.findByName(name)
+    if (found === undefined) throw new Refusal(failure(404, noSuchLabel(name)))
+    return found
+  }
+
   /**
-   * Issues with their parents, sub-issues and dependencies, those Hoot shows:
-   * without the issues of projects removed from the list.
+   * Issues with their parents, sub-issues, dependencies and labels, those
+   * Hoot shows: without the issues of projects removed from the list.
    */
   private withRelations(issues: readonly Issue[]): HootIssue[] {
     const shown = new Map(this.options.issues.list().map((issue) => [issue.id, issue]))
@@ -284,8 +359,26 @@ export class HootServer {
         subIssues: (children.get(issue.id) ?? []).flatMap(related),
         blockedBy: blockedByIdsOf(dependencies, issue.id).flatMap(related),
         blocking: blockingIdsOf(dependencies, issue.id).flatMap(related),
+        labels: this.options.labels.labelsOf(issue.id).map(hootLabel),
       }
     })
+  }
+
+  /** The issue with this id as it is saved now, with its relations, or as it was. */
+  private current(projectId: number, issue: Issue): HootIssue {
+    return this.withRelations([this.options.issues.getInProject(projectId, issue.id) ?? issue])[0]!
+  }
+
+  /** Tells the window of each issue hoot created, once it is saved. */
+  private reportCreated(issues: readonly Issue[]): void {
+    for (const issue of issues) {
+      try {
+        this.options.issueCreated(issue)
+      } catch (error) {
+        // The issue is saved all the same; the window shows it once it reads the issues again.
+        console.error('Could not show the issue hoot created:', error)
+      }
+    }
   }
 
   private async respond(request: http.IncomingMessage, response: http.ServerResponse) {
@@ -339,26 +432,114 @@ export class HootServer {
     if (pathname === '/issues' && request.method === 'POST') {
       const parsed = newHootIssue.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid issue.')
-      const {
-        parent: parentDigits,
-        priority,
-        blockedBy = [],
-        blocking = [],
-        ...fields
-      } = parsed.data
-      let parent: Issue | null = null
-      if (parentDigits !== undefined) {
-        parent = this.issueOf(projectId, parentDigits)
-        if (parent === null) return failure(404, noSuchIssue(parentDigits, project))
+      return this.create(projectId, project, parsed.data)
+    }
+
+    if (numbered && request.method === 'PATCH') {
+      const parsed = issueEdit.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid change.')
+      return this.edit(projectId, project, numbered[1]!, parsed.data)
+    }
+
+    const batch = /^\/issues\/(\d+)\/sub-issues$/.exec(pathname)
+    if (batch && request.method === 'POST') {
+      const parsed = batchRequest.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid issues.')
+      return this.createBatch(projectId, project, batch[1]!, parsed.data.issues)
+    }
+
+    if (pathname === '/labels' && request.method === 'GET') {
+      const answer: LabelListAnswer = {
+        ok: true,
+        project,
+        labels: this.options.labels.list().map(hootLabel),
       }
-      const dependencies = {
-        blockedBy: this.issuesOf(projectId, project, blockedBy),
-        blocking: this.issuesOf(projectId, project, blocking),
-      }
-      let issue: Issue | null
+      return { status: 200, answer }
+    }
+
+    if (pathname === '/labels' && request.method === 'POST') {
+      const parsed = newHootLabel.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid label.')
+      const { name: labelName, color, description } = parsed.data
       try {
+        const label = this.options.labels.createLabel({
+          name: labelName,
+          ...(color === undefined ? {} : { color }),
+          ...(description === undefined ? {} : { description }),
+        })
+        const answer: LabelAnswer = { ok: true, project, label: hootLabel(label) }
+        return { status: 201, answer }
+      } catch (error) {
+        return failure(refusal(error), errorMessage(error))
+      }
+    }
+
+    const labelPath = /^\/labels\/(.+)$/.exec(pathname)
+    if (labelPath && (request.method === 'PATCH' || request.method === 'DELETE')) {
+      let given: string
+      try {
+        given = decodeURIComponent(labelPath[1]!)
+      } catch {
+        return failure(400, 'Invalid label.')
+      }
+      if (request.method === 'DELETE') {
+        const label = this.labelNamed(given)
+        try {
+          this.options.labels.deleteLabel(label.id)
+        } catch (error) {
+          return failure(refusal(error), errorMessage(error))
+        }
+        const answer: DeletedLabelAnswer = { ok: true, project }
+        return { status: 200, answer }
+      }
+      const parsed = labelEdit.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid change.')
+      const changes = parsed.data
+      if (Object.keys(changes).length === 0) return failure(400, 'Nothing to change.')
+      const label = this.labelNamed(given)
+      try {
+        const edited = this.options.labels.editLabel(label.id, changes)
+        const answer: LabelAnswer = { ok: true, project, label: hootLabel(edited) }
+        return { status: 200, answer }
+      } catch (error) {
+        return failure(refusal(error), errorMessage(error))
+      }
+    }
+
+    if (pathname === '/sessions' && request.method === 'POST') {
+      const parsed = sessionRequest.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid session.')
+      return this.startSession(projectId, project, parsed.data)
+    }
+
+    return failure(404, 'Hoot does not know this request.')
+  }
+
+  /** Creates an issue in the project, with its parent, dependencies and labels, or nothing. */
+  private create(projectId: number, project: HootProject, request: NewHootIssue): Reply {
+    const {
+      parent: parentDigits,
+      priority,
+      blockedBy = [],
+      blocking = [],
+      labels = [],
+      ...fields
+    } = request
+    let parent: Issue | null = null
+    if (parentDigits !== undefined) {
+      parent = this.issueOf(projectId, parentDigits)
+      if (parent === null) return failure(404, noSuchIssue(parentDigits, project))
+    }
+    const dependencies = {
+      blockedBy: this.issuesOf(projectId, project, blockedBy),
+      blocking: this.issuesOf(projectId, project, blocking),
+    }
+    const labelIds = this.labelsNamed(labels)
+    let issue: Issue | null
+    try {
+      issue = this.options.together(() => {
         // As the new issue dialog creates it, whose title field takes the title on one line.
-        issue = this.options.issues.create(
+        const created = this.options.issues.create(
           {
             projectId,
             ...fields,
@@ -368,54 +549,24 @@ export class HootServer {
           parent?.id ?? null,
           dependencies,
         )
-      } catch (error) {
-        // Such as a title of nothing but whitespace, or a parent with all the sub-issues it can have.
-        return failure(refusal(error), errorMessage(error))
-      }
-      if (issue === null) return failure(404, "The session's project is no longer in Hoot's list.")
-      try {
-        this.options.issueCreated(issue)
-      } catch (error) {
-        // The issue is saved all the same; the window shows it once it reads the issues again.
-        console.error('Could not show the issue hoot created:', error)
-      }
-      const answer: CreatedIssueAnswer = {
-        ok: true,
-        project,
-        issue: this.withRelations([issue])[0]!,
-      }
-      return { status: 201, answer }
+        if (created !== null && labelIds.length > 0) {
+          this.options.labels.changeIssueLabels(created.id, { add: labelIds }, 'agent')
+        }
+        return created
+      })
+    } catch (error) {
+      // Such as a title of nothing but whitespace, or a parent with all the sub-issues it can have.
+      return failure(refusal(error), errorMessage(error))
     }
-
-    if (numbered && request.method === 'PATCH') {
-      const parsed = issueEdit.safeParse(await readJson(request))
-      if (!parsed.success) return failure(400, 'Invalid change.')
-      return this.edit(projectId, project, numbered[1]!, parsed.data)
-    }
-
-    const split = /^\/issues\/(\d+)\/split$/.exec(pathname)
-    if (split && request.method === 'POST') {
-      const parsed = splitRequest.safeParse(await readJson(request))
-      if (!parsed.success) return failure(400, 'Invalid issues.')
-      return this.split(projectId, project, split[1]!, parsed.data.issues)
-    }
-
-    if (pathname === '/steps/report' && request.method === 'POST') {
-      const parsed = stepReportRequest.safeParse(await readJson(request))
-      if (!parsed.success) return failure(400, 'Invalid report.')
-      const { outcome, summary } = parsed.data
-      const result = this.options.reportStep(sessionId, outcome, summary)
-      if (!result.ok) return failure(409, result.message)
-      const answer: StepReportAnswer = { ok: true, project, report: result.report }
-      return { status: 200, answer }
-    }
-
-    return failure(404, 'Hoot does not know this request.')
+    if (issue === null) return failure(404, "The session's project is no longer in Hoot's list.")
+    this.reportCreated([issue])
+    const answer: CreatedIssueAnswer = { ok: true, project, issue: this.current(projectId, issue) }
+    return { status: 201, answer }
   }
 
   /**
-   * Changes the parent, the sub-issues and the dependencies of an issue of
-   * the project, all together or not at all.
+   * Changes the parent, the sub-issues, the dependencies and the labels of an
+   * issue of the project, all together or not at all.
    */
   private edit(projectId: number, project: HootProject, digits: string, edit: IssueEdit): Reply {
     const {
@@ -427,6 +578,8 @@ export class HootServer {
       removeBlockedBy = [],
       addBlocking = [],
       removeBlocking = [],
+      addLabels = [],
+      removeLabels = [],
     } = edit
     const listed =
       addSubIssues.length +
@@ -435,7 +588,8 @@ export class HootServer {
       removeBlockedBy.length +
       addBlocking.length +
       removeBlocking.length
-    if (parent === undefined && !removeParent && listed === 0) {
+    const labelled = addLabels.length + removeLabels.length
+    if (parent === undefined && !removeParent && listed === 0 && labelled === 0) {
       return failure(400, 'Nothing to change.')
     }
     if (parent !== undefined && removeParent) {
@@ -504,41 +658,49 @@ export class HootServer {
         )
       }
     }
+    const labelsAdded = this.labelsNamed(addLabels)
+    const labelsRemoved = this.labelsNamed(removeLabels)
     try {
-      this.options.issues.changeRelations({
-        parents: changes,
-        removeDependencies: [
-          ...of(removeBlockedBy).map(blockedBy),
-          ...of(removeBlocking).map(blocking),
-        ],
-        addDependencies: [...of(addBlockedBy).map(blockedBy), ...of(addBlocking).map(blocking)],
+      this.options.together(() => {
+        if (parent !== undefined || removeParent || listed > 0) {
+          this.options.issues.changeRelations({
+            parents: changes,
+            removeDependencies: [
+              ...of(removeBlockedBy).map(blockedBy),
+              ...of(removeBlocking).map(blocking),
+            ],
+            addDependencies: [...of(addBlockedBy).map(blockedBy), ...of(addBlocking).map(blocking)],
+          })
+        }
+        if (labelled > 0) {
+          this.options.labels.changeIssueLabels(
+            issue.id,
+            { add: labelsAdded, remove: labelsRemoved },
+            'agent',
+          )
+        }
       })
     } catch (error) {
       return failure(refusal(error), errorMessage(error))
     }
-    const answer: EditedIssueAnswer = {
-      ok: true,
-      project,
-      issue: this.withRelations([
-        this.options.issues.getInProject(projectId, issue.id) ?? issue,
-      ])[0]!,
-    }
+    const answer: EditedIssueAnswer = { ok: true, project, issue: this.current(projectId, issue) }
     return { status: 200, answer }
   }
 
   /**
-   * Creates sub-issues of an issue of the project, all together or, when one
-   * of them cannot be created, none, and reports each once it is saved.
+   * Creates sub-issues of an issue of the project, with their dependencies
+   * and labels, all together or, when one of them cannot be created, none,
+   * and reports each once it is saved.
    */
-  private split(
+  private createBatch(
     projectId: number,
     project: HootProject,
     digits: string,
-    issues: readonly SplitIssue[],
+    issues: readonly BatchIssue[],
   ): Reply {
     const parent = this.issueOf(projectId, digits)
     if (parent === null) return failure(404, noSuchIssue(digits, project))
-    const reference = (given: SplitIssue['blockedBy'][number], index: number): IssueReference => {
+    const reference = (given: BatchIssue['blockedBy'][number], index: number): IssueReference => {
       if ('issue' in given) return { issueId: this.issuesOf(projectId, project, [given.issue])[0]! }
       if (given.item > issues.length) {
         throw new Refusal(
@@ -568,26 +730,59 @@ export class HootServer {
         blocking: issue.blocking.map((given) => reference(given, index)),
       }
     })
+    const labelIds = issues.map((issue) => this.labelsNamed(issue.labels))
     let created: Issue[] | null
     try {
-      created = this.options.issues.createSubIssues(
-        parent.id,
-        items,
-        (index) => `item ${index + 1}`,
-      )
+      created = this.options.together(() => {
+        const saved = this.options.issues.createSubIssues(
+          parent.id,
+          items,
+          (index) => `item ${index + 1}`,
+        )
+        saved?.forEach((issue, index) => {
+          const add = labelIds[index]!
+          if (add.length > 0) this.options.labels.changeIssueLabels(issue.id, { add }, 'agent')
+        })
+        return saved
+      })
     } catch (error) {
       return failure(refusal(error), errorMessage(error))
     }
     if (created === null) return failure(404, "The session's project is no longer in Hoot's list.")
-    for (const issue of created) {
-      try {
-        this.options.issueCreated(issue)
-      } catch (error) {
-        // The issue is saved all the same; the window shows it once it reads the issues again.
-        console.error('Could not show the issue hoot created:', error)
-      }
+    this.reportCreated(created)
+    const answer: BatchAnswer = {
+      ok: true,
+      project,
+      issues: created.map((issue) => this.current(projectId, issue)),
     }
-    const answer: SplitAnswer = { ok: true, project, issues: this.withRelations(created) }
+    return { status: 201, answer }
+  }
+
+  /**
+   * Starts a session for an issue of the project, unless work on it cannot
+   * be started now, and answers once it has started with the worktree it
+   * runs in.
+   */
+  private async startSession(
+    projectId: number,
+    project: HootProject,
+    request: SessionRequest,
+  ): Promise<Reply> {
+    const issue = this.issueOf(projectId, request.issue)
+    if (issue === null) return failure(404, noSuchIssue(request.issue, project))
+    const blockers = this.options.startBlockers(issue)
+    if (blockers.length > 0) {
+      return failure(
+        409,
+        [
+          `Work on ${issueIdentifier(issue.id)} cannot be started now:`,
+          ...blockers.map((blocker) => `- ${startBlockerText(blocker)}`),
+        ].join('\n'),
+      )
+    }
+    const started = await this.options.startSession(issue.id, request.prompt ?? null)
+    if (!started.ok) return failure(409, started.message)
+    const answer: SessionAnswer = { ok: true, project, worktreePath: started.worktreePath }
     return { status: 201, answer }
   }
 }

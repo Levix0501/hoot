@@ -1,10 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { BUILT_IN_WORKFLOW } from '../shared/built-in-workflow'
 import type { Issue, IssuePriority, IssueStatus } from '../shared/issues'
-import { stepInstructions } from '../shared/workflow-text'
-import { workflowProgress, type WorkflowStep } from '../shared/workflows'
 import { leaveSocket, startTestHoot, type TestHoot } from '../main/hoot-cli/test-support'
 import { runHoot } from './program'
 
@@ -123,6 +120,7 @@ describe('hoot issue view', () => {
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
       blockedBy: [],
       blocking: [],
+      labels: [],
     })
     expect(JSON.parse(stdout).createdAt).toBe('2026-10-12T06:03:00.000Z')
     const beta = JSON.parse((await run(['issue', 'view', '2', '--json'])).stdout)
@@ -279,6 +277,7 @@ describe('hoot issue list', () => {
         'subIssuesSummary',
         'blockedBy',
         'blocking',
+        'labels',
       ])
     }
     const started = JSON.parse(
@@ -433,6 +432,7 @@ describe('hoot issue create', () => {
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
       blockedBy: [],
       blocking: [],
+      labels: [],
     })
     expect(saved().at(-1)).toMatchObject({ status: 'done', createdAt: now, completedAt: now })
     await run(['issue', 'create', '--title', 'Theta', '--status', 'canceled'])
@@ -941,7 +941,7 @@ describe('the rules of dependencies in hoot', () => {
     block(y, z)
   })
 
-  it('refuses an issue that would wait for itself, or be blocked by an issue above or below it', async () => {
+  it('refuses an issue that would wait for itself', async () => {
     for (const [args, message] of [
       [
         ['edit', id(z), '--add-blocked-by', id(x)],
@@ -949,24 +949,54 @@ describe('the rules of dependencies in hoot', () => {
           `blocked by ${id(y)}, which is blocked by ${id(z)}.`,
       ],
       [['edit', id(x), '--add-blocking', id(y)], `${id(y)} cannot be blocked by ${id(x)}`],
-      [
-        ['edit', id(y1), '--add-blocked-by', id(x)],
-        `${id(x)} is blocked by ${id(y)}, which is the parent of ${id(y1)}.`,
-      ],
       [['edit', id(x), '--add-blocked-by', id(x)], `${id(x)} cannot be blocked by itself.`],
-      [['edit', id(p1), '--add-blocked-by', id(p)], `which is above it`],
-      [['edit', id(p), '--add-blocked-by', id(q1)], `which is below it`],
-      [
-        ['edit', id(x), '--parent', id(y)],
-        `${id(x)} cannot be a sub-issue of ${id(y)}: ${id(x)} is blocked by ${id(y)}`,
-      ],
-      [['edit', id(y), '--add-sub-issue', id(x)], `${id(x)} is blocked by ${id(y)}`],
-      [['create', '--title', 'N', '--parent', id(p), '--blocked-by', id(p)], 'which is above it'],
       [['create', '--title', 'N', '--blocked-by', id(w), '--blocking', id(w)], 'waits for it'],
     ] as const) {
       await expectRefused(['issue', ...args], message)
     }
     expect(hoot.created).toEqual([])
+  })
+
+  it('lets an issue be blocked by an issue above or below it, and block one, both ways', async () => {
+    for (const args of [
+      ['edit', id(p), '--add-blocked-by', id(p1)],
+      ['edit', id(q1), '--add-blocked-by', id(p)],
+      ['edit', id(y1), '--add-blocked-by', id(x)],
+      ['edit', id(p1), '--add-blocking', id(p2)],
+    ]) {
+      expect((await run(['issue', ...args])).code).toBe(0)
+    }
+    expect(dependencyTitles()).toEqual([
+      ['X', 'Y'],
+      ['Y', 'Z'],
+      ['P', 'P1'],
+      ['Q1', 'P'],
+      ['Y1', 'X'],
+      ['P2', 'P1'],
+    ])
+    // Its sub-issue waits for P already, through Q1 and P1.
+    await expectRefused(
+      ['issue', 'edit', id(p1), '--add-blocked-by', id(q1)],
+      `${id(p1)} cannot be blocked by ${id(q1)}, which waits for it already`,
+    )
+    const created = await run([
+      'issue',
+      'create',
+      '--title',
+      'N',
+      '--parent',
+      id(p),
+      '--blocked-by',
+      id(p),
+    ])
+    expect(created.code).toBe(0)
+  })
+
+  it('changes parents whatever the dependencies, which count for nothing in them', async () => {
+    expect((await run(['issue', 'edit', id(x), '--parent', id(y)])).code).toBe(0)
+    expect((await run(['issue', 'edit', id(z), '--add-sub-issue', id(y)])).code).toBe(0)
+    expect(subIssueTitles(y)).toEqual(['Y1', 'X'])
+    expect(subIssueTitles(z)).toEqual(['Y'])
   })
 
   it('makes a dependency within the rules', async () => {
@@ -1036,7 +1066,7 @@ describe('the limits of dependencies in hoot', () => {
       `ISS-${n.id} would block 51 issues`,
     )
     await expectRefused(
-      ['issue', 'split', `ISS-${e.id}`, '--file', '-'],
+      ['issue', 'create-batch', `ISS-${e.id}`, '--file', '-'],
       `ISS-${n.id} would block 51 issues`,
       JSON.stringify([{ title: 'S1', blockedBy: [`ISS-${n.id}`] }]),
     )
@@ -1108,7 +1138,6 @@ describe('hoot issue create with dependencies', () => {
         `There is no issue ISS-${hx.id} in this session's project`,
       ],
       [['--blocked-by', 'foo'], `"foo" is neither an issue's identifier`],
-      [['--parent', `ISS-${p.id}`, '--blocking', `ISS-${p.id}`], 'which is below it'],
       [['--blocked-by', `ISS-${k.id}`, '--blocking', `ISS-${k.id}`], 'waits for it already'],
     ] as const) {
       await expectRefused(['issue', 'create', '--title', 'N3', ...options], message)
@@ -1190,7 +1219,6 @@ describe('hoot issue edit with dependencies', () => {
         `There is no issue ${id(hx)} in this session's project, gamma.`,
       ],
       [[id(a), '--add-blocking', id(c)], 'waits for it already'],
-      [[id(a), '--add-blocked-by', id(d), '--parent', id(d)], `${id(d)}, which is above it`],
       [[id(a)], 'Nothing to change'],
     ] as const) {
       await expectRefused(['issue', 'edit', ...args], message)
@@ -1274,7 +1302,7 @@ describe('hoot issue view with dependencies', () => {
   })
 })
 
-describe('hoot issue split', () => {
+describe('hoot issue create-batch', () => {
   let p: Issue, e: Issue, hx: Issue, c0: Issue
   let file: string
   const plan = () => [
@@ -1294,7 +1322,13 @@ describe('hoot issue split', () => {
   })
 
   it('creates the issues as the last sub-issues, in order, with their dependencies, and prints their identifiers', async () => {
-    const { code, stdout, stderr } = await run(['issue', 'split', `ISS-${p.id}`, '--file', file])
+    const { code, stdout, stderr } = await run([
+      'issue',
+      'create-batch',
+      `ISS-${p.id}`,
+      '--file',
+      file,
+    ])
     expect(stderr).toBe('')
     expect(code).toBe(0)
     const [s1, s2, s3] = saved().slice(-3)
@@ -1313,9 +1347,12 @@ describe('hoot issue split', () => {
   })
 
   it('reads standard input with -, and prints the new issues as JSON with --json', async () => {
-    const { code, stdout } = await run(['issue', 'split', `${p.id}`, '--file', '-', '--json'], {
-      stdin: `﻿${JSON.stringify(plan())}`,
-    })
+    const { code, stdout } = await run(
+      ['issue', 'create-batch', `${p.id}`, '--file', '-', '--json'],
+      {
+        stdin: `﻿${JSON.stringify(plan())}`,
+      },
+    )
     expect(code).toBe(0)
     const json = JSON.parse(stdout)
     expect(json.map((issue: { title: string }) => issue.title)).toEqual(['S1', 'S2', 'S3'])
@@ -1344,10 +1381,9 @@ describe('hoot issue split', () => {
         withItem(2, { blockedBy: [`ISS-${hx.id}`] }),
         `There is no issue ISS-${hx.id} in this session's project, gamma.`,
       ],
-      [
-        withItem(2, { blockedBy: [`ISS-${p.id}`] }),
-        `Item 3 cannot be blocked by ISS-${p.id}, which is above it`,
-      ],
+      [withItem(2, { labels: ['nope'] }), 'There is no label named "nope".'],
+      [withItem(2, { labels: 'x' }), 'The "labels" of item 3 in '],
+      [withItem(2, { labels: [3] }), 'The "labels" of item 3 in '],
       [plan().map((item, at) => (at === 0 ? {} : item)), 'Item 1 in '],
       [withItem(1, { status: 'doing' }), 'The status of item 2 in '],
       [withItem(1, { status: null }), 'The status of item 2 in '],
@@ -1360,211 +1396,329 @@ describe('hoot issue split', () => {
     ]
     for (const [content, message] of cases) {
       fs.writeFileSync(file, JSON.stringify(content))
-      await expectRefused(['issue', 'split', `ISS-${p.id}`, '--file', file], message)
+      await expectRefused(['issue', 'create-batch', `ISS-${p.id}`, '--file', file], message)
     }
     fs.writeFileSync(file, 'not JSON')
-    await expectRefused(['issue', 'split', `ISS-${p.id}`, '--file', file], 'are not JSON')
+    await expectRefused(['issue', 'create-batch', `ISS-${p.id}`, '--file', file], 'are not JSON')
     fs.writeFileSync(file, JSON.stringify(plan()))
     await expectRefused(
-      ['issue', 'split', `ISS-${hx.id}`, '--file', file],
+      ['issue', 'create-batch', `ISS-${hx.id}`, '--file', file],
       `There is no issue ISS-${hx.id} in this session's project, gamma.`,
     )
     await expectRefused(
-      ['issue', 'split', `ISS-${p.id}`, '--file', path.join(hoot.directory, 'missing.json')],
+      ['issue', 'create-batch', `ISS-${p.id}`, '--file', path.join(hoot.directory, 'missing.json')],
       'Could not read the issues from',
     )
-    await expectRefused(['issue', 'split', `ISS-${p.id}`], "required option '--file <file>'")
+    await expectRefused(['issue', 'create-batch', `ISS-${p.id}`], "required option '--file <file>'")
     expect(hoot.created).toEqual([])
   })
 
   it('refuses more sub-issues than the parent can have', async () => {
     for (let index = 0; index < 98; index++) attach(p, addIssue(`C${index + 1}`))
     await expectRefused(
-      ['issue', 'split', `ISS-${p.id}`, '--file', file],
+      ['issue', 'create-batch', `ISS-${p.id}`, '--file', file],
       `ISS-${p.id} has 99 sub-issues, and 3 more would make 102: an issue can have at most 100.`,
     )
     expect(subIssueTitles(p)).toHaveLength(99)
   })
 })
 
-/** Runs `hoot step report` in the session started from an issue. */
-const report = (args: string[], stdin?: string) =>
-  run(['step', 'report', ...args], { session: 'issue-session', stdin })
-
-describe('hoot step report', () => {
-  const [, design, implement] = BUILT_IN_WORKFLOW.steps as [
-    WorkflowStep,
-    WorkflowStep,
-    WorkflowStep,
-  ]
-  let issue: Issue
-  let files: string
-
-  beforeEach(() => {
-    issue = addIssue('Fix the login bug', 'todo')
-    hoot.startIssueSession('issue-session', issue.id)
-    files = fs.mkdtempSync(path.join(hoot.directory, 'summaries-'))
-  })
-
-  /** Writes a file of a summary, outside any worktree. */
-  const summaryFile = (content: string | Uint8Array, name = 'summary.md') => {
-    const file = path.join(files, name)
-    fs.writeFileSync(file, content)
-    return file
-  }
-
-  const progress = () => workflowProgress(hoot.workflows.records(issue.id))
-
-  it("reports the step with the summary in a file, and prints the next step's prompt and how to report it", async () => {
-    const result = await report([
-      'no-split',
-      '--summary-file',
-      summaryFile('# Why\n\nOnly `src/auth` changes.\n'),
+describe('hoot issue create-batch with labels and its parent blocked', () => {
+  it('creates sub-issues to do with their labels, blocking the parent and each other, as a split is written back', async () => {
+    hoot.labels.createLabel({ name: 'x', color: 'ff8800' })
+    const p = addIssue('P', 'in_progress')
+    const file = path.join(hoot.directory, 'f.json')
+    fs.writeFileSync(
+      file,
+      JSON.stringify([
+        { title: 'S1', labels: ['Design'], status: 'todo', blocking: [id(p)] },
+        {
+          title: 'S2',
+          labels: ['design', 'x'],
+          status: 'todo',
+          blockedBy: [1],
+          blocking: [id(p)],
+        },
+      ]),
+    )
+    const { code, stdout, stderr } = await run(['issue', 'create-batch', id(p), '--file', file])
+    expect(stderr).toBe('')
+    expect(code).toBe(0)
+    const [s1, s2] = saved().slice(-2) as [Issue, Issue]
+    expect(stdout).toBe(`${id(s1)}\n${id(s2)}\n`)
+    expect(subIssueTitles(p)).toEqual(['S1', 'S2'])
+    expect([s1.status, s2.status]).toEqual(['todo', 'todo'])
+    const written = (issue: Issue) =>
+      hoot.labels
+        .labelsOf(issue.id)
+        .map((label) => (label.group ? `${label.group} › ${label.name}` : label.name))
+    expect(written(s1)).toEqual(['Spec-driven › Design'])
+    expect(written(s2)).toEqual(['Spec-driven › Design', 'x'])
+    expect(dependencyTitles()).toEqual([
+      ['P', 'S1'],
+      ['S2', 'S1'],
+      ['P', 'S2'],
     ])
-    expect(result).toEqual({
-      code: 0,
-      stdout: `ISS-1: Scope → No split. Next step: Design.\n\n${stepInstructions(design)}\n`,
-      stderr: '',
-    })
-    expect(hoot.workflows.records(issue.id)[1]).toMatchObject({
-      kind: 'step-reported',
-      step: 'scope',
-      outcome: 'no-split',
-      reporter: 'agent',
-      summary: '# Why\n\nOnly `src/auth` changes.\n',
-    })
-    expect(progress()).toMatchObject({ kind: 'at-step', step: 'design' })
-  })
-
-  it('reads the summary from standard input with -, and takes it with --summary', async () => {
-    await report(['no-split', '--summary', 'Fits.'])
-    const fromStdin = await report(['implement', '--summary-file', '-'], 'Decided.')
-    expect(fromStdin.code).toBe(0)
-    expect(fromStdin.stdout).toBe(
-      `ISS-1: Design → Implement directly. Next step: Implement.\n\n${stepInstructions(implement)}\n`,
-    )
-    expect(hoot.workflows.records(issue.id)[3]).toMatchObject({ summary: 'Decided.' })
-    const done = await report(['done', '--summary', 'Changed the login check.'])
-    expect(done).toEqual({
-      code: 0,
-      stdout: 'ISS-1: Implement → Implemented. The workflow for this issue is finished.\n',
-      stderr: '',
-    })
-    expect(progress()).toEqual({ kind: 'finished' })
-  })
-
-  it('keeps the summary exactly as the file has it, its byte order mark included', async () => {
-    const summary = '\uFEFF  Line one\r\n\nLine three  \n\n'
-    expect((await report(['split', '--summary-file', summaryFile(summary)])).code).toBe(0)
-    expect(hoot.workflows.records(issue.id)[1]).toMatchObject({ summary })
-  })
-
-  it('takes a summary as long as Hoot saves, and refuses a longer one', async () => {
-    const tooLong = await report(['no-split', '--summary-file', summaryFile('x'.repeat(1_000_001))])
-    expect(tooLong).toEqual({
-      code: 1,
-      stdout: '',
-      stderr:
-        'error: The summary is 1,000,001 characters long; Hoot saves summaries of up to 1,000,000.\n',
-    })
-    expect(progress()).toMatchObject({ kind: 'at-step', step: 'scope' })
-    const longest = await report(['no-split', '--summary-file', summaryFile('x'.repeat(1_000_000))])
-    expect(longest.code).toBe(0)
-    expect(progress()).toMatchObject({ kind: 'at-step', step: 'design' })
-  })
-
-  it("refuses an outcome the step does not have, and lists the step's outcomes", async () => {
-    expect(await report(['done', '--summary', 'x'])).toEqual({
-      code: 1,
-      stdout: '',
-      stderr: 'error: done is not an outcome of Scope.\nOutcomes: no-split, split\n',
-    })
-    await report(['no-split', '--summary', 'x'])
-    expect((await report(['done', '--summary', 'x'])).stderr).toBe(
-      'error: done is not an outcome of Design.\nOutcomes: implement, split\n',
-    )
-  })
-
-  it('refuses a report without a summary, with an empty one, or with two', async () => {
-    const before = hoot.workflows.records(issue.id)
-    const missing = await report(['no-split'])
-    expect(missing.code).toBe(1)
-    expect(missing.stderr).toBe(
-      'error: No summary was given: give it with --summary <text> or --summary-file <file>.\n',
-    )
-    for (const summary of ['', '   ', '\n\t\n']) {
-      expect(await report(['no-split', '--summary', summary])).toEqual({
-        code: 1,
-        stdout: '',
-        stderr: 'error: The summary is empty, or only whitespace.\n',
-      })
-    }
-    expect((await report(['no-split', '--summary-file', summaryFile(' \n')])).stderr).toBe(
-      'error: The summary is empty, or only whitespace.\n',
-    )
-    const both = await report(['no-split', '--summary', 'x', '--summary-file', summaryFile('x')])
-    expect(both.code).toBe(1)
-    expect(both.stderr).toMatch(
-      /^error: option '--summary <text>' cannot be used with option '--summary-file <file>'/,
-    )
-    expect(hoot.workflows.records(issue.id)).toEqual(before)
-  })
-
-  it('refuses a file it cannot read, or that is not UTF-8', async () => {
-    const missing = path.join(files, 'missing.md')
-    const unreadable = await report(['no-split', '--summary-file', missing])
-    expect(unreadable.code).toBe(1)
-    expect(unreadable.stderr).toMatch(
-      new RegExp(`^error: Could not read the summary from ${missing}: ENOENT`),
-    )
-    const binary = summaryFile(Uint8Array.of(0x41, 0xff, 0x42), 'binary.md')
-    expect(await report(['no-split', '--summary-file', binary])).toEqual({
-      code: 1,
-      stdout: '',
-      stderr: `error: The summary in ${binary} is not UTF-8 text.\n`,
-    })
-    expect(progress()).toMatchObject({ kind: 'at-step', step: 'scope' })
-  })
-
-  it('refuses in a session not started from an issue', async () => {
+    // Their activity says the agent gave them the labels.
     expect(
-      await run(['step', 'report', 'no-split', '--summary', 'x'], { session: 'gamma-session' }),
+      hoot.labels
+        .eventsOfShown()
+        .filter((event) => event.issueId === s2.id)
+        .map((event) => [event.kind, event.label, event.actor]),
+    ).toEqual([
+      ['added', 'Spec-driven › Design', 'agent'],
+      ['added', 'x', 'agent'],
+    ])
+  })
+
+  it('creates no issue when a label is not one, and has no command split any more', async () => {
+    const p = addIssue('P', 'todo')
+    const file = path.join(hoot.directory, 'f.json')
+    fs.writeFileSync(file, JSON.stringify([{ title: 'S1' }, { title: 'S2', labels: ['nope'] }]))
+    await expectRefused(['issue', 'create-batch', id(p), '--file', file], 'no label named "nope"')
+    const split = await run(['issue', 'split', id(p), '--file', file])
+    expect(split.code).toBe(1)
+    expect(split.stdout).toBe('')
+    expect(saved().map((issue) => issue.title)).toEqual(['P'])
+  })
+})
+
+/** How an issue's labels are written, in the order Hoot lists them. */
+const labelsOf = (issue: Issue) =>
+  hoot.labels
+    .labelsOf(issue.id)
+    .map((label) => (label.group === null ? label.name : `${label.group} › ${label.name}`))
+
+describe('hoot issue create, edit, list and view with labels', () => {
+  beforeEach(() => {
+    hoot.labels.createLabel({ name: 'x', color: 'ff8800', description: 'Ex' })
+    hoot.labels.createLabel({ name: 'y', color: '00ff00' })
+  })
+
+  it('creates an issue with the labels given, repeated or separated by commas, and none when one is not a label', async () => {
+    expect(await run(['issue', 'create', '--title', 'P', '--label', 'x,Y'])).toMatchObject({
+      code: 0,
+    })
+    const p = saved().at(-1)!
+    expect(labelsOf(p)).toEqual(['x', 'y'])
+    await expectRefused(
+      ['issue', 'create', '--title', 'Q', '--label', 'x', '--label', 'nope'],
+      'There is no label named "nope".',
+    )
+    expect(saved().map((issue) => issue.title)).toEqual(['P'])
+    await expectRefused(
+      ['issue', 'create', '--title', 'Q', '--label', 'x,'],
+      'A label name is empty.',
+    )
+  })
+
+  it('gives and takes off labels, a label of a group replacing the other, as the edit did before', async () => {
+    await run(['issue', 'create', '--title', 'P', '--label', 'x,y'])
+    const p = saved().at(-1)!
+    expect(
+      await run(['issue', 'edit', id(p), '--remove-label', 'y', '--add-label', 'Design']),
     ).toEqual({
-      code: 1,
-      stdout: '',
-      stderr: 'error: this session was not started from an issue.\n',
+      code: 0,
+      stdout: `${id(p)}\n`,
+      stderr: '',
     })
+    expect(labelsOf(p)).toEqual(['Spec-driven › Design', 'x'])
+    expect((await run(['issue', 'edit', id(p), '--add-label', 'Scope'])).code).toBe(0)
+    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    await expectRefused(['issue', 'edit', id(p), '--add-label', 'nope'], 'no label named "nope"')
+    await expectRefused(
+      ['issue', 'edit', id(p), '--add-label', 'x', '--remove-label', 'x'],
+      'x cannot both be given to',
+    )
+    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    // Together with the parent and dependencies, all or nothing.
+    const q = addIssue('Q', 'todo')
+    await expectRefused(
+      ['issue', 'edit', id(p), '--add-blocked-by', id(p), '--add-label', 'y'],
+      'cannot be blocked by itself',
+    )
+    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    expect((await run(['issue', 'edit', id(p), '--parent', id(q), '--add-label', 'y'])).code).toBe(
+      0,
+    )
+    expect(subIssueTitles(q)).toEqual(['P'])
+    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x', 'y'])
+    // The activity names the agent, the label taken off by the one of its group included.
+    expect(
+      hoot.labels
+        .eventsOfShown()
+        .filter((event) => event.issueId === p.id)
+        .map((event) => [event.kind, event.label, event.actor]),
+    ).toEqual([
+      ['added', 'x', 'agent'],
+      ['added', 'y', 'agent'],
+      ['removed', 'y', 'agent'],
+      ['added', 'Spec-driven › Design', 'agent'],
+      ['removed', 'Spec-driven › Design', 'agent'],
+      ['added', 'Spec-driven › Scope', 'agent'],
+      ['added', 'y', 'agent'],
+    ])
   })
 
-  it('refuses once the workflow is finished, or the issue is deleted', async () => {
-    await report(['split', '--summary', 'Split.'])
-    const finished = await report(['split', '--summary', 'Again.'])
-    expect(finished.code).toBe(1)
-    expect(finished.stderr).toBe(
-      'error: The workflow for ISS-1 is finished; there is no step left to report.\n',
-    )
-    hoot.issues.delete(issue.id)
-    expect((await report(['split', '--summary', 'x'])).stderr).toBe(
-      'error: ISS-1 no longer exists in Hoot.\n',
-    )
+  it('lists the issues with every label given, and refuses a name that is no label', async () => {
+    await run(['issue', 'create', '--title', 'P', '--label', 'x', '--label', 'Scope'])
+    await run(['issue', 'create', '--title', 'R', '--label', 'x'])
+    await run(['issue', 'create', '--title', 'S'])
+    const titles = async (...args: string[]) =>
+      (
+        JSON.parse((await run(['issue', 'list', ...args, '--json'])).stdout) as Array<{
+          title: string
+        }>
+      ).map((issue) => issue.title)
+    expect((await titles('--label', 'x')).toSorted()).toEqual(['P', 'R'])
+    expect(await titles('--label', 'x', '--label', 'scope')).toEqual(['P'])
+    expect(await titles('--label', 'x,y')).toEqual([])
+    await expectRefused(['issue', 'list', '--label', 'nope'], 'no label named "nope"')
   })
 
-  it('refuses in a session whose issue was moved on in Hoot since', async () => {
-    const scope = progress()
-    if (scope.kind !== 'at-step') throw new Error('Not at a step.')
-    hoot.workflows.reportByUser(issue.id, scope.run, 'no-split')
-    const moved = await report(['no-split', '--summary', 'x'])
-    expect(moved).toEqual({
-      code: 1,
-      stdout: '',
-      stderr:
-        'error: ISS-1 was moved on in Hoot; it is now at Design. Close this session and start the issue again to continue.\n',
+  it('writes the labels in view and list, and gives them as label objects with --json', async () => {
+    await run(['issue', 'create', '--title', 'P', '--label', 'x,Scope'])
+    const p = saved().at(-1)!
+    const view = (await run(['issue', 'view', id(p)])).stdout
+    expect(view.split('\n')[2]).toBe('Labels: Spec-driven › Scope, x')
+    expect((await run(['issue', 'list'])).stdout).toContain('P  [Spec-driven › Scope, x]\n')
+    const json = JSON.parse((await run(['issue', 'view', id(p), '--json'])).stdout)
+    expect(json.labels).toStrictEqual([
+      {
+        name: 'Scope',
+        color: '4ea7fc',
+        description: 'Judging whether the issue is one piece of work or several',
+        group: 'Spec-driven',
+      },
+      { name: 'x', color: 'ff8800', description: 'Ex', group: null },
+    ])
+    const plain = addIssue('Plain')
+    expect(JSON.parse((await run(['issue', 'view', id(plain), '--json'])).stdout).labels).toEqual(
+      [],
+    )
+  })
+})
+
+describe('hoot label', () => {
+  it('creates, lists, changes and deletes labels', async () => {
+    expect(
+      await run(['label', 'create', 'area', '--color', 'ff8800', '--description', 'Area of code']),
+    ).toEqual({ code: 0, stdout: '', stderr: '' })
+    const listed = (await run(['label', 'list'])).stdout
+    expect(listed).toMatch(/^area +No group +ff8800 +Area of code$/m)
+    for (const name of ['Scope', 'Design', 'Implement', 'Split', 'Implemented']) {
+      expect(listed).toMatch(new RegExp(`^${name} +Spec-driven +[0-9a-f]{6} `, 'm'))
+    }
+    const json = JSON.parse((await run(['label', 'list', '--json'])).stdout)
+    expect(json).toContainEqual({
+      name: 'area',
+      color: 'ff8800',
+      description: 'Area of code',
+      group: null,
     })
+    await expectRefused(['label', 'create', 'Area'], 'There is a label named "area" already')
+    await expectRefused(['label', 'create', 'z', '--color', 'red'], '"red" is not a color')
+    expect((await run(['label', 'create', 'z'])).code).toBe(0)
+    expect(hoot.labels.findByName('z')).toMatchObject({ description: '', group: null })
+    expect(hoot.labels.findByName('z')!.color).toMatch(/^[0-9a-f]{6}$/)
+    expect((await run(['label', 'edit', 'AREA', '--name', 'zone', '--color', '00FF00'])).code).toBe(
+      0,
+    )
+    expect(hoot.labels.findByName('zone')).toMatchObject({ color: '00ff00' })
+    await expectRefused(['label', 'edit', 'nope', '--name', 'n'], 'There is no label named "nope".')
+    await expectRefused(['label', 'edit', 'zone'], 'Nothing to change')
   })
 
-  it('reports for the issue whatever project it is in now', async () => {
-    hoot.issues.update(issue.id, { projectId: hoot.hotel.id, status: 'canceled' })
-    expect((await report(['no-split', '--summary', 'x'])).code).toBe(0)
+  it("refuses to change or delete the labels of the workflow's group, or take a name of theirs", async () => {
+    for (const args of [
+      ['label', 'edit', 'Scope', '--name', 'Begin'],
+      ['label', 'edit', 'Design', '--color', '112233'],
+      ['label', 'edit', 'Split', '--description', 'x'],
+      ['label', 'delete', 'Implement', '--yes'],
+    ]) {
+      await expectRefused(args, 'belongs to the workflow Spec-driven')
+    }
+    await expectRefused(
+      ['label', 'create', 'design'],
+      'There is a label named "Spec-driven › Design"',
+    )
+    expect(hoot.labels.findByName('Scope')).toMatchObject({ name: 'Scope', group: 'Spec-driven' })
+  })
+
+  it('deletes a label only with --yes, taking it off every issue', async () => {
+    hoot.labels.createLabel({ name: 'tmp' })
+    await run(['issue', 'create', '--title', 'B', '--label', 'tmp'])
+    const b = saved().at(-1)!
+    await expectRefused(['label', 'delete', 'tmp'], 'give --yes to delete it')
+    expect(labelsOf(b)).toEqual(['tmp'])
+    expect(await run(['label', 'delete', 'tmp', '--yes'])).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
+    expect(labelsOf(b)).toEqual([])
+    expect(hoot.labels.findByName('tmp')).toBeUndefined()
+  })
+})
+
+describe('hoot session start', () => {
+  it('asks Hoot for a session for an issue of the project, and prints the worktree it runs in', async () => {
+    const a = addIssue('A')
+    expect(await run(['session', 'start', id(a)])).toEqual({
+      code: 0,
+      stdout: `/worktrees/gamma/iss-${a.id}\n`,
+      stderr: '',
+    })
+    expect(hoot.startedSessions).toEqual([{ issueId: a.id, prompt: null }])
+    expect(labelsOf(a)).toEqual(['Spec-driven › Scope'])
+  })
+
+  it('gives the session the first message of a file', async () => {
+    const a = addIssue('A')
+    const file = path.join(hoot.directory, 'p.txt')
+    fs.writeFileSync(file, 'Do this first.\n')
+    expect((await run(['session', 'start', `${a.id}`, '--prompt-file', file])).code).toBe(0)
+    expect(hoot.startedSessions).toEqual([{ issueId: a.id, prompt: 'Do this first.\n' }])
+    await expectRefused(
+      ['session', 'start', id(a), '--prompt-file', path.join(hoot.directory, 'missing.txt')],
+      'Could not read the first message from',
+    )
+    expect(hoot.startedSessions).toHaveLength(1)
+  })
+
+  it('refuses an issue that cannot be started now, saying every reason, and starts nothing', async () => {
+    const a = addIssue('A')
+    const b = addIssue('B', 'todo')
+    block(a, b)
+    await expectRefused(
+      ['session', 'start', id(a)],
+      `Work on ${id(a)} cannot be started now:\n- It waits on ${id(b)}, which is neither done nor canceled.`,
+    )
+    hoot.issues.update(b.id, { status: 'done' })
+    const d = addIssue('D')
+    hoot.labels.changeIssueLabels(d.id, { add: [hoot.labels.findByName('Split')!.id] }, 'user')
+    await expectRefused(
+      ['session', 'start', id(d)],
+      'Its workflow is finished: it has the label Split.',
+    )
+    hoot.setTools({ detecting: true, tools: [], error: null })
+    await expectRefused(
+      ['session', 'start', id(a)],
+      'still checking whether Claude Code is installed',
+    )
+    const none = addElsewhere(null, 'C')
+    await expectRefused(
+      ['session', 'start', id(none)],
+      `There is no issue ${id(none)} in this session's project, gamma.`,
+    )
+    expect(hoot.startedSessions).toEqual([])
+  })
+
+  it('says why the session did not start', async () => {
+    const a = addIssue('A')
+    hoot.setStartSession(async () => ({ ok: false, message: 'Claude Code exited.' }))
+    const stderr = await expectRefused(['session', 'start', id(a)], 'Claude Code exited.')
+    expect(stderr).toBe('error: Claude Code exited.\n')
   })
 })
 
@@ -1598,8 +1752,11 @@ describe('hoot --help and hoot issue --help', () => {
       '--remove-parent',
       '--add-sub-issue <issues>',
       '--remove-sub-issue <issues>',
-      'split',
+      'create-batch',
       '--file <file>',
+      '--label <names>',
+      '--add-label <names>',
+      '--remove-label <names>',
       '--blocked-by <issues>',
       '--blocking <issues>',
       '--add-blocked-by <issues>',
@@ -1620,7 +1777,10 @@ describe('hoot --help and hoot issue --help', () => {
     expect(help).toMatch(
       /Usage: hoot issue edit .*--add-blocked-by <issues>.*--remove-blocked-by <issues>.*--add-blocking <issues>.*--remove-blocking <issues>/,
     )
-    expect(help).toMatch(/Usage: hoot issue split \[options\] <issue>.*--file <file>.*--json/)
+    expect(help).toMatch(
+      /Usage: hoot issue create-batch \[options\] <issue>.*--file <file>.*--json/,
+    )
+    expect(`${top.stdout}${issue.stdout}`).not.toMatch(/step/i)
   })
 
   it('shows the help of a command', async () => {
@@ -1629,20 +1789,32 @@ describe('hoot --help and hoot issue --help', () => {
     expect(stdout).toContain('Usage: hoot issue create [options]')
   })
 
-  it('names the step command, its argument and its options', async () => {
+  it('names the label and session commands, and no step command', async () => {
     const top = await run(['--help'])
-    const step = await run(['step', '--help'])
-    expect(step.code).toBe(0)
-    const help = `${top.stdout}${step.stdout}`.replace(/\s+/g, ' ')
+    const label = await run(['label', '--help'])
+    const session = await run(['session', '--help'])
+    expect(label.code).toBe(0)
+    expect(session.code).toBe(0)
+    const all = `${top.stdout}${label.stdout}${session.stdout}`
+    const help = all.replace(/\s+/g, ' ')
     for (const text of [
-      'hoot step --help',
-      'report',
-      '<outcome>',
-      '--summary <text>',
-      '--summary-file <file>',
+      'hoot label --help',
+      'hoot session --help',
+      'Usage: hoot label list [options]',
+      'Usage: hoot label create [options] <name>',
+      'Usage: hoot label edit [options] <name>',
+      'Usage: hoot label delete [options] <name>',
+      '--color <color>',
+      '--description <text>',
+      '--yes',
+      'Usage: hoot session start [options] <issue>',
+      '--prompt-file <file>',
     ]) {
       expect(help).toContain(text)
     }
+    expect(all).not.toMatch(/step|workflow/i)
+    const step = await run(['step', 'report', 'done', '--summary', 'x'])
+    expect(step.code).toBe(1)
   })
 })
 

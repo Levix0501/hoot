@@ -2,19 +2,41 @@ import { checkedWorkflow } from './workflow-check'
 import type { WorkflowDefinition } from './workflows'
 
 /**
+ * How the agent writes a split back once the user has confirmed it: the
+ * issues of the split, created at once as sub-issues of the issue, each
+ * starting at the step `start` and blocking the issue, then the issue's
+ * label changed to Split.
+ */
+function splitInstruction(confirmed: string, start: string): string {
+  return [
+    `${confirmed} Create every issue of the split at once, as sub-issues of this issue, with one \`hoot issue create-batch {issue} --file <file>\`.`,
+    `In its JSON array, give each issue \`"labels": ["${start}"]\`, \`"status": "todo"\` and \`"blocking": ["{issue}"]\`, and in \`"blockedBy"\`, as I confirmed the order, the issues it waits on: issues of the split by their place in the array, from 1, and issues there are already by their identifiers, such as \`"ISS-12"\`.`,
+    "Write the file next to the issue's file, in a folder that Git ignores, or pass `-` to read standard input.",
+    'Do not start sessions for the sub-issues.',
+  ].join(' ')
+}
+
+/**
  * The workflow Hoot comes with, as data in the format of any other: Scope,
  * which judges whether the issue is one piece of work or several; Design,
  * which settles with the user how it is to be built, then whether one
- * session can implement it; and Implement. It passes the same check as
- * any other definition. The ids of its steps and the names of its outcomes
- * are in the records of issues' progress, and stay as they are once released.
+ * session can implement it; and Implement. Each step and its outcomes are
+ * marked by the labels of the group Spec-driven: an issue split by Scope or
+ * Design ends at Split, which it is completed with once its sub-issues are,
+ * and one implemented at Implemented. It passes the same check as any other
+ * definition.
  */
 const SPEC_DRIVEN: WorkflowDefinition = {
   name: 'Spec-driven',
+  group: 'Spec-driven',
   steps: [
     {
-      id: 'scope',
       name: 'Scope',
+      label: {
+        name: 'Scope',
+        color: '4ea7fc',
+        description: 'Judging whether the issue is one piece of work or several',
+      },
       prompt: [
         "Scope: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
         '',
@@ -31,22 +53,24 @@ const SPEC_DRIVEN: WorkflowDefinition = {
       ].join('\n'),
       outcomes: [
         {
-          name: 'no-split',
-          label: 'No split',
-          instruction: 'I confirmed that the issue is one piece of work. The summary says why.',
-          next: 'design',
+          label: 'Design',
+          instruction: 'I confirmed that the issue is one piece of work.',
+          goOn: true,
         },
         {
-          name: 'split',
           label: 'Split',
-          instruction: 'I confirmed the split. The summary is the confirmed split.',
-          next: null,
+          instruction: splitInstruction('I confirmed the split.', 'Design'),
+          goOn: false,
         },
       ],
     },
     {
-      id: 'design',
       name: 'Design',
+      label: {
+        name: 'Design',
+        color: 'bb87fc',
+        description: 'Settling how the issue is to be built, and whether one session can',
+      },
       prompt: [
         'Design: settle with me how the issue is to be built, before anything changes. Read whatever you need, but change nothing yet.',
         '',
@@ -70,34 +94,40 @@ const SPEC_DRIVEN: WorkflowDefinition = {
       ].join('\n'),
       outcomes: [
         {
-          name: 'implement',
-          label: 'Implement directly',
-          instruction:
-            'I confirmed the summary, and the issue fits one session. The summary is the confirmed summary.',
-          next: 'implement',
+          label: 'Implement',
+          instruction: 'I confirmed the summary, and the issue fits one session.',
+          goOn: true,
         },
         {
-          name: 'split',
           label: 'Split',
-          instruction:
-            'I confirmed the summary and the split. The summary is the confirmed summary, with the split after it.',
-          next: null,
+          instruction: splitInstruction('I confirmed the summary and the split.', 'Implement'),
+          goOn: false,
         },
       ],
     },
     {
-      id: 'implement',
       name: 'Implement',
+      label: {
+        name: 'Implement',
+        color: 'f2c94c',
+        description: 'Implementing the issue as Scope and Design settled it',
+      },
       prompt: 'Implement: implement the issue here, as the earlier steps settled it.',
-      outcomes: [
-        {
-          name: 'done',
-          label: 'Implemented',
-          instruction:
-            'the issue is implemented. The summary says what changed, how you verified it, and what is left undone.',
-          next: null,
-        },
-      ],
+      outcomes: [{ label: 'Implemented', instruction: 'The issue is implemented.', goOn: false }],
+    },
+  ],
+  endLabels: [
+    {
+      name: 'Split',
+      color: '95a2b3',
+      description: 'Split into sub-issues; done once they are',
+      completeWithSubIssues: true,
+    },
+    {
+      name: 'Implemented',
+      color: '4cb782',
+      description: 'Implemented in its worktree',
+      completeWithSubIssues: false,
     },
   ],
 }

@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import type { SessionInfo } from '../../shared/session'
 import type { SentIssue } from './launch'
 import {
@@ -300,8 +299,8 @@ describe('SessionManager', () => {
       title: 'Fix the login bug',
       description: 'Steps',
       branch: 'iss-7-fix',
-      step: BUILT_IN_WORKFLOW.steps[0]!,
-      stepsFile: null,
+      workflowFile: '# Workflow\n',
+      firstMessage: () => 'Start.',
     }
     const worktree = '/home/.hoot/worktrees/project/iss-7-fix'
     const sent = await manager.start(

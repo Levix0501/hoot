@@ -2,10 +2,11 @@ import { Command, CommanderError, InvalidArgumentError, Option } from 'commander
 import { MAX_BLOCKED_BY, MAX_BLOCKING } from '../shared/dependencies'
 import {
   HOOT_ENV,
+  MAX_PROMPT_LENGTH,
+  type BatchIssue,
+  type BatchReference,
   type HootAnswer,
   type IssueEdit,
-  type SplitIssue,
-  type SplitReference,
 } from '../shared/hoot-cli'
 import {
   ISSUE_DESCRIPTION_MAX_LENGTH,
@@ -15,11 +16,10 @@ import {
   issueTitle,
   listOrder,
 } from '../shared/issues'
+import { sameName } from '../shared/labels'
 import { MAX_SUB_ISSUE_LEVEL, MAX_SUB_ISSUES } from '../shared/sub-issues'
-import { stepReportText } from '../shared/workflow-text'
-import { STEP_SUMMARY_MAX_LENGTH } from '../shared/workflows'
 import { CliError, HootClient } from './client'
-import { issueJson, issueListText, issueText, jsonText } from './format'
+import { issueJson, issueListText, issueText, jsonText, labelJson, labelListText } from './format'
 import { PRIORITY_NAME_LIST, STATUS_NAME_LIST, priorityNamed, statusNamed } from './names'
 
 /** What hoot works with: its environment, its output, and the files it reads. */
@@ -59,6 +59,18 @@ function givenIssues(list: string): string[] {
   return list.split(',').map((text) => givenIssue(text.trim()))
 }
 
+/**
+ * Adds the names an option of names is given, which may be given again and
+ * hold several names separated by commas, to those it was given before.
+ */
+function addNames(value: string, previous: string[] | undefined): string[] {
+  const names = value.split(',').map((name) => name.trim())
+  if (names.some((name) => name === '')) {
+    throw new InvalidArgumentError('A label name is empty.')
+  }
+  return [...(previous ?? []), ...names]
+}
+
 const quantity = new Intl.NumberFormat('en-US')
 
 /** Why a title cannot be saved, said of `what`, such as "The title"; `null` when it can. */
@@ -82,17 +94,26 @@ function descriptionProblem(description: string, what: string): string | null {
   )
 }
 
-/** The fields an issue of `hoot issue split` may have. */
-const SPLIT_FIELDS = ['title', 'description', 'status', 'priority', 'blockedBy', 'blocking']
+/** The fields an issue of `hoot issue create-batch` may have. */
+const BATCH_FIELDS = [
+  'title',
+  'description',
+  'status',
+  'priority',
+  'labels',
+  'blockedBy',
+  'blocking',
+]
 
 /** A JSON value as a message quotes it. */
 const quoted = (value: unknown) => JSON.stringify(value)
 
 /**
- * The sub-issues `hoot issue split` is to create, from the JSON of `source`:
- * an array with an object for each, or a `CliError` saying what is wrong.
+ * The sub-issues `hoot issue create-batch` is to create, from the JSON of
+ * `source`: an array with an object for each, or a `CliError` saying what is
+ * wrong.
  */
-export function splitIssues(text: string, source: string): SplitIssue[] {
+export function batchIssues(text: string, source: string): BatchIssue[] {
   let value: unknown
   try {
     // A byte order mark is not part of the JSON.
@@ -108,18 +129,18 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
     )
   }
   const count = value.length
-  return value.map((entry: unknown, index): SplitIssue => {
+  return value.map((entry: unknown, index): BatchIssue => {
     const item = `item ${index + 1}`
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
       throw new CliError(`Item ${index + 1} in ${source} is not a JSON object.`)
     }
     const fields = entry as Record<string, unknown>
     for (const key of Object.keys(fields)) {
-      if (!SPLIT_FIELDS.includes(key)) {
+      if (!BATCH_FIELDS.includes(key)) {
         throw new CliError(
           `Item ${index + 1} in ${source} has the field ${quoted(key)}, which an issue does not ` +
             `have: it has "title", and may have "description", "status", "priority", ` +
-            `"blockedBy" and "blocking".`,
+            `"labels", "blockedBy" and "blocking".`,
         )
       }
     }
@@ -153,7 +174,7 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
       )
     }
     /** The issues a field lists, each another item by its place, or an issue by its identifier. */
-    const references = (field: 'blockedBy' | 'blocking'): SplitReference[] => {
+    const references = (field: 'blockedBy' | 'blocking'): BatchReference[] => {
       // Only a missing field lists none: null is not an array.
       const list = fields[field] === undefined ? [] : fields[field]
       if (!Array.isArray(list)) {
@@ -172,6 +193,18 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
         )
       })
     }
+    // Only a missing field lists none: null is not an array.
+    const labels = fields.labels === undefined ? [] : fields.labels
+    if (!Array.isArray(labels)) {
+      throw new CliError(`The "labels" of ${item} in ${source} is not a JSON array.`)
+    }
+    for (const label of labels as unknown[]) {
+      if (typeof label !== 'string' || label.trim() === '') {
+        throw new CliError(
+          `The "labels" of ${item} in ${source} has ${quoted(label)}, which is not a label's name.`,
+        )
+      }
+    }
     return {
       title,
       description,
@@ -179,6 +212,7 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
       ...(priority === undefined ? {} : { priority: priorityNamed(priority as string)! }),
       blockedBy: references('blockedBy'),
       blocking: references('blocking'),
+      labels: (labels as string[]).map((label) => label.trim()),
     }
   })
 }
@@ -187,6 +221,21 @@ export function splitIssues(text: string, source: string): SplitIssue[] {
 function answered<T extends HootAnswer<object>>(answer: T): Extract<T, { ok: true }> {
   if (!answer.ok) throw new CliError(answer.message)
   return answer as Extract<T, { ok: true }>
+}
+
+/**
+ * Checks that each of the names is a label's, whatever its case; a
+ * `CliError` names the first that is not.
+ */
+async function knownLabels(client: HootClient, names: readonly string[]): Promise<void> {
+  const { labels } = answered(await client.listLabels())
+  for (const name of names) {
+    if (!labels.some((label) => sameName(label.name, name))) {
+      throw new CliError(
+        `There is no label named "${name}". Run "hoot label list" for the labels there are.`,
+      )
+    }
+  }
 }
 
 /** Text decoded as UTF-8, kept exactly as it is, byte order mark included. */
@@ -200,11 +249,12 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 
 /**
  * Builds hoot's commands: `hoot issue view`, `list`, `create`, `edit` and
- * `split`, modeled on `gh issue`, which read or create the issues of the
- * project of the Hoot session hoot runs in, and change their parents,
- * sub-issues and dependencies; and `hoot step report`, which reports a step
- * of the workflow of the issue the session was started from. Each works
- * through the Hoot that started the session.
+ * `create-batch`, modeled on `gh issue`, which read or create the issues of
+ * the project of the Hoot session hoot runs in, and change their parents,
+ * sub-issues, dependencies and labels; `hoot label list`, `create`, `edit`
+ * and `delete`, modeled on `gh label`; and `hoot session start`, which starts
+ * a session for an issue. Each works through the Hoot that started the
+ * session.
  */
 export function hootProgram(io: CliIo): Command {
   /** The Hoot and the session that the session's environment names. */
@@ -237,8 +287,8 @@ export function hootProgram(io: CliIo): Command {
   const program = new Command('hoot')
     .description(
       'Read and create the issues of the project of the Hoot session that hoot runs in, change ' +
-        'their parents, sub-issues and dependencies, split an issue into sub-issues, and report ' +
-        'the steps of the workflow of the issue the session was started from.',
+        'their parents, sub-issues, dependencies and labels, create sub-issues of an issue all ' +
+        'at once, manage the labels, and start sessions for the issues.',
     )
     .configureOutput({
       writeOut: (text) => io.write(text),
@@ -248,14 +298,15 @@ export function hootProgram(io: CliIo): Command {
     .addHelpText(
       'after',
       '\nRun "hoot issue --help" for the issue commands, their options, and the names of the statuses and priorities.' +
-        '\nRun "hoot step --help" for reporting a step of the workflow.',
+        '\nRun "hoot label --help" for the label commands.' +
+        '\nRun "hoot session --help" for starting a session for an issue.',
     )
 
   const issueCommand: Command = program
     .command('issue')
     .description(
       "Show, list and create the issues of the session's project, change their parents, " +
-        'sub-issues and dependencies, and split an issue into sub-issues',
+        'sub-issues, dependencies and labels, and create sub-issues of an issue all at once',
     )
     // Every command's usage, so that this help says all there is.
     .addHelpText('after', () =>
@@ -265,9 +316,9 @@ export function hootProgram(io: CliIo): Command {
   issueCommand
     .command('view')
     .description(
-      'Show an issue: its identifier and title; its status, priority and creation time; the issue ' +
-        'it is a sub-issue of; its description; its sub-issues; and the issues it is blocked by ' +
-        'and those it blocks',
+      'Show an issue: its identifier and title; its status, priority and creation time; its ' +
+        'labels; the issue it is a sub-issue of; its description; its sub-issues; and the issues ' +
+        'it is blocked by and those it blocks',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option('--json', 'print the issue as a JSON object')
@@ -302,17 +353,30 @@ export function hootProgram(io: CliIo): Command {
           return [...(previous ?? []), name]
         }),
     )
+    .option(
+      '--label <names>',
+      'list only the issues that have every one of these labels, separated by commas; give it again for more',
+      addNames,
+    )
     .option('--json', 'print the issues as a JSON array of objects')
-    .action(async (options: { all?: boolean; status?: string[]; json?: boolean }) => {
-      const { issues } = answered(await connect().listIssues())
-      const statuses = options.status?.map((name) => statusNamed(name))
-      const listed = listOrder(issues, 'all').filter((issue) =>
-        statuses === undefined
-          ? options.all === true || isIssueOpen(issue)
-          : statuses.includes(issue.status),
-      )
-      io.write(options.json ? jsonText(listed.map(issueJson)) : issueListText(listed))
-    })
+    .action(
+      async (options: { all?: boolean; status?: string[]; label?: string[]; json?: boolean }) => {
+        const client = connect()
+        if (options.label !== undefined) await knownLabels(client, options.label)
+        const { issues } = answered(await client.listIssues())
+        const statuses = options.status?.map((name) => statusNamed(name))
+        const listed = listOrder(issues, 'all').filter(
+          (issue) =>
+            (statuses === undefined
+              ? options.all === true || isIssueOpen(issue)
+              : statuses.includes(issue.status)) &&
+            (options.label ?? []).every((name) =>
+              issue.labels.some((label) => sameName(label.name, name)),
+            ),
+        )
+        io.write(options.json ? jsonText(listed.map(issueJson)) : issueListText(listed))
+      },
+    )
 
   issueCommand
     .command('create')
@@ -351,6 +415,11 @@ export function hootProgram(io: CliIo): Command {
       '--blocking <issues>',
       'make these issues of the project, separated by commas, blocked by it, so that they wait for it',
     )
+    .option(
+      '--label <names>',
+      'give it these labels, separated by commas; give it again for more',
+      addNames,
+    )
     .option('--json', 'print the new issue as a JSON object instead of its identifier')
     .action(
       async (
@@ -363,6 +432,7 @@ export function hootProgram(io: CliIo): Command {
           parent?: string
           blockedBy?: string
           blocking?: string
+          label?: string[]
           json?: boolean
         },
         command: Command,
@@ -392,6 +462,7 @@ export function hootProgram(io: CliIo): Command {
             ...(parent === undefined ? {} : { parent }),
             ...(blockedBy === undefined ? {} : { blockedBy }),
             ...(blocking === undefined ? {} : { blocking }),
+            ...(options.label === undefined ? {} : { labels: options.label }),
           }),
         )
         io.write(options.json ? jsonText(issueJson(created)) : `${issueIdentifier(created.id)}\n`)
@@ -401,13 +472,14 @@ export function hootProgram(io: CliIo): Command {
   issueCommand
     .command('edit')
     .description(
-      'Change the parent, the sub-issues and the dependencies of an issue, all together or, when ' +
-        `one of the changes cannot be made, not at all, and print its identifier. An issue has at ` +
-        `most ${MAX_SUB_ISSUES} sub-issues and is at most ${MAX_SUB_ISSUE_LEVEL} levels below a ` +
-        'top-level issue, and cannot be below itself. An issue waits for the issues it is blocked ' +
-        `by and, as a parent, for its sub-issues; it is blocked by at most ${MAX_BLOCKED_BY} ` +
-        `issues and blocks at most ${MAX_BLOCKING}, cannot be blocked by an issue above or below ` +
-        'it, and cannot wait for itself',
+      'Change the parent, the sub-issues, the dependencies and the labels of an issue, all ' +
+        'together or, when one of the changes cannot be made, not at all, and print its ' +
+        `identifier. An issue has at most ${MAX_SUB_ISSUES} sub-issues and is at most ` +
+        `${MAX_SUB_ISSUE_LEVEL} levels below a top-level issue, and cannot be below itself. An ` +
+        `issue waits for the issues it is blocked by; it is blocked by at most ${MAX_BLOCKED_BY} ` +
+        `issues and blocks at most ${MAX_BLOCKING}, and cannot wait for itself, but can be ` +
+        'blocked by an issue above or below it, or block one. An issue has at most one label ' +
+        'of a group: given another, it no longer has the one it had',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .addOption(
@@ -443,6 +515,16 @@ export function hootProgram(io: CliIo): Command {
       '--remove-blocking <issues>',
       'make these issues, separated by commas, no longer blocked by it',
     )
+    .option(
+      '--add-label <names>',
+      'give it these labels, separated by commas, in this order; give it again for more',
+      addNames,
+    )
+    .option(
+      '--remove-label <names>',
+      'take these labels, separated by commas, off it; give it again for more',
+      addNames,
+    )
     .action(
       async (
         text: string,
@@ -455,6 +537,8 @@ export function hootProgram(io: CliIo): Command {
           removeBlockedBy?: string
           addBlocking?: string
           removeBlocking?: string
+          addLabel?: string[]
+          removeLabel?: string[]
         },
       ) => {
         const digits = givenIssue(text)
@@ -475,11 +559,13 @@ export function hootProgram(io: CliIo): Command {
         if (options.removeBlocking !== undefined) {
           edit.removeBlocking = givenIssues(options.removeBlocking)
         }
+        if (options.addLabel !== undefined) edit.addLabels = options.addLabel
+        if (options.removeLabel !== undefined) edit.removeLabels = options.removeLabel
         if (Object.keys(edit).length === 0) {
           throw new CliError(
             'Nothing to change: give --parent, --remove-parent, --add-sub-issue, ' +
-              '--remove-sub-issue, --add-blocked-by, --remove-blocked-by, --add-blocking or ' +
-              '--remove-blocking.',
+              '--remove-sub-issue, --add-blocked-by, --remove-blocked-by, --add-blocking, ' +
+              '--remove-blocking, --add-label or --remove-label.',
           )
         }
         const { issue: edited } = answered(await connect().editIssue(digits, edit))
@@ -488,21 +574,23 @@ export function hootProgram(io: CliIo): Command {
     )
 
   issueCommand
-    .command('split')
+    .command('create-batch')
     .description(
-      'Split an issue: create the issues a JSON file lists as its last sub-issues, in order, ' +
-        'each blocked by the issues it lists and blocking others, all together or, when one of ' +
-        'them cannot be created, none; and print their identifiers, in order. Each is created as ' +
-        '"hoot issue create --parent <issue>" creates one, with the same rules',
+      'Create the issues a JSON file lists as the last sub-issues of an issue, in order, each ' +
+        'blocked by the issues it lists, blocking others and with the labels it lists, all ' +
+        'together or, when one of them cannot be created, none; and print their identifiers, ' +
+        'in order. Each is created as "hoot issue create --parent <issue>" creates one, with ' +
+        'the same rules',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .requiredOption(
       '--file <file>',
       'read the issues from a UTF-8 file, or from standard input with -: a JSON array with an ' +
         'object for each issue, with "title", and optionally "description", "status" and ' +
-        '"priority" (by their names), "blockedBy", the issues it is blocked by, and "blocking", ' +
-        'those it blocks: arrays of the places of other issues in the array, from 1, and the ' +
-        'identifiers of issues of the project, such as "ISS-12"',
+        '"priority" (by their names), "labels", an array of the names of its labels, ' +
+        '"blockedBy", the issues it is blocked by, and "blocking", those it blocks: arrays of ' +
+        'the places of other issues in the array, from 1, and the identifiers of issues of the ' +
+        'project, such as "ISS-12"',
     )
     .option(
       '--json',
@@ -511,8 +599,8 @@ export function hootProgram(io: CliIo): Command {
     .action(async (text: string, options: { file: string; json?: boolean }) => {
       const digits = givenIssue(text)
       const source = options.file === '-' ? 'standard input' : options.file
-      const issues = splitIssues(await readText(options.file, 'issues'), source)
-      const { issues: created } = answered(await connect().split(digits, issues))
+      const issues = batchIssues(await readText(options.file, 'issues'), source)
+      const { issues: created } = answered(await connect().createBatch(digits, issues))
       io.write(
         options.json
           ? jsonText(created.map(issueJson))
@@ -520,44 +608,126 @@ export function hootProgram(io: CliIo): Command {
       )
     })
 
-  const stepCommand: Command = program
-    .command('step')
-    .description('Report the steps of the workflow of the issue that this session was started from')
+  const labelCommand: Command = program
+    .command('label')
+    .description('List, create, change and delete the labels, which any issue can have')
     .addHelpText('after', () =>
-      stepCommand.commands.map((command) => `\n${command.helpInformation()}`).join(''),
+      labelCommand.commands.map((command) => `\n${command.helpInformation()}`).join(''),
     )
 
-  stepCommand
-    .command('report')
+  labelCommand
+    .command('list')
     .description(
-      'Report the outcome of the current step, with a summary of what the step found, ' +
-        'and print what to do next: the next step, or that the workflow is finished',
+      'List the labels, one line each: the name, the group (No group for none), the color and ' +
+        'the description',
     )
-    .argument('<outcome>', 'the name of one of the outcomes of the current step')
-    .addOption(new Option('--summary <text>', 'the summary, in Markdown').conflicts('summaryFile'))
+    .option('--json', 'print the labels as a JSON array of objects')
+    .action(async (options: { json?: boolean }) => {
+      const { labels } = answered(await connect().listLabels())
+      io.write(options.json ? jsonText(labels.map(labelJson)) : labelListText(labels))
+    })
+
+  labelCommand
+    .command('create')
+    .description(
+      'Create a label, without a group. No two labels can have the same name, whatever its case',
+    )
+    .argument('<name>', "the label's name")
+    .option('--color <color>', 'six hexadecimal digits, such as ff8800; without it, Hoot picks one')
+    .option('--description <text>', 'a description; without it, the label has none')
+    .action(async (name: string, options: { color?: string; description?: string }) => {
+      answered(
+        await connect().createLabel({
+          name,
+          ...(options.color === undefined ? {} : { color: options.color }),
+          ...(options.description === undefined ? {} : { description: options.description }),
+        }),
+      )
+    })
+
+  labelCommand
+    .command('edit')
+    .description(
+      "Change a label's name, color or description. Some labels, which Hoot keeps as they " +
+        'are, cannot be changed: hoot then says why',
+    )
+    .argument('<name>', "the label's name, whatever its case")
+    .option('--name <name>', 'its new name')
+    .option('--color <color>', 'its new color: six hexadecimal digits, such as ff8800')
+    .option('--description <text>', 'its new description')
+    .action(
+      async (name: string, options: { name?: string; color?: string; description?: string }) => {
+        if (
+          options.name === undefined &&
+          options.color === undefined &&
+          options.description === undefined
+        ) {
+          throw new CliError('Nothing to change: give --name, --color or --description.')
+        }
+        answered(
+          await connect().editLabel(name, {
+            ...(options.name === undefined ? {} : { name: options.name }),
+            ...(options.color === undefined ? {} : { color: options.color }),
+            ...(options.description === undefined ? {} : { description: options.description }),
+          }),
+        )
+      },
+    )
+
+  labelCommand
+    .command('delete')
+    .description(
+      'Delete a label, which every issue that has it no longer has. Some labels, which Hoot ' +
+        'keeps as they are, cannot be deleted: hoot then says why',
+    )
+    .argument('<name>', "the label's name, whatever its case")
+    .option('--yes', 'delete it: without it, hoot deletes nothing')
+    .action(async (name: string, options: { yes?: boolean }) => {
+      if (options.yes !== true) {
+        throw new CliError(
+          'Deleting a label takes it off every issue that has it, and cannot be undone: ' +
+            'give --yes to delete it.',
+        )
+      }
+      answered(await connect().deleteLabel(name))
+    })
+
+  const sessionCommand: Command = program
+    .command('session')
+    .description('Start sessions for the issues')
+    .addHelpText('after', () =>
+      sessionCommand.commands.map((command) => `\n${command.helpInformation()}`).join(''),
+    )
+
+  sessionCommand
+    .command('start')
+    .description(
+      "Start a Claude Code session for an issue of the project, in the issue's worktree, as its " +
+        'start button in Hoot starts one, and print the root of the worktree. It shows in the ' +
+        "sidebar, and Hoot's window goes on showing what it showed. Nothing starts while the " +
+        "issue's start button could not start a session either, such as while the issue waits " +
+        'on issues neither done nor canceled: hoot then says why',
+    )
+    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option(
-      '--summary-file <file>',
-      'read the summary from a UTF-8 file, or from standard input with -',
+      '--prompt-file <file>',
+      "the session's first message, from a UTF-8 file, or from standard input with -; without " +
+        'it, Hoot gives the session the first message its start button would',
     )
-    .action(async (outcome: string, options: { summary?: string; summaryFile?: string }) => {
-      const summary =
-        options.summaryFile === undefined
-          ? options.summary
-          : await readText(options.summaryFile, 'summary')
-      if (summary === undefined) {
+    .action(async (text: string, options: { promptFile?: string }) => {
+      const digits = givenIssue(text)
+      const prompt =
+        options.promptFile === undefined
+          ? null
+          : await readText(options.promptFile, 'first message')
+      if (prompt !== null && prompt.length > MAX_PROMPT_LENGTH) {
         throw new CliError(
-          'No summary was given: give it with --summary <text> or --summary-file <file>.',
+          `The first message is ${quantity.format(prompt.length)} characters long; a session ` +
+            `is given one of up to ${quantity.format(MAX_PROMPT_LENGTH)}.`,
         )
       }
-      if (summary.trim() === '') throw new CliError('The summary is empty, or only whitespace.')
-      if (summary.length > STEP_SUMMARY_MAX_LENGTH) {
-        throw new CliError(
-          `The summary is ${quantity.format(summary.length)} characters long; ` +
-            `Hoot saves summaries of up to ${quantity.format(STEP_SUMMARY_MAX_LENGTH)}.`,
-        )
-      }
-      const { report } = answered(await connect().reportStep({ outcome, summary }))
-      io.write(stepReportText(report))
+      const { worktreePath } = answered(await connect().startSession(digits, prompt))
+      io.write(`${worktreePath}\n`)
     })
 
   return program

@@ -6,7 +6,7 @@ import {
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
 import { TOOLS, type ToolId } from '../../shared/tools'
-import { toolStatus } from '../lib/tool-status'
+import { toolStatus } from '../../shared/tool-status'
 import { ToolIcon } from './tool-icon'
 
 interface ItemProps {

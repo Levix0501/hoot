@@ -3,10 +3,8 @@
  * first, the built-in one included.
  */
 import { z } from 'zod'
+import { LABEL_DESCRIPTION_MAX_LENGTH, LABEL_NAME_MAX_LENGTH } from './labels'
 import type { WorkflowDefinition } from './workflows'
-
-/** The ids of steps and the names of outcomes: lower-case letters and digits, in words joined by `-`. */
-const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 /** Text that goes between others in messages: not empty, without whitespace around it, CR or NUL. */
 function text(where: string) {
@@ -22,51 +20,81 @@ function line(where: string) {
   return text(where).refine((value) => !value.includes('\n'), `${where} is not on one line.`)
 }
 
+/** A label's name: on one line, as long as Hoot saves, and without a comma, which separates names. */
+function labelName(where: string) {
+  return line(where)
+    .max(LABEL_NAME_MAX_LENGTH, `${where} is longer than ${LABEL_NAME_MAX_LENGTH} characters.`)
+    .refine((value) => !value.includes(','), `${where} has a comma, which separates names.`)
+}
+
+const labelFields = {
+  name: labelName('A label name'),
+  color: z
+    .string()
+    .regex(/^[0-9a-f]{6}$/, 'A label color is not six hexadecimal digits in lower case.'),
+  description: z
+    .string()
+    .max(LABEL_DESCRIPTION_MAX_LENGTH)
+    .refine((value) => value === value.trim(), 'A label description has whitespace around it.')
+    .refine((value) => !/[\r\n\0]/.test(value), 'A label description is not on one line.'),
+}
+
+/** The key two names compare by: without regard to case. */
+const key = (name: string) => name.toLowerCase()
+
 const outcomeSchema = z.strictObject({
-  name: z.string().regex(NAME, 'An outcome name is not lower-case words joined by "-".'),
-  label: line('An outcome label'),
-  instruction: line("An outcome's instruction"),
-  next: z.string().nullable(),
+  label: z.string(),
+  instruction: text("An outcome's instruction"),
+  goOn: z.boolean(),
 })
 
 const stepSchema = z.strictObject({
-  id: z.string().regex(NAME, 'A step id is not lower-case words joined by "-".'),
   name: line('A step name'),
+  label: z.strictObject(labelFields),
   prompt: text("A step's prompt"),
   outcomes: z.array(outcomeSchema).min(1, 'A step has no outcome.'),
 })
 
+const endLabelSchema = z.strictObject({ ...labelFields, completeWithSubIssues: z.boolean() })
+
 const workflowSchema = z
   .strictObject({
     name: line("The workflow's name"),
+    group: labelName("The name of the workflow's group"),
     steps: z.array(stepSchema).min(1, 'The workflow has no step.'),
+    endLabels: z.array(endLabelSchema),
   })
   .superRefine((workflow, context) => {
     const problem = (message: string, path: Array<string | number>) =>
       context.addIssue({ code: 'custom', message, path })
-    const ids = new Set<string>()
-    const names = new Set<string>()
+    const steps = new Set<string>()
     workflow.steps.forEach((step, index) => {
-      if (ids.has(step.id)) problem(`Two steps have the id "${step.id}".`, ['steps', index, 'id'])
-      if (names.has(step.name)) {
+      if (steps.has(key(step.name))) {
         problem(`Two steps have the name "${step.name}".`, ['steps', index, 'name'])
       }
-      ids.add(step.id)
-      names.add(step.name)
+      steps.add(key(step.name))
     })
+    const labels = new Set<string>()
+    const label = (name: string, path: Array<string | number>) => {
+      if (labels.has(key(name))) problem(`Two labels have the name "${name}".`, path)
+      labels.add(key(name))
+    }
+    workflow.steps.forEach((step, index) => label(step.label.name, ['steps', index, 'label']))
+    workflow.endLabels.forEach((end, index) => label(end.name, ['endLabels', index, 'name']))
+    const ends = new Set(workflow.endLabels.map((end) => key(end.name)))
     workflow.steps.forEach((step, index) => {
-      const outcomes = new Set<string>()
       step.outcomes.forEach((outcome, position) => {
         const path = ['steps', index, 'outcomes', position]
-        if (outcomes.has(outcome.name)) {
-          problem(`${step.name} has two outcomes named "${outcome.name}".`, [...path, 'name'])
-        }
-        outcomes.add(outcome.name)
-        if (outcome.next !== null && !ids.has(outcome.next)) {
-          problem(`The outcome "${outcome.name}" leads to no step: "${outcome.next}".`, [
+        if (!labels.has(key(outcome.label))) {
+          problem(`The outcome changes to "${outcome.label}", which is no label of the workflow.`, [
             ...path,
-            'next',
+            'label',
           ])
+        } else if (ends.has(key(outcome.label)) && outcome.goOn) {
+          problem(
+            `The outcome changes to the end label "${outcome.label}", after which there is no step to go on with.`,
+            [...path, 'goOn'],
+          )
         }
       })
     })
@@ -77,11 +105,14 @@ export type WorkflowCheck =
   | { ok: false; problems: string[] }
 
 /**
- * Checks that something is a workflow definition Hoot can run: every step
- * with an id, a name, a prompt and at least one outcome; each outcome with a
- * name, a label, an instruction, and a step it leads to that the workflow
- * has, or none for the end. Ids, step names and the outcome names of a step
- * are each different, and nothing else is in it.
+ * Checks that something is a workflow definition Hoot can run: a name, the
+ * name of its group of labels, at least one step and any end labels. Each
+ * step has a name, a label, a prompt and at least one outcome; each outcome
+ * the label it changes the issue's to, one of the workflow's, an
+ * instruction, and whether the agent goes on afterwards, which it cannot
+ * after an end label. Labels have a name, a color and a description. Step
+ * names and label names are each different, without regard to case, and
+ * nothing else is in it.
  */
 export function checkWorkflow(value: unknown): WorkflowCheck {
   const parsed = workflowSchema.safeParse(value)

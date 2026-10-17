@@ -2,8 +2,6 @@ import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Issue } from '../../shared/issues'
-import { firstMessage } from '../../shared/workflow-text'
-import type { WorkflowStep } from '../../shared/workflows'
 import { findPermissionLevel, type PermissionLevel } from '../../shared/permission-levels'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
@@ -16,6 +14,7 @@ import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
 import { findAgentCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
+import type { SessionFiles } from '../workflows/workflow-executor'
 import { SessionError, type SessionLaunch } from './session-manager'
 
 export interface LaunchContext {
@@ -39,15 +38,15 @@ export interface LaunchContext {
 }
 
 /**
- * What a session started from an issue's start button sends Claude Code: the
- * issue's title and description, the branch of the worktree the session
- * runs in, the step of the issue's workflow the session starts at, and the
- * text of the file of what earlier steps found, `null` when there is none.
+ * What a session started from an issue sends Claude Code: the issue's title
+ * and description, the text of the file of its workflow, and the first
+ * message, given the files once they are written and the branch of the
+ * worktree the session runs in.
  */
 export interface SentIssue extends Pick<Issue, 'title' | 'description'> {
   branch: string
-  step: WorkflowStep
-  stepsFile: string | null
+  workflowFile: string
+  firstMessage(files: SessionFiles): string
 }
 
 /**
@@ -64,8 +63,8 @@ const TEMPORARY_GITIGNORE = '# Created by Hoot automatically.\n*\n'
 /** The name of the file that holds an issue sent to a session, in the session's own folder. */
 const ISSUE_FILE_NAME = 'issue.md'
 
-/** The name of the file of what earlier steps found, beside the issue's file. */
-const STEPS_FILE_NAME = 'steps.md'
+/** The name of the file of the issue's workflow, beside the issue's file. */
+const WORKFLOW_FILE_NAME = 'workflow.md'
 
 /**
  * Text without its NUL characters: a program's arguments end at the first
@@ -89,26 +88,28 @@ export function issueFileText(issue: Pick<Issue, 'title' | 'description'>): stri
 /**
  * The arguments that send an issue to Claude Code, after those of its
  * permission level: the issue's title as the session's name, and the first
- * message, which points to the files and starts the step. The folder of the
- * files is in the session's working directory, where Claude Code reads them
- * at any permission level without asking. Each option and its value are one
- * argument, so that a title starting with `-` is still the name.
+ * message, which points to the files and starts the step, without its NUL
+ * characters. The folder of the files is in the session's working directory,
+ * where Claude Code reads them at any permission level without asking. Each
+ * option and its value are one argument, so that a title starting with `-`
+ * is still the name.
  */
 export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
   return [
     `--name=${withoutNul(issue.title)}`,
-    firstMessage({
-      issueFile: path.join(issueFolder, ISSUE_FILE_NAME),
-      stepsFile: issue.stepsFile === null ? null : path.join(issueFolder, STEPS_FILE_NAME),
-      branch: issue.branch,
-      step: issue.step,
-    }),
+    withoutNul(
+      issue.firstMessage({
+        issueFile: path.join(issueFolder, ISSUE_FILE_NAME),
+        workflowFile: path.join(issueFolder, WORKFLOW_FILE_NAME),
+        branch: issue.branch,
+      }),
+    ),
   ]
 }
 
 /**
- * Writes the file of an issue sent to a session, and the file of what earlier
- * steps found when there is one, in a new folder of the session's own in
+ * Writes the file of an issue sent to a session, and the file of its
+ * workflow, in a new folder of the session's own in
  * `TEMPORARY_FOLDER` of its working directory, and returns that folder. The
  * `.gitignore` there is written when it is missing and stays afterwards, as
  * does the folder that holds it: another session's folder may be beside this
@@ -126,9 +127,7 @@ async function writeIssueFolder(cwd: string, issue: SentIssue): Promise<string> 
       })
     folder = await fs.mkdtemp(path.join(temporaryFolder, 'issue-'))
     await fs.writeFile(path.join(folder, ISSUE_FILE_NAME), issueFileText(issue))
-    if (issue.stepsFile !== null) {
-      await fs.writeFile(path.join(folder, STEPS_FILE_NAME), issue.stepsFile)
-    }
+    await fs.writeFile(path.join(folder, WORKFLOW_FILE_NAME), issue.workflowFile)
     return folder
   } catch (error) {
     if (folder !== null) await fs.rm(folder, { recursive: true, force: true }).catch(() => {})

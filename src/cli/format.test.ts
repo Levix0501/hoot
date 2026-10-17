@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HootIssue, HootProject, RelatedIssue } from '../shared/hoot-cli'
 import type { IssueStatus } from '../shared/issues'
-import { issueJson, issueListText, issueText, localMinute } from './format'
+import { issueJson, issueListText, issueText, labelListText, localMinute } from './format'
 import { PRIORITY_NAME_LIST, STATUS_NAME_LIST, priorityNamed, statusNamed } from './names'
 
 const issue: HootIssue = {
@@ -17,6 +17,7 @@ const issue: HootIssue = {
   subIssues: [],
   blockedBy: [],
   blocking: [],
+  labels: [],
 }
 
 const gamma: HootProject = { id: 3, name: 'gamma' }
@@ -69,6 +70,7 @@ describe('issueJson', () => {
       subIssuesSummary: { total: 0, completed: 0, percentCompleted: 0 },
       blockedBy: [],
       blocking: [],
+      labels: [],
     })
     expect(
       issueJson({ ...issue, status: 'canceled', completedAt: Date.UTC(2026, 9, 13) }),
@@ -269,6 +271,46 @@ describe('issueListText', () => {
       ]),
     ).toBe('ISS-9   Todo     No priority  Nine\nISS-10  Backlog  Urgent       Ten\n')
     expect(issueListText([])).toBe('')
+  })
+
+  it('writes the labels of an issue after its title', () => {
+    expect(
+      issueListText([
+        {
+          ...issue,
+          labels: [
+            { name: 'Design', color: 'bb87fc', description: '', group: 'Spec-driven' },
+            { name: 'ui', color: 'f2c94c', description: '', group: null },
+          ],
+        },
+      ]),
+    ).toBe('ISS-12  In Progress  Medium  Restore sessions  [Spec-driven › Design, ui]\n')
+  })
+})
+
+describe('issueText with labels', () => {
+  it('writes the labels under the properties', () => {
+    expect(
+      issueText(
+        {
+          ...issue,
+          labels: [{ name: 'ui', color: 'f2c94c', description: '', group: null }],
+        },
+        gamma,
+      ).split('\n')[2],
+    ).toBe('Labels: ui')
+  })
+})
+
+describe('labelListText', () => {
+  it('lines up the name, the group, the color and the description', () => {
+    expect(
+      labelListText([
+        { name: 'area', color: 'ff8800', description: 'Area of code', group: null },
+        { name: 'Scope', color: '4ea7fc', description: '', group: 'Spec-driven' },
+      ]),
+    ).toBe('area   No group     ff8800  Area of code\nScope  Spec-driven  4ea7fc\n')
+    expect(labelListText([])).toBe('')
   })
 })
 

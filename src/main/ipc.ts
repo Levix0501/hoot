@@ -16,23 +16,31 @@ import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
   type AddProjectResult,
+  type CreateLabelGroupResult,
+  type CreateLabelResult,
   type DependencyChangeResult,
+  type IssueLabelsRequest,
+  type LabelChangeRequest,
+  type LabelChangeResult,
   type NewIssueDependency,
+  type NewLabelRequest,
+  type SessionStartAnswer,
   type StartSessionRequest,
   type StartSessionResult,
   type StartupState,
   type SubIssueChangeResult,
   type WindowState,
-  type WorkflowChangeResult,
 } from '../shared/ipc'
 import {
   ISSUE_TITLE_MAX_LENGTH,
+  issueIdentifier,
   type Issue,
   type IssueChanges,
   type IssueResult,
   type NewIssue,
 } from '../shared/issues'
 import type { Dependency } from '../shared/dependencies'
+import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
@@ -46,11 +54,13 @@ import type {
 import type { AgentService } from './agents/agent-service'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
+import { LabelError, type LabelStore } from './labels/label-store'
 import type { ProjectRootResult } from './projects/project-root'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import type { SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
+import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
 import type { PermissionLevelStore } from './settings/permission-level-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
@@ -65,6 +75,7 @@ export interface IpcDependencies {
   appInfo: AppInfo
   projects: ProjectStore
   issues: IssueStore
+  labels: LabelStore
   tools: ToolService
   agents: AgentService
   permissionLevels: PermissionLevelStore
@@ -75,6 +86,8 @@ export interface IpcDependencies {
   updates: UpdateService
   worktrees: WorktreeService
   workflows: WorkflowExecutor
+  /** The sessions hoot asked for, which the window answers. */
+  sessionStarts: SessionStartRequests
   resolveProjectRoot(directory: string): Promise<ProjectRootResult>
 }
 
@@ -87,6 +100,8 @@ const startSessionRequest = z.object({
   worktreePath: z.string().min(1).nullable(),
   toolId: z.enum(TOOL_IDS),
   issueId: rowId.nullable(),
+  startedBy: z.enum(['user', 'agent']).optional(),
+  prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
   permissionLevel: z.string().min(1).max(100).optional(),
   cols: terminalDimension,
   rows: terminalDimension,
@@ -138,6 +153,28 @@ const issueChanges = z.strictObject({
   priority: issuePriority.optional(),
   projectId: rowId.nullable().optional(),
 }) satisfies z.ZodType<IssueChanges>
+const labelField = z.string().max(100_000)
+const newLabelRequest = z.strictObject({
+  name: labelField,
+  color: labelField,
+  description: labelField,
+  groupId: rowId.nullable(),
+  issueId: rowId.optional(),
+}) satisfies z.ZodType<NewLabelRequest>
+const labelChangeRequest = z.strictObject({
+  name: labelField.optional(),
+  color: labelField.optional(),
+  description: labelField.optional(),
+  groupId: rowId.nullable().optional(),
+}) satisfies z.ZodType<LabelChangeRequest>
+const issueLabelsRequest = z.strictObject({
+  add: z.array(rowId).max(1_000),
+  remove: z.array(rowId).max(1_000),
+}) satisfies z.ZodType<IssueLabelsRequest>
+const sessionStartAnswer = z.union([
+  z.strictObject({ ok: z.literal(true), worktreePath: z.string() }),
+  z.strictObject({ ok: z.literal(false), message: z.string().max(100_000) }),
+]) satisfies z.ZodType<SessionStartAnswer>
 const agentId = z.enum(CODING_TOOL_IDS)
 /**
  * The longest text put on the clipboard, which only ever gets an issue's
@@ -159,6 +196,17 @@ function changeIssue(change: () => Issue | null, missing: string): IssueResult {
     return issue ? { ok: true, issue } : { ok: false, message: missing }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
+  }
+}
+
+/** Runs a change to labels, saying why it cannot be made instead of throwing a `LabelError`. */
+function changeLabels(change: () => void): LabelChangeResult {
+  try {
+    change()
+    return { ok: true }
+  } catch (error) {
+    if (error instanceof LabelError) return { ok: false, message: error.message }
+    throw error
   }
 }
 
@@ -400,24 +448,25 @@ export function registerIpc(deps: IpcDependencies): void {
           }
         }
         // And the step of the issue's workflow the session starts at: the one
-        // it was at when its start button was clicked, since the window
-        // changes none of its progress until this start has ended, so that
-        // the session is in a run of that step once it has started.
-        const start = deps.workflows.sessionStart(saved.id)
+        // of the label it carries now.
+        const start = deps.workflows.sessionStart(saved.id, issueIdentifier(saved.id))
         if (!start.ok) return start
+        const { prompt } = request
         issue = {
           title: saved.title,
           description: saved.description,
           branch: worktree.branch,
-          step: start.step,
-          stepsFile: start.stepsFile,
+          workflowFile: start.workflowFile,
+          firstMessage: prompt === undefined ? start.firstMessage : () => prompt,
         }
       }
     }
     try {
       const session = await deps.sessions.start(request, issue)
       // Work on the issue goes on in the session from now on.
-      if (request.issueId !== null) deps.workflows.sessionStarted(session.id, request.issueId)
+      if (request.issueId !== null) {
+        deps.workflows.sessionStarted(request.issueId, request.startedBy ?? 'user')
+      }
       return { ok: true, session }
     } catch (error) {
       if (error instanceof SessionError) return { ok: false, message: error.message }
@@ -425,11 +474,15 @@ export function registerIpc(deps: IpcDependencies): void {
     }
   })
 
+  on(IpcChannel.answerSessionStart, (...args) => {
+    const parsed = z.tuple([z.string().min(1).max(100), sessionStartAnswer]).safeParse(args)
+    if (parsed.success) deps.sessionStarts.answer(...parsed.data)
+  })
+
   handle(IpcChannel.closeSession, async (_event, value) => {
     const parsed = sessionId.safeParse(value)
     if (!parsed.success) return
     await deps.sessions.close(parsed.data)
-    deps.workflows.forgetSession(parsed.data)
   })
 
   on(IpcChannel.writeSession, (...args) => {
@@ -657,21 +710,67 @@ export function registerIpc(deps: IpcDependencies): void {
     }
   })
 
-  handle(IpcChannel.listWorkflowRecords, () => deps.workflows.listShown())
-  deps.workflows.on('changed', (issueId, records) =>
-    send(IpcChannel.workflowChanged, issueId, records),
-  )
+  // Issues Hoot completed once their sub-issues were.
+  deps.workflows.on('issues-completed', (issues) => send(IpcChannel.issuesChanged, issues))
 
-  handle(IpcChannel.reportStep, (_event, ...args): WorkflowChangeResult => {
-    const parsed = z.tuple([rowId, rowId, z.string().min(1).max(1_000)]).safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid report.' }
-    return deps.workflows.reportByUser(...parsed.data)
+  handle(IpcChannel.listLabels, () => deps.labels.snapshot())
+  // Wherever the change came from: hoot in a session, or this window.
+  deps.labels.on('changed', (labels) => send(IpcChannel.labelsChanged, labels))
+  handle(IpcChannel.listLabelEvents, () => deps.labels.eventsOfShown())
+  deps.labels.on('events-added', (events) => send(IpcChannel.labelEventsAdded, events))
+
+  handle(IpcChannel.createLabel, (_event, value): CreateLabelResult => {
+    const parsed = newLabelRequest.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid label.' }
+    const { issueId, ...label } = parsed.data
+    try {
+      const created = deps.labels.createLabel(
+        label,
+        issueId === undefined ? undefined : { issueId, actor: 'user' },
+      )
+      const { group: _group, ...saved } = created
+      return { ok: true, label: saved }
+    } catch (error) {
+      if (error instanceof LabelError) return { ok: false, message: error.message }
+      throw error
+    }
   })
 
-  handle(IpcChannel.startOverWorkflow, (_event, value): WorkflowChangeResult => {
+  handle(IpcChannel.editLabel, (_event, ...args): LabelChangeResult => {
+    const parsed = z.tuple([rowId, labelChangeRequest]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid change.' }
+    return changeLabels(() => deps.labels.editLabel(...parsed.data))
+  })
+
+  handle(IpcChannel.deleteLabel, (_event, value): LabelChangeResult => {
     const parsed = rowId.safeParse(value)
-    if (!parsed.success) return { ok: false, message: 'Invalid issue.' }
-    return deps.workflows.startOver(parsed.data)
+    if (!parsed.success) return { ok: false, message: 'Invalid label.' }
+    return changeLabels(() => deps.labels.deleteLabel(parsed.data))
+  })
+
+  handle(IpcChannel.createLabelGroup, (_event, value): CreateLabelGroupResult => {
+    const parsed = labelField.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid group.' }
+    try {
+      return { ok: true, group: deps.labels.createGroup(parsed.data) }
+    } catch (error) {
+      if (error instanceof LabelError) return { ok: false, message: error.message }
+      throw error
+    }
+  })
+
+  handle(IpcChannel.deleteLabelGroup, (_event, value): LabelChangeResult => {
+    const parsed = rowId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid group.' }
+    return changeLabels(() => deps.labels.deleteGroup(parsed.data))
+  })
+
+  handle(IpcChannel.changeIssueLabels, (_event, ...args): LabelChangeResult => {
+    const parsed = z.tuple([rowId, issueLabelsRequest]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid change.' }
+    const [issueId, change] = parsed.data
+    if (deps.issues.get(issueId) === null) return { ok: false, message: noIssue }
+    return changeLabels(() => deps.labels.changeIssueLabels(issueId, change, 'user'))
   })
 
   on(IpcChannel.writeClipboardText, (value) => {

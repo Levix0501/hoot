@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, BotIcon, InfoIcon, SunMoonIcon } from 'lucide-react'
+import { ArrowLeftIcon, BotIcon, InfoIcon, SunMoonIcon, TagIcon } from 'lucide-react'
 import { useEffect, type ComponentType } from 'react'
 import { api } from '../../lib/api'
 import { useAppStore, type SettingsSection } from '../../store/app-store'
@@ -14,6 +14,7 @@ import {
 import { AboutPage } from './about-page'
 import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
+import { LabelsPage } from './labels-page'
 
 /** The pages of the settings, in the order of their list: Agents where Hoot manages them, About last. */
 const SECTIONS: ReadonlyArray<{
@@ -23,6 +24,7 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
   ...(api.manageAgents ? [{ id: 'agents' as const, label: 'Agents', icon: BotIcon }] : []),
+  { id: 'labels', label: 'Labels', icon: TagIcon },
   { id: 'about', label: 'About', icon: InfoIcon },
 ]
 
@@ -127,6 +129,8 @@ export function SettingsView() {
       <SettingsNavigation />
       {section === 'about' ? (
         <AboutPage />
+      ) : section === 'labels' ? (
+        <LabelsPage />
       ) : section === 'agents' && api.manageAgents ? (
         <AgentsPage />
       ) : (

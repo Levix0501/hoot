@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW } from './built-in-workflow'
 import {
+  filledIn,
   firstMessage,
-  PICKED_IN_HOOT,
-  reportInstructions,
-  stepReportText,
-  stepsFileText,
-  WORKFLOW_FINISHED,
+  labelCommand,
+  outcomeInstructions,
+  workflowFileText,
 } from './workflow-text'
 import type { WorkflowStep } from './workflows'
 
@@ -16,6 +15,7 @@ const [scope, design, implement] = BUILT_IN_WORKFLOW.steps as [
   WorkflowStep,
 ]
 
+/** The prompts of the built-in steps word for word as they were before labels marked the steps. */
 const SCOPE_PROMPT = [
   "Scope: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
   '',
@@ -55,148 +55,144 @@ const DESIGN_PROMPT = [
 
 const IMPLEMENT_PROMPT = 'Implement: implement the issue here, as the earlier steps settled it.'
 
-/** How every step asks to be reported, around the list of its outcomes. */
-function reporting(outcomes: string[]): string {
-  return [
-    "When this step is done, report it with Hoot's `hoot` command:",
-    '',
-    '  hoot step report <outcome> --summary-file <file>',
-    '',
-    '<outcome> is one of:',
-    ...outcomes,
-    '',
-    "The summary is Markdown, for me and for the steps after this one, which may start in a new session that has only the issue and the summaries. Write the file next to the issue's file, in a folder that Git ignores, or pass `-` to read standard input. hoot then says what to do next.",
-  ].join('\n')
-}
+describe('the built-in prompts', () => {
+  it('are word for word what they were', () => {
+    expect(scope.prompt).toBe(SCOPE_PROMPT)
+    expect(design.prompt).toBe(DESIGN_PROMPT)
+    expect(implement.prompt).toBe(IMPLEMENT_PROMPT)
+  })
+})
 
-const SCOPE_REPORTING = reporting([
-  '- no-split: I confirmed that the issue is one piece of work. The summary says why.',
-  '- split: I confirmed the split. The summary is the confirmed split.',
-])
-const DESIGN_REPORTING = reporting([
-  '- implement: I confirmed the summary, and the issue fits one session. The summary is the confirmed summary.',
-  '- split: I confirmed the summary and the split. The summary is the confirmed summary, with the split after it.',
-])
-const IMPLEMENT_REPORTING = reporting([
-  '- done: the issue is implemented. The summary says what changed, how you verified it, and what is left undone.',
-])
+describe('filledIn', () => {
+  it("puts the issue's identifier in place of {issue}", () => {
+    expect(filledIn('hoot issue create-batch {issue} --file x, blocking {issue}', 'ISS-12')).toBe(
+      'hoot issue create-batch ISS-12 --file x, blocking ISS-12',
+    )
+    expect(filledIn('{"title": "A"}', 'ISS-12')).toBe('{"title": "A"}')
+  })
+})
 
-describe('the built-in steps', () => {
-  it('have their prompts word for word', () => {
-    expect([scope.prompt, design.prompt, implement.prompt]).toEqual([
-      SCOPE_PROMPT,
-      DESIGN_PROMPT,
-      IMPLEMENT_PROMPT,
-    ])
+describe('outcomeInstructions', () => {
+  it('lists each outcome: its instruction, the command that changes the label, and whether to go on', () => {
+    const text = outcomeInstructions(BUILT_IN_WORKFLOW, scope, 'ISS-7')
+    expect(text).toBe(
+      [
+        "When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group Spec-driven with Hoot's `hoot` command:",
+        '',
+        '- I confirmed that the issue is one piece of work.',
+        '  Then change the label to Design with `hoot issue edit ISS-7 --add-label Design`, and go on with the step of that label, Design, as workflow.md gives it.',
+        `- ${filledIn(scope.outcomes[1]!.instruction, 'ISS-7')}`,
+        '  Then change the label to Split with `hoot issue edit ISS-7 --add-label Split`, and stop.',
+      ].join('\n'),
+    )
+    expect(text).toContain('`hoot issue create-batch ISS-7 --file <file>`')
+    expect(text).toContain('`"blocking": ["ISS-7"]`')
+    expect(text).not.toContain('{issue}')
   })
 
-  it('ask to be reported with their outcomes, in order, each with what it means', () => {
-    expect(reportInstructions(scope)).toBe(SCOPE_REPORTING)
-    expect(reportInstructions(design)).toBe(DESIGN_REPORTING)
-    expect(reportInstructions(implement)).toBe(IMPLEMENT_REPORTING)
+  it('stops after the end label of Implement', () => {
+    expect(outcomeInstructions(BUILT_IN_WORKFLOW, implement, 'ISS-7')).toContain(
+      '- The issue is implemented.\n  Then change the label to Implemented with `hoot issue edit ISS-7 --add-label Implemented`, and stop.',
+    )
   })
 })
 
 describe('firstMessage', () => {
-  it('opens with the issue, the branch and the step, then gives the step and how to report it', () => {
-    const message = firstMessage({
-      issueFile:
-        '/home/me/.hoot/worktrees/app/iss-1-fix-the-login-bug-on-safari/.hoot/tmp/issue-1/issue.md',
-      stepsFile: null,
-      branch: 'iss-1-fix-the-login-bug-on-safari',
-      step: scope,
-    })
-    expect(message).toBe(
-      [
-        'The issue to work on is in `/home/me/.hoot/worktrees/app/iss-1-fix-the-login-bug-on-safari/.hoot/tmp/issue-1/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
-        '',
-        'This is a Git worktree of the project, on the branch `iss-1-fix-the-login-bug-on-safari`, made for this issue. Work on the issue goes in steps; this session starts at the step Scope.',
-        '',
-        SCOPE_PROMPT,
-        '',
-        SCOPE_REPORTING,
-      ].join('\n'),
-    )
-    // Lines end with LF alone, and nothing follows the last one.
-    expect(message).not.toMatch(/\r|\s$/)
+  const message = firstMessage({
+    workflow: BUILT_IN_WORKFLOW,
+    identifier: 'ISS-7',
+    issueFile: '/work/a/.hoot/tmp/issue-x/issue.md',
+    workflowFile: '/work/a/.hoot/tmp/issue-x/workflow.md',
+    branch: 'iss-7-fix-it',
+    step: scope,
   })
 
-  it('points to what earlier steps found when there is a file of it', () => {
-    const message = firstMessage({
-      issueFile: '/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/issue.md',
-      stepsFile: '/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/steps.md',
-      branch: 'iss-13-修复登录页的问题',
+  it('points to the files, names the branch and the step, then gives the prompt and the outcomes', () => {
+    expect(message).toBe(
+      [
+        'The issue to work on is ISS-7, in `/work/a/.hoot/tmp/issue-x/issue.md`. Read it first: its title is the heading; the rest, if any, is its description. Then read `/work/a/.hoot/tmp/issue-x/workflow.md`: the workflow Spec-driven, which work on the issue goes through, step by step.',
+        "This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue. This session starts at the step Scope, which the issue's label Scope marks.",
+        SCOPE_PROMPT,
+        outcomeInstructions(BUILT_IN_WORKFLOW, scope, 'ISS-7'),
+      ].join('\n\n'),
+    )
+  })
+
+  it('ends without a line break', () => {
+    expect(message.endsWith('\n')).toBe(false)
+  })
+
+  it('starts at the step it is given', () => {
+    const at = firstMessage({
+      workflow: BUILT_IN_WORKFLOW,
+      identifier: 'ISS-7',
+      issueFile: '/i.md',
+      workflowFile: '/w.md',
+      branch: 'b',
       step: design,
     })
-    expect(message).toBe(
+    expect(at).toContain('This session starts at the step Design')
+    expect(at).toContain(DESIGN_PROMPT)
+    expect(at).toContain('`hoot issue edit ISS-7 --add-label Implement`')
+  })
+})
+
+describe('workflowFileText', () => {
+  const text = workflowFileText(BUILT_IN_WORKFLOW, 'ISS-7')
+
+  it('gives the name, each step in order with its label, prompt and outcomes, and the end labels', () => {
+    expect(text.startsWith('# Spec-driven\n\n')).toBe(true)
+    expect(text.endsWith('\n')).toBe(true)
+    const scopeAt = text.indexOf('## 1. Scope\n\nLabel: Scope\n\n' + SCOPE_PROMPT)
+    const designAt = text.indexOf('## 2. Design\n\nLabel: Design\n\n' + DESIGN_PROMPT)
+    const implementAt = text.indexOf('## 3. Implement\n\nLabel: Implement\n\n' + IMPLEMENT_PROMPT)
+    const endsAt = text.indexOf('## End labels')
+    expect(scopeAt).toBeGreaterThan(0)
+    expect(designAt).toBeGreaterThan(scopeAt)
+    expect(implementAt).toBeGreaterThan(designAt)
+    expect(endsAt).toBeGreaterThan(implementAt)
+  })
+
+  it('gives each outcome the label it changes to, its instruction, and whether it goes on', () => {
+    expect(text).toContain(
       [
-        'The issue to work on is in `/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/issue.md`. Read it first: its title is the heading; the rest, if any, is its description. What earlier steps found is in `/home/me/.hoot/worktrees/app/iss-13/.hoot/tmp/issue-AbC/steps.md`; read it too.',
-        '',
-        'This is a Git worktree of the project, on the branch `iss-13-修复登录页的问题`, made for this issue. Work on the issue goes in steps; this session starts at the step Design.',
-        '',
-        DESIGN_PROMPT,
-        '',
-        DESIGN_REPORTING,
+        '- I confirmed that the issue is one piece of work.',
+        `  - Changes the label to: Design (\`${labelCommand('ISS-7', 'Design')}\`)`,
+        '  - Go on: on; once the label is changed, go on with the step of that label, Design.',
       ].join('\n'),
     )
-  })
-
-  it('names no agent', () => {
-    for (const step of BUILT_IN_WORKFLOW.steps) {
-      const message = firstMessage({ issueFile: '/i.md', stepsFile: '/s.md', branch: 'b', step })
-      expect(message).not.toMatch(/Claude|Codex|OpenCode/)
+    expect(text).toContain(
+      [
+        '- I confirmed the summary, and the issue fits one session.',
+        '  - Changes the label to: Implement (`hoot issue edit ISS-7 --add-label Implement`)',
+        '  - Go on: on; once the label is changed, go on with the step of that label, Implement.',
+      ].join('\n'),
+    )
+    expect(text).toContain(
+      [
+        '- The issue is implemented.',
+        '  - Changes the label to: Implemented (`hoot issue edit ISS-7 --add-label Implemented`)',
+        '  - Go on: off; once the label is changed, stop.',
+      ].join('\n'),
+    )
+    for (const instruction of [scope.outcomes[1]!.instruction, design.outcomes[1]!.instruction]) {
+      expect(text).toContain(
+        [
+          `- ${filledIn(instruction, 'ISS-7')}`,
+          '  - Changes the label to: Split (`hoot issue edit ISS-7 --add-label Split`)',
+          '  - Go on: off; once the label is changed, stop.',
+        ].join('\n'),
+      )
     }
-  })
-})
-
-describe('stepReportText', () => {
-  it("says what was reported, then gives the next step's prompt and how to report it", () => {
-    expect(
-      stepReportText({ issue: 'ISS-1', step: 'Scope', outcome: 'No split', next: design }),
-    ).toBe(
-      `ISS-1: Scope → No split. Next step: Design.\n\n${DESIGN_PROMPT}\n\n${DESIGN_REPORTING}\n`,
-    )
-    expect(
-      stepReportText({
-        issue: 'ISS-1',
-        step: 'Design',
-        outcome: 'Implement directly',
-        next: implement,
-      }),
-    ).toBe(
-      `ISS-1: Design → Implement directly. Next step: Implement.\n\n${IMPLEMENT_PROMPT}\n\n${IMPLEMENT_REPORTING}\n`,
-    )
+    expect(text).toContain('`hoot issue create-batch ISS-7 --file <file>`')
+    expect(text).toContain('`"labels": ["Design"]`')
+    expect(text).toContain('`"labels": ["Implement"]`')
   })
 
-  it('says that the workflow is finished when nothing comes next', () => {
-    expect(
-      stepReportText({ issue: 'ISS-1', step: 'Implement', outcome: 'Implemented', next: null }),
-    ).toBe('ISS-1: Implement → Implemented. The workflow for this issue is finished.\n')
-    expect(WORKFLOW_FINISHED).toBe('The workflow for this issue is finished.')
-  })
-})
-
-describe('stepsFileText', () => {
-  it('gives each outcome a heading and its summary, without the NUL characters and the line breaks it ends with', () => {
-    expect(
-      stepsFileText([
-        { step: 'Scope', outcome: 'No split', summary: 'Scope found A.\0B.\n' },
-        { step: 'Design', outcome: 'Implement directly', summary: '# Plan\r\n\r\n- one\n\n\n' },
-      ]),
-    ).toBe(
-      '## Scope · No split\n\nScope found A.B.\n\n## Design · Implement directly\n\n# Plan\r\n\r\n- one\n',
+  it('says that Split completes the issue once its sub-issues are, and Implemented nothing', () => {
+    expect(text).toContain(
+      '- Split: once the issue has at least one sub-issue that Hoot shows, and each of them is done or canceled, Hoot completes the issue: Done when at least one of them is done, Canceled otherwise.',
     )
-  })
-
-  it('says of an outcome the user picked in Hoot that it has no summary', () => {
-    const text = stepsFileText([
-      { step: 'Scope', outcome: 'No split', summary: 'Fits.' },
-      { step: 'Design', outcome: 'Implement directly', summary: null },
-    ])
-    expect(text).toBe(
-      `## Scope · No split\n\nFits.\n\n## Design · Implement directly\n\n${PICKED_IN_HOOT}\n`,
-    )
-    expect(PICKED_IN_HOOT).toMatch(/picked .* in Hoot/)
-    expect(PICKED_IN_HOOT).toMatch(/no summary/)
+    expect(text).toMatch(/\n- Implemented\n$/)
   })
 })

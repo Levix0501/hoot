@@ -64,16 +64,79 @@ export function migrate(db: DatabaseSync, migrations: readonly string[]): void {
   })
 }
 
-/** Runs `body` in a write transaction, which is rolled back when it throws. */
+/**
+ * What runs with every write transaction of a database: before its changes,
+ * after them and before it commits, which may change more, and once it has
+ * committed or been rolled back.
+ */
+export interface TransactionObserver {
+  begin(): void
+  beforeCommit(): void
+  end(committed: boolean): void
+}
+
+const observers = new WeakMap<DatabaseSync, TransactionObserver[]>()
+
+/** Runs `observer` with every write transaction of `db` from now on, until the returned function stops it. */
+export function observeTransactions(db: DatabaseSync, observer: TransactionObserver): () => void {
+  observers.set(db, [...(observers.get(db) ?? []), observer])
+  return () =>
+    observers.set(
+      db,
+      (observers.get(db) ?? []).filter((entry) => entry !== observer),
+    )
+}
+
+/** How deep the transactions run inside others are, which names their savepoints. */
+let savepoints = 0
+
+/**
+ * Runs `body` in a write transaction, which is rolled back when it throws.
+ * Inside another transaction, it runs in a savepoint of that one instead,
+ * whose changes alone are rolled back when it throws, and which commits with
+ * that one.
+ */
 export function transaction<T>(db: DatabaseSync, body: () => T): T {
+  if (db.isTransaction) {
+    const name = `nested_${++savepoints}`
+    db.exec(`SAVEPOINT ${name}`)
+    try {
+      const result = body()
+      db.exec(`RELEASE ${name}`)
+      return result
+    } catch (error) {
+      db.exec(`ROLLBACK TO ${name}`)
+      db.exec(`RELEASE ${name}`)
+      throw error
+    } finally {
+      savepoints--
+    }
+  }
+  const watching = observers.get(db) ?? []
   db.exec('BEGIN IMMEDIATE')
+  let result: T
   try {
-    const result = body()
+    for (const observer of watching) observer.begin()
+    result = body()
+    for (const observer of watching) observer.beforeCommit()
     db.exec('COMMIT')
-    return result
   } catch (error) {
     if (db.isTransaction) db.exec('ROLLBACK')
+    ended(watching, false)
     throw error
+  }
+  ended(watching, true)
+  return result
+}
+
+/** Tells the observers that a transaction has ended; one that fails leaves the others to be told. */
+function ended(watching: readonly TransactionObserver[], committed: boolean): void {
+  for (const observer of watching) {
+    try {
+      observer.end(committed)
+    } catch (error) {
+      console.error('An observer of a transaction failed once it ended:', error)
+    }
   }
 }
 

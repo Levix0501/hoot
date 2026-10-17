@@ -1,8 +1,8 @@
 import { CornerLeftUpIcon, PlusIcon } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { dependencyProblem, unpickableForDependency } from '../../../shared/dependencies'
+import { unpickableForDependency } from '../../../shared/dependencies'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
-import { ancestorsOf, descendantsOf, parentOf, withParents } from '../../../shared/sub-issues'
+import { ancestorsOf, descendantsOf, parentOf } from '../../../shared/sub-issues'
 import { focusAfterOverlay, useAppStore, type IssuePicker } from '../../store/app-store'
 import { Button } from '../ui/button'
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '../ui/combobox'
@@ -22,36 +22,21 @@ function matches(issue: Issue, query: string): boolean {
 /**
  * What the picker of a parent or of sub-issues lists: the issues Hoot shows,
  * newest first, without the issue itself and, picking its parent, without
- * the issues below it, or, picking its sub-issues, without those above it;
- * and without those that would put an issue above or below one it has a
- * dependency with, or have an issue wait for itself.
+ * the issues below it, or, picking its sub-issues, without those above it.
+ * Dependencies count for nothing here.
  */
 function useCandidates(picker: IssuePicker): Issue[] {
   const issues = useAppStore((state) => state.issues)
   const links = useAppStore((state) => state.subIssues.links)
-  const dependencies = useAppStore((state) => state.dependencies.links)
   return useMemo(() => {
     const left =
       picker.kind === 'parent'
         ? descendantsOf(links, picker.issueId)
         : ancestorsOf(links, picker.issueId)
-    /** Whether the issue picked would break the rules of dependencies. */
-    const breaks = (picked: number) => {
-      const change =
-        picker.kind === 'parent'
-          ? { issueId: picker.issueId, parentId: picked }
-          : { issueId: picked, parentId: picker.issueId }
-      return (
-        dependencyProblem(withParents(links, [change]), dependencies, {
-          added: [],
-          moved: [change.issueId],
-        }) !== null
-      )
-    }
     return issues
-      .filter((issue) => issue.id !== picker.issueId && !left.has(issue.id) && !breaks(issue.id))
+      .filter((issue) => issue.id !== picker.issueId && !left.has(issue.id))
       .toSorted((a, b) => b.id - a.id)
-  }, [issues, links, dependencies, picker])
+  }, [issues, links, picker])
 }
 
 /** The last item of the picker of Blocked by… and Blocking…, which creates an issue instead. */
@@ -218,7 +203,6 @@ function SubIssuesPicker({ picker, issue }: { picker: IssuePicker; issue: Issue 
 function DependencyPicker({ picker, issue }: { picker: IssuePicker; issue: Issue }) {
   const kind = picker.kind === 'blocked-by' ? 'blocked-by' : 'blocking'
   const issues = useAppStore((state) => state.issues)
-  const links = useAppStore((state) => state.subIssues.links)
   const dependencies = useAppStore((state) => state.dependencies.links)
   const changeDependencies = useAppStore((state) => state.changeDependencies)
   const closeIssuePicker = useAppStore((state) => state.closeIssuePicker)
@@ -226,7 +210,7 @@ function DependencyPicker({ picker, issue }: { picker: IssuePicker; issue: Issue
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const items = useMemo((): DependencyItem[] => {
-    const left = unpickableForDependency(links, dependencies, issue.id, kind)
+    const left = unpickableForDependency(dependencies, issue.id, kind)
     // The issue whose identifier is typed comes first, so that Enter picks it.
     const typed = query.trim().toLowerCase()
     const exact = (candidate: Issue) => issueIdentifier(candidate.id).toLowerCase() === typed
@@ -234,7 +218,7 @@ function DependencyPicker({ picker, issue }: { picker: IssuePicker; issue: Issue
       .filter((candidate) => !left.has(candidate.id))
       .toSorted((a, b) => Number(exact(b)) - Number(exact(a)) || b.id - a.id)
     return [...candidates, CREATE_ITEM]
-  }, [issues, links, dependencies, issue.id, kind, query])
+  }, [issues, dependencies, issue.id, kind, query])
   const identifier = issueIdentifier(issue.id)
   const createLabel =
     kind === 'blocked-by'

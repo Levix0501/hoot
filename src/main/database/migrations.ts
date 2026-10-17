@@ -104,4 +104,65 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX issue_dependencies_by_blocker ON issue_dependencies (blocked_by_id, id);
   `,
+  // 5: labels, which now mark how far an issue has come through its workflow,
+  // instead of the records of its progress, which go.
+  `
+  DROP TABLE workflow_records;
+
+  -- Groups of labels, of which an issue carries at most one label.
+  CREATE TABLE label_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK (name <> ''),
+    -- The name in lower case: no two groups have the same name, whatever its case.
+    name_key TEXT NOT NULL UNIQUE,
+    -- The name of the workflow whose group it is, which alone changes it and
+    -- its labels; NULL for a group of the user's own.
+    workflow TEXT UNIQUE
+  ) STRICT;
+
+  -- The labels, which belong to no project: any issue can carry any of them.
+  CREATE TABLE labels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK (name <> ''),
+    -- The name in lower case: no two labels have the same name, whatever its
+    -- case, those in groups included.
+    name_key TEXT NOT NULL UNIQUE,
+    -- Six hexadecimal digits in lower case, without '#'.
+    color TEXT NOT NULL CHECK (length(color) = 6 AND color NOT GLOB '*[^0-9a-f]*'),
+    -- May be empty.
+    description TEXT NOT NULL,
+    -- The group it is in; NULL for none. Deleting a group leaves its labels
+    -- without one.
+    group_id INTEGER REFERENCES label_groups (id) ON DELETE SET NULL
+  ) STRICT;
+
+  CREATE INDEX labels_by_group ON labels (group_id);
+
+  -- The labels each issue carries. Deleting the issue or the label deletes the row.
+  CREATE TABLE issue_labels (
+    issue_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES labels (id) ON DELETE CASCADE,
+    PRIMARY KEY (issue_id, label_id)
+  ) STRICT;
+
+  CREATE INDEX issue_labels_by_label ON issue_labels (label_id);
+
+  -- Each label an issue was given or had taken off, in the order it happened,
+  -- for the issue's activity. Deleting a label adds none, and leaves those
+  -- of it, which keep the label as it was written then.
+  CREATE TABLE label_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('added', 'removed')),
+    -- The label as it was written then, such as 'Spec-driven › Design', and its color then.
+    label TEXT NOT NULL,
+    color TEXT NOT NULL,
+    -- Who changed it: 'user', in the window, or 'agent', with hoot.
+    actor TEXT NOT NULL CHECK (actor IN ('user', 'agent')),
+    -- Milliseconds since the Unix epoch.
+    at INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE INDEX label_events_by_issue ON label_events (issue_id, id);
+  `,
 ]

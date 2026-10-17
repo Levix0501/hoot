@@ -1,5 +1,5 @@
-import type { ToolsState } from '../../shared/ipc'
-import type { ToolDefinition } from '../../shared/tools'
+import type { ToolsState } from './ipc'
+import type { ToolDefinition } from './tools'
 
 /**
  * Whether a tool can start sessions: the shell always can; a coding tool can

@@ -1,5 +1,6 @@
-import type { HootIssue, HootProject, RelatedIssue } from '../shared/hoot-cli'
-import { issueIdentifier, PRIORITY_LABELS, STATUS_LABELS, type Issue } from '../shared/issues'
+import type { HootIssue, HootLabel, HootProject, RelatedIssue } from '../shared/hoot-cli'
+import { issueIdentifier, PRIORITY_LABELS, STATUS_LABELS } from '../shared/issues'
+import { labelText } from '../shared/labels'
 import { percentCompleted, subIssueProgress } from '../shared/sub-issues'
 import { PRIORITY_NAMES, STATUS_NAMES } from './names'
 
@@ -48,6 +49,33 @@ export interface IssueJson {
   blockedBy: RelatedIssueJson[]
   /** The issues it blocks, in the order they became blocked by it. */
   blocking: RelatedIssueJson[]
+  /** Its labels, in the order Hoot lists labels; empty without any. */
+  labels: LabelJson[]
+}
+
+/** A label as hoot prints it with `--json`. */
+export interface LabelJson {
+  name: string
+  /** Six hexadecimal digits, without `#`. */
+  color: string
+  /** Empty when it has none. */
+  description: string
+  /** The name of its group, or `null` for none. */
+  group: string | null
+}
+
+export function labelJson(label: HootLabel): LabelJson {
+  return {
+    name: label.name,
+    color: label.color,
+    description: label.description,
+    group: label.group,
+  }
+}
+
+/** How a label is written: its name, after its group's when it has one, as `Kind › Feature`. */
+export function writtenLabel(label: Pick<HootLabel, 'name' | 'group'>): string {
+  return labelText(label.name, label.group)
 }
 
 function relatedJson(issue: RelatedIssue): RelatedIssueJson {
@@ -80,6 +108,7 @@ export function issueJson(issue: HootIssue): IssueJson {
     },
     blockedBy: issue.blockedBy.map(relatedJson),
     blocking: issue.blocking.map(relatedJson),
+    labels: issue.labels.map(labelJson),
   }
 }
 
@@ -111,7 +140,8 @@ function projectNote(issue: RelatedIssue, project: HootProject): string | null {
 
 /**
  * An issue as `hoot issue view` prints it: its identifier and title; its
- * status, priority and creation time; the issue it is a sub-issue of, if
+ * status, priority and creation time; its labels, if any, such as
+ * `Labels: bug, Kind › Feature`; the issue it is a sub-issue of, if
  * any, such as `Sub-issue of ISS-4 Ship it (Todo)`; its description as it is
  * saved, after a blank line, when it has one; after a blank line, its
  * sub-issues when it has any: their progress, such as `Sub-issues · 1/3
@@ -131,6 +161,7 @@ export function issueText(issue: HootIssue, project: HootProject): string {
       `Created ${localMinute(issue.createdAt)}`,
     ].join(' · '),
   ]
+  if (issue.labels.length > 0) lines.push(`Labels: ${issue.labels.map(writtenLabel).join(', ')}`)
   if (issue.parent !== null) {
     const { parent } = issue
     const note = [STATUS_LABELS[parent.status], projectNote(parent, project)]
@@ -176,14 +207,18 @@ function relatedRows(issues: readonly RelatedIssue[], project: HootProject): str
 
 /**
  * Issues as `hoot issue list` prints them, one line each, in columns: the
- * identifier, the status, the priority and the title.
+ * identifier, the status, the priority and the title, followed by the
+ * issue's labels, if any, in brackets, such as `[bug, Kind › Feature]`.
  */
-export function issueListText(issues: readonly Issue[]): string {
+export function issueListText(issues: readonly HootIssue[]): string {
   const rows = issues.map((issue) => ({
     identifier: issueIdentifier(issue.id),
     status: STATUS_LABELS[issue.status],
     priority: PRIORITY_LABELS[issue.priority],
-    title: issue.title,
+    title:
+      issue.labels.length === 0
+        ? issue.title
+        : `${issue.title}  [${issue.labels.map(writtenLabel).join(', ')}]`,
   }))
   const width = (column: 'identifier' | 'status' | 'priority') =>
     Math.max(0, ...rows.map((row) => row[column].length))
@@ -196,5 +231,27 @@ export function issueListText(issues: readonly Issue[]): string {
         `${row.identifier.padEnd(identifierWidth)}  ${row.status.padEnd(statusWidth)}  ` +
         `${row.priority.padEnd(priorityWidth)}  ${row.title}\n`,
     )
+    .join('')
+}
+
+/**
+ * Labels as `hoot label list` prints them, one line each, in columns: the
+ * name, the group (No group for none), the color and the description.
+ */
+export function labelListText(labels: readonly HootLabel[]): string {
+  const rows = labels.map((label) => ({
+    name: label.name,
+    group: label.group ?? 'No group',
+    color: label.color,
+    description: label.description,
+  }))
+  const width = (column: 'name' | 'group') => Math.max(0, ...rows.map((row) => row[column].length))
+  const nameWidth = width('name')
+  const groupWidth = width('group')
+  return rows
+    .map((row) =>
+      `${row.name.padEnd(nameWidth)}  ${row.group.padEnd(groupWidth)}  ${row.color}  ${row.description}`.trimEnd(),
+    )
+    .map((line) => `${line}\n`)
     .join('')
 }

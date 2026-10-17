@@ -21,12 +21,20 @@ import { useAppStore } from './store/app-store'
 import { isSettingsPage } from './store/page-history'
 
 /**
- * While the sidebar's edge is dragged, the sidebar and the space it takes
- * beside the main area take each width at once instead of sliding to it, the
- * pointer shows the resize cursor wherever it is, and no text is selected.
+ * While the sidebar's edge is held, the pointer shows the resize cursor
+ * wherever it is and no text is selected. Unlike the resizing below, this
+ * lasts until the pointer is let go of, so the cursor keeps to the edge while
+ * the sidebar slides out and back in, which the width does not follow.
+ */
+const SIDEBAR_EDGE_DRAGGING_CLASS =
+  'data-edge-dragging:select-none data-edge-dragging:**:cursor-col-resize!'
+
+/**
+ * While the width follows the pointer, the sidebar and the space it takes
+ * beside the main area take each width at once instead of sliding to it.
  */
 const SIDEBAR_RESIZING_CLASS =
-  'data-resizing:select-none data-resizing:**:cursor-col-resize! data-resizing:**:data-[slot=sidebar-container]:transition-none data-resizing:**:data-[slot=sidebar-gap]:transition-none'
+  'data-resizing:**:data-[slot=sidebar-container]:transition-none data-resizing:**:data-[slot=sidebar-gap]:transition-none'
 
 /**
  * Handles the session shortcuts (⌘1–⌘9, ⌘⇧], ⌘⇧[, ⌘[, ⌘] and ⌘W) and ⌘, for
@@ -56,6 +64,7 @@ export function App() {
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen)
   const sidebarWidth = useAppStore((state) => state.sidebarWidth)
   const sidebarResizing = useAppStore((state) => state.sidebarResizing)
+  const sidebarEdgeDragging = useAppStore((state) => state.sidebarEdgeDragging)
   const settingsShown = useAppStore((state) => isSettingsPage(state.currentPage))
   useEffect(() => {
     void initialize()
@@ -73,8 +82,9 @@ export function App() {
       <SidebarProvider
         open={sidebarOpen}
         onOpenChange={setSidebarOpen}
+        data-edge-dragging={sidebarEdgeDragging || undefined}
         data-resizing={sidebarResizing || undefined}
-        className={cn('h-svh overflow-hidden', SIDEBAR_RESIZING_CLASS)}
+        className={cn('h-svh overflow-hidden', SIDEBAR_EDGE_DRAGGING_CLASS, SIDEBAR_RESIZING_CLASS)}
         style={{ '--sidebar-width': sidebarWidthStyle(sidebarWidth) } as React.CSSProperties}
       >
         {settingsShown ? (

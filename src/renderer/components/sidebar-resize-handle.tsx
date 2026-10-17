@@ -23,7 +23,9 @@ function nextFrame(): Promise<void> {
  * sliding: the width is set on the sidebar's wrapper directly, and saved when
  * the pointer is let go of. Past half the sidebar's narrowest width, the
  * sidebar slides out as it does when it is hidden, and keeps the width it had
- * before; brought back, it slides in, then follows the pointer again.
+ * before; brought back, it slides in, then follows the pointer again. The edge
+ * is held for as long as the pointer is down: the resize cursor shows, and
+ * nothing is selected, through the slides too.
  */
 function dragSidebarEdge(down: ReactPointerEvent<HTMLElement>): void {
   const handle = down.currentTarget
@@ -90,9 +92,11 @@ function dragSidebarEdge(down: ReactPointerEvent<HTMLElement>): void {
       store().setSidebarWidth(width)
     }
     store().setSidebarResizing(false)
+    store().setSidebarEdgeDragging(false)
   }
 
   store().setSidebarResizing(true)
+  store().setSidebarEdgeDragging(true)
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onUp)
@@ -120,7 +124,7 @@ export function SidebarResizeHandle() {
       onDoubleClick={() => useAppStore.getState().setSidebarWidth(SIDEBAR_WIDTH.default)}
       data-testid="sidebar-resize-handle"
     >
-      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-linear-to-b from-transparent via-foreground/25 to-transparent opacity-0 group-hover/resize:opacity-100 in-data-resizing:opacity-100" />
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-linear-to-b from-transparent via-foreground/25 to-transparent opacity-0 group-hover/resize:opacity-100 in-data-edge-dragging:opacity-100" />
     </div>
   )
 }

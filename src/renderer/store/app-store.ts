@@ -314,6 +314,13 @@ export interface AppState {
    * follows the pointer at once, without sliding.
    */
   sidebarResizing: boolean
+  /**
+   * Whether the sidebar's edge is held, from the pointer pressing it to the
+   * pointer being let go of, which outlasts the resizing above: the pointer
+   * shows the resize cursor, and no text is selected, while the sidebar
+   * slides out and back in as well.
+   */
+  sidebarEdgeDragging: boolean
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
   collapsedProjects: ReadonlySet<number>
   /** Whether the window is in full screen. */
@@ -518,6 +525,8 @@ export interface AppState {
   /** Sets the sidebar's width, brought within its limits, and saves it. */
   setSidebarWidth(width: number): void
   setSidebarResizing(resizing: boolean): void
+  /** Notes that the sidebar's edge is held from now until it is let go of. */
+  setSidebarEdgeDragging(dragging: boolean): void
   /** Expands or collapses a project in the sidebar, and saves its state. */
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
@@ -1594,6 +1603,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarOpen: true,
     sidebarWidth: SIDEBAR_WIDTH.default,
     sidebarResizing: false,
+    sidebarEdgeDragging: false,
     collapsedProjects: new Set(),
     fullScreen: false,
     appearance: DEFAULT_APPEARANCE,
@@ -2355,6 +2365,10 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     setSidebarResizing(resizing) {
       set({ sidebarResizing: resizing })
+    },
+
+    setSidebarEdgeDragging(dragging) {
+      set({ sidebarEdgeDragging: dragging })
     },
 
     setProjectExpanded(projectId, expanded) {

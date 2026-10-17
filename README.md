@@ -147,7 +147,7 @@ The latest version is the one the `latest` tag names on registry.npmjs.org, what
 npm uses; Hoot asks registry.npmjs.org only then, never in the background.
 
 - **Install** installs the npm package's latest version (`@anthropic-ai/claude-code`,
-  `@openai/codex`, `opencode-ai`) with npm, never with an agent's install script. When the first
+  `@openai/codex`, `@opencode/cli`) with npm, never with an agent's install script. When the first
   `npm` on your login shell's `PATH` runs and you can create files in its global folder's
   `lib/node_modules` and `bin`, Hoot runs `npm install -g <package>@latest` with it, as you would
   in a terminal. Otherwise it uses the npm that comes with Hoot, run by Hoot's own executable as

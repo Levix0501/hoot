@@ -31,7 +31,7 @@ const claudeProgram = (folder: string) =>
 const codexScript = (folder: string) =>
   path.join(folder, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
 const opencodeScript = () =>
-  path.join(pnpm, 'global', '5', 'node_modules', 'opencode-ai', 'bin', 'opencode')
+  path.join(pnpm, 'global', '5', 'node_modules', '@opencode', 'cli', 'bin', 'opencode')
 
 beforeAll(async () => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-program-')))

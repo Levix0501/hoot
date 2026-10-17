@@ -228,7 +228,7 @@ describe('resolveLaunch', () => {
 
   it('refuses a tool that is not on the login shell PATH', async () => {
     await expect(resolveLaunch(context({ PATH: '/usr/bin' }), 'opencode', project)).rejects.toThrow(
-      'OpenCode is not available. Install it with: npm install -g opencode-ai',
+      'OpenCode is not available. Install it with: npm install -g @opencode/cli',
     )
   })
 

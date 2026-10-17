@@ -32,7 +32,7 @@ done
 case "$spec" in
   @anthropic-ai/claude-code) command=claude ;;
   @openai/codex) command=codex ;;
-  opencode-ai) command=opencode ;;
+  @opencode/cli) command=opencode ;;
   *) echo "npm error code E404" >&2; exit 1 ;;
 esac
 version="$(cat "$root/latest-$command")"
@@ -64,7 +64,7 @@ process.exit(result.status ?? 1)
 const PACKAGES: Record<CodingToolId, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
-  opencode: 'opencode-ai',
+  opencode: '@opencode/cli',
 }
 
 let root: string
@@ -375,10 +375,10 @@ describe('AgentService installs', () => {
     write(
       path.join(root, 'npm-script'),
       [
-        'mkdir -p "$prefix/lib/node_modules/opencode-ai/bin" "$prefix/bin"',
-        `printf '#!/bin/sh\\nexit 1\\n' > "$prefix/lib/node_modules/opencode-ai/bin/opencode"`,
-        'chmod 755 "$prefix/lib/node_modules/opencode-ai/bin/opencode"',
-        'ln -sf ../lib/node_modules/opencode-ai/bin/opencode "$prefix/bin/opencode"',
+        'mkdir -p "$prefix/lib/node_modules/@opencode/cli/bin" "$prefix/bin"',
+        `printf '#!/bin/sh\\nexit 1\\n' > "$prefix/lib/node_modules/@opencode/cli/bin/opencode"`,
+        'chmod 755 "$prefix/lib/node_modules/@opencode/cli/bin/opencode"',
+        'ln -sf ../lib/node_modules/@opencode/cli/bin/opencode "$prefix/bin/opencode"',
         'exit 0',
         '',
       ].join('\n'),
@@ -765,7 +765,7 @@ describe('AgentService queue and cancelling', () => {
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(service.pendingOperations()).toEqual([])
     expect(started()).toEqual(['started @anthropic-ai/claude-code'])
-    expect(npmRuns().filter((run) => / -g (@openai|opencode-ai)/.test(run))).toEqual([])
+    expect(npmRuns().filter((run) => / -g (@openai|@opencode)/.test(run))).toEqual([])
 
     // Hoot keeps running after all, as when restarting into an update fails.
     service.resume()

@@ -16,16 +16,16 @@ describe('tools', () => {
     expect(installable.map((tool) => tool.installCommand)).toEqual([
       'npm install -g @anthropic-ai/claude-code',
       'npm install -g @openai/codex',
-      'npm install -g opencode-ai',
+      'npm install -g @opencode/cli',
     ])
-    expect(getTool('opencode').installCommand).toBe('npm install -g opencode-ai')
+    expect(getTool('opencode').installCommand).toBe('npm install -g @opencode/cli')
   })
 
   it('names the npm package each coding tool comes in', () => {
     expect(CODING_TOOLS.map((tool) => [tool.id, tool.npmPackage])).toEqual([
       ['claude', '@anthropic-ai/claude-code'],
       ['codex', '@openai/codex'],
-      ['opencode', 'opencode-ai'],
+      ['opencode', '@opencode/cli'],
     ])
     expect(getCodingTool('codex').npmPackage).toBe('@openai/codex')
     expect(() => getCodingTool('shell' as never)).toThrow(/Unknown coding tool/)

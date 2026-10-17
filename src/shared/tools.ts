@@ -48,8 +48,8 @@ export const TOOLS: readonly ToolDefinition[] = [
     id: 'opencode',
     label: 'OpenCode',
     command: 'opencode',
-    npmPackage: 'opencode-ai',
-    installCommand: 'npm install -g opencode-ai',
+    npmPackage: '@opencode/cli',
+    installCommand: 'npm install -g @opencode/cli',
   },
   {
     id: 'shell',

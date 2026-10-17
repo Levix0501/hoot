@@ -69,7 +69,9 @@ describe('detectInstallMethod', () => {
 
   it('tells an agent installed by the npm of another global folder', async () => {
     const prefix = path.join(root, 'other-node')
-    const target = file(path.join(prefix, 'lib', 'node_modules', 'opencode-ai', 'bin', 'opencode'))
+    const target = file(
+      path.join(prefix, 'lib', 'node_modules', '@opencode', 'cli', 'bin', 'opencode'),
+    )
     const command = link(path.join(prefix, 'bin', 'opencode'), target)
     const npm = file(path.join(prefix, 'bin', 'npm'))
     const asked: string[] = []

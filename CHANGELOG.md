@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.6
+
+### Patch Changes
+
+- [`efb4237`](https://github.com/Levix0501/hoot/commit/efb4237d697243ef1230fc3df2ae10549e69262f) - On Windows, the settings have the Agents page: Claude Code, Codex and OpenCode are installed and updated with the npm of the computer's Node.js, showing their versions and the latest ones, as on macOS.
+
+- [`4c6bbea`](https://github.com/Levix0501/hoot/commit/4c6bbeaae65c6a3b2218772ec064cff29957d03a) - Confirmation dialogs keep what names what they ask about inside their frame: the close-session confirmation wraps a session's long name, such as the path a shell session is named after, and the delete-issue confirmation wraps a long issue title, instead of their text and buttons spilling out past the dialog's rounded edge.
+
+- [`2505b7a`](https://github.com/Levix0501/hoot/commit/2505b7a104a1084fd3a9e1e2aa57e67287cedcb8) - OpenCode is installed and updated from its new npm package, `@opencode/cli`. On an OpenCode installed from the old `opencode-ai` package, the row says to update it the way you installed it.
+
 ## 0.1.0-alpha.5
 
 ### Patch Changes

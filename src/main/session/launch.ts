@@ -92,11 +92,14 @@ export function issueFileText(issue: Pick<Issue, 'title' | 'description'>): stri
  * characters. The folder of the files is in the session's working directory,
  * where Claude Code reads them at any permission level without asking. Each
  * option and its value are one argument, so that a title starting with `-`
- * is still the name.
+ * is still the name, and `--` ends the options, so that a first message
+ * starting with `-`, such as one from `hoot session start --prompt-file`
+ * that starts with a list, is still the first message and no option.
  */
 export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
   return [
     `--name=${withoutNul(issue.title)}`,
+    '--',
     withoutNul(
       issue.firstMessage({
         issueFile: path.join(issueFolder, ISSUE_FILE_NAME),

@@ -227,6 +227,7 @@ describe('resolveLaunch', () => {
       '--permission-mode',
       'acceptEdits',
       '--name=Fix the login bug',
+      '--',
       messageAt(scope)({
         issueFile: path.join(folder, 'issue.md'),
         workflowFile: path.join(folder, 'workflow.md'),
@@ -391,11 +392,21 @@ describe('the issue, the first message and the arguments that send them', () => 
       ),
     ).toEqual([
       '--name=--verbose flag broken',
+      '--',
       messageAt(scope)({
         issueFile: '/w/.hoot/tmp/issue-1/issue.md',
         workflowFile: '/w/.hoot/tmp/issue-1/workflow.md',
         branch: 'iss-2-verbose-flag-broken',
       }),
     ])
+  })
+
+  it('ends the options before the first message, so that one starting with a dash is still the message', () => {
+    // Such as one `hoot session start --prompt-file` gives, which Claude Code
+    // would otherwise take for an option: a list, front matter or a flag.
+    for (const prompt of ['- First item\n- Second item', '---\ntitle: x\n---', '--version']) {
+      const issue = { ...sentIssue('T', '', 'b'), firstMessage: () => prompt }
+      expect(sentIssueArgs('/w/.hoot/tmp/issue-1', issue)).toEqual(['--name=T', '--', prompt])
+    }
   })
 })

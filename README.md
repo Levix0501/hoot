@@ -52,7 +52,7 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   `Path` had when Hoot started).
 - **Many sessions at once**: any number of sessions can run at the same time, in the same project
   or in different ones. Each project lists its sessions below it in the sidebar while it is
-  expanded, in the order they started, with the tool's icon (for Claude Code, its own mark), the
+  expanded, in the order they started, with the tool's own icon, the
   session's name and its state: a green dot while it runs, or how it ended. Click a session to show
   it; the keyboard focus goes to its terminal. A collapsed project expands when one of its sessions
   is shown, however it is shown. Sessions that are not shown keep running, and their output is all
@@ -912,13 +912,15 @@ app's user data folder: `~/Library/Application Support/Hoot` for the installed a
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.
 
-Icons come from [lucide](https://lucide.dev), except brand marks, which Hoot keeps as SVG files of
-its own in `src/renderer/assets/brand-icons`: Claude Code's is copied from Anthropic's Claude Code
-extension for VS Code, with its color replaced by the color of the text around it.
+Icons come from [lucide](https://lucide.dev), except the marks of the tools Hoot starts, which Hoot
+keeps as SVG files in `src/renderer/assets/brand-icons`: Claude Code's, in its orange, is copied
+from Anthropic's Claude Code extension for VS Code; Codex's blossom is copied from OpenAI's Codex
+extension for VS Code, with its black replaced by the color of the text around it; opencode's, in
+the two sets of grays it comes in, one for each theme, are from opencode's brand assets.
 
 ## License
 
-Hoot is released under the MIT License. The Claude Code icon
-(`src/renderer/assets/brand-icons/claude-code.svg`) is a trademark of Anthropic and is not covered
-by Hoot's MIT License. The npm that comes with Hoot is released under the Artistic License 2.0,
+Hoot is released under the MIT License. The icons of Claude Code, Codex and opencode
+(`src/renderer/assets/brand-icons`) are trademarks of Anthropic, OpenAI and opencode's authors, and
+are not covered by Hoot's MIT License. The npm that comes with Hoot is released under the Artistic License 2.0,
 whose text it carries.

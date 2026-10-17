@@ -37,7 +37,7 @@ const SPEC_DRIVEN: WorkflowDefinition = {
         description: 'Judging whether the issue is one piece of work or several',
       },
       prompt: [
-        "Triage: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
+        'Judge the issue against this project.',
         '',
         '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
         '2. If one, that is the end of this step: do not ask me to confirm it.',

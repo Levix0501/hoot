@@ -89,10 +89,9 @@ export interface FirstMessage {
 }
 
 /**
- * The first message of a session started from an issue: an opening that
- * points to the issue's file, and to the file of its workflow when the
- * session may go on from its step to another, and names the worktree's
- * branch and the step the session starts at; then the step's prompt and how
+ * The first message of a session started from an issue: where the issue's
+ * file is, and the file of its workflow when the session may go on from its
+ * step to another; the branch of the worktree; then the step's prompt and how
  * to end it. Its parts are a blank line apart, its lines end with LF, and
  * nothing follows the last one. The issue itself stays out of it, where an
  * agent could take some of its text for a command or a mention.
@@ -105,16 +104,11 @@ export function firstMessage({
   branch,
   step,
 }: FirstMessage): string {
-  const issue =
-    `The issue to work on is ${identifier}, in \`${issueFile}\`. Read it first: its title is the heading; ` +
-    'the rest, if any, is its description.'
   return [
     goesOn(step)
-      ? `${issue} Then read \`${workflowFile}\`: the workflow ${workflow.name}, ` +
-        'which work on the issue goes through, step by step.'
-      : issue,
-    `This is a Git worktree of the project, on the branch \`${branch}\`, made for this issue. ` +
-      `This session starts at the step ${step.name}, which the issue's label ${labelName(step.label.name)} marks.`,
+      ? `The issue is in \`${issueFile}\`, and the workflow it goes through in \`${workflowFile}\`.`
+      : `The issue is in \`${issueFile}\`.`,
+    `This is a Git worktree of the project, on the branch \`${branch}\`, made for this issue.`,
     filledIn(step.prompt, identifier),
     outcomeInstructions(workflow, step, identifier),
   ].join('\n\n')

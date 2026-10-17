@@ -346,9 +346,9 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   has come is the label of the group **Spec-driven** it has, and nothing else: none before it
   starts, **triaging** while it is at Triage, and **ready to design** or **split** once it is
   finished. Changing the label, in the window or with `hoot`, moves the issue on or back; taking it
-  off makes the issue not started again. In **Triage**, the agent judges the issue against the code,
-  without changing anything: whether it is one piece of work, or several, results that could each be
-  delivered and accepted on their own; how much work it is waits until its design is settled. If it
+  off makes the issue not started again. In **Triage**, the agent judges the issue against the
+  project: whether it is one piece of work, or several, results that could each be delivered and
+  accepted on their own; how much work it is waits until its design is settled. If it
   is one, the agent says why, changes the issue's label to **ready to design** with
   [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If several, it splits the
   issue into one issue per result, each with a title, a description and the issues it waits on, ends
@@ -396,14 +396,12 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   `workflow.md`: its name, each step in order with its label, its prompt and its outcomes (the
   label each changes to, what it means and what to do first, and whether the agent goes on or
   stops afterwards), and the end labels, with what **split** does; a session of Triage, which
-  stops either way, gets `issue.md` alone. The first message points to `issue.md`, and to
-  `workflow.md` when there is one, asking the agent to read them, names the worktree's branch and
-  the step the session starts at, then gives the step's prompt and its outcomes, each with what it
-  means, the command that changes the label, such as
+  stops either way, gets `issue.md` alone. The first message says where `issue.md` is, and
+  `workflow.md` when there is one, and names the worktree's branch; then it gives the step's prompt
+  and its outcomes, each with what it means, the command that changes the label, such as
   `hoot issue edit ISS-12 --add-label 'ready to design'`, and whether to go on with that label's
   step from `workflow.md` afterwards, or stop. The message would do for any agent, and the issue
-  stays out of it, where an agent could take some of its text for a command or a mention. Hoot
-  does not enforce that nothing changes while the agent judges or asks: like any
+  stays out of it, where an agent could take some of its text for a command or a mention. Like any
   other session, this one can change files as far as its permission level lets it. Once the session
   has started, an issue in the Backlog or Todo is In Progress. Hoot removes the session's folder
   once the session's process has ended, or when it could not start, and leaves `.hoot/tmp` with its

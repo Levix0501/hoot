@@ -175,7 +175,7 @@ describe('sessionStart', () => {
     const message = make.firstMessage(files)
     expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
     expect(message).toContain('the branch `iss-1-a`')
-    expect(message).toContain('This session starts at the step Make')
+    expect(message).toContain('Make it.')
     expect(message).toContain('`hoot issue edit ISS-1 --add-label Made`')
   })
 
@@ -186,7 +186,9 @@ describe('sessionStart', () => {
     expect(look.ok).toBe(true)
     if (!look.ok) return
     expect(look.workflowFile?.startsWith('# Sample\n')).toBe(true)
-    expect(look.firstMessage(files)).toContain('Then read `/w/.hoot/tmp/issue-1/workflow.md`')
+    expect(look.firstMessage(files)).toContain(
+      'the workflow it goes through in `/w/.hoot/tmp/issue-1/workflow.md`',
+    )
     give(issue, 'Making')
     const make = executor.sessionStart(issue.id, 'ISS-1')
     expect(make.ok).toBe(true)
@@ -205,9 +207,7 @@ describe('sessionStart', () => {
     const message = triage.firstMessage(files)
     expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
     expect(message).not.toContain('workflow.md')
-    expect(message).toContain(
-      "This session starts at the step Triage, which the issue's label `triaging` marks.",
-    )
+    expect(message).toContain('Judge the issue against this project.')
     expect(message).toContain("`hoot issue edit ISS-1 --add-label 'ready to design'`, and stop.")
     expect(message).toContain('`hoot issue edit ISS-1 --add-label split`, and stop.')
   })

@@ -14,7 +14,7 @@ const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
 
 /** The prompt of the built-in Triage, word for word. */
 const TRIAGE_PROMPT = [
-  "Triage: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
+  'Judge the issue against this project.',
   '',
   '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
   '2. If one, that is the end of this step: do not ask me to confirm it.',
@@ -133,11 +133,11 @@ describe('firstMessage', () => {
     step: triage,
   })
 
-  it('points to the issue file, names the branch and the step, then gives the prompt and the outcomes', () => {
+  it('says where the issue file is and names the branch, then gives the prompt and the outcomes', () => {
     expect(message).toBe(
       [
-        'The issue to work on is ISS-7, in `/work/a/.hoot/tmp/issue-x/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
-        "This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue. This session starts at the step Triage, which the issue's label `triaging` marks.",
+        'The issue is in `/work/a/.hoot/tmp/issue-x/issue.md`.',
+        'This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue.',
         TRIAGE_PROMPT,
         outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7'),
       ].join('\n\n'),
@@ -148,7 +148,7 @@ describe('firstMessage', () => {
     expect(message.endsWith('\n')).toBe(false)
   })
 
-  it('points to the file of the workflow too when the step may go on to another', () => {
+  it('says where the file of the workflow is too when the step may go on to another', () => {
     const at = firstMessage({
       workflow: SAMPLE,
       identifier: 'ISS-7',
@@ -158,11 +158,11 @@ describe('firstMessage', () => {
       step: look,
     })
     expect(at.split('\n\n')[0]).toBe(
-      'The issue to work on is ISS-7, in `/i.md`. Read it first: its title is the heading; the rest, if any, is its description. Then read `/w.md`: the workflow Sample, which work on the issue goes through, step by step.',
+      'The issue is in `/i.md`, and the workflow it goes through in `/w.md`.',
     )
   })
 
-  it('starts at the step it is given', () => {
+  it('gives the prompt and the outcomes of the step it is given', () => {
     const at = firstMessage({
       workflow: SAMPLE,
       identifier: 'ISS-7',
@@ -171,9 +171,6 @@ describe('firstMessage', () => {
       branch: 'b',
       step: make,
     })
-    expect(at).toContain(
-      "This session starts at the step Make, which the issue's label `Making` marks.",
-    )
     expect(at).toContain('Make: build it.')
     expect(at).toContain("`hoot issue edit ISS-7 --add-label 'made well'`")
     expect(at).not.toContain('/w.md')

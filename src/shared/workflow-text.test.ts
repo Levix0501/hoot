@@ -116,7 +116,7 @@ describe('outcomeInstructions', () => {
     ])
   })
 
-  it('ends Triage at ready to design or split, stopping either way', () => {
+  it('ends Triage at ready to design or waiting on sub-issues, stopping either way', () => {
     const text = outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7')
     expect(text).toBe(
       [
@@ -129,7 +129,7 @@ describe('outcomeInstructions', () => {
         '  `[{"title": "…", "description": "…", "labels": ["ready to design"], "status": "todo", "blocking": ["ISS-7"], "blockedBy": […]}, …]`',
         '  In `"blockedBy"`, list the issues it waits on: those of the split by their place in the array, from 1, others by their identifiers.',
         '  Run `hoot issue create-batch ISS-7 --file <file>`.',
-        '  Run `hoot issue edit ISS-7 --add-label split`, then stop.',
+        "  Run `hoot issue edit ISS-7 --add-label 'waiting on sub-issues'`, then stop.",
       ].join('\n'),
     )
     expect(text).not.toContain('{issue}')

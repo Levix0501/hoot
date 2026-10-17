@@ -5,7 +5,7 @@ import type { WorkflowDefinition } from './workflows'
  * How the agent writes a split back once the user has confirmed it: the
  * issues of the split, created at once as sub-issues of the issue, each with
  * the label `label` and blocking the issue; the outcome then changes the
- * issue's label to split.
+ * issue's label to waiting on sub-issues.
  */
 function splitInstruction(confirmed: string, label: string): string {
   return [
@@ -22,8 +22,8 @@ function splitInstruction(confirmed: string, label: string): string {
  * one step for now, Triage, which judges whether the issue is one piece of
  * work or several, and stops either way: an issue of one piece ends at
  * ready to design; one of several is split into sub-issues, each at ready to
- * design, and ends at split, which it is completed with once its sub-issues
- * are. The labels of the group Spec-driven mark them. It passes the same
+ * design, and ends at waiting on sub-issues, which it is completed with once
+ * its sub-issues are. The labels of the group Spec-driven mark them. It passes the same
  * check as any other definition.
  */
 const SPEC_DRIVEN: WorkflowDefinition = {
@@ -58,7 +58,7 @@ const SPEC_DRIVEN: WorkflowDefinition = {
           goOn: false,
         },
         {
-          label: 'split',
+          label: 'waiting on sub-issues',
           instruction: splitInstruction('I confirmed the split.', 'ready to design'),
           goOn: false,
         },
@@ -73,9 +73,9 @@ const SPEC_DRIVEN: WorkflowDefinition = {
       completeWithSubIssues: false,
     },
     {
-      name: 'split',
+      name: 'waiting on sub-issues',
       color: '95a2b3',
-      description: 'Split into sub-issues; done once they are',
+      description: 'Waiting on its sub-issues; done once they are',
       completeWithSubIssues: true,
     },
   ],

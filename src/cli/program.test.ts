@@ -1606,7 +1606,7 @@ describe('hoot label', () => {
     ).toEqual({ code: 0, stdout: '', stderr: '' })
     const listed = (await run(['label', 'list'])).stdout
     expect(listed).toMatch(/^area +No group +ff8800 +Area of code$/m)
-    for (const name of ['triaging', 'ready to design', 'split']) {
+    for (const name of ['triaging', 'ready to design', 'waiting on sub-issues']) {
       expect(listed).toMatch(new RegExp(`^${name} +Spec-driven +[0-9a-f]{6} `, 'm'))
     }
     const json = JSON.parse((await run(['label', 'list', '--json'])).stdout)
@@ -1633,7 +1633,7 @@ describe('hoot label', () => {
     for (const args of [
       ['label', 'edit', 'triaging', '--name', 'Begin'],
       ['label', 'edit', 'ready to design', '--color', '112233'],
-      ['label', 'edit', 'split', '--description', 'x'],
+      ['label', 'edit', 'waiting on sub-issues', '--description', 'x'],
       ['label', 'delete', 'ready to design', '--yes'],
     ]) {
       await expectRefused(args, 'belongs to the workflow Spec-driven')
@@ -1699,10 +1699,14 @@ describe('hoot session start', () => {
     )
     hoot.issues.update(b.id, { status: 'done' })
     const d = addIssue('D')
-    hoot.labels.changeIssueLabels(d.id, { add: [hoot.labels.findByName('split')!.id] }, 'user')
+    hoot.labels.changeIssueLabels(
+      d.id,
+      { add: [hoot.labels.findByName('waiting on sub-issues')!.id] },
+      'user',
+    )
     await expectRefused(
       ['session', 'start', id(d)],
-      'Its workflow is finished: it has the label "split".',
+      'Its workflow is finished: it has the label "waiting on sub-issues".',
     )
     hoot.setTools({ detecting: true, tools: [], error: null })
     await expectRefused(

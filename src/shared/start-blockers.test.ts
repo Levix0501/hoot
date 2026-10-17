@@ -69,13 +69,13 @@ describe('startBlockers', () => {
       { kind: 'waiting', issueIds: [3, 2] },
     ])
     expect(startBlockers(detected(true), inProject, [], split)).toEqual([
-      { kind: 'finished', label: 'split' },
+      { kind: 'finished', label: 'waiting on sub-issues' },
     ])
     expect(startBlockers(firstDetection, withoutProject, [4], split)).toEqual([
       { kind: 'checking' },
       { kind: 'no-project' },
       { kind: 'waiting', issueIds: [4] },
-      { kind: 'finished', label: 'split' },
+      { kind: 'finished', label: 'waiting on sub-issues' },
     ])
   })
 })
@@ -93,8 +93,8 @@ describe('startBlockerText', () => {
     expect(startBlockerText({ kind: 'waiting', issueIds: [3, 4, 5] })).toBe(
       'It waits on ISS-3, ISS-4, and ISS-5, which are neither done nor canceled.',
     )
-    expect(startBlockerText({ kind: 'finished', label: 'split' })).toBe(
-      'Its workflow is finished: it has the label "split".',
+    expect(startBlockerText({ kind: 'finished', label: 'waiting on sub-issues' })).toBe(
+      'Its workflow is finished: it has the label "waiting on sub-issues".',
     )
   })
 })

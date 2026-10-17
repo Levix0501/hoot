@@ -60,12 +60,12 @@ describe('the built-in workflow', () => {
     expect(workflowLabels(BUILT_IN_WORKFLOW).map((label) => label.name)).toEqual([
       'triaging',
       'ready to design',
-      'split',
+      'waiting on sub-issues',
     ])
     expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Triage')
   })
 
-  it('ends Triage at ready to design or split, stopping either way', () => {
+  it('ends Triage at ready to design or waiting on sub-issues, stopping either way', () => {
     expect(
       BUILT_IN_WORKFLOW.steps.map((step) => ({
         step: step.name,
@@ -76,7 +76,7 @@ describe('the built-in workflow', () => {
         step: 'Triage',
         outcomes: [
           ['ready to design', false],
-          ['split', false],
+          ['waiting on sub-issues', false],
         ],
       },
     ])
@@ -90,7 +90,7 @@ describe('the built-in workflow', () => {
       ]),
     ).toEqual([
       ['ready to design', false],
-      ['split', true],
+      ['waiting on sub-issues', true],
     ])
   })
 

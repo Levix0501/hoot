@@ -344,10 +344,10 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
 - **The workflow**: work on an issue goes through Hoot's built-in workflow, **Spec-driven**, in
   Claude Code sessions started from the issue. For now it has one step, **Triage**. How far an issue
   has come is the label of the group **Spec-driven** it has, and nothing else: none before it
-  starts, **triaging** while it is at Triage, and **ready to design** or **split** once it is
-  finished. Changing the label, in the window or with `hoot`, moves the issue on or back; taking it
-  off makes the issue not started again. In **Triage**, the agent judges the issue against the
-  project: whether it is one piece of work, or several, results that could each be delivered and
+  starts, **triaging** while it is at Triage, and **ready to design** or **waiting on sub-issues**
+  once it is finished. Changing the label, in the window or with `hoot`, moves the issue on or back;
+  taking it off makes the issue not started again. In **Triage**, the agent judges the issue against
+  the project: whether it is one piece of work, or several, results that could each be delivered and
   accepted on their own. If it is one, the agent says why, changes the issue's label to
   **ready to design** with [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If
   several, it splits the issue into one issue per result, each with a title, a description and the
@@ -356,15 +356,15 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   back: it creates all of its issues at once with [`hoot issue create-batch`](#the-hoot-command), as
   sub-issues to do of the issue, each with **ready to design**, waiting on the issues of the split
   and others as you confirmed their order, and blocking the issue; then it gives the issue
-  **split**, and stops, starting no session for the sub-issues. An issue with **split** is completed
-  once its sub-issues are: when the last of the sub-issues Hoot shows (it has at least one) becomes
-  done or canceled, or goes, the issue, unless it is done or canceled already, becomes Done when one
-  of them is done, and Canceled otherwise; this happens only as that comes to be, so an issue you
-  open again stays open, and so does one given a sub-issue to do. The workflow is data, which Hoot
-  runs as it would run any workflow; its prompts name no agent. A label that the group had and the
-  workflow no longer has, such as one of a step taken out, leaves the group, and stays on its issues
-  like any other label. Labels change no status, and changing the status, the project or anything
-  else of the issue changes nothing of its progress.
+  **waiting on sub-issues**, and stops, starting no session for the sub-issues. An issue with
+  **waiting on sub-issues** is completed once its sub-issues are: when the last of the sub-issues
+  Hoot shows (it has at least one) becomes done or canceled, or goes, the issue, unless it is done
+  or canceled already, becomes Done when one of them is done, and Canceled otherwise; this happens
+  only as that comes to be, so an issue you open again stays open, and so does one given a sub-issue
+  to do. The workflow is data, which Hoot runs as it would run any workflow; its prompts name no
+  agent. A label that the group had and the workflow no longer has, such as one of a step taken out,
+  leaves the group, and stays on its issues like any other label. Labels change no status, and
+  changing the status, the project or anything else of the issue changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
   worktree of its own, at the first step of its workflow when it has not started, and at the step of
@@ -394,10 +394,10 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   go on from the step it starts at to another, Hoot also writes beside it the whole workflow to
   `workflow.md`: its name, each step in order with its label, its prompt and its outcomes (the
   label each changes to, what it means and what to do first, and whether the agent goes on or
-  stops afterwards), and the end labels, with what **split** does; a session of Triage, which
-  stops either way, gets `issue.md` alone. The first message says where `issue.md` is, and
-  `workflow.md` when there is one, and names the worktree's branch; then it gives the step's prompt
-  and its outcomes, each with what it means, the command that changes the label, such as
+  stops afterwards), and the end labels, with what **waiting on sub-issues** does; a session of
+  Triage, which stops either way, gets `issue.md` alone. The first message says where `issue.md` is,
+  and `workflow.md` when there is one, and names the worktree's branch; then it gives the step's
+  prompt and its outcomes, each with what it means, the command that changes the label, such as
   `hoot issue edit ISS-12 --add-label 'ready to design'`, and whether to go on with that label's
   step from `workflow.md` afterwards, or stop. The message would do for any agent, and the issue
   stays out of it, where an agent could take some of its text for a command or a mention. Like any

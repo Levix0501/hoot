@@ -86,7 +86,7 @@ describe('the workflow group', () => {
     expect(labels.list().map((label) => [label.group, label.name, label.color])).toEqual([
       ['Spec-driven', 'triaging', '4ea7fc'],
       ['Spec-driven', 'ready to design', 'bb87fc'],
-      ['Spec-driven', 'split', '95a2b3'],
+      ['Spec-driven', 'waiting on sub-issues', '95a2b3'],
     ])
     expect(labels.snapshot().groups).toEqual([
       { id: 1, name: 'Spec-driven', workflow: 'Spec-driven' },
@@ -104,11 +104,16 @@ describe('the workflow group', () => {
     const changed: WorkflowDefinition = {
       ...BUILT_IN_WORKFLOW,
       endLabels: BUILT_IN_WORKFLOW.endLabels.map((end) =>
-        end.name === 'split' ? { ...end, color: '000000', description: 'Now' } : end,
+        end.name === 'waiting on sub-issues'
+          ? { ...end, color: '000000', description: 'Now' }
+          : end,
       ),
     }
     const { labels } = start(changed)
-    expect(labels.findByName('split')).toMatchObject({ color: '000000', description: 'Now' })
+    expect(labels.findByName('waiting on sub-issues')).toMatchObject({
+      color: '000000',
+      description: 'Now',
+    })
     expect(labels.list()).toHaveLength(3)
   })
 
@@ -211,16 +216,18 @@ describe('sessionStart', () => {
     expect(message).toContain(
       "Run `hoot issue edit ISS-1 --add-label 'ready to design'`, then stop.",
     )
-    expect(message).toContain('Run `hoot issue edit ISS-1 --add-label split`, then stop.')
+    expect(message).toContain(
+      "Run `hoot issue edit ISS-1 --add-label 'waiting on sub-issues'`, then stop.",
+    )
   })
 
   it('refuses an issue whose workflow is finished', () => {
     const { executor, add, give } = start()
     const issue = add('A')
-    give(issue, 'split')
+    give(issue, 'waiting on sub-issues')
     expect(executor.sessionStart(issue.id, 'ISS-1')).toEqual({
       ok: false,
-      message: 'The workflow of ISS-1 is finished: it has the label "split".',
+      message: 'The workflow of ISS-1 is finished: it has the label "waiting on sub-issues".',
     })
   })
 })
@@ -254,12 +261,12 @@ describe('sessionStarted', () => {
 })
 
 describe('completing an issue split once its sub-issues are', () => {
-  it('changes nothing of the issue when it is given split, or of others when labels change', () => {
+  it('changes nothing of the issue when it is given waiting on sub-issues, or of others when labels change', () => {
     const { add, give, status, issues, completed } = start()
     const p = add('P', 'in_progress')
     const s1 = add('S1', 'todo', p)
     add('S2', 'todo', p)
-    give(p, 'split')
+    give(p, 'waiting on sub-issues')
     expect(status(p)).toBe('in_progress')
     give(s1, 'ready to design')
     expect(status(s1)).toBe('todo')
@@ -272,7 +279,7 @@ describe('completing an issue split once its sub-issues are', () => {
     const p = add('P', 'in_progress')
     const s1 = add('S1', 'todo', p)
     const s2 = add('S2', 'todo', p)
-    give(p, 'split')
+    give(p, 'waiting on sub-issues')
     issues.update(s1.id, { status: 'done' })
     expect(status(p)).toBe('in_progress')
     clock = 5_000
@@ -282,7 +289,7 @@ describe('completing an issue split once its sub-issues are', () => {
     const q = add('Q', 'todo')
     const t1 = add('T1', 'todo', q)
     const t2 = add('T2', 'todo', q)
-    give(q, 'split')
+    give(q, 'waiting on sub-issues')
     issues.update(t1.id, { status: 'canceled' })
     issues.update(t2.id, { status: 'canceled' })
     expect(status(q)).toBe('canceled')
@@ -293,7 +300,7 @@ describe('completing an issue split once its sub-issues are', () => {
     const p = add('P', 'in_progress')
     const s1 = add('S1', 'todo', p)
     const s2 = add('S2', 'todo', p)
-    give(p, 'split')
+    give(p, 'waiting on sub-issues')
     issues.update(s1.id, { status: 'done' })
     issues.update(s2.id, { status: 'canceled' })
     expect(status(p)).toBe('done')
@@ -314,7 +321,7 @@ describe('completing an issue split once its sub-issues are', () => {
     const r = add('R', 'todo')
     add('U1', 'done', r)
     add('U2', 'todo', r, hotel.id)
-    give(r, 'split')
+    give(r, 'waiting on sub-issues')
     expect(status(r)).toBe('todo')
     projects.remove(hotel.root)
     expect(status(r)).toBe('done')
@@ -332,27 +339,27 @@ describe('completing an issue split once its sub-issues are', () => {
     issues.update(y1.id, { status: 'done' })
     expect(status(x)).toBe('todo')
     const lone = add('Lone', 'todo')
-    give(lone, 'split')
+    give(lone, 'waiting on sub-issues')
     expect(status(lone)).toBe('todo')
   })
 
-  it('completes it when a sub-issue is deleted or leaves it, and when it is given split', () => {
+  it('completes it when a sub-issue is deleted or leaves it, and when it is given waiting on sub-issues', () => {
     const { add, give, status, issues } = start()
     const z = add('Z', 'todo')
     const z1 = add('Z1', 'todo', z)
     add('Z2', 'done', z)
-    give(z, 'split')
+    give(z, 'waiting on sub-issues')
     issues.delete(z1.id)
     expect(status(z)).toBe('done')
     const m = add('M', 'todo')
     const m1 = add('M1', 'todo', m)
     add('M2', 'done', m)
-    give(m, 'split')
+    give(m, 'waiting on sub-issues')
     issues.setParents([{ issueId: m1.id, parentId: null }])
     expect(status(m)).toBe('done')
     const n = add('N', 'todo')
     add('N1', 'done', n)
-    give(n, 'split')
+    give(n, 'waiting on sub-issues')
     expect(status(n)).toBe('done')
   })
 
@@ -361,8 +368,8 @@ describe('completing an issue split once its sub-issues are', () => {
     const top = add('Top', 'todo')
     const middle = add('Middle', 'todo', top)
     const leaf = add('Leaf', 'todo', middle)
-    give(top, 'split')
-    give(middle, 'split')
+    give(top, 'waiting on sub-issues')
+    give(middle, 'waiting on sub-issues')
     issues.update(leaf.id, { status: 'done' })
     expect(status(middle)).toBe('done')
     expect(status(top)).toBe('done')
@@ -373,7 +380,7 @@ describe('completing an issue split once its sub-issues are', () => {
     const p = add('P', 'todo')
     const s1 = add('S1', 'todo', p)
     add('S2', 'done', p)
-    give(p, 'split')
+    give(p, 'waiting on sub-issues')
     expect(() =>
       issues.changeRelations({
         parents: [{ issueId: s1.id, parentId: null }],

@@ -192,7 +192,7 @@ describe('LabelStore', () => {
     projects.add(hotel.root)
     expect(carried(a)).toEqual([])
     expect(events.flat()).toHaveLength(2)
-    expect(() => labels.deleteLabel(labels.findByName('split')!.id)).toThrow(
+    expect(() => labels.deleteLabel(labels.findByName('waiting on sub-issues')!.id)).toThrow(
       /belongs to the workflow/,
     )
   })

@@ -61,6 +61,6 @@ export function startBlockerText(blocker: StartBlocker): string {
       )
     }
     case 'finished':
-      return `Its workflow is finished: it has the label ${blocker.label}.`
+      return `Its workflow is finished: it has the label "${blocker.label}".`
   }
 }

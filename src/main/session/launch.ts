@@ -39,13 +39,13 @@ export interface LaunchContext {
 
 /**
  * What a session started from an issue sends Claude Code: the issue's title
- * and description, the text of the file of its workflow, and the first
- * message, given the files once they are written and the branch of the
- * worktree the session runs in.
+ * and description, the text of the file of its workflow, if the session has
+ * one, and the first message, given the files once they are written and the
+ * branch of the worktree the session runs in.
  */
 export interface SentIssue extends Pick<Issue, 'title' | 'description'> {
   branch: string
-  workflowFile: string
+  workflowFile: string | null
   firstMessage(files: SessionFiles): string
 }
 
@@ -112,7 +112,7 @@ export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
 
 /**
  * Writes the file of an issue sent to a session, and the file of its
- * workflow, in a new folder of the session's own in
+ * workflow if it has one, in a new folder of the session's own in
  * `TEMPORARY_FOLDER` of its working directory, and returns that folder. The
  * `.gitignore` there is written when it is missing and stays afterwards, as
  * does the folder that holds it: another session's folder may be beside this
@@ -130,7 +130,9 @@ async function writeIssueFolder(cwd: string, issue: SentIssue): Promise<string> 
       })
     folder = await fs.mkdtemp(path.join(temporaryFolder, 'issue-'))
     await fs.writeFile(path.join(folder, ISSUE_FILE_NAME), issueFileText(issue))
-    await fs.writeFile(path.join(folder, WORKFLOW_FILE_NAME), issue.workflowFile)
+    if (issue.workflowFile !== null) {
+      await fs.writeFile(path.join(folder, WORKFLOW_FILE_NAME), issue.workflowFile)
+    }
     return folder
   } catch (error) {
     if (folder !== null) await fs.rm(folder, { recursive: true, force: true }).catch(() => {})

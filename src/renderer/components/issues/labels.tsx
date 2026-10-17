@@ -39,7 +39,7 @@ export function LabelDot({ color, className }: { color: string; className?: stri
 
 /**
  * A label as an issue shows it: its color and how it is written, such as
- * `Spec-driven › Design`, in a pill; with a ✕ that takes it off when
+ * `Spec-driven › triaging`, in a pill; with a ✕ that takes it off when
  * `onRemove` is given.
  */
 export function LabelChip({

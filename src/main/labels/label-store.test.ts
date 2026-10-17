@@ -78,7 +78,7 @@ describe('LabelStore', () => {
         'There is a label named "Kind › Feature" already: no two labels can have the same name.',
       ),
     )
-    expect(() => labels.createLabel({ name: 'design' })).toThrow(/Spec-driven › Design/)
+    expect(() => labels.createLabel({ name: 'Triaging' })).toThrow(/Spec-driven › triaging/)
     expect(() => labels.createGroup('kind')).toThrow(/There is a group named "Kind" already/)
     expect(() => labels.createLabel({ name: '  ' })).toThrow('A label needs a name.')
     expect(() => labels.createLabel({ name: 'z', color: 'red' })).toThrow(/is not a color/)
@@ -168,10 +168,10 @@ describe('LabelStore', () => {
       labels.editLabel(chore.id, { name: 'Task', color: '112233', description: ' Small ' }),
     ).toMatchObject({ name: 'Task', color: '112233', description: 'Small' })
     expect(labels.editLabel(chore.id, { name: 'task' }).name).toBe('task')
-    expect(() => labels.editLabel(chore.id, { name: 'Scope' })).toThrow(/There is a label named/)
+    expect(() => labels.editLabel(chore.id, { name: 'Triaging' })).toThrow(/There is a label named/)
     for (const change of [{ name: 'Begin' }, { color: '112233' }, { description: 'x' }]) {
-      expect(() => labels.editLabel(labels.findByName('Scope')!.id, change)).toThrow(
-        'Spec-driven › Scope belongs to the workflow Spec-driven: it can only be given to issues and taken off them.',
+      expect(() => labels.editLabel(labels.findByName('triaging')!.id, change)).toThrow(
+        'Spec-driven › triaging belongs to the workflow Spec-driven: it can only be given to issues and taken off them.',
       )
     }
   })
@@ -192,7 +192,7 @@ describe('LabelStore', () => {
     projects.add(hotel.root)
     expect(carried(a)).toEqual([])
     expect(events.flat()).toHaveLength(2)
-    expect(() => labels.deleteLabel(labels.findByName('Implement')!.id)).toThrow(
+    expect(() => labels.deleteLabel(labels.findByName('split')!.id)).toThrow(
       /belongs to the workflow/,
     )
   })
@@ -237,10 +237,10 @@ describe('LabelStore', () => {
     const { labels, issues, add, give, carried, hotel } = start()
     labels.createLabel({ name: 'x' })
     const a = add('A')
-    give(a, 'x', 'Design')
+    give(a, 'x', 'ready to design')
     issues.update(a.id, { projectId: hotel.id })
-    expect(carried(a)).toEqual(['Spec-driven › Design', 'x'])
+    expect(carried(a)).toEqual(['Spec-driven › ready to design', 'x'])
     issues.update(a.id, { projectId: null })
-    expect(carried(a)).toEqual(['Spec-driven › Design', 'x'])
+    expect(carried(a)).toEqual(['Spec-driven › ready to design', 'x'])
   })
 })

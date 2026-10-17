@@ -1431,10 +1431,10 @@ describe('hoot issue create-batch with labels and its parent blocked', () => {
     fs.writeFileSync(
       file,
       JSON.stringify([
-        { title: 'S1', labels: ['Design'], status: 'todo', blocking: [id(p)] },
+        { title: 'S1', labels: ['ready to design'], status: 'todo', blocking: [id(p)] },
         {
           title: 'S2',
-          labels: ['design', 'x'],
+          labels: ['Ready to Design', 'x'],
           status: 'todo',
           blockedBy: [1],
           blocking: [id(p)],
@@ -1452,8 +1452,8 @@ describe('hoot issue create-batch with labels and its parent blocked', () => {
       hoot.labels
         .labelsOf(issue.id)
         .map((label) => (label.group ? `${label.group} › ${label.name}` : label.name))
-    expect(written(s1)).toEqual(['Spec-driven › Design'])
-    expect(written(s2)).toEqual(['Spec-driven › Design', 'x'])
+    expect(written(s1)).toEqual(['Spec-driven › ready to design'])
+    expect(written(s2)).toEqual(['Spec-driven › ready to design', 'x'])
     expect(dependencyTitles()).toEqual([
       ['P', 'S1'],
       ['S2', 'S1'],
@@ -1466,7 +1466,7 @@ describe('hoot issue create-batch with labels and its parent blocked', () => {
         .filter((event) => event.issueId === s2.id)
         .map((event) => [event.kind, event.label, event.actor]),
     ).toEqual([
-      ['added', 'Spec-driven › Design', 'agent'],
+      ['added', 'Spec-driven › ready to design', 'agent'],
       ['added', 'x', 'agent'],
     ])
   })
@@ -1516,33 +1516,33 @@ describe('hoot issue create, edit, list and view with labels', () => {
     await run(['issue', 'create', '--title', 'P', '--label', 'x,y'])
     const p = saved().at(-1)!
     expect(
-      await run(['issue', 'edit', id(p), '--remove-label', 'y', '--add-label', 'Design']),
+      await run(['issue', 'edit', id(p), '--remove-label', 'y', '--add-label', 'ready to design']),
     ).toEqual({
       code: 0,
       stdout: `${id(p)}\n`,
       stderr: '',
     })
-    expect(labelsOf(p)).toEqual(['Spec-driven › Design', 'x'])
-    expect((await run(['issue', 'edit', id(p), '--add-label', 'Scope'])).code).toBe(0)
-    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    expect(labelsOf(p)).toEqual(['Spec-driven › ready to design', 'x'])
+    expect((await run(['issue', 'edit', id(p), '--add-label', 'triaging'])).code).toBe(0)
+    expect(labelsOf(p)).toEqual(['Spec-driven › triaging', 'x'])
     await expectRefused(['issue', 'edit', id(p), '--add-label', 'nope'], 'no label named "nope"')
     await expectRefused(
       ['issue', 'edit', id(p), '--add-label', 'x', '--remove-label', 'x'],
       'x cannot both be given to',
     )
-    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    expect(labelsOf(p)).toEqual(['Spec-driven › triaging', 'x'])
     // Together with the parent and dependencies, all or nothing.
     const q = addIssue('Q', 'todo')
     await expectRefused(
       ['issue', 'edit', id(p), '--add-blocked-by', id(p), '--add-label', 'y'],
       'cannot be blocked by itself',
     )
-    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x'])
+    expect(labelsOf(p)).toEqual(['Spec-driven › triaging', 'x'])
     expect((await run(['issue', 'edit', id(p), '--parent', id(q), '--add-label', 'y'])).code).toBe(
       0,
     )
     expect(subIssueTitles(q)).toEqual(['P'])
-    expect(labelsOf(p)).toEqual(['Spec-driven › Scope', 'x', 'y'])
+    expect(labelsOf(p)).toEqual(['Spec-driven › triaging', 'x', 'y'])
     // The activity names the agent, the label taken off by the one of its group included.
     expect(
       hoot.labels
@@ -1553,15 +1553,15 @@ describe('hoot issue create, edit, list and view with labels', () => {
       ['added', 'x', 'agent'],
       ['added', 'y', 'agent'],
       ['removed', 'y', 'agent'],
-      ['added', 'Spec-driven › Design', 'agent'],
-      ['removed', 'Spec-driven › Design', 'agent'],
-      ['added', 'Spec-driven › Scope', 'agent'],
+      ['added', 'Spec-driven › ready to design', 'agent'],
+      ['removed', 'Spec-driven › ready to design', 'agent'],
+      ['added', 'Spec-driven › triaging', 'agent'],
       ['added', 'y', 'agent'],
     ])
   })
 
   it('lists the issues with every label given, and refuses a name that is no label', async () => {
-    await run(['issue', 'create', '--title', 'P', '--label', 'x', '--label', 'Scope'])
+    await run(['issue', 'create', '--title', 'P', '--label', 'x', '--label', 'triaging'])
     await run(['issue', 'create', '--title', 'R', '--label', 'x'])
     await run(['issue', 'create', '--title', 'S'])
     const titles = async (...args: string[]) =>
@@ -1571,21 +1571,21 @@ describe('hoot issue create, edit, list and view with labels', () => {
         }>
       ).map((issue) => issue.title)
     expect((await titles('--label', 'x')).toSorted()).toEqual(['P', 'R'])
-    expect(await titles('--label', 'x', '--label', 'scope')).toEqual(['P'])
+    expect(await titles('--label', 'x', '--label', 'TRIAGING')).toEqual(['P'])
     expect(await titles('--label', 'x,y')).toEqual([])
     await expectRefused(['issue', 'list', '--label', 'nope'], 'no label named "nope"')
   })
 
   it('writes the labels in view and list, and gives them as label objects with --json', async () => {
-    await run(['issue', 'create', '--title', 'P', '--label', 'x,Scope'])
+    await run(['issue', 'create', '--title', 'P', '--label', 'x,triaging'])
     const p = saved().at(-1)!
     const view = (await run(['issue', 'view', id(p)])).stdout
-    expect(view.split('\n')[2]).toBe('Labels: Spec-driven › Scope, x')
-    expect((await run(['issue', 'list'])).stdout).toContain('P  [Spec-driven › Scope, x]\n')
+    expect(view.split('\n')[2]).toBe('Labels: Spec-driven › triaging, x')
+    expect((await run(['issue', 'list'])).stdout).toContain('P  [Spec-driven › triaging, x]\n')
     const json = JSON.parse((await run(['issue', 'view', id(p), '--json'])).stdout)
     expect(json.labels).toStrictEqual([
       {
-        name: 'Scope',
+        name: 'triaging',
         color: '4ea7fc',
         description: 'Judging whether the issue is one piece of work or several',
         group: 'Spec-driven',
@@ -1606,7 +1606,7 @@ describe('hoot label', () => {
     ).toEqual({ code: 0, stdout: '', stderr: '' })
     const listed = (await run(['label', 'list'])).stdout
     expect(listed).toMatch(/^area +No group +ff8800 +Area of code$/m)
-    for (const name of ['Scope', 'Design', 'Implement', 'Split', 'Implemented']) {
+    for (const name of ['triaging', 'ready to design', 'split']) {
       expect(listed).toMatch(new RegExp(`^${name} +Spec-driven +[0-9a-f]{6} `, 'm'))
     }
     const json = JSON.parse((await run(['label', 'list', '--json'])).stdout)
@@ -1631,18 +1631,21 @@ describe('hoot label', () => {
 
   it("refuses to change or delete the labels of the workflow's group, or take a name of theirs", async () => {
     for (const args of [
-      ['label', 'edit', 'Scope', '--name', 'Begin'],
-      ['label', 'edit', 'Design', '--color', '112233'],
-      ['label', 'edit', 'Split', '--description', 'x'],
-      ['label', 'delete', 'Implement', '--yes'],
+      ['label', 'edit', 'triaging', '--name', 'Begin'],
+      ['label', 'edit', 'ready to design', '--color', '112233'],
+      ['label', 'edit', 'split', '--description', 'x'],
+      ['label', 'delete', 'ready to design', '--yes'],
     ]) {
       await expectRefused(args, 'belongs to the workflow Spec-driven')
     }
     await expectRefused(
-      ['label', 'create', 'design'],
-      'There is a label named "Spec-driven › Design"',
+      ['label', 'create', 'Triaging'],
+      'There is a label named "Spec-driven › triaging"',
     )
-    expect(hoot.labels.findByName('Scope')).toMatchObject({ name: 'Scope', group: 'Spec-driven' })
+    expect(hoot.labels.findByName('triaging')).toMatchObject({
+      name: 'triaging',
+      group: 'Spec-driven',
+    })
   })
 
   it('deletes a label only with --yes, taking it off every issue', async () => {
@@ -1670,7 +1673,7 @@ describe('hoot session start', () => {
       stderr: '',
     })
     expect(hoot.startedSessions).toEqual([{ issueId: a.id, prompt: null }])
-    expect(labelsOf(a)).toEqual(['Spec-driven › Scope'])
+    expect(labelsOf(a)).toEqual(['Spec-driven › triaging'])
   })
 
   it('gives the session the first message of a file', async () => {
@@ -1696,10 +1699,10 @@ describe('hoot session start', () => {
     )
     hoot.issues.update(b.id, { status: 'done' })
     const d = addIssue('D')
-    hoot.labels.changeIssueLabels(d.id, { add: [hoot.labels.findByName('Split')!.id] }, 'user')
+    hoot.labels.changeIssueLabels(d.id, { add: [hoot.labels.findByName('split')!.id] }, 'user')
     await expectRefused(
       ['session', 'start', id(d)],
-      'Its workflow is finished: it has the label Split.',
+      'Its workflow is finished: it has the label "split".',
     )
     hoot.setTools({ detecting: true, tools: [], error: null })
     await expectRefused(

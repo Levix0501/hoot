@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
-import type { StartBlocker } from '../../../shared/start-blockers'
+import { startBlockerText, type StartBlocker } from '../../../shared/start-blockers'
 import { getTool } from '../../../shared/tools'
 import { startHint, startState } from '../../lib/issue-start'
 import { cn } from '../../lib/utils'
@@ -62,7 +62,7 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
     case 'waiting':
       return <WaitingNote issueIds={blocker.issueIds} />
     case 'finished':
-      return <p>Its workflow is finished: it has the label {blocker.label}.</p>
+      return <p>{startBlockerText(blocker)}</p>
   }
 }
 

@@ -327,7 +327,7 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   can have any label, and keeps its labels when it moves. A label has a name, which no other label
   has whatever its case, a color and a description, and may be in a group, of which an issue has
   at most one label: given another label of the group, it no longer has the one it had. A label
-  in a group is written after its group's name, such as `Spec-driven › Design`. Under its
+  in a group is written after its group's name, such as `Spec-driven › triaging`. Under its
   properties, an issue's page lists under **Labels** the labels it has, each with its color and a
   `✕` that takes it off, and **Add label**, which opens a list of every label you can search, each
   with its description, those the issue has checked: check one to give it, uncheck it to take it
@@ -341,48 +341,37 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   press the value's digit; ⌘⌫ deletes, after asking; and Esc on an issue's page goes back to the
   list. On an issue's page, also while you type in its fields, ⌘⇧O adds a sub-issue and ⌘⇧P picks
   its parent.
-- **The workflow**: work on an issue goes through Hoot's built-in workflow, **Spec-driven**, one
-  step after another, in Claude Code sessions started from the issue. How far an issue has come is
-  the label of the group **Spec-driven** it has, and nothing else: none before it starts,
-  **Scope**, **Design** or **Implement** while it is at that step, and **Split** or **Implemented**
-  once it is finished. Changing the label, in the window or with `hoot`, moves the issue on or
-  back; taking it off makes the issue not started again. In **Scope**, the agent judges the issue
-  against the code, without changing anything: whether it is one piece of work, or several, results
-  that could each be delivered and accepted on their own; how much work it is waits until its
-  design is settled. If it is one, the agent says so; if several, it splits the issue into one
-  issue per result, each with a title, a description and the issues it waits on, and ends with
-  their order. Either way, it asks you to confirm. In **Design**, the agent interviews you in rounds
-  until every decision about the issue is settled, asking you only for decisions the issue and the
-  earlier steps have not settled, and for facts only you can provide, with the option it
-  recommends first; then it sums up what the issue delivers, the decisions and the facts it relied
-  on, and judges, by the design as settled, whether one fresh agent session can implement all of it
-  and another then verify it in full. If not, it splits the issue into issues that one session can
-  each implement and another verify, each with the decisions and facts it relies on in its
-  description. It asks you to confirm the summary, with the split if there is one. In both steps,
-  when you object or ask for changes, the agent revises and asks you again, and ends the step only
-  once you confirm. In **Implement**, the agent implements the issue in the worktree, as the earlier
-  steps settled it. When a step is done, the agent changes the issue's label with
-  [`hoot issue edit`](#the-hoot-command): to **Design** once you confirmed that the issue is one
-  piece of work, and to **Implement** once you confirmed the design of an issue that fits one
-  session, each time going on with that step in the same session; to **Implemented** once it is
-  implemented, and stopping. Once you confirmed a split, the agent writes it back: it creates all
-  of its issues at once with [`hoot issue create-batch`](#the-hoot-command), as sub-issues to do
-  of the issue, each with the label of the step it starts at (**Design** for a split of Scope,
-  **Implement** for one of Design), waiting on the issues of the split and others as you confirmed
-  their order, and blocking the issue; then it gives the issue **Split**, and stops, starting no
-  session for the sub-issues. An issue with **Split** is completed once its sub-issues are: when
-  the last of the sub-issues Hoot shows (it has at least one) becomes done or canceled, or goes, the
-  issue, unless it is done or canceled already, becomes Done when one of them is done, and
-  Canceled otherwise; this happens only as that comes to be, so an issue you open again stays
-  open, and so does one given a sub-issue to do. The workflow is data, which Hoot runs as it would
-  run any workflow; its prompts name no agent. Labels change no status, and changing the status,
-  the project or anything else of the issue changes nothing of its progress.
+- **The workflow**: work on an issue goes through Hoot's built-in workflow, **Spec-driven**, in
+  Claude Code sessions started from the issue. For now it has one step, **Triage**. How far an issue
+  has come is the label of the group **Spec-driven** it has, and nothing else: none before it
+  starts, **triaging** while it is at Triage, and **ready to design** or **split** once it is
+  finished. Changing the label, in the window or with `hoot`, moves the issue on or back; taking it
+  off makes the issue not started again. In **Triage**, the agent judges the issue against the code,
+  without changing anything: whether it is one piece of work, or several, results that could each be
+  delivered and accepted on their own; how much work it is waits until its design is settled. If it
+  is one, the agent says why, changes the issue's label to **ready to design** with
+  [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If several, it splits the
+  issue into one issue per result, each with a title, a description and the issues it waits on, ends
+  with their order, and asks you to confirm the split; when you object or ask for changes, it
+  revises and asks you again. Once you confirmed the split, the agent writes it back: it creates all
+  of its issues at once with [`hoot issue create-batch`](#the-hoot-command), as sub-issues to do of
+  the issue, each with **ready to design**, waiting on the issues of the split and others as you
+  confirmed their order, and blocking the issue; then it gives the issue **split**, and stops,
+  starting no session for the sub-issues. An issue with **split** is completed once its sub-issues
+  are: when the last of the sub-issues Hoot shows (it has at least one) becomes done or canceled, or
+  goes, the issue, unless it is done or canceled already, becomes Done when one of them is done, and
+  Canceled otherwise; this happens only as that comes to be, so an issue you open again stays open,
+  and so does one given a sub-issue to do. The workflow is data, which Hoot runs as it would run any
+  workflow; its prompts name no agent. A label that the group had and the workflow no longer has,
+  such as one of a step taken out, leaves the group, and stays on its issues like any other label.
+  Labels change no status, and changing the status, the project or anything else of the issue
+  changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
   worktree of its own, at the first step of its workflow when it has not started, and at the step of
   its label otherwise. It shows a paper plane, which turns into Claude Code's mark while you point at it
-  or move the keyboard focus to it, and its tooltip says what it does, such as **Start Scope with
-  Claude Code in a new worktree** or **Continue Design with Claude Code in this issue's worktree**.
+  or move the keyboard focus to it, and its tooltip says what it does, such as **Start Triage with
+  Claude Code in a new worktree** or **Continue Triage with Claude Code in this issue's worktree**.
   Clicking it saves what you typed in the issue, then starts Claude Code, at the permission level
   picked in the Agents menu at the click, in the issue's worktree, and shows the session as soon as
   it appears, whatever page is shown then, with the keyboard focus in its terminal; going back shows
@@ -397,21 +386,24 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   `~/.hoot/worktrees/<project>/<branch>`. The project expands to show the worktree's row. Meanwhile
   the button spins and clicking it does nothing; the rest of Hoot can be used as usual. The branch
   keeps its name when the title changes. The session is named after the issue's title. An issue that
-  had not started gets the first step's label, **Spec-driven › Scope**, once the session has
+  had not started gets the first step's label, **Spec-driven › triaging**, once the session has
   started, which its activity records as yours. Hoot writes the issue, its title as a heading and
   its description below it, to `issue.md` in a new folder of the session's own in `.hoot/tmp` of
   the worktree, where Claude Code reads its files without asking at any permission level; NUL
   characters are left out. A `.gitignore` there has Git ignore everything in `.hoot/tmp`, itself
-  included, which leaves the rest of `.hoot` to files a project might commit. Beside it Hoot writes
-  the whole workflow to `workflow.md`: its name, each step in order with its label, its prompt and
-  its outcomes (the label each changes to, what it means and what to do first, and whether the agent
-  goes on or stops afterwards), and the end labels, with what **Split** does. The first message
-  points to `issue.md` and `workflow.md`, asking the agent to read them, names the worktree's
-  branch and the step the session starts at, then gives the step's prompt and its outcomes, each
-  with what it means, the command that changes the label, such as
-  `hoot issue edit ISS-12 --add-label Design`, and whether to go on with that label's step from
-  `workflow.md` afterwards, or stop. The message would do for any agent, and the issue stays out of
-  it, where an agent could take some of its text for a command or a mention. Hoot does not enforce that nothing changes while the agent judges or asks: like any
+  included, which leaves the rest of `.hoot` to files a project might commit. When the session can
+  go on from the step it starts at to another, Hoot also writes beside it the whole workflow to
+  `workflow.md`: its name, each step in order with its label, its prompt and its outcomes (the
+  label each changes to, what it means and what to do first, and whether the agent goes on or
+  stops afterwards), and the end labels, with what **split** does; a session of Triage, which
+  stops either way, gets `issue.md` alone. The first message points to `issue.md`, and to
+  `workflow.md` when there is one, asking the agent to read them, names the worktree's branch and
+  the step the session starts at, then gives the step's prompt and its outcomes, each with what it
+  means, the command that changes the label, such as
+  `hoot issue edit ISS-12 --add-label 'ready to design'`, and whether to go on with that label's
+  step from `workflow.md` afterwards, or stop. The message would do for any agent, and the issue
+  stays out of it, where an agent could take some of its text for a command or a mention. Hoot
+  does not enforce that nothing changes while the agent judges or asks: like any
   other session, this one can change files as far as its permission level lets it. Once the session
   has started, an issue in the Backlog or Todo is In Progress. Hoot removes the session's folder
   once the session's process has ended, or when it could not start, and leaves `.hoot/tmp` with its
@@ -435,7 +427,7 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   worktree with the worktree row's `+`.
 - **Activity**: below the sub-issues, an issue's page lists, in the order they happened, when the
   issue was created; each label it was given or had taken off, as the label was written then,
-  with its color, by you or by an agent, such as **Added label Spec-driven › Design · by agent ·
+  with its color, by you or by an agent, such as **Added label Spec-driven › triaging · by agent ·
   2 hours ago** (a label of a group given in place of another takes the other off, which is listed
   too); and when the issue was done or canceled.
 - **When it cannot start**: when the issue's project is not a Git repository, Hoot creates nothing
@@ -475,7 +467,7 @@ hoot issue create --title "Write the tests" --parent ISS-12   # a sub-issue of I
 hoot issue create --title "Ship it" --blocked-by ISS-14,ISS-15
 hoot issue edit ISS-12 --add-sub-issue ISS-14,ISS-15
 hoot issue edit ISS-15 --add-blocked-by ISS-14 --remove-blocking ISS-16
-hoot issue edit ISS-12 --add-label Design --remove-label bug
+hoot issue edit ISS-12 --add-label 'ready to design' --remove-label bug
 hoot issue list --label ui --label bug     # the issues with both labels
 hoot issue create-batch ISS-12 --file plan.json   # sub-issues of ISS-12, all at once
 hoot label create bug --color eb5757 --description "Something is broken"
@@ -485,7 +477,7 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
 - **`hoot issue view <issue>`** shows an issue, given its identifier (such as `ISS-12`) or its
   number (`12`): its identifier and title; then its status, its priority and when it was created
   (in local time, to the minute); then, if it has labels, a line such as
-  `Labels: bug, Spec-driven › Design`; then, if it has a parent, a line such as
+  `Labels: bug, Spec-driven › triaging`; then, if it has a parent, a line such as
   `Sub-issue of ISS-4 Ship it (Todo)`; then, if it has a description, a blank line and the
   description as it is written, in Markdown; then, if it has sub-issues, a blank line,
   `Sub-issues · 1/3 (33%)` (how many of those not canceled are done) and a line for each, with
@@ -591,8 +583,8 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
   the Hoot that started the session is not running any more, or it does not run in a session Hoot
   started.
 - **Agents** are told about `hoot` only by the first message of a session started from an issue,
-  and the `workflow.md` beside its issue, which ask them to change the issue's label with
-  `hoot issue edit` when a step is done, and it is not allowed in advance: a
+  and the `workflow.md` beside its issue when there is one, which ask them to change the issue's
+  label with `hoot issue edit` when a step is done, and it is not allowed in advance: a
   coding tool runs it like any other command, at its [permission level](#permission-levels), and
   Hoot changes no tool's settings for it. At Codex's **Default** and **Read Only** levels, Codex's
   sandbox may block `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside the

@@ -75,6 +75,9 @@ importers:
       '@types/semver':
         specifier: ^7.8.0
         version: 7.8.0
+      '@types/shell-quote':
+        specifier: ^1.7.5
+        version: 1.7.5
       '@types/which':
         specifier: ^3.0.4
         version: 3.0.4
@@ -162,6 +165,9 @@ importers:
       shadcn:
         specifier: ^4.21.4
         version: 4.21.4
+      shell-quote:
+        specifier: ^1.12.0
+        version: 1.12.0
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1355,6 +1361,9 @@ packages:
 
   '@types/semver@7.8.0':
     resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
+
+  '@types/shell-quote@1.7.5':
+    resolution: {integrity: sha512-+UE8GAGRPbJVQDdxi16dgadcBfQ+KG2vgZhV1+3A1XmHbmwcdwhCUwIdy+d3pAGrbvgRoVSjeI9vOWyq376Yzw==}
 
   '@types/use-sync-external-store@0.0.6':
     resolution: {integrity: sha512-zFDAD+tlpf2r4asuHEj0XH6pY6i0g5NeAHPn+15wk3BV6JA69eERFXC1gyGThDkVa1zCyKr5jox1+2LbV/AMLg==}
@@ -5250,6 +5259,8 @@ snapshots:
       '@types/node': 24.19.1
 
   '@types/semver@7.8.0': {}
+
+  '@types/shell-quote@1.7.5': {}
 
   '@types/use-sync-external-store@0.0.6': {}
 

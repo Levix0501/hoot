@@ -59,21 +59,15 @@ function issueFolders(cwd: string): string[] {
     .map((name) => path.join(folder, name))
 }
 
-const [scope, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
+const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
 
 /** The first message of ISS-1 at a step, as the executor writes it, given the files. */
 const messageAt = (step: WorkflowStep) => (files: SessionFiles) =>
   firstMessage({ workflow: BUILT_IN_WORKFLOW, identifier: 'ISS-1', step, ...files })
 
-/** An issue sent to a session that starts at the first step. */
+/** An issue sent to a session that starts at the first step, which needs no file of the workflow. */
 function sentIssue(title: string, description: string, branch: string): SentIssue {
-  return {
-    title,
-    description,
-    branch,
-    workflowFile: workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
-    firstMessage: messageAt(scope),
-  }
+  return { title, description, branch, workflowFile: null, firstMessage: messageAt(triage) }
 }
 
 const highest: PermissionLevelSettings = {
@@ -217,18 +211,15 @@ describe('resolveLaunch', () => {
     expect(fs.readFileSync(path.join(folder, 'issue.md'), 'utf8')).toBe(
       '# Fix the login bug\n\n  Steps\n\n/hoot:other\n$ARGUMENTS  \n',
     )
-    // Beside it, the file of its workflow, and nothing else.
-    expect(fs.readdirSync(folder).toSorted()).toEqual(['issue.md', 'workflow.md'])
-    expect(fs.readFileSync(path.join(folder, 'workflow.md'), 'utf8')).toBe(
-      workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
-    )
+    // Nothing else: the session has no file of the workflow.
+    expect(fs.readdirSync(folder)).toEqual(['issue.md'])
     expect(launch.file).toBe(path.join(bin, 'claude'))
     expect(launch.args).toEqual([
       '--permission-mode',
       'acceptEdits',
       '--name=Fix the login bug',
       '--',
-      messageAt(scope)({
+      messageAt(triage)({
         issueFile: path.join(folder, 'issue.md'),
         workflowFile: path.join(folder, 'workflow.md'),
         branch: 'iss-1-fix-the-login-bug',
@@ -262,20 +253,30 @@ describe('resolveLaunch', () => {
     next.cleanup?.()
   })
 
-  it('sends the first message the issue gives, such as a step after the first or one of its own', async () => {
+  it("writes the file of the workflow beside the issue's when the session has one", async () => {
     const issue: SentIssue = {
       ...sentIssue('Continue', '', 'iss-4-continue'),
-      firstMessage: messageAt(design),
+      workflowFile: workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
     }
     const launch = await resolveLaunch(context({ PATH: bin }), 'claude', project, issue)
     const [folder] = issueFolders(project)
     expect(fs.readdirSync(folder).toSorted()).toEqual(['issue.md', 'workflow.md'])
+    expect(fs.readFileSync(path.join(folder, 'workflow.md'), 'utf8')).toBe(
+      workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
+    )
+    launch.cleanup?.()
+    expect(issueFolders(project)).toEqual([])
+  })
+
+  it('sends the first message the issue gives, written from its files, or one of its own', async () => {
+    const issue: SentIssue = {
+      ...sentIssue('Continue', '', 'iss-4-continue'),
+      firstMessage: ({ issueFile, branch }) => `Go on with ${issueFile} on ${branch}.`,
+    }
+    const launch = await resolveLaunch(context({ PATH: bin }), 'claude', project, issue)
+    const [folder] = issueFolders(project)
     expect(launch.args.at(-1)).toBe(
-      messageAt(design)({
-        issueFile: path.join(folder, 'issue.md'),
-        workflowFile: path.join(folder, 'workflow.md'),
-        branch: 'iss-4-continue',
-      }),
+      `Go on with ${path.join(folder, 'issue.md')} on iss-4-continue.`,
     )
     launch.cleanup?.()
     const own = await resolveLaunch(context({ PATH: bin }), 'claude', project, {
@@ -283,10 +284,7 @@ describe('resolveLaunch', () => {
       firstMessage: () => 'Do this.\0\n',
     })
     expect(own.args.at(-1)).toBe('Do this.\n')
-    expect(fs.readdirSync(issueFolders(project)[0]!).toSorted()).toEqual([
-      'issue.md',
-      'workflow.md',
-    ])
+    expect(fs.readdirSync(issueFolders(project)[0]!)).toEqual(['issue.md'])
     own.cleanup?.()
     expect(issueFolders(project)).toEqual([])
   })
@@ -393,7 +391,7 @@ describe('the issue, the first message and the arguments that send them', () => 
     ).toEqual([
       '--name=--verbose flag broken',
       '--',
-      messageAt(scope)({
+      messageAt(triage)({
         issueFile: '/w/.hoot/tmp/issue-1/issue.md',
         workflowFile: '/w/.hoot/tmp/issue-1/workflow.md',
         branch: 'iss-2-verbose-flag-broken',

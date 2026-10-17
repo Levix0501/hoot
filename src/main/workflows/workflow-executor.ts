@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import { isCompleted, type Issue, type IssuePriority, type IssueStatus } from '../../shared/issues'
 import type { LabelActor } from '../../shared/labels'
-import { firstMessage, workflowFileText } from '../../shared/workflow-text'
+import { firstMessage, goesOn, workflowFileText } from '../../shared/workflow-text'
 import {
   firstStep,
   workflowLabels,
@@ -18,7 +18,7 @@ import { LabelError, type LabelStore } from '../labels/label-store'
 export interface SessionFiles {
   /** The absolute path of the issue's file. */
   issueFile: string
-  /** The absolute path of the workflow's file. */
+  /** The absolute path of the workflow's file, which is there when the session has one. */
   workflowFile: string
   branch: string
 }
@@ -32,7 +32,8 @@ export type SessionStart =
   | {
       ok: true
       step: WorkflowStep
-      workflowFile: string
+      /** `null` when the session needs no file of the workflow: when it cannot go on from its step. */
+      workflowFile: string | null
       firstMessage(files: SessionFiles): string
     }
   | { ok: false; message: string }
@@ -156,14 +157,14 @@ export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues
     if (progress.kind === 'finished') {
       return {
         ok: false,
-        message: `The workflow of ${identifier} is finished: it has the label ${progress.label.name}.`,
+        message: `The workflow of ${identifier} is finished: it has the label "${progress.label.name}".`,
       }
     }
     const step = progress.kind === 'at-step' ? progress.step : firstStep(this.workflow)
     return {
       ok: true,
       step,
-      workflowFile: workflowFileText(this.workflow, identifier),
+      workflowFile: goesOn(step) ? workflowFileText(this.workflow, identifier) : null,
       firstMessage: (files) =>
         firstMessage({ workflow: this.workflow, identifier, step, ...files }),
     }

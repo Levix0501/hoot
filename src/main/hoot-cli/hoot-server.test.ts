@@ -164,13 +164,13 @@ describe('HootServer', () => {
     expect(
       (
         await request('PATCH', `/issues/${alpha.id}`, {
-          body: JSON.stringify({ addLabels: ['BUG', 'Design'] }),
+          body: JSON.stringify({ addLabels: ['BUG', 'Ready to Design'] }),
         })
       ).answer.issue,
     ).toMatchObject({
       labels: [
         { name: 'bug', group: null },
-        { name: 'Design', group: 'Spec-driven' },
+        { name: 'ready to design', group: 'Spec-driven' },
       ],
     })
     expect(
@@ -182,12 +182,12 @@ describe('HootServer', () => {
       status: 200,
       answer: { ok: true, project: gamma() },
     })
-    expect(hoot.labels.labelsOf(alpha.id).map((label) => label.name)).toEqual(['Design'])
+    expect(hoot.labels.labelsOf(alpha.id).map((label) => label.name)).toEqual(['ready to design'])
     for (const [method, url, body, status, message] of [
-      ['DELETE', '/labels/Scope', undefined, 409, 'belongs to the workflow Spec-driven'],
+      ['DELETE', '/labels/triaging', undefined, 409, 'belongs to the workflow Spec-driven'],
       ['DELETE', '/labels/nope', undefined, 404, 'There is no label named "nope".'],
-      ['PATCH', '/labels/Scope', JSON.stringify({}), 400, 'Nothing to change.'],
-      ['POST', '/labels', JSON.stringify({ name: 'scope' }), 409, 'There is a label named'],
+      ['PATCH', '/labels/triaging', JSON.stringify({}), 400, 'Nothing to change.'],
+      ['POST', '/labels', JSON.stringify({ name: 'Triaging' }), 409, 'There is a label named'],
       ['POST', '/labels', JSON.stringify({ name: 'z', color: 'red' }), 409, 'is not a color'],
       [
         'PATCH',
@@ -381,7 +381,7 @@ describe('HootServer', () => {
             title: 'S2',
             blockedBy: [{ item: 1 }, { issue: String(charlie.id) }],
             blocking: [{ issue: String(alpha.id) }],
-            labels: ['Implement'],
+            labels: ['ready to design'],
           },
         ],
       }),
@@ -390,7 +390,7 @@ describe('HootServer', () => {
     const [s1, s2] = split.answer.issues as HootIssue[]
     expect(s2!.blockedBy.map((entry) => entry.id)).toEqual([s1!.id, charlie.id])
     expect(s2!.blocking.map((entry) => entry.id)).toEqual([alpha.id])
-    expect(s2!.labels.map((label) => label.name)).toEqual(['Implement'])
+    expect(s2!.labels.map((label) => label.name)).toEqual(['ready to design'])
     expect(hoot.issues.subIssues().links).toEqual([
       { issueId: s1!.id, parentId: alpha.id },
       { issueId: s2!.id, parentId: alpha.id },

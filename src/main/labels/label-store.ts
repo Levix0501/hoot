@@ -184,6 +184,10 @@ export class LabelStore extends EventEmitter<{
          WHERE id = ?`,
       ),
       deleteLabel: db.prepare('DELETE FROM labels WHERE id = ?'),
+      ungroupOthers: db.prepare(
+        `UPDATE labels SET group_id = NULL
+         WHERE group_id = ? AND id NOT IN (SELECT value FROM json_each(?))`,
+      ),
       issueLabels: db.prepare(
         'SELECT issue_id, label_id FROM issue_labels ORDER BY issue_id, label_id',
       ),
@@ -416,8 +420,11 @@ export class LabelStore extends EventEmitter<{
   /**
    * Puts a workflow's group and its labels in place, as the workflow gives
    * them: creates them when they are missing, and gives them the name,
-   * colors and descriptions the workflow has. Returns the group's id and
-   * each label's id, by the label's name as the workflow writes it.
+   * colors and descriptions the workflow has. Any other label the group has,
+   * one the workflow no longer has, leaves it: it becomes a label without a
+   * group, which the issues carrying it still carry, and which can be changed
+   * and deleted like any other. Returns the group's id and each label's id,
+   * by the label's name as the workflow writes it.
    */
   ensureWorkflowGroup(
     workflow: string,
@@ -473,6 +480,11 @@ export class LabelStore extends EventEmitter<{
           this.changedNow = true
         }
       }
+      const others = this.statements.ungroupOthers.run(
+        group.id,
+        JSON.stringify([...labelIds.values()]),
+      )
+      if (others.changes > 0) this.changedNow = true
       return { groupId: group.id, labelIds }
     })
   }

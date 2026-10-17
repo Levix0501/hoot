@@ -51,25 +51,21 @@ describe('the built-in workflow', () => {
     expect(checkWorkflow(read)).toEqual({ ok: true, workflow: BUILT_IN_WORKFLOW })
   })
 
-  it('is Spec-driven, with the group Spec-driven, and goes Scope, Design, Implement', () => {
+  it('is Spec-driven, with the group Spec-driven, and has one step for now: Triage', () => {
     expect(BUILT_IN_WORKFLOW.name).toBe('Spec-driven')
     expect(BUILT_IN_WORKFLOW.group).toBe('Spec-driven')
     expect(BUILT_IN_WORKFLOW.steps.map((step) => [step.name, step.label.name])).toEqual([
-      ['Scope', 'Scope'],
-      ['Design', 'Design'],
-      ['Implement', 'Implement'],
+      ['Triage', 'triaging'],
     ])
     expect(workflowLabels(BUILT_IN_WORKFLOW).map((label) => label.name)).toEqual([
-      'Scope',
-      'Design',
-      'Implement',
-      'Split',
-      'Implemented',
+      'triaging',
+      'ready to design',
+      'split',
     ])
-    expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Scope')
+    expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Triage')
   })
 
-  it('has the outcomes of each step in their order, with the label each changes to and whether it goes on', () => {
+  it('ends Triage at ready to design or split, stopping either way', () => {
     expect(
       BUILT_IN_WORKFLOW.steps.map((step) => ({
         step: step.name,
@@ -77,56 +73,40 @@ describe('the built-in workflow', () => {
       })),
     ).toEqual([
       {
-        step: 'Scope',
+        step: 'Triage',
         outcomes: [
-          ['Design', true],
-          ['Split', false],
+          ['ready to design', false],
+          ['split', false],
         ],
       },
-      {
-        step: 'Design',
-        outcomes: [
-          ['Implement', true],
-          ['Split', false],
-        ],
-      },
-      { step: 'Implement', outcomes: [['Implemented', false]] },
     ])
   })
 
-  it('completes an issue split once its sub-issues are, and not one implemented', () => {
+  it('completes an issue split once its sub-issues are, and not one ready to design', () => {
     expect(
       BUILT_IN_WORKFLOW.endLabels.map(({ name, completeWithSubIssues }) => [
         name,
         completeWithSubIssues,
       ]),
     ).toEqual([
-      ['Split', true],
-      ['Implemented', false],
+      ['ready to design', false],
+      ['split', true],
     ])
   })
 
   it('tells the agent what each outcome means, and how to write a split back', () => {
-    const [scope, design, implement] = BUILT_IN_WORKFLOW.steps
-    expect(scope!.outcomes[0]!.instruction).toBe('I confirmed that the issue is one piece of work.')
-    expect(design!.outcomes[0]!.instruction).toBe(
-      'I confirmed the summary, and the issue fits one session.',
+    const [one, split] = BUILT_IN_WORKFLOW.steps[0]!.outcomes
+    expect(one!.instruction).toBe('The issue is one piece of work.')
+    const { instruction } = split!
+    expect(instruction).toMatch(/^I confirmed the split\. /)
+    expect(instruction).toContain('with one `hoot issue create-batch {issue} --file <file>`')
+    expect(instruction).toContain('`"labels": ["ready to design"]`')
+    expect(instruction).toContain('`"status": "todo"`')
+    expect(instruction).toContain('`"blocking": ["{issue}"]`')
+    expect(instruction).toContain(
+      'in `"blockedBy"`, as I confirmed the order, the issues it waits on',
     )
-    expect(implement!.outcomes[0]!.instruction).toBe('The issue is implemented.')
-    for (const [outcome, start] of [
-      [scope!.outcomes[1]!, 'Design'],
-      [design!.outcomes[1]!, 'Implement'],
-    ] as const) {
-      const { instruction } = outcome
-      expect(instruction).toContain('with one `hoot issue create-batch {issue} --file <file>`')
-      expect(instruction).toContain(`\`"labels": ["${start}"]\``)
-      expect(instruction).toContain('`"status": "todo"`')
-      expect(instruction).toContain('`"blocking": ["{issue}"]`')
-      expect(instruction).toContain(
-        'in `"blockedBy"`, as I confirmed the order, the issues it waits on',
-      )
-      expect(instruction).toContain('Do not start sessions for the sub-issues.')
-    }
+    expect(instruction).toContain('Do not start sessions for the sub-issues.')
   })
 
   it('is the workflow every issue follows', () => {

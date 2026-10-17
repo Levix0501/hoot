@@ -3,63 +3,63 @@ import { BUILT_IN_WORKFLOW } from './built-in-workflow'
 import {
   filledIn,
   firstMessage,
+  goesOn,
   labelCommand,
   outcomeInstructions,
   workflowFileText,
 } from './workflow-text'
-import type { WorkflowStep } from './workflows'
+import type { WorkflowDefinition, WorkflowStep } from './workflows'
 
-const [scope, design, implement] = BUILT_IN_WORKFLOW.steps as [
-  WorkflowStep,
-  WorkflowStep,
-  WorkflowStep,
-]
+const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
 
-/** The prompts of the built-in steps word for word as they were before labels marked the steps. */
-const SCOPE_PROMPT = [
-  "Scope: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
+/** The prompt of the built-in Triage, word for word. */
+const TRIAGE_PROMPT = [
+  "Triage: judge the issue against this project's code. Read whatever you need, but change nothing: no edits, no commits, no commands that change files.",
   '',
   '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
-  '2. If one, say so.',
+  '2. If one, that is the end of this step: do not ask me to confirm it.',
   '3. If several, split it into one issue per result. For each:',
   '   - Title',
   '   - Description: what it delivers, and how to accept it',
   '   - Waits on: the issues it cannot be delivered and accepted without, or none',
   '4. End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`.',
-  '5. Ask me to confirm your answer, with the split if there is one. If I object or ask for changes, revise it and ask me again, until I confirm.',
+  '5. Ask me to confirm the split. If I object or ask for changes, revise it and ask me again, until I confirm.',
   '',
   "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
 ].join('\n')
 
-const DESIGN_PROMPT = [
-  'Design: settle with me how the issue is to be built, before anything changes. Read whatever you need, but change nothing yet.',
-  '',
-  'Interview me until every decision about the issue is settled. A decision is a choice that whoever implements the issue may not make on their own. A decision the issue already states, or an earlier step settled, is settled: do not ask it again. Ask me only for decisions, and for facts only I can provide. Find out every other fact yourself, from the code and the environment, even one I stated; when what you find contradicts me, put it to me as a decision.',
-  '',
-  'Ask in rounds. Each round asks every open decision whose prerequisites are settled, those that unblock the most first. Put the option you recommend first, with its main reason and its cost. Use your tool for asking structured questions if you have one; otherwise ask in your reply, with numbered options. Wait for my answers before the next round.',
-  '',
-  'When nothing is left open, summarize:',
-  '- what the issue delivers, and what it leaves out',
-  '- each decision, as I settled it',
-  '- the facts you relied on, each with how you established it, and the risks I accepted',
-  '',
-  'Then judge the workload of the issue as settled: can one fresh agent session implement the whole issue, and another fresh session then verify it in full? Answer yes or no, and say why: the parts of the code it touches, and what is still unknown. Do not estimate time. If no, split it into issues that one session can each implement and another verify. Each delivers a narrow but complete result through every layer it touches, never one layer of the whole. For each:',
-  '- Title',
-  '- Description: what it delivers, how to accept it, and the decisions and facts above that it relies on',
-  '- Waits on: the issues it cannot be delivered and accepted without, or none',
-  '',
-  "End the split with the order, one chain per line, such as `1 → 2 → 4` and `1 → 3`. Write titles and descriptions in the issue's language.",
-  '',
-  'Ask me to confirm the summary, with the split if there is one. If I object or ask for changes, revise it and ask me again, until I confirm.',
-].join('\n')
+/** A workflow of two steps: Look, which goes on to Make or stops, and Make. */
+const SAMPLE: WorkflowDefinition = {
+  name: 'Sample',
+  group: 'Sample',
+  steps: [
+    {
+      name: 'Look',
+      label: { name: 'Looking', color: '4ea7fc', description: '' },
+      prompt: 'Look: read {issue}.',
+      outcomes: [
+        { label: 'Making', instruction: 'It is worth making.', goOn: true },
+        { label: 'Dropped', instruction: 'Drop {issue}.', goOn: false },
+      ],
+    },
+    {
+      name: 'Make',
+      label: { name: 'Making', color: 'bb87fc', description: '' },
+      prompt: 'Make: build it.',
+      outcomes: [{ label: 'made well', instruction: 'It is made.', goOn: false }],
+    },
+  ],
+  endLabels: [
+    { name: 'made well', color: '4cb782', description: '', completeWithSubIssues: false },
+    { name: 'Dropped', color: '95a2b3', description: '', completeWithSubIssues: true },
+  ],
+}
 
-const IMPLEMENT_PROMPT = 'Implement: implement the issue here, as the earlier steps settled it.'
+const [look, make] = SAMPLE.steps as [WorkflowStep, WorkflowStep]
 
-describe('the built-in prompts', () => {
-  it('are word for word what they were', () => {
-    expect(scope.prompt).toBe(SCOPE_PROMPT)
-    expect(design.prompt).toBe(DESIGN_PROMPT)
-    expect(implement.prompt).toBe(IMPLEMENT_PROMPT)
+describe('the built-in prompt', () => {
+  it('is word for word as settled', () => {
+    expect(triage.prompt).toBe(TRIAGE_PROMPT)
   })
 })
 
@@ -72,28 +72,54 @@ describe('filledIn', () => {
   })
 })
 
+describe('labelCommand', () => {
+  it("quotes a label's name that a shell would take for more than one word", () => {
+    expect(labelCommand('ISS-7', 'split')).toBe('hoot issue edit ISS-7 --add-label split')
+    expect(labelCommand('ISS-7', 'ready to design')).toBe(
+      "hoot issue edit ISS-7 --add-label 'ready to design'",
+    )
+    expect(labelCommand('ISS-7', "won't do")).toBe(`hoot issue edit ISS-7 --add-label "won't do"`)
+  })
+})
+
+describe('goesOn', () => {
+  it('is whether any outcome of the step goes on', () => {
+    expect(goesOn(look)).toBe(true)
+    expect(goesOn(make)).toBe(false)
+    expect(goesOn(triage)).toBe(false)
+  })
+})
+
 describe('outcomeInstructions', () => {
   it('lists each outcome: its instruction, the command that changes the label, and whether to go on', () => {
-    const text = outcomeInstructions(BUILT_IN_WORKFLOW, scope, 'ISS-7')
+    expect(outcomeInstructions(SAMPLE, look, 'ISS-7')).toBe(
+      [
+        "When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group Sample with Hoot's `hoot` command:",
+        '',
+        '- It is worth making.',
+        '  Then change the label to `Making` with `hoot issue edit ISS-7 --add-label Making`, and go on with the step of that label, Make, as workflow.md gives it.',
+        '- Drop ISS-7.',
+        '  Then change the label to `Dropped` with `hoot issue edit ISS-7 --add-label Dropped`, and stop.',
+      ].join('\n'),
+    )
+  })
+
+  it('ends Triage at ready to design or split, stopping either way', () => {
+    const text = outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7')
     expect(text).toBe(
       [
         "When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group Spec-driven with Hoot's `hoot` command:",
         '',
-        '- I confirmed that the issue is one piece of work.',
-        '  Then change the label to Design with `hoot issue edit ISS-7 --add-label Design`, and go on with the step of that label, Design, as workflow.md gives it.',
-        `- ${filledIn(scope.outcomes[1]!.instruction, 'ISS-7')}`,
-        '  Then change the label to Split with `hoot issue edit ISS-7 --add-label Split`, and stop.',
+        '- The issue is one piece of work.',
+        "  Then change the label to `ready to design` with `hoot issue edit ISS-7 --add-label 'ready to design'`, and stop.",
+        `- ${filledIn(triage.outcomes[1]!.instruction, 'ISS-7')}`,
+        '  Then change the label to `split` with `hoot issue edit ISS-7 --add-label split`, and stop.',
       ].join('\n'),
     )
     expect(text).toContain('`hoot issue create-batch ISS-7 --file <file>`')
+    expect(text).toContain('`"labels": ["ready to design"]`')
     expect(text).toContain('`"blocking": ["ISS-7"]`')
     expect(text).not.toContain('{issue}')
-  })
-
-  it('stops after the end label of Implement', () => {
-    expect(outcomeInstructions(BUILT_IN_WORKFLOW, implement, 'ISS-7')).toContain(
-      '- The issue is implemented.\n  Then change the label to Implemented with `hoot issue edit ISS-7 --add-label Implemented`, and stop.',
-    )
   })
 })
 
@@ -104,16 +130,16 @@ describe('firstMessage', () => {
     issueFile: '/work/a/.hoot/tmp/issue-x/issue.md',
     workflowFile: '/work/a/.hoot/tmp/issue-x/workflow.md',
     branch: 'iss-7-fix-it',
-    step: scope,
+    step: triage,
   })
 
-  it('points to the files, names the branch and the step, then gives the prompt and the outcomes', () => {
+  it('points to the issue file, names the branch and the step, then gives the prompt and the outcomes', () => {
     expect(message).toBe(
       [
-        'The issue to work on is ISS-7, in `/work/a/.hoot/tmp/issue-x/issue.md`. Read it first: its title is the heading; the rest, if any, is its description. Then read `/work/a/.hoot/tmp/issue-x/workflow.md`: the workflow Spec-driven, which work on the issue goes through, step by step.',
-        "This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue. This session starts at the step Scope, which the issue's label Scope marks.",
-        SCOPE_PROMPT,
-        outcomeInstructions(BUILT_IN_WORKFLOW, scope, 'ISS-7'),
+        'The issue to work on is ISS-7, in `/work/a/.hoot/tmp/issue-x/issue.md`. Read it first: its title is the heading; the rest, if any, is its description.',
+        "This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue. This session starts at the step Triage, which the issue's label `triaging` marks.",
+        TRIAGE_PROMPT,
+        outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7'),
       ].join('\n\n'),
     )
   })
@@ -122,77 +148,79 @@ describe('firstMessage', () => {
     expect(message.endsWith('\n')).toBe(false)
   })
 
-  it('starts at the step it is given', () => {
+  it('points to the file of the workflow too when the step may go on to another', () => {
     const at = firstMessage({
-      workflow: BUILT_IN_WORKFLOW,
+      workflow: SAMPLE,
       identifier: 'ISS-7',
       issueFile: '/i.md',
       workflowFile: '/w.md',
       branch: 'b',
-      step: design,
+      step: look,
     })
-    expect(at).toContain('This session starts at the step Design')
-    expect(at).toContain(DESIGN_PROMPT)
-    expect(at).toContain('`hoot issue edit ISS-7 --add-label Implement`')
+    expect(at.split('\n\n')[0]).toBe(
+      'The issue to work on is ISS-7, in `/i.md`. Read it first: its title is the heading; the rest, if any, is its description. Then read `/w.md`: the workflow Sample, which work on the issue goes through, step by step.',
+    )
+  })
+
+  it('starts at the step it is given', () => {
+    const at = firstMessage({
+      workflow: SAMPLE,
+      identifier: 'ISS-7',
+      issueFile: '/i.md',
+      workflowFile: '/w.md',
+      branch: 'b',
+      step: make,
+    })
+    expect(at).toContain(
+      "This session starts at the step Make, which the issue's label `Making` marks.",
+    )
+    expect(at).toContain('Make: build it.')
+    expect(at).toContain("`hoot issue edit ISS-7 --add-label 'made well'`")
+    expect(at).not.toContain('/w.md')
   })
 })
 
 describe('workflowFileText', () => {
-  const text = workflowFileText(BUILT_IN_WORKFLOW, 'ISS-7')
-
   it('gives the name, each step in order with its label, prompt and outcomes, and the end labels', () => {
-    expect(text.startsWith('# Spec-driven\n\n')).toBe(true)
-    expect(text.endsWith('\n')).toBe(true)
-    const scopeAt = text.indexOf('## 1. Scope\n\nLabel: Scope\n\n' + SCOPE_PROMPT)
-    const designAt = text.indexOf('## 2. Design\n\nLabel: Design\n\n' + DESIGN_PROMPT)
-    const implementAt = text.indexOf('## 3. Implement\n\nLabel: Implement\n\n' + IMPLEMENT_PROMPT)
-    const endsAt = text.indexOf('## End labels')
-    expect(scopeAt).toBeGreaterThan(0)
-    expect(designAt).toBeGreaterThan(scopeAt)
-    expect(implementAt).toBeGreaterThan(designAt)
-    expect(endsAt).toBeGreaterThan(implementAt)
-  })
-
-  it('gives each outcome the label it changes to, its instruction, and whether it goes on', () => {
-    expect(text).toContain(
+    expect(workflowFileText(SAMPLE, 'ISS-7')).toBe(
       [
-        '- I confirmed that the issue is one piece of work.',
-        `  - Changes the label to: Design (\`${labelCommand('ISS-7', 'Design')}\`)`,
-        '  - Go on: on; once the label is changed, go on with the step of that label, Design.',
-      ].join('\n'),
-    )
-    expect(text).toContain(
-      [
-        '- I confirmed the summary, and the issue fits one session.',
-        '  - Changes the label to: Implement (`hoot issue edit ISS-7 --add-label Implement`)',
-        '  - Go on: on; once the label is changed, go on with the step of that label, Implement.',
-      ].join('\n'),
-    )
-    expect(text).toContain(
-      [
-        '- The issue is implemented.',
-        '  - Changes the label to: Implemented (`hoot issue edit ISS-7 --add-label Implemented`)',
+        '# Sample',
+        '',
+        'The workflow ISS-7 goes through. How far the issue has come is the label of the group Sample it carries: none before it starts, the label of the step it is at, or an end label once it is finished. An issue carries one label of the group at most: adding one with `hoot issue edit ISS-7 --add-label <label>` takes the other off.',
+        '',
+        '## 1. Look',
+        '',
+        'Label: `Looking`',
+        '',
+        'Look: read ISS-7.',
+        '',
+        'Outcomes:',
+        '',
+        '- It is worth making.',
+        '  - Changes the label to: `Making` (`hoot issue edit ISS-7 --add-label Making`)',
+        '  - Go on: on; once the label is changed, go on with the step of that label, Make.',
+        '- Drop ISS-7.',
+        '  - Changes the label to: `Dropped` (`hoot issue edit ISS-7 --add-label Dropped`)',
         '  - Go on: off; once the label is changed, stop.',
+        '',
+        '## 2. Make',
+        '',
+        'Label: `Making`',
+        '',
+        'Make: build it.',
+        '',
+        'Outcomes:',
+        '',
+        '- It is made.',
+        "  - Changes the label to: `made well` (`hoot issue edit ISS-7 --add-label 'made well'`)",
+        '  - Go on: off; once the label is changed, stop.',
+        '',
+        '## End labels',
+        '',
+        '- `made well`',
+        '- `Dropped`: once the issue has at least one sub-issue that Hoot shows, and each of them is done or canceled, Hoot completes the issue: Done when at least one of them is done, Canceled otherwise.',
+        '',
       ].join('\n'),
     )
-    for (const instruction of [scope.outcomes[1]!.instruction, design.outcomes[1]!.instruction]) {
-      expect(text).toContain(
-        [
-          `- ${filledIn(instruction, 'ISS-7')}`,
-          '  - Changes the label to: Split (`hoot issue edit ISS-7 --add-label Split`)',
-          '  - Go on: off; once the label is changed, stop.',
-        ].join('\n'),
-      )
-    }
-    expect(text).toContain('`hoot issue create-batch ISS-7 --file <file>`')
-    expect(text).toContain('`"labels": ["Design"]`')
-    expect(text).toContain('`"labels": ["Implement"]`')
-  })
-
-  it('says that Split completes the issue once its sub-issues are, and Implemented nothing', () => {
-    expect(text).toContain(
-      '- Split: once the issue has at least one sub-issue that Hoot shows, and each of them is done or canceled, Hoot completes the issue: Done when at least one of them is done, Canceled otherwise.',
-    )
-    expect(text).toMatch(/\n- Implemented\n$/)
   })
 })

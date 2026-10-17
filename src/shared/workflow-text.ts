@@ -4,6 +4,7 @@
  * first message of a session started from an issue. Only the names,
  * labels, prompts and outcomes come from the workflow.
  */
+import { quote } from 'shell-quote'
 import type {
   WorkflowDefinition,
   WorkflowEndLabel,
@@ -22,7 +23,22 @@ export function filledIn(text: string, identifier: string): string {
 
 /** The command that changes an issue's label of the workflow's group to another. */
 export function labelCommand(identifier: string, label: string): string {
-  return `hoot issue edit ${identifier} --add-label ${label}`
+  return `hoot issue edit ${identifier} --add-label ${quote([label])}`
+}
+
+/** A label's name in the text, set apart from the words around it, as `ready to design`. */
+function labelName(name: string): string {
+  return `\`${name}\``
+}
+
+/**
+ * Whether work on an issue may go on from a step to another in the same
+ * session: whether any of its outcomes goes on. A session that starts at a
+ * step that does not needs neither another step nor the file of the
+ * workflow.
+ */
+export function goesOn(step: Pick<WorkflowStep, 'outcomes'>): boolean {
+  return step.outcomes.some((outcome) => outcome.goOn)
 }
 
 /** What the agent does once it has changed the label: goes on with the step of that label, or stops. */
@@ -53,7 +69,7 @@ export function outcomeInstructions(
     ...step.outcomes.map(
       (outcome) =>
         `- ${filledIn(outcome.instruction, identifier)}\n` +
-        `  Then change the label to ${outcome.label} with \`${labelCommand(identifier, outcome.label)}\`, and ${afterwards(workflow, outcome, 'workflow.md')}`,
+        `  Then change the label to ${labelName(outcome.label)} with \`${labelCommand(identifier, outcome.label)}\`, and ${afterwards(workflow, outcome, 'workflow.md')}`,
     ),
   ].join('\n')
 }
@@ -64,7 +80,7 @@ export interface FirstMessage {
   identifier: string
   /** The absolute path of the session's issue file. */
   issueFile: string
-  /** The absolute path of the session's file of the workflow. */
+  /** The absolute path of the session's file of the workflow, which it has when its step `goesOn`. */
   workflowFile: string
   /** The branch of the worktree the session runs in. */
   branch: string
@@ -74,11 +90,12 @@ export interface FirstMessage {
 
 /**
  * The first message of a session started from an issue: an opening that
- * points to the issue's file and the file of its workflow, names the
- * worktree's branch and the step the session starts at; then the step's
- * prompt and how to end it. Its parts are a blank line apart, its lines end
- * with LF, and nothing follows the last one. The issue itself stays out of
- * it, where an agent could take some of its text for a command or a mention.
+ * points to the issue's file, and to the file of its workflow when the
+ * session may go on from its step to another, and names the worktree's
+ * branch and the step the session starts at; then the step's prompt and how
+ * to end it. Its parts are a blank line apart, its lines end with LF, and
+ * nothing follows the last one. The issue itself stays out of it, where an
+ * agent could take some of its text for a command or a mention.
  */
 export function firstMessage({
   workflow,
@@ -88,12 +105,16 @@ export function firstMessage({
   branch,
   step,
 }: FirstMessage): string {
-  return [
+  const issue =
     `The issue to work on is ${identifier}, in \`${issueFile}\`. Read it first: its title is the heading; ` +
-      `the rest, if any, is its description. Then read \`${workflowFile}\`: the workflow ${workflow.name}, ` +
-      'which work on the issue goes through, step by step.',
+    'the rest, if any, is its description.'
+  return [
+    goesOn(step)
+      ? `${issue} Then read \`${workflowFile}\`: the workflow ${workflow.name}, ` +
+        'which work on the issue goes through, step by step.'
+      : issue,
     `This is a Git worktree of the project, on the branch \`${branch}\`, made for this issue. ` +
-      `This session starts at the step ${step.name}, which the issue's label ${step.label.name} marks.`,
+      `This session starts at the step ${step.name}, which the issue's label ${labelName(step.label.name)} marks.`,
     filledIn(step.prompt, identifier),
     outcomeInstructions(workflow, step, identifier),
   ].join('\n\n')
@@ -101,9 +122,9 @@ export function firstMessage({
 
 /** What an end label of a workflow does, as `workflow.md` says it. */
 function endLabelText(end: WorkflowEndLabel): string {
-  if (!end.completeWithSubIssues) return `- ${end.name}`
+  if (!end.completeWithSubIssues) return `- ${labelName(end.name)}`
   return (
-    `- ${end.name}: once the issue has at least one sub-issue that Hoot shows, and each of ` +
+    `- ${labelName(end.name)}: once the issue has at least one sub-issue that Hoot shows, and each of ` +
     'them is done or canceled, Hoot completes the issue: Done when at least one of them is done, ' +
     'Canceled otherwise.'
   )
@@ -120,7 +141,7 @@ export function workflowFileText(workflow: WorkflowDefinition, identifier: strin
   const steps = workflow.steps.map((step, index) =>
     [
       `## ${index + 1}. ${step.name}`,
-      `Label: ${step.label.name}`,
+      `Label: ${labelName(step.label.name)}`,
       filledIn(step.prompt, identifier),
       [
         'Outcomes:',
@@ -128,7 +149,7 @@ export function workflowFileText(workflow: WorkflowDefinition, identifier: strin
         ...step.outcomes.map((outcome) =>
           [
             `- ${filledIn(outcome.instruction, identifier)}`,
-            `  - Changes the label to: ${outcome.label} (\`${labelCommand(identifier, outcome.label)}\`)`,
+            `  - Changes the label to: ${labelName(outcome.label)} (\`${labelCommand(identifier, outcome.label)}\`)`,
             `  - Go on: ${outcome.goOn ? 'on' : 'off'}; once the label is changed, ${afterwards(workflow, outcome, 'here')}`,
           ].join('\n'),
         ),
@@ -144,7 +165,7 @@ export function workflowFileText(workflow: WorkflowDefinition, identifier: strin
     `The workflow ${identifier} goes through. How far the issue has come is the label of the group ` +
       `${workflow.group} it carries: none before it starts, the label of the step it is at, or an ` +
       'end label once it is finished. An issue carries one label of the group at most: adding one ' +
-      `with \`${labelCommand(identifier, '<label>')}\` takes the other off.`,
+      `with \`hoot issue edit ${identifier} --add-label <label>\` takes the other off.`,
     ...steps,
     '## End labels',
     ends,

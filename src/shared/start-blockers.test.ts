@@ -7,8 +7,8 @@ import { getTool } from './tools'
 import type { WorkflowProgress } from './workflows'
 
 const notStarted: WorkflowProgress = { kind: 'not-started' }
-const atDesign: WorkflowProgress = { kind: 'at-step', step: BUILT_IN_WORKFLOW.steps[1]! }
-const split: WorkflowProgress = { kind: 'finished', label: BUILT_IN_WORKFLOW.endLabels[0]! }
+const atTriage: WorkflowProgress = { kind: 'at-step', step: BUILT_IN_WORKFLOW.steps[0]! }
+const split: WorkflowProgress = { kind: 'finished', label: BUILT_IN_WORKFLOW.endLabels[1]! }
 
 /** The tools state once a detection has found Claude Code, or has not. */
 function detected(claude: boolean): ToolsState {
@@ -48,7 +48,7 @@ describe('startBlockers', () => {
 
   it('has none once Claude Code is found, for an issue in a project that waits on nothing', () => {
     expect(startBlockers(detected(true), inProject, [], notStarted)).toEqual([])
-    expect(startBlockers(detected(true), inProject, [], atDesign)).toEqual([])
+    expect(startBlockers(detected(true), inProject, [], atTriage)).toEqual([])
   })
 
   it('says Claude Code is still being checked for, or is not installed', () => {
@@ -69,13 +69,13 @@ describe('startBlockers', () => {
       { kind: 'waiting', issueIds: [3, 2] },
     ])
     expect(startBlockers(detected(true), inProject, [], split)).toEqual([
-      { kind: 'finished', label: 'Split' },
+      { kind: 'finished', label: 'split' },
     ])
     expect(startBlockers(firstDetection, withoutProject, [4], split)).toEqual([
       { kind: 'checking' },
       { kind: 'no-project' },
       { kind: 'waiting', issueIds: [4] },
-      { kind: 'finished', label: 'Split' },
+      { kind: 'finished', label: 'split' },
     ])
   })
 })
@@ -93,8 +93,8 @@ describe('startBlockerText', () => {
     expect(startBlockerText({ kind: 'waiting', issueIds: [3, 4, 5] })).toBe(
       'It waits on ISS-3, ISS-4, and ISS-5, which are neither done nor canceled.',
     )
-    expect(startBlockerText({ kind: 'finished', label: 'Split' })).toBe(
-      'Its workflow is finished: it has the label Split.',
+    expect(startBlockerText({ kind: 'finished', label: 'split' })).toBe(
+      'Its workflow is finished: it has the label "split".',
     )
   })
 })

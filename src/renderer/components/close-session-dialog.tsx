@@ -33,7 +33,10 @@ export function CloseSessionDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>Close this session?</AlertDialogTitle>
           <AlertDialogDescription>
-            <span className="font-medium text-foreground" data-session-name="">
+            <span
+              className="font-medium text-foreground [overflow-wrap:anywhere]"
+              data-session-name=""
+            >
               {name}
             </span>{' '}
             is still running. Closing the session ends its process.

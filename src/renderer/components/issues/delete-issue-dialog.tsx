@@ -35,7 +35,10 @@ export function DeleteIssueDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this issue?</AlertDialogTitle>
           <AlertDialogDescription>
-            <span className="font-medium break-words text-foreground" data-user-text="">
+            <span
+              className="font-medium text-foreground [overflow-wrap:anywhere]"
+              data-user-text=""
+            >
               {title}
             </span>{' '}
             will be deleted for good. This cannot be undone.

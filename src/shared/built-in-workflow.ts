@@ -4,16 +4,17 @@ import type { WorkflowDefinition } from './workflows'
 /**
  * How the agent writes a split back once the user has confirmed it: the
  * issues of the split, created at once as sub-issues of the issue, each with
- * the label `label` and blocking the issue, then the issue's label changed to
- * split.
+ * the label `label` and blocking the issue; the outcome then changes the
+ * issue's label to split.
  */
 function splitInstruction(confirmed: string, label: string): string {
   return [
-    `${confirmed} Create every issue of the split at once, as sub-issues of this issue, with one \`hoot issue create-batch {issue} --file <file>\`.`,
-    `In its JSON array, give each issue \`"labels": ["${label}"]\`, \`"status": "todo"\` and \`"blocking": ["{issue}"]\`, and in \`"blockedBy"\`, as I confirmed the order, the issues it waits on: issues of the split by their place in the array, from 1, and issues there are already by their identifiers, such as \`"ISS-12"\`.`,
-    "Write the file next to the issue's file, in a folder that Git ignores, or pass `-` to read standard input.",
-    'Do not start sessions for the sub-issues.',
-  ].join(' ')
+    confirmed,
+    'Write the issues of the split, in order, to a JSON file next to the issue file:',
+    `\`[{"title": "…", "description": "…", "labels": ["${label}"], "status": "todo", "blocking": ["{issue}"], "blockedBy": […]}, …]\``,
+    'In `"blockedBy"`, list the issues it waits on: those of the split by their place in the array, from 1, others by their identifiers.',
+    'Run `hoot issue create-batch {issue} --file <file>`.',
+  ].join('\n')
 }
 
 /**
@@ -39,7 +40,7 @@ const SPEC_DRIVEN: WorkflowDefinition = {
       prompt: [
         'Judge the issue against this project.',
         '',
-        '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
+        '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. Answer one or several, and say why.',
         '2. If one, that is the end of this step: do not ask me to confirm it.',
         '3. If several, split it into one issue per result. For each:',
         '   - Title',

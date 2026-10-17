@@ -348,24 +348,23 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   finished. Changing the label, in the window or with `hoot`, moves the issue on or back; taking it
   off makes the issue not started again. In **Triage**, the agent judges the issue against the
   project: whether it is one piece of work, or several, results that could each be delivered and
-  accepted on their own; how much work it is waits until its design is settled. If it
-  is one, the agent says why, changes the issue's label to **ready to design** with
-  [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If several, it splits the
-  issue into one issue per result, each with a title, a description and the issues it waits on, ends
-  with their order, and asks you to confirm the split; when you object or ask for changes, it
-  revises and asks you again. Once you confirmed the split, the agent writes it back: it creates all
-  of its issues at once with [`hoot issue create-batch`](#the-hoot-command), as sub-issues to do of
-  the issue, each with **ready to design**, waiting on the issues of the split and others as you
-  confirmed their order, and blocking the issue; then it gives the issue **split**, and stops,
-  starting no session for the sub-issues. An issue with **split** is completed once its sub-issues
-  are: when the last of the sub-issues Hoot shows (it has at least one) becomes done or canceled, or
-  goes, the issue, unless it is done or canceled already, becomes Done when one of them is done, and
-  Canceled otherwise; this happens only as that comes to be, so an issue you open again stays open,
-  and so does one given a sub-issue to do. The workflow is data, which Hoot runs as it would run any
-  workflow; its prompts name no agent. A label that the group had and the workflow no longer has,
-  such as one of a step taken out, leaves the group, and stays on its issues like any other label.
-  Labels change no status, and changing the status, the project or anything else of the issue
-  changes nothing of its progress.
+  accepted on their own. If it is one, the agent says why, changes the issue's label to
+  **ready to design** with [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If
+  several, it splits the issue into one issue per result, each with a title, a description and the
+  issues it waits on, ends with their order, and asks you to confirm the split; when you object or
+  ask for changes, it revises and asks you again. Once you confirmed the split, the agent writes it
+  back: it creates all of its issues at once with [`hoot issue create-batch`](#the-hoot-command), as
+  sub-issues to do of the issue, each with **ready to design**, waiting on the issues of the split
+  and others as you confirmed their order, and blocking the issue; then it gives the issue
+  **split**, and stops, starting no session for the sub-issues. An issue with **split** is completed
+  once its sub-issues are: when the last of the sub-issues Hoot shows (it has at least one) becomes
+  done or canceled, or goes, the issue, unless it is done or canceled already, becomes Done when one
+  of them is done, and Canceled otherwise; this happens only as that comes to be, so an issue you
+  open again stays open, and so does one given a sub-issue to do. The workflow is data, which Hoot
+  runs as it would run any workflow; its prompts name no agent. A label that the group had and the
+  workflow no longer has, such as one of a step taken out, leaves the group, and stays on its issues
+  like any other label. Labels change no status, and changing the status, the project or anything
+  else of the issue changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
   worktree of its own, at the first step of its workflow when it has not started, and at the step of

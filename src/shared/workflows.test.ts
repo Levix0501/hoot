@@ -98,15 +98,13 @@ describe('the built-in workflow', () => {
     const [one, split] = BUILT_IN_WORKFLOW.steps[0]!.outcomes
     expect(one!.instruction).toBe('The issue is one piece of work.')
     const { instruction } = split!
-    expect(instruction).toMatch(/^I confirmed the split\. /)
-    expect(instruction).toContain('with one `hoot issue create-batch {issue} --file <file>`')
-    expect(instruction).toContain('`"labels": ["ready to design"]`')
-    expect(instruction).toContain('`"status": "todo"`')
-    expect(instruction).toContain('`"blocking": ["{issue}"]`')
-    expect(instruction).toContain(
-      'in `"blockedBy"`, as I confirmed the order, the issues it waits on',
-    )
-    expect(instruction).toContain('Do not start sessions for the sub-issues.')
+    expect(instruction).toMatch(/^I confirmed the split\.\n/)
+    expect(instruction).toContain('to a JSON file next to the issue file')
+    expect(instruction).toContain('"labels": ["ready to design"]')
+    expect(instruction).toContain('"status": "todo"')
+    expect(instruction).toContain('"blocking": ["{issue}"]')
+    expect(instruction).toContain('In `"blockedBy"`, list the issues it waits on')
+    expect(instruction).toMatch(/\nRun `hoot issue create-batch \{issue\} --file <file>`\.$/)
   })
 
   it('is the workflow every issue follows', () => {

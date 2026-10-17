@@ -16,7 +16,7 @@ const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
 const TRIAGE_PROMPT = [
   'Judge the issue against this project.',
   '',
-  '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. How much work it is does not count here: that is judged once its design is settled. Answer one or several, and say why.',
+  '1. Is the issue one piece of work, or several? Several means it asks for results that could each be delivered and accepted on its own, such as two features, or a feature and an unrelated fix. Answer one or several, and say why.',
   '2. If one, that is the end of this step: do not ask me to confirm it.',
   '3. If several, split it into one issue per result. For each:',
   '   - Title',
@@ -94,31 +94,44 @@ describe('outcomeInstructions', () => {
   it('lists each outcome: its instruction, the command that changes the label, and whether to go on', () => {
     expect(outcomeInstructions(SAMPLE, look, 'ISS-7')).toBe(
       [
-        "When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group Sample with Hoot's `hoot` command:",
+        'When this step is done, end it with the one of these outcomes that applies:',
         '',
         '- It is worth making.',
-        '  Then change the label to `Making` with `hoot issue edit ISS-7 --add-label Making`, and go on with the step of that label, Make, as workflow.md gives it.',
+        '  Run `hoot issue edit ISS-7 --add-label Making`, then go on with the step Make in workflow.md.',
         '- Drop ISS-7.',
-        '  Then change the label to `Dropped` with `hoot issue edit ISS-7 --add-label Dropped`, and stop.',
+        '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
       ].join('\n'),
     )
+  })
+
+  it('keeps an instruction of several lines in its item', () => {
+    const step = {
+      outcomes: [{ label: 'Dropped', instruction: 'Check it.\n\nTidy up.', goOn: false }],
+    }
+    expect(outcomeInstructions(SAMPLE, step, 'ISS-7').split('\n').slice(2)).toEqual([
+      '- Check it.',
+      '',
+      '  Tidy up.',
+      '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
+    ])
   })
 
   it('ends Triage at ready to design or split, stopping either way', () => {
     const text = outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7')
     expect(text).toBe(
       [
-        "When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group Spec-driven with Hoot's `hoot` command:",
+        'When this step is done, end it with the one of these outcomes that applies:',
         '',
         '- The issue is one piece of work.',
-        "  Then change the label to `ready to design` with `hoot issue edit ISS-7 --add-label 'ready to design'`, and stop.",
-        `- ${filledIn(triage.outcomes[1]!.instruction, 'ISS-7')}`,
-        '  Then change the label to `split` with `hoot issue edit ISS-7 --add-label split`, and stop.',
+        "  Run `hoot issue edit ISS-7 --add-label 'ready to design'`, then stop.",
+        '- I confirmed the split.',
+        '  Write the issues of the split, in order, to a JSON file next to the issue file:',
+        '  `[{"title": "…", "description": "…", "labels": ["ready to design"], "status": "todo", "blocking": ["ISS-7"], "blockedBy": […]}, …]`',
+        '  In `"blockedBy"`, list the issues it waits on: those of the split by their place in the array, from 1, others by their identifiers.',
+        '  Run `hoot issue create-batch ISS-7 --file <file>`.',
+        '  Run `hoot issue edit ISS-7 --add-label split`, then stop.',
       ].join('\n'),
     )
-    expect(text).toContain('`hoot issue create-batch ISS-7 --file <file>`')
-    expect(text).toContain('`"labels": ["ready to design"]`')
-    expect(text).toContain('`"blocking": ["ISS-7"]`')
     expect(text).not.toContain('{issue}')
   })
 })
@@ -194,11 +207,9 @@ describe('workflowFileText', () => {
         'Outcomes:',
         '',
         '- It is worth making.',
-        '  - Changes the label to: `Making` (`hoot issue edit ISS-7 --add-label Making`)',
-        '  - Go on: on; once the label is changed, go on with the step of that label, Make.',
+        '  Run `hoot issue edit ISS-7 --add-label Making`, then go on with the step Make.',
         '- Drop ISS-7.',
-        '  - Changes the label to: `Dropped` (`hoot issue edit ISS-7 --add-label Dropped`)',
-        '  - Go on: off; once the label is changed, stop.',
+        '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
         '',
         '## 2. Make',
         '',
@@ -209,8 +220,7 @@ describe('workflowFileText', () => {
         'Outcomes:',
         '',
         '- It is made.',
-        "  - Changes the label to: `made well` (`hoot issue edit ISS-7 --add-label 'made well'`)",
-        '  - Go on: off; once the label is changed, stop.',
+        "  Run `hoot issue edit ISS-7 --add-label 'made well'`, then stop.",
         '',
         '## End labels',
         '',

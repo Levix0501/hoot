@@ -48,9 +48,30 @@ function afterwards(
   where: 'workflow.md' | 'here',
 ): string {
   const next = stepOfLabel(workflow, outcome.label)
-  if (!outcome.goOn || next === undefined) return 'stop.'
-  const given = where === 'workflow.md' ? ', as workflow.md gives it' : ''
-  return `go on with the step of that label, ${next.name}${given}.`
+  if (!outcome.goOn || next === undefined) return 'stop'
+  const given = where === 'workflow.md' ? ' in workflow.md' : ''
+  return `go on with the step ${next.name}${given}`
+}
+
+/**
+ * An outcome as the agent is told it, as an item of a list: its instruction,
+ * the lines after the first indented to stay in the item, then the command
+ * that changes the issue's label, and whether to go on or stop afterwards.
+ */
+function outcomeText(
+  workflow: WorkflowDefinition,
+  outcome: WorkflowOutcome,
+  identifier: string,
+  where: 'workflow.md' | 'here',
+): string {
+  const instruction = filledIn(outcome.instruction, identifier)
+    .split('\n')
+    .map((line, index) => (index === 0 || line === '' ? line : `  ${line}`))
+    .join('\n')
+  return (
+    `- ${instruction}\n` +
+    `  Run \`${labelCommand(identifier, outcome.label)}\`, then ${afterwards(workflow, outcome, where)}.`
+  )
 }
 
 /**
@@ -64,13 +85,9 @@ export function outcomeInstructions(
   identifier: string,
 ): string {
   return [
-    `When this step is done, end it with the one of these outcomes that applies, by changing the issue's label of the group ${workflow.group} with Hoot's \`hoot\` command:`,
+    'When this step is done, end it with the one of these outcomes that applies:',
     '',
-    ...step.outcomes.map(
-      (outcome) =>
-        `- ${filledIn(outcome.instruction, identifier)}\n` +
-        `  Then change the label to ${labelName(outcome.label)} with \`${labelCommand(identifier, outcome.label)}\`, and ${afterwards(workflow, outcome, 'workflow.md')}`,
-    ),
+    ...step.outcomes.map((outcome) => outcomeText(workflow, outcome, identifier, 'workflow.md')),
   ].join('\n')
 }
 
@@ -140,13 +157,7 @@ export function workflowFileText(workflow: WorkflowDefinition, identifier: strin
       [
         'Outcomes:',
         '',
-        ...step.outcomes.map((outcome) =>
-          [
-            `- ${filledIn(outcome.instruction, identifier)}`,
-            `  - Changes the label to: ${labelName(outcome.label)} (\`${labelCommand(identifier, outcome.label)}\`)`,
-            `  - Go on: ${outcome.goOn ? 'on' : 'off'}; once the label is changed, ${afterwards(workflow, outcome, 'here')}`,
-          ].join('\n'),
-        ),
+        ...step.outcomes.map((outcome) => outcomeText(workflow, outcome, identifier, 'here')),
       ].join('\n'),
     ].join('\n\n'),
   )

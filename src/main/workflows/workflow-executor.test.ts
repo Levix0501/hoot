@@ -208,8 +208,10 @@ describe('sessionStart', () => {
     expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
     expect(message).not.toContain('workflow.md')
     expect(message).toContain('Judge the issue against this project.')
-    expect(message).toContain("`hoot issue edit ISS-1 --add-label 'ready to design'`, and stop.")
-    expect(message).toContain('`hoot issue edit ISS-1 --add-label split`, and stop.')
+    expect(message).toContain(
+      "Run `hoot issue edit ISS-1 --add-label 'ready to design'`, then stop.",
+    )
+    expect(message).toContain('Run `hoot issue edit ISS-1 --add-label split`, then stop.')
   })
 
   it('refuses an issue whose workflow is finished', () => {

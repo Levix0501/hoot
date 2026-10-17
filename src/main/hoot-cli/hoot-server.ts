@@ -474,7 +474,9 @@ export class HootServer {
       }
     }
 
-    const labelPath = /^\/labels\/(.+)$/.exec(pathname)
+    // On the path as sent: parsing the URL takes a name of `.` or `..` for a
+    // part of the path, and drops it.
+    const labelPath = /^\/labels\/(.+)$/.exec((request.url ?? '/').split('?')[0]!)
     if (labelPath && (request.method === 'PATCH' || request.method === 'DELETE')) {
       let given: string
       try {

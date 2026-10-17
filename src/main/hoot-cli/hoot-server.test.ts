@@ -203,6 +203,22 @@ describe('HootServer', () => {
     }
   })
 
+  it('changes and deletes a label named . or .., which the path of a URL would drop', async () => {
+    for (const name of ['.', '..']) {
+      hoot.labels.createLabel({ name })
+      expect(
+        await request('PATCH', `/labels/${encodeURIComponent(name)}`, {
+          body: JSON.stringify({ color: '112233' }),
+        }),
+      ).toMatchObject({ status: 200, answer: { label: { name, color: '112233' } } })
+      expect(await request('DELETE', `/labels/${encodeURIComponent(name)}`)).toEqual({
+        status: 200,
+        answer: { ok: true, project: gamma() },
+      })
+      expect(hoot.labels.findByName(name)).toBeUndefined()
+    }
+  })
+
   it('refuses a label both given and taken off before changing the parent, which the window is told of', async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
     const beta = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Beta' })!

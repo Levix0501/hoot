@@ -27,7 +27,7 @@ export function hootSocketPath(
   temporaryFolder: string = os.tmpdir(),
 ): string {
   if (platform === 'win32') return `\\\\.\\pipe\\hoot-${directoryHash(userData)}`
-  const inUserData = path.join(userData, 'hoot.sock')
+  const inUserData = path.posix.join(userData, 'hoot.sock')
   if (Buffer.byteLength(inUserData) <= MAX_SOCKET_PATH_BYTES) return inUserData
-  return path.join(temporaryFolder, `hoot-${directoryHash(userData)}.sock`)
+  return path.posix.join(temporaryFolder, `hoot-${directoryHash(userData)}.sock`)
 }

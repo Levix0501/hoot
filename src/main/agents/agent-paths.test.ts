@@ -14,6 +14,9 @@ import {
   withHootNode,
 } from './agent-paths'
 
+/** A path as `path.join` writes it on this platform: with `\` between folders on Windows. */
+const native = (file: string) => path.normalize(file)
+
 describe('agentPaths', () => {
   it("keeps Hoot's agents in the home folder, and its node and npm with the app", () => {
     const packaged = agentPaths({
@@ -24,10 +27,10 @@ describe('agentPaths', () => {
       executable: '/Applications/Hoot.app/Contents/MacOS/Hoot',
     })
     expect(packaged).toEqual({
-      directory: '/Users/me/.hoot/agents',
-      binDirectory: '/Users/me/.hoot/agents/bin',
-      nodeDirectory: '/Applications/Hoot.app/Contents/Resources/node',
-      npmCli: '/Applications/Hoot.app/Contents/Resources/npm/bin/npm-cli.js',
+      directory: native('/Users/me/.hoot/agents'),
+      binDirectory: native('/Users/me/.hoot/agents/bin'),
+      nodeDirectory: native('/Applications/Hoot.app/Contents/Resources/node'),
+      npmCli: native('/Applications/Hoot.app/Contents/Resources/npm/bin/npm-cli.js'),
       executable: '/Applications/Hoot.app/Contents/MacOS/Hoot',
     })
     const repository = agentPaths({
@@ -37,9 +40,9 @@ describe('agentPaths', () => {
       appPath: '/code/hoot',
       executable: '/code/hoot/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron',
     })
-    expect(repository.nodeDirectory).toBe('/code/hoot/resources/node')
-    expect(repository.npmCli).toBe('/code/hoot/node_modules/npm/bin/npm-cli.js')
-    expect(repository.directory).toBe('/Users/me/.hoot/agents')
+    expect(repository.nodeDirectory).toBe(native('/code/hoot/resources/node'))
+    expect(repository.npmCli).toBe(native('/code/hoot/node_modules/npm/bin/npm-cli.js'))
+    expect(repository.directory).toBe(native('/Users/me/.hoot/agents'))
   })
 
   it("puts Hoot's node, then its folder of agents' commands, last on PATH", () => {
@@ -50,9 +53,11 @@ describe('agentPaths', () => {
       appPath: '/R/app.asar',
       executable: '/M/Hoot',
     })
-    expect(lastOnSessionPath(paths)).toEqual(['/R/node', '/Users/me/.hoot/agents/bin'])
+    const node = native('/R/node')
+    const bin = native('/Users/me/.hoot/agents/bin')
+    expect(lastOnSessionPath(paths)).toEqual([node, bin])
     expect(withHootNode({ PATH: '/usr/bin', HOME: '/Users/me' }, paths, 'darwin')).toEqual({
-      PATH: '/usr/bin:/R/node:/Users/me/.hoot/agents/bin',
+      PATH: `/usr/bin:${node}:${bin}`,
       HOME: '/Users/me',
       HOOT_NODE: '/M/Hoot',
     })
@@ -64,7 +69,7 @@ describe('agentPaths', () => {
 
 describe('paths as they are on disk and as Hoot shows them', () => {
   it('follows symbolic links, also of the part of a path that exists', async () => {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-canonical-')))
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-canonical-')))
     try {
       fs.mkdirSync(path.join(root, 'real'))
       fs.symlinkSync(path.join(root, 'real'), path.join(root, 'link'))
@@ -119,7 +124,8 @@ describe('paths as they are on disk and as Hoot shows them', () => {
   })
 })
 
-describe("Hoot's node", () => {
+// Hoot ships its node, a script for sh, in the macOS app only.
+describe.skipIf(process.platform === 'win32')("Hoot's node", () => {
   const node = path.join(import.meta.dirname, '../../../resources/node/node')
   const run = promisify(execFile)
 

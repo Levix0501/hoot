@@ -7,7 +7,7 @@ import { parseEnvOutput, resolveLoginShellEnv } from './login-shell-env'
 const temporaryDirectories: string[] = []
 
 function temporaryDirectory(): string {
-  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-env-')))
+  const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-env-')))
   temporaryDirectories.push(directory)
   return directory
 }
@@ -32,7 +32,9 @@ describe('parseEnvOutput', () => {
   })
 })
 
-describe('resolveLoginShellEnv', () => {
+// Windows has no login shell environment to read: Hoot takes the environment
+// it started with there (see `ToolService`).
+describe.skipIf(process.platform === 'win32')('resolveLoginShellEnv', () => {
   it('returns the environment after the login and interactive startup files ran', async () => {
     const home = temporaryDirectory()
     fs.writeFileSync(path.join(home, '.zprofile'), 'export FROM_LOGIN_FILE=yes\n')

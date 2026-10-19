@@ -32,10 +32,21 @@ beforeAll(() => {
 
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }))
 
-/** Runs the POSIX launcher, and returns its output and exit code. */
+/**
+ * Runs the POSIX launcher, and returns its output and exit code. On Windows
+ * the sh of Git for Windows runs it, as in Git Bash: Git's exec path is
+ * `<Git>/mingw64/libexec/git-core`, and that sh `<Git>/bin/sh.exe`.
+ */
 async function launch(args: string[], env: Record<string, string>) {
+  const launcher = path.join(bin, 'hoot')
+  let file = launcher
+  if (process.platform === 'win32') {
+    const { stdout } = await run('git', ['--exec-path'])
+    file = path.resolve(stdout.trim(), '..', '..', '..', 'bin', 'sh.exe')
+    args = [launcher, ...args]
+  }
   try {
-    const { stdout, stderr } = await run(path.join(bin, 'hoot'), args, { env })
+    const { stdout, stderr } = await run(file, args, { env })
     return { code: 0, stdout, stderr }
   } catch (error) {
     const failed = error as { code: number; stdout: string; stderr: string }

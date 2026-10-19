@@ -3,19 +3,23 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ToolsState } from '../../shared/ipc'
+import { samePath } from '../agents/agent-paths'
 import type { resolveLoginShellEnv } from '../env/login-shell-env'
+import { onPath, writeNodeCommand } from './test-support'
 import { ToolService } from './tool-service'
 
 let bin: string
 let agentsBin: string
+/** The stand-ins of the commands, as a lookup finds them. */
+let claude: string
+let agentsCodex: string
 
-beforeAll(() => {
-  bin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-tools-')))
-  fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\n', { mode: 0o755 })
-  agentsBin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-agents-bin-')))
-  for (const command of ['claude', 'codex']) {
-    fs.writeFileSync(path.join(agentsBin, command), '#!/bin/sh\n', { mode: 0o755 })
-  }
+beforeAll(async () => {
+  bin = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-tools-')))
+  claude = await writeNodeCommand(path.join(bin, 'claude'), '')
+  agentsBin = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-agents-bin-')))
+  await writeNodeCommand(path.join(agentsBin, 'claude'), '')
+  agentsCodex = await writeNodeCommand(path.join(agentsBin, 'codex'), '')
 })
 
 afterAll(() => {
@@ -26,13 +30,24 @@ afterAll(() => {
 const availability = (state: ToolsState) =>
   Object.fromEntries(state.tools.map((tool) => [tool.id, tool.available]))
 
+/**
+ * Whether a lookup found a stand-in command, whose extension it spells on
+ * Windows as PATHEXT does.
+ */
+const isCommand = (command: string) => (found: string | null | undefined) =>
+  typeof found === 'string' && samePath(found, command)
+
+// The tests that give `resolveEnv` run the service as outside Windows, where
+// it reads the login shell environment; on Windows it takes the environment
+// Hoot started with instead (see the test of Windows).
 describe('ToolService', () => {
   it('checks each tool against the login shell PATH; Shell is always available', async () => {
     const service = new ToolService({
       shell: '/bin/zsh',
       baseEnv: { PATH: '/usr/bin' },
       cwd: '/',
-      resolveEnv: async () => ({ PATH: `${bin}:/usr/bin` }),
+      resolveEnv: async () => ({ PATH: onPath(bin, '/usr/bin') }),
+      platform: 'darwin',
     })
     const state = await service.detect()
     expect(availability(state)).toEqual({
@@ -41,9 +56,9 @@ describe('ToolService', () => {
       opencode: false,
       shell: true,
     })
-    expect(state.tools.find((tool) => tool.id === 'claude')?.path).toBe(path.join(bin, 'claude'))
+    expect(state.tools.find((tool) => tool.id === 'claude')?.path).toSatisfy(isCommand(claude))
     expect(state.error).toBeNull()
-    expect((await service.getLoginEnvironment()).env.PATH).toBe(`${bin}:/usr/bin`)
+    expect((await service.getLoginEnvironment()).env.PATH).toBe(onPath(bin, '/usr/bin'))
   })
 
   it('reads the login shell environment again on every detection', async () => {
@@ -56,6 +71,7 @@ describe('ToolService', () => {
         calls += 1
         return { PATH: calls === 1 ? '/usr/bin' : bin }
       },
+      platform: 'darwin',
     })
     expect(availability(await service.detect()).claude).toBe(false)
     expect(availability(await service.detect()).claude).toBe(true)
@@ -70,6 +86,7 @@ describe('ToolService', () => {
       resolveEnv: async () => {
         throw new Error('Timed out')
       },
+      platform: 'darwin',
     })
     service.on('changed', (state) => changes.push(state))
     const state = await service.detect()
@@ -102,7 +119,8 @@ describe('ToolService', () => {
       baseEnv: {},
       cwd: '/',
       agentsBinDirectory: agentsBin,
-      resolveEnv: async () => ({ PATH: `${bin}:/usr/bin` }),
+      resolveEnv: async () => ({ PATH: onPath(bin, '/usr/bin') }),
+      platform: 'darwin',
     })
     const state = await service.detect()
     expect(availability(state)).toEqual({
@@ -113,8 +131,8 @@ describe('ToolService', () => {
     })
     const pathOf = (id: string) => state.tools.find((tool) => tool.id === id)?.path
     // The one on PATH comes first.
-    expect(pathOf('claude')).toBe(path.join(bin, 'claude'))
-    expect(pathOf('codex')).toBe(path.join(agentsBin, 'codex'))
+    expect(pathOf('claude')).toSatisfy(isCommand(claude))
+    expect(pathOf('codex')).toSatisfy(isCommand(agentsCodex))
   })
 
   it('starts another detection after the running one for every call made meanwhile', async () => {
@@ -130,6 +148,7 @@ describe('ToolService', () => {
         await new Promise<void>((resolve) => releases.push(resolve))
         return { PATH: call === 1 ? '/usr/bin' : bin }
       },
+      platform: 'darwin',
     })
     const first = service.detectWithEnvironment()
     const second = service.detectWithEnvironment()

@@ -60,11 +60,26 @@ function versionOf(at: string): number {
 
 describe('databaseFile', () => {
   it('is hoot.db in the data folder of the user data directory', () => {
-    expect(databaseFile('/Users/me/Library/Application Support/Hoot')).toBe(
-      '/Users/me/Library/Application Support/Hoot/data/hoot.db',
-    )
+    // The user data directory of the installed Hoot, on this platform.
+    const [userData, database] =
+      process.platform === 'win32'
+        ? [
+            'C:\\Users\\me\\AppData\\Roaming\\Hoot',
+            'C:\\Users\\me\\AppData\\Roaming\\Hoot\\data\\hoot.db',
+          ]
+        : [
+            '/Users/me/Library/Application Support/Hoot',
+            '/Users/me/Library/Application Support/Hoot/data/hoot.db',
+          ]
+    expect(databaseFile(userData)).toBe(database)
   })
 })
+
+/**
+ * Windows keeps no permissions on folders that chmod could take away: it only
+ * makes files read-only.
+ */
+const noFolderPermissions = process.platform === 'win32'
 
 describe('openDatabase', () => {
   it('creates the data folder and the file, with the latest version of the tables', () => {
@@ -139,25 +154,31 @@ describe('openDatabase', () => {
     expect(fs.readFileSync(file).equals(before)).toBe(true)
   })
 
-  it('refuses a file in a folder it cannot write to', () => {
+  it.skipIf(noFolderPermissions)('refuses a file in a folder it cannot write to', () => {
     openDatabase(file).close()
     fs.chmodSync(path.dirname(file), 0o555)
     expect(() => openDatabase(file)).toThrow(/readonly/)
   })
 
-  it('refuses a file in a folder it cannot open, without changing it', () => {
-    openDatabase(file).close()
-    const before = fs.readFileSync(file)
-    fs.chmodSync(path.dirname(file), 0o000)
-    expect(() => openDatabase(file)).toThrow(/unable to open/)
-    fs.chmodSync(path.dirname(file), 0o755)
-    expect(fs.readFileSync(file).equals(before)).toBe(true)
-  })
+  it.skipIf(noFolderPermissions)(
+    'refuses a file in a folder it cannot open, without changing it',
+    () => {
+      openDatabase(file).close()
+      const before = fs.readFileSync(file)
+      fs.chmodSync(path.dirname(file), 0o000)
+      expect(() => openDatabase(file)).toThrow(/unable to open/)
+      fs.chmodSync(path.dirname(file), 0o755)
+      expect(fs.readFileSync(file).equals(before)).toBe(true)
+    },
+  )
 
-  it('refuses a user data directory where it cannot create the data folder', () => {
-    fs.chmodSync(directory, 0o555)
-    expect(() => openDatabase(file)).toThrow(/EACCES/)
-  })
+  it.skipIf(noFolderPermissions)(
+    'refuses a user data directory where it cannot create the data folder',
+    () => {
+      fs.chmodSync(directory, 0o555)
+      expect(() => openDatabase(file)).toThrow(/EACCES/)
+    },
+  )
 })
 
 /** Inserts an issue, numbered as SQLite numbers rows, and returns its number. */

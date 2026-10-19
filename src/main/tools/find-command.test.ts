@@ -2,24 +2,32 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { samePath } from '../agents/agent-paths'
 import { findAgentCommand, findCommand, pathFolders } from './find-command'
+import { onPath, writeNodeCommand } from './test-support'
 
 let root: string
+/** The command in `c`, as a lookup finds it. */
+let tool: string
 
-beforeAll(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-find-')))
+beforeAll(async () => {
+  root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-find-')))
   for (const directory of ['a', 'b', 'c']) fs.mkdirSync(path.join(root, directory))
   fs.writeFileSync(path.join(root, 'a', 'tool'), 'not executable', { mode: 0o644 })
-  fs.mkdirSync(path.join(root, 'b', 'tool'))
-  fs.writeFileSync(path.join(root, 'c', 'tool'), '#!/bin/sh\n', { mode: 0o755 })
+  // A folder by the name a lookup tries: on Windows, with an extension of PATHEXT.
+  fs.mkdirSync(path.join(root, 'b', process.platform === 'win32' ? 'tool.cmd' : 'tool'))
+  tool = await writeNodeCommand(path.join(root, 'c', 'tool'), '')
 })
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 
+/** Whether a lookup found `tool`, whose extension it spells on Windows as PATHEXT does. */
+const isTool = (found: string | null) => found !== null && samePath(found, tool)
+
 describe('findCommand', () => {
   it('returns the first executable file in PATH order', async () => {
-    const pathValue = ['a', 'b', 'c'].map((directory) => path.join(root, directory)).join(':')
-    expect(await findCommand('tool', { PATH: pathValue })).toBe(path.join(root, 'c', 'tool'))
+    const pathValue = onPath(...['a', 'b', 'c'].map((directory) => path.join(root, directory)))
+    expect(await findCommand('tool', { PATH: pathValue })).toSatisfy(isTool)
   })
 
   it('returns null when no PATH entry has the command', async () => {
@@ -29,20 +37,27 @@ describe('findCommand', () => {
   })
 
   it('ignores relative PATH entries', async () => {
-    const relative = path.relative(process.cwd(), path.join(root, 'c'))
-    expect(path.isAbsolute(relative)).toBe(false)
-    expect(await findCommand('tool', { PATH: relative })).toBeNull()
+    // From the working directory, `c` is the folder with the command. The
+    // tests start in the repository, from which no relative path leads to a
+    // temporary folder on another drive, as on Windows.
+    const cwd = process.cwd()
+    process.chdir(root)
+    try {
+      expect(await findCommand('tool', { PATH: 'c' })).toBeNull()
+    } finally {
+      process.chdir(cwd)
+    }
   })
 })
 
 describe('findAgentCommand', () => {
   it('prefers the command on PATH to the one in the folder of agents', async () => {
     const agentsBin = path.join(root, 'c')
-    expect(await findAgentCommand('tool', { PATH: path.join(root, 'c') }, agentsBin)).toBe(
-      path.join(root, 'c', 'tool'),
+    expect(await findAgentCommand('tool', { PATH: path.join(root, 'c') }, agentsBin)).toSatisfy(
+      isTool,
     )
-    expect(await findAgentCommand('tool', { PATH: path.join(root, 'a') }, agentsBin)).toBe(
-      path.join(agentsBin, 'tool'),
+    expect(await findAgentCommand('tool', { PATH: path.join(root, 'a') }, agentsBin)).toSatisfy(
+      isTool,
     )
   })
 

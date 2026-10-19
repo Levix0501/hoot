@@ -6,6 +6,7 @@ import {
   permissionLevelOrDefault,
   type PermissionLevelSettings,
 } from '../../shared/permission-levels'
+import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
@@ -26,23 +27,25 @@ let project: string
 let bin: string
 let agentsBin: string
 
-beforeAll(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
+beforeAll(async () => {
+  root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
   project = path.join(root, 'project')
   bin = path.join(root, 'bin')
   agentsBin = path.join(root, 'agents', 'bin')
   fs.mkdirSync(project)
-  fs.mkdirSync(bin)
-  fs.mkdirSync(agentsBin, { recursive: true })
-  for (const command of ['claude', 'codex']) {
-    fs.writeFileSync(path.join(bin, command), '#!/bin/sh\n', { mode: 0o755 })
-  }
+  for (const command of ['claude', 'codex']) await writeNodeCommand(path.join(bin, command), '')
   for (const command of ['codex', 'opencode']) {
-    fs.writeFileSync(path.join(agentsBin, command), '#!/bin/sh\n', { mode: 0o755 })
+    await writeNodeCommand(path.join(agentsBin, command), '')
   }
 })
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+
+/**
+ * What a session runs for the stand-in command of a folder, and the arguments
+ * that go before the tool's own.
+ */
+const program = (folder: string, command: string) => nodeCommandProgram(path.join(folder, command))
 
 /** The folder in a session's working directory that holds the folders of sessions' issues. */
 function temporaryFolder(cwd: string): string {
@@ -90,7 +93,7 @@ function context(
 ): LaunchContext {
   return {
     shell: { file: '/bin/zsh', args: ['-l'] },
-    baseEnv: { HOME: '/home/me', PATH: '/usr/bin:/bin', SHELL: '/bin/zsh' },
+    baseEnv: { HOME: '/home/me', PATH: onPath('/usr/bin', '/bin'), SHELL: '/bin/zsh' },
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
@@ -112,12 +115,12 @@ const hootVariables = {
 
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
-    const launch = await resolveLaunch(context({ PATH: `${bin}:/usr/bin` }), 'shell', project)
+    const launch = await resolveLaunch(context({ PATH: onPath(bin, '/usr/bin') }), 'shell', project)
     expect(launch.file).toBe('/bin/zsh')
     expect(launch.args).toEqual(['-l'])
     expect(launch.env).toMatchObject({
       HOME: '/home/me',
-      PATH: `${hoot.binDirectory}:/usr/bin:/bin`,
+      PATH: onPath(hoot.binDirectory, '/usr/bin', '/bin'),
       PWD: project,
       ...hootVariables,
     })
@@ -125,12 +128,18 @@ describe('resolveLaunch', () => {
   })
 
   it('runs a tool command with its permission level arguments in the login shell environment', async () => {
-    const loginEnv = { PATH: `${bin}:/usr/bin`, FROM_RC: 'yes', SHLVL: '1', _: '/usr/bin/env' }
+    const loginEnv = {
+      PATH: onPath(bin, '/usr/bin'),
+      FROM_RC: 'yes',
+      SHLVL: '1',
+      _: '/usr/bin/env',
+    }
     const launch = await resolveLaunch(context(loginEnv), 'codex', project)
-    expect(launch.file).toBe(path.join(bin, 'codex'))
-    expect(launch.args).toEqual(['--dangerously-bypass-approvals-and-sandbox'])
+    const codex = program(bin, 'codex')
+    expect(launch.file).toBe(codex.file)
+    expect(launch.args).toEqual([...codex.args, '--dangerously-bypass-approvals-and-sandbox'])
     expect(launch.env).toMatchObject({
-      PATH: `${hoot.binDirectory}:${bin}:/usr/bin`,
+      PATH: onPath(hoot.binDirectory, bin, '/usr/bin'),
       FROM_RC: 'yes',
       PWD: project,
       ...hootVariables,
@@ -141,12 +150,14 @@ describe('resolveLaunch', () => {
 
   it('uses the selected permission level of the tool, and none for the shell', async () => {
     const levels = { claude: 'plan', codex: 'read-only', opencode: 'standard' }
-    const loginEnv = { PATH: `${bin}:/usr/bin` }
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     expect((await resolveLaunch(context(loginEnv, levels), 'claude', project)).args).toEqual([
+      ...program(bin, 'claude').args,
       '--permission-mode',
       'plan',
     ])
     expect((await resolveLaunch(context(loginEnv, levels), 'codex', project)).args).toEqual([
+      ...program(bin, 'codex').args,
       '--sandbox',
       'read-only',
       '--ask-for-approval',
@@ -157,15 +168,21 @@ describe('resolveLaunch', () => {
 
   it('starts a tool at the level given, unless it is none of its levels, and else at the one selected', async () => {
     const levels = { claude: 'plan', codex: 'read-only', opencode: 'standard' }
-    const loginEnv = { PATH: `${bin}:/usr/bin` }
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const args = async (toolId: 'claude' | 'codex' | 'shell', level: string | null) =>
       (await resolveLaunch(context(loginEnv, levels), toolId, project, null, level)).args
-    expect(await args('claude', 'accept-edits')).toEqual(['--permission-mode', 'acceptEdits'])
-    expect(await args('claude', 'manual')).toEqual(['--permission-mode', 'manual'])
-    expect(await args('claude', null)).toEqual(['--permission-mode', 'plan'])
+    const claude = program(bin, 'claude').args
+    expect(await args('claude', 'accept-edits')).toEqual([
+      ...claude,
+      '--permission-mode',
+      'acceptEdits',
+    ])
+    expect(await args('claude', 'manual')).toEqual([...claude, '--permission-mode', 'manual'])
+    expect(await args('claude', null)).toEqual([...claude, '--permission-mode', 'plan'])
     // Codex has no level of that name; the shell has no levels at all.
-    expect(await args('claude', 'full-access')).toEqual(['--permission-mode', 'plan'])
+    expect(await args('claude', 'full-access')).toEqual([...claude, '--permission-mode', 'plan'])
     expect(await args('codex', 'full-access')).toEqual([
+      ...program(bin, 'codex').args,
       '--dangerously-bypass-approvals-and-sandbox',
     ])
     expect(await args('shell', 'manual')).toEqual(['-l'])
@@ -190,7 +207,10 @@ describe('resolveLaunch', () => {
     await expect.poll(() => detecting).toBe(true)
     selected = { ...highest, claude: 'manual' }
     detection.resolve({ env: { PATH: bin }, error: null })
-    expect((await launching).args).toEqual(['--dangerously-skip-permissions'])
+    expect((await launching).args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+    ])
   })
 
   it('sends Claude Code an issue after the arguments of its permission level', async () => {
@@ -213,8 +233,10 @@ describe('resolveLaunch', () => {
     )
     // Nothing else: the session has no file of the workflow.
     expect(fs.readdirSync(folder)).toEqual(['issue.md'])
-    expect(launch.file).toBe(path.join(bin, 'claude'))
+    const claude = program(bin, 'claude')
+    expect(launch.file).toBe(claude.file)
     expect(launch.args).toEqual([
+      ...claude.args,
       '--permission-mode',
       'acceptEdits',
       '--name=Fix the login bug',
@@ -228,9 +250,10 @@ describe('resolveLaunch', () => {
     // The cleanup removes the session's folder and leaves the `.gitignore`.
     launch.cleanup?.()
     expect(fs.readdirSync(temporaryFolder(project))).toEqual(['.gitignore'])
-    // Any other session, Claude Code's included, has only its level's arguments.
+    // Any other session, Claude Code's included, has no arguments but its level's, after those
+    // that run its command.
     const other = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)
-    expect(other.args).toEqual(['--permission-mode', 'acceptEdits'])
+    expect(other.args).toEqual([...claude.args, '--permission-mode', 'acceptEdits'])
     expect(other.cleanup).toBeUndefined()
     expect(issueFolders(project)).toEqual([])
   })
@@ -332,27 +355,29 @@ describe('resolveLaunch', () => {
       ...context(loginEnv),
       agents: { binDirectory: agentsBin, lastOnPath: [nodeDirectory, agentsBin] },
     })
-    const loginEnv = { PATH: `${bin}:/usr/bin` }
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const opencode = await resolveLaunch(withAgents(loginEnv), 'opencode', project)
-    expect(opencode.file).toBe(path.join(agentsBin, 'opencode'))
-    expect(opencode.args).toEqual(['--auto'])
+    expect(opencode.file).toBe(program(agentsBin, 'opencode').file)
+    expect(opencode.args).toEqual([...program(agentsBin, 'opencode').args, '--auto'])
     // The folders that come with Hoot go last, after every folder the session had.
     expect(opencode.env.PATH).toBe(
-      `${hoot.binDirectory}:${bin}:/usr/bin:${nodeDirectory}:${agentsBin}`,
+      onPath(hoot.binDirectory, bin, '/usr/bin', nodeDirectory, agentsBin),
     )
     // The one on the login shell PATH comes first.
     expect((await resolveLaunch(withAgents(loginEnv), 'codex', project)).file).toBe(
-      path.join(bin, 'codex'),
+      program(bin, 'codex').file,
     )
     const shell = await resolveLaunch(withAgents(loginEnv), 'shell', project)
-    expect(shell.env.PATH).toBe(`${hoot.binDirectory}:/usr/bin:/bin:${nodeDirectory}:${agentsBin}`)
+    expect(shell.env.PATH).toBe(
+      onPath(hoot.binDirectory, '/usr/bin', '/bin', nodeDirectory, agentsBin),
+    )
   })
 
   it('runs a tool found on the login shell PATH only, where Hoot has no folder of agents', async () => {
-    const elsewhere: LaunchContext = { ...context({ PATH: `${bin}:/usr/bin` }), agents: null }
+    const elsewhere: LaunchContext = { ...context({ PATH: onPath(bin, '/usr/bin') }), agents: null }
     const codex = await resolveLaunch(elsewhere, 'codex', project)
-    expect(codex.file).toBe(path.join(bin, 'codex'))
-    expect(codex.env.PATH).toBe(`${hoot.binDirectory}:${bin}:/usr/bin`)
+    expect(codex.file).toBe(program(bin, 'codex').file)
+    expect(codex.env.PATH).toBe(onPath(hoot.binDirectory, bin, '/usr/bin'))
     await expect(resolveLaunch(elsewhere, 'opencode', project)).rejects.toThrow(
       'OpenCode is not available.',
     )
@@ -383,17 +408,16 @@ describe('the issue, the first message and the arguments that send them', () => 
   })
 
   it('keeps a title that starts with a dash the name, in the same argument as its option', () => {
+    const folder = '/w/.hoot/tmp/issue-1'
     expect(
-      sentIssueArgs(
-        '/w/.hoot/tmp/issue-1',
-        sentIssue('--verbose flag broken', '', 'iss-2-verbose-flag-broken'),
-      ),
+      sentIssueArgs(folder, sentIssue('--verbose flag broken', '', 'iss-2-verbose-flag-broken')),
     ).toEqual([
       '--name=--verbose flag broken',
       '--',
       messageAt(triage)({
-        issueFile: '/w/.hoot/tmp/issue-1/issue.md',
-        workflowFile: '/w/.hoot/tmp/issue-1/workflow.md',
+        // Joined to the folder with the separator of the platform.
+        issueFile: path.join(folder, 'issue.md'),
+        workflowFile: path.join(folder, 'workflow.md'),
         branch: 'iss-2-verbose-flag-broken',
       }),
     ])

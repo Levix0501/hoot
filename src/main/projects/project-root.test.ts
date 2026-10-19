@@ -25,7 +25,7 @@ function git(cwd: string, ...args: string[]): void {
 const resolve = (directory: string) => resolveProjectRoot(directory, { git: 'git', env })
 
 beforeAll(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-root-')))
+  root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-root-')))
   const repo = path.join(root, 'repo')
   fs.mkdirSync(path.join(repo, 'sub', 'deeper'), { recursive: true })
   git(repo, 'init', '-q', '-b', 'main')

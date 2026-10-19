@@ -1875,26 +1875,34 @@ describe('what hoot cannot do', () => {
     )
   })
 
-  it('says that Hoot is not running when nothing listens on the socket it left', async () => {
-    await hoot.server.stop()
-    await leaveSocket(hoot.socket)
-    expect(fs.statSync(hoot.socket).isSocket()).toBe(true)
-    const { code, stderr } = await run(['issue', 'list'])
-    expect(code).toBe(1)
-    expect(stderr).toBe(
-      'error: Hoot is not running: the Hoot that started this session has quit.\n',
-    )
-  })
+  // Nothing is left on Windows: a named pipe goes with the process that listened on it.
+  it.skipIf(process.platform === 'win32')(
+    'says that Hoot is not running when nothing listens on the socket it left',
+    async () => {
+      await hoot.server.stop()
+      await leaveSocket(hoot.socket)
+      expect(fs.statSync(hoot.socket).isSocket()).toBe(true)
+      const { code, stderr } = await run(['issue', 'list'])
+      expect(code).toBe(1)
+      expect(stderr).toBe(
+        'error: Hoot is not running: the Hoot that started this session has quit.\n',
+      )
+    },
+  )
 
-  it('says that a sandbox may have blocked the connection when the system refuses it', async () => {
-    // As a sandbox does; here the socket's permissions refuse it.
-    fs.chmodSync(hoot.socket, 0o000)
-    const { code, stderr } = await run(['issue', 'list'])
-    fs.chmodSync(hoot.socket, 0o600)
-    expect(code).toBe(1)
-    expect(stderr).toContain('which a sandbox may have blocked')
-    expect(stderr).toContain('Run hoot outside the sandbox.')
-  })
+  // The named pipe that Hoot listens on on Windows has no permissions to take away.
+  it.skipIf(process.platform === 'win32')(
+    'says that a sandbox may have blocked the connection when the system refuses it',
+    async () => {
+      // As a sandbox does; here the socket's permissions refuse it.
+      fs.chmodSync(hoot.socket, 0o000)
+      const { code, stderr } = await run(['issue', 'list'])
+      fs.chmodSync(hoot.socket, 0o600)
+      expect(code).toBe(1)
+      expect(stderr).toContain('which a sandbox may have blocked')
+      expect(stderr).toContain('Run hoot outside the sandbox.')
+    },
+  )
 
   it('passes on why Hoot could not do it', async () => {
     const { code, stderr } = await run(['issue', 'list'], { session: 'closed-session' })

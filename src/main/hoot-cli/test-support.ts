@@ -30,13 +30,13 @@ export const CLAUDE_FOUND: ToolsState = {
  * A Hoot for hoot to talk to in tests: its database in a temporary folder,
  * with the projects `gamma` and `hotel`, a session in each, the labels, the
  * executor of the issues' workflow, and the server that answers hoot,
- * listening on a socket in the same folder. Sessions it is asked for are
- * started as `setStartSession` says, by default in the worktree
+ * listening on a socket in the same folder (see `socketIn`). Sessions it is
+ * asked for are started as `setStartSession` says, by default in the worktree
  * `/worktrees/<project>/iss-<n>`, giving the issue the label of the step it
  * starts at as the window does.
  */
 export async function startTestHoot() {
-  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-cli-')))
+  const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-cli-')))
   const db: DatabaseSync = openDatabase(databaseFile(directory))
   let clock = Date.UTC(2026, 9, 12, 6, 3)
   const projects = new ProjectStore(db)
@@ -61,7 +61,7 @@ export async function startTestHoot() {
     ['hotel-session', hotel.root],
   ])
   const created: Issue[] = []
-  const socket = path.join(directory, 'hoot.sock')
+  const socket = socketIn(directory, 'hoot.sock')
   const server = new HootServer({
     address: socket,
     sessionProject: (sessionId) => {
@@ -129,8 +129,19 @@ export async function startTestHoot() {
 export type TestHoot = Awaited<ReturnType<typeof startTestHoot>>
 
 /**
+ * Where a server of the tests listens: the socket `name` in `directory`; on
+ * Windows, where Hoot listens on a named pipe, which is no file, a pipe named
+ * after both.
+ */
+export function socketIn(directory: string, name: string): string {
+  if (process.platform !== 'win32') return path.join(directory, name)
+  return `\\\\.\\pipe\\${path.basename(directory)}-${name}`
+}
+
+/**
  * Leaves a socket at a path as a Hoot that stopped without quitting leaves
- * it: a process listened on it, and was killed.
+ * it: a process listened on it, and was killed. Only outside Windows: a named
+ * pipe goes with the last process that listens on it.
  */
 export async function leaveSocket(socket: string): Promise<void> {
   const listener = spawn(

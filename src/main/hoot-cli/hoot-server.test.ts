@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SESSION_HEADER, type HootIssue } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import { HootServer } from './hoot-server'
-import { leaveSocket, startTestHoot, type TestHoot } from './test-support'
+import { leaveSocket, socketIn, startTestHoot, type TestHoot } from './test-support'
 
 let hoot: TestHoot
 
@@ -480,44 +480,56 @@ describe('HootServer', () => {
     expect(hoot.issues.list()).toEqual([alpha])
   })
 
-  it('listens on a socket only the user can connect to, and removes it when it stops', async () => {
-    expect(fs.statSync(hoot.socket).mode & 0o777).toBe(0o600)
-    expect(fs.statSync(hoot.socket).isSocket()).toBe(true)
-    await hoot.server.stop()
-    expect(fs.existsSync(hoot.socket)).toBe(false)
-  })
+  // On Windows Hoot listens on a named pipe, which is no file: it has no permissions, and
+  // it goes with the server.
+  it.skipIf(process.platform === 'win32')(
+    'listens on a socket only the user can connect to, and removes it when it stops',
+    async () => {
+      expect(fs.statSync(hoot.socket).mode & 0o777).toBe(0o600)
+      expect(fs.statSync(hoot.socket).isSocket()).toBe(true)
+      await hoot.server.stop()
+      expect(fs.existsSync(hoot.socket)).toBe(false)
+    },
+  )
 
-  it('takes the place of a socket left by a Hoot that stopped without quitting', async () => {
-    const socket = path.join(hoot.directory, 'left.sock')
-    await leaveSocket(socket)
-    expect(fs.statSync(socket).isSocket()).toBe(true)
-    const server = new HootServer({
-      address: socket,
-      sessionProject: () => ({ ok: true, project: hoot.gamma }),
-      listProjects: () => hoot.projects.list(),
-      issues: hoot.issues,
-      labels: hoot.labels,
-      together: (body) => body(),
-      issueCreated: () => {},
-      startBlockers: () => [],
-      startSession: async () => ({ ok: false, message: 'none' }),
-    })
-    await server.start()
-    const answer = await new Promise<string>((resolve, reject) => {
-      http
-        .get({ socketPath: socket, path: '/issues', headers: { [SESSION_HEADER]: 'any' } }, (r) => {
-          let text = ''
-          r.on('data', (chunk) => (text += chunk))
-          r.on('end', () => resolve(text))
-        })
-        .on('error', reject)
-    })
-    expect(JSON.parse(answer)).toMatchObject({ ok: true, project: { name: 'gamma' } })
-    await server.stop()
-  })
+  // Nothing is left on Windows: a named pipe goes with the process that listened on it.
+  it.skipIf(process.platform === 'win32')(
+    'takes the place of a socket left by a Hoot that stopped without quitting',
+    async () => {
+      const socket = path.join(hoot.directory, 'left.sock')
+      await leaveSocket(socket)
+      expect(fs.statSync(socket).isSocket()).toBe(true)
+      const server = new HootServer({
+        address: socket,
+        sessionProject: () => ({ ok: true, project: hoot.gamma }),
+        listProjects: () => hoot.projects.list(),
+        issues: hoot.issues,
+        labels: hoot.labels,
+        together: (body) => body(),
+        issueCreated: () => {},
+        startBlockers: () => [],
+        startSession: async () => ({ ok: false, message: 'none' }),
+      })
+      await server.start()
+      const answer = await new Promise<string>((resolve, reject) => {
+        http
+          .get(
+            { socketPath: socket, path: '/issues', headers: { [SESSION_HEADER]: 'any' } },
+            (r) => {
+              let text = ''
+              r.on('data', (chunk) => (text += chunk))
+              r.on('end', () => resolve(text))
+            },
+          )
+          .on('error', reject)
+      })
+      expect(JSON.parse(answer)).toMatchObject({ ok: true, project: { name: 'gamma' } })
+      await server.stop()
+    },
+  )
 
   it('stops also when it is asked to before it listens', async () => {
-    const socket = path.join(hoot.directory, 'early.sock')
+    const socket = socketIn(hoot.directory, 'early.sock')
     const server = new HootServer({
       address: socket,
       sessionProject: () => ({ ok: false, message: 'none' }),

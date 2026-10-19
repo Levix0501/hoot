@@ -56,7 +56,7 @@ describe('agentRowStatus', () => {
     ).toEqual({ kind: 'checking' })
   })
 
-  it('offers Install where it is not installed, and says Node.js is needed where Hoot has no npm', () => {
+  it("offers Install where it is not installed, and says what Install needs where npm can't install it", () => {
     expect(agentRowStatus(agent({ installation: null, latestFailed: true }), target)).toEqual({
       kind: 'install',
     })
@@ -67,11 +67,11 @@ describe('agentRowStatus', () => {
     ).toEqual({ kind: 'needs-node' })
     expect(
       agentRowStatus(agent({ installation: null }), {
-        kind: 'hoot',
-        directory: '/h',
-        displayDirectory: '~/.hoot/agents',
+        kind: 'npm-not-writable',
+        prefix: '/usr/local',
+        displayPrefix: '/usr/local',
       }),
-    ).toEqual({ kind: 'install' })
+    ).toEqual({ kind: 'needs-write-access' })
   })
 
   it('takes the first that applies', () => {
@@ -97,7 +97,7 @@ describe('agentRowStatus', () => {
     ).toEqual({
       kind: 'update-elsewhere',
     })
-    for (const method of ['npm', 'hoot', 'homebrew', 'official'] as const) {
+    for (const method of ['npm', 'homebrew', 'official'] as const) {
       expect(agentRowStatus(agent({ installation: { ...installation, method } }), target)).toEqual({
         kind: 'update',
         version: '2.1.299',

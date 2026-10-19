@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { BrowserWindow } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AGENTS_PATH_COMMAND, type AgentsState } from '../shared/agents'
+import type { AgentsState } from '../shared/agents'
 import type { AppInfo } from '../shared/app-info'
 import type { Dependencies } from '../shared/dependencies'
 import { IpcChannel } from '../shared/ipc'
@@ -379,9 +379,9 @@ describe('the messages of the Agents page', () => {
     expect(webContents.send).toHaveBeenCalledWith(IpcChannel.agentsChanged, agentsState)
   })
 
-  it('put the line that adds the folder of agents to PATH on the clipboard', () => {
-    send(IpcChannel.writeClipboardText, AGENTS_PATH_COMMAND)
-    expect(electron.clipboard.writeText).toHaveBeenCalledWith(AGENTS_PATH_COMMAND)
+  it('put the text the window copies on the clipboard', () => {
+    send(IpcChannel.writeClipboardText, 'ISS-1')
+    expect(electron.clipboard.writeText).toHaveBeenCalledWith('ISS-1')
   })
 })
 

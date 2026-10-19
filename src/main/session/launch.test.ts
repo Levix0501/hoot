@@ -25,18 +25,13 @@ import { SessionError } from './session-manager'
 let root: string
 let project: string
 let bin: string
-let agentsBin: string
 
 beforeAll(async () => {
   root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
   project = path.join(root, 'project')
   bin = path.join(root, 'bin')
-  agentsBin = path.join(root, 'agents', 'bin')
   fs.mkdirSync(project)
   for (const command of ['claude', 'codex']) await writeNodeCommand(path.join(bin, command), '')
-  for (const command of ['codex', 'opencode']) {
-    await writeNodeCommand(path.join(agentsBin, command), '')
-  }
 })
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
@@ -98,13 +93,8 @@ function context(
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
     hoot,
-    // A folder of agents without any.
-    agents: { binDirectory: path.join(root, 'no-agents'), lastOnPath: [] },
   }
 }
-
-/** Where the Hoot that a session's process runs `node` from keeps it. */
-const nodeDirectory = '/Applications/Hoot.app/Contents/Resources/node'
 
 const hootVariables = {
   HOOT_SOCKET: hoot.socket,
@@ -350,37 +340,13 @@ describe('resolveLaunch', () => {
     )
   })
 
-  it("runs a tool from Hoot's folder of agents when the login shell PATH has none", async () => {
-    const withAgents = (loginEnv: Record<string, string>): LaunchContext => ({
-      ...context(loginEnv),
-      agents: { binDirectory: agentsBin, lastOnPath: [nodeDirectory, agentsBin] },
-    })
+  it('runs a tool found on the login shell PATH, and adds no folder after the ones it has', async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
-    const opencode = await resolveLaunch(withAgents(loginEnv), 'opencode', project)
-    expect(opencode.file).toBe(program(agentsBin, 'opencode').file)
-    expect(opencode.args).toEqual([...program(agentsBin, 'opencode').args, '--auto'])
-    // The folders that come with Hoot go last, after every folder the session had.
-    expect(opencode.env.PATH).toBe(
-      onPath(hoot.binDirectory, bin, '/usr/bin', nodeDirectory, agentsBin),
-    )
-    // The one on the login shell PATH comes first.
-    expect((await resolveLaunch(withAgents(loginEnv), 'codex', project)).file).toBe(
-      program(bin, 'codex').file,
-    )
-    const shell = await resolveLaunch(withAgents(loginEnv), 'shell', project)
-    expect(shell.env.PATH).toBe(
-      onPath(hoot.binDirectory, '/usr/bin', '/bin', nodeDirectory, agentsBin),
-    )
-  })
-
-  it('runs a tool found on the login shell PATH only, where Hoot has no folder of agents', async () => {
-    const elsewhere: LaunchContext = { ...context({ PATH: onPath(bin, '/usr/bin') }), agents: null }
-    const codex = await resolveLaunch(elsewhere, 'codex', project)
+    const codex = await resolveLaunch(context(loginEnv), 'codex', project)
     expect(codex.file).toBe(program(bin, 'codex').file)
     expect(codex.env.PATH).toBe(onPath(hoot.binDirectory, bin, '/usr/bin'))
-    await expect(resolveLaunch(elsewhere, 'opencode', project)).rejects.toThrow(
-      'OpenCode is not available.',
-    )
+    const shell = await resolveLaunch(context(loginEnv), 'shell', project)
+    expect(shell.env.PATH).toBe(onPath(hoot.binDirectory, '/usr/bin', '/bin'))
   })
 
   it('refuses a project folder that no longer exists', async () => {

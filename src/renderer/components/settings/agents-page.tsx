@@ -1,10 +1,10 @@
-import { ChevronDownIcon, CopyIcon, RefreshCwIcon } from 'lucide-react'
+import { ChevronDownIcon, RefreshCwIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  AGENTS_PATH_COMMAND,
   CANCELLED_MESSAGE,
   INSTALL_NEEDS_NODE_MESSAGE,
+  INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
   installMethodLabel,
   type AgentState,
   type InstallTarget,
@@ -61,35 +61,6 @@ function PathText({ shown, full, testId }: { shown: string; full: string; testId
   )
 }
 
-/** Puts the line that adds Hoot's folder of agents to PATH on the clipboard. */
-function CopyPathCommandButton({ testId }: { testId: string }) {
-  const copy = useAppStore((state) => state.copyAgentsPathCommand)
-  const label = 'Copy the command that adds ~/.hoot/agents/bin to PATH'
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="-my-1 ml-0.5 align-middle"
-            onClick={copy}
-            aria-label={label}
-            data-testid={testId}
-          />
-        }
-      >
-        <CopyIcon />
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-[min(36rem,90vw)]">
-        <span>
-          {label}: <code className="font-mono">{AGENTS_PATH_COMMAND}</code>
-        </span>
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 /** Parts of a line, with a middle dot between each two. */
 function joined(parts: ReactNode[]): ReactNode[] {
   return parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))
@@ -97,7 +68,8 @@ function joined(parts: ReactNode[]): ReactNode[] {
 
 /**
  * The line below an agent's name: its version, how it was installed and where
- * its command is; or, when it is not installed, where Install puts it.
+ * its command is; or, when it is not installed, where Install puts it, or why
+ * there is no Install.
  */
 function AgentDescription({ agent, target }: { agent: AgentState; target: InstallTarget | null }) {
   const id = agent.id
@@ -115,9 +87,6 @@ function AgentDescription({ agent, target }: { agent: AgentState; target: Instal
         testId={`agent-path-${id}`}
       />,
     ])
-    if (installation.method === 'hoot') {
-      content.push(<CopyPathCommandButton key="copy" testId={`agent-copy-path-${id}`} />)
-    }
   } else if (target?.kind === 'npm') {
     content = [
       'Not installed · Install uses npm, into ',
@@ -128,8 +97,16 @@ function AgentDescription({ agent, target }: { agent: AgentState; target: Instal
         testId={`agent-install-target-${id}`}
       />,
     ]
-  } else if (target?.kind === 'hoot') {
-    content = ["Not installed · Install puts it in ~/.hoot/agents, only for Hoot's sessions"]
+  } else if (target?.kind === 'npm-not-writable') {
+    content = [
+      "Not installed · Install needs write access to npm's global folder, ",
+      <PathText
+        key="path"
+        shown={target.displayPrefix}
+        full={target.prefix}
+        testId={`agent-install-target-${id}`}
+      />,
+    ]
   } else if (target?.kind === 'node-required') {
     content = ['Not installed · ', INSTALL_NEEDS_NODE_MESSAGE]
   } else {
@@ -310,6 +287,9 @@ function AgentRow({
       break
     case 'needs-node':
       right = <StatusText testId={statusId}>{INSTALL_NEEDS_NODE_MESSAGE}</StatusText>
+      break
+    case 'needs-write-access':
+      right = <StatusText testId={statusId}>{INSTALL_NEEDS_WRITE_ACCESS_MESSAGE}</StatusText>
       break
     case 'does-not-run':
       right = (

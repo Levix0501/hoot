@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  appendToPath,
   buildSessionEnv,
   fallbackUtf8Locale,
   hootCliEnvironment,
@@ -50,18 +49,6 @@ describe('buildSessionEnv', () => {
     expect(env.PATH!.split(':')[0]).toBe(hoot.binDirectory)
     expect(env.PATH).toBe(`${hoot.binDirectory}:/usr/local/bin:/usr/bin:/bin`)
     expect(buildSessionEnv({}, options).PATH).toBe(hoot.binDirectory)
-  })
-
-  it('puts the folders it is given last on PATH, after every folder the environment has', () => {
-    const lastOnPath = [
-      '/Applications/Hoot.app/Contents/Resources/node',
-      '/Users/me/.hoot/agents/bin',
-    ]
-    const env = buildSessionEnv({ PATH: '/usr/local/bin:/usr/bin' }, { ...options, lastOnPath })
-    expect(env.PATH).toBe(`${hoot.binDirectory}:/usr/local/bin:/usr/bin:${lastOnPath.join(':')}`)
-    const none: Record<string, string> = {}
-    appendToPath(none, '/a', 'darwin')
-    expect(none).toEqual({ PATH: '/a' })
   })
 
   it('names the session and the Hoot that starts it, over what the source environment says', () => {

@@ -31,19 +31,3 @@ export async function findCommand(command: string, env: Env): Promise<string | n
   }
   return null
 }
-
-/**
- * Where an agent's command is: the first on the login shell's PATH or, when
- * there is none there, the one in Hoot's folder of agents (`agentsBin`), where
- * Hoot installs agents when the computer has no npm it can use. `null` when
- * there is neither, or when Hoot has no such folder, as on Windows.
- */
-export async function findAgentCommand(
-  command: string,
-  env: Env,
-  agentsBin: string | null,
-): Promise<string | null> {
-  const found = await findCommand(command, env)
-  if (found !== null || agentsBin === null) return found
-  return which(path.join(agentsBin, command), { nothrow: true })
-}

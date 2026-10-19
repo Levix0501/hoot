@@ -1,11 +1,7 @@
 import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
-import {
-  AGENTS_PATH_COMMAND,
-  type AgentOperationSummary,
-  type AgentsState,
-} from '../../shared/agents'
+import { type AgentOperationSummary, type AgentsState } from '../../shared/agents'
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
@@ -352,8 +348,6 @@ export interface AppState {
   installAgent(id: CodingToolId): void
   updateAgent(id: CodingToolId): void
   cancelAgentOperation(id: CodingToolId): void
-  /** Puts the line that adds Hoot's folder of agents to PATH on the clipboard. */
-  copyAgentsPathCommand(): void
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
@@ -1823,10 +1817,6 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     cancelAgentOperation(id) {
       api.cancelAgentOperation(id)
-    },
-
-    copyAgentsPathCommand() {
-      copyText(AGENTS_PATH_COMMAND)
     },
 
     newSession(projectRoot, toolId, worktreePath = null) {

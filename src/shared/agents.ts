@@ -3,10 +3,10 @@ import type { CodingToolId } from './tools'
 
 /**
  * How an agent was installed, as Hoot tells from the file its command leads
- * to: by npm into a global folder, by Hoot into its own folder, by Homebrew,
- * by the agent's official installer, or some other way.
+ * to: by npm into a global folder, by Homebrew, by the agent's official
+ * installer, or some other way.
  */
-export type InstallMethod = 'npm' | 'hoot' | 'homebrew' | 'official' | 'unknown'
+export type InstallMethod = 'npm' | 'homebrew' | 'official' | 'unknown'
 
 /** The installation of an agent that Hoot finds, which its sessions run. */
 export interface AgentInstallation {
@@ -62,13 +62,12 @@ export interface AgentState {
 
 /**
  * Where Install puts an agent: in the global folder of the computer's npm,
- * when it can use that npm; else, on macOS, where Hoot installs it into
- * Hoot's folder of agents with the npm that comes with it; or nowhere, which
- * is the case on Windows alone, where agents come from Node.js's npm.
+ * when the user can install into it; otherwise nowhere, the computer having
+ * no npm that runs, or one whose global folder the user cannot write to.
  */
 export type InstallTarget =
   | { kind: 'npm'; prefix: string; displayPrefix: string }
-  | { kind: 'hoot'; directory: string; displayDirectory: string }
+  | { kind: 'npm-not-writable'; prefix: string; displayPrefix: string }
   | { kind: 'node-required' }
 
 export interface AgentsState {
@@ -88,17 +87,16 @@ export interface AgentOperationSummary {
 }
 
 /**
- * The line that puts the commands in Hoot's folder of agents on PATH, for zsh
- * and bash, which the Agents page copies for whoever wants them outside Hoot.
- */
-export const AGENTS_PATH_COMMAND = 'export PATH="$HOME/.hoot/agents/bin:$PATH"'
-
-/**
- * What the Agents page says about Install where Hoot has no npm to install
- * with: on Windows, where Hoot installs nothing itself, agents are installed
- * with the npm that comes with the computer's Node.js.
+ * What the Agents page says about Install where the computer has no npm that
+ * runs: agents are installed with the npm that comes with Node.js.
  */
 export const INSTALL_NEEDS_NODE_MESSAGE = 'Install needs Node.js and npm'
+
+/**
+ * What the Agents page says about Install where the user cannot write to the
+ * global folder of the computer's npm, which an agent's row also names.
+ */
+export const INSTALL_NEEDS_WRITE_ACCESS_MESSAGE = "Install needs write access to npm's folder"
 
 /**
  * The version a command reports in what it writes for `--version`, such as
@@ -124,8 +122,6 @@ export function installMethodLabel(method: InstallMethod): string | null {
   switch (method) {
     case 'npm':
       return 'npm'
-    case 'hoot':
-      return "Installed by Hoot · only in Hoot's sessions"
     case 'homebrew':
       return 'Homebrew'
     case 'official':

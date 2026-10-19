@@ -5,5 +5,3 @@
 *.cmd text eol=crlf
 # sh, Git Bash's too, cannot run a script with Windows line endings.
 resources/bin/hoot text eol=lf
-# The launcher of node, which Hoot puts on the PATH of its sessions on macOS.
-resources/node/node text eol=lf

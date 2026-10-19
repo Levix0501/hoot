@@ -45,7 +45,6 @@ afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 function context(overrides: Partial<InstallMethodContext> = {}): InstallMethodContext {
   return {
     home,
-    agentsDirectory: path.join(home, '.hoot', 'agents'),
     env: {},
     computerNpm: null,
     npmGlobalFolder: async () => null,
@@ -54,15 +53,6 @@ function context(overrides: Partial<InstallMethodContext> = {}): InstallMethodCo
 }
 
 describe('detectInstallMethod', () => {
-  it("tells an agent installed in Hoot's folder", async () => {
-    const agents = path.join(home, '.hoot', 'agents')
-    const target = file(path.join(npmPackagesFolder(agents), '@openai', 'codex', 'bin', 'codex.js'))
-    const command = await npmCommand(agents, 'codex', target)
-    expect(await detectInstallMethod(getCodingTool('codex'), command, context())).toEqual({
-      kind: 'hoot',
-    })
-  })
-
   it("tells an agent installed by the computer's npm into its global folder", async () => {
     const prefix = path.join(root, 'nvm', 'v24')
     const target = file(
@@ -211,11 +201,11 @@ describe('npmPrefixOf', () => {
     ).toBe('/')
     expect(
       npmPrefixOf(
-        '/Users/me/.hoot/agents/lib/node_modules/@openai/codex/bin/codex.js',
+        '/Users/me/.npm-global/lib/node_modules/@openai/codex/bin/codex.js',
         '@openai/codex',
         'darwin',
       ),
-    ).toBe('/Users/me/.hoot/agents')
+    ).toBe('/Users/me/.npm-global')
 
     // On Windows the global folder holds packages in `node_modules` itself.
     expect(

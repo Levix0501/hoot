@@ -12,6 +12,7 @@ export type AgentRowStatus =
   | { kind: 'checking' }
   | { kind: 'install' }
   | { kind: 'needs-node' }
+  | { kind: 'needs-write-access' }
   | { kind: 'does-not-run' }
   | { kind: 'cannot-check' }
   | { kind: 'up-to-date' }
@@ -21,8 +22,9 @@ export type AgentRowStatus =
 /**
  * What an agent's row shows on its right: its operation while it waits or
  * runs; otherwise "Checking…" while the agent is being detected; otherwise,
- * by the first that applies, Install when it is not installed, that it needs
- * Node.js and npm when Hoot has no npm to install with, that it does not run,
+ * by the first that applies, when it is not installed, Install, or why there
+ * is none: that it needs Node.js and npm when the computer has no npm that
+ * runs, or write access to npm's global folder; then that it does not run,
  * that its latest version could not be read, that it is up to date, that it
  * is to be updated the way it was installed when Hoot cannot tell how, or the
  * button that updates it to its latest version.
@@ -34,7 +36,14 @@ export function agentRowStatus(agent: AgentState, target: InstallTarget | null):
   if (agent.checking) return { kind: 'checking' }
   const installation = agent.installation
   if (installation === null) {
-    return target?.kind === 'node-required' ? { kind: 'needs-node' } : { kind: 'install' }
+    switch (target?.kind) {
+      case 'node-required':
+        return { kind: 'needs-node' }
+      case 'npm-not-writable':
+        return { kind: 'needs-write-access' }
+      default:
+        return { kind: 'install' }
+    }
   }
   if (installation.version === null) return { kind: 'does-not-run' }
   if (agent.latestFailed || agent.latest === null) return { kind: 'cannot-check' }

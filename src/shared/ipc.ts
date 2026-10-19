@@ -45,10 +45,7 @@ export type AddProjectResult =
 export interface ToolAvailability {
   id: ToolId
   available: boolean
-  /**
-   * Absolute path of the command found in the login shell PATH or, for a
-   * coding tool on macOS, else in Hoot's folder of agents.
-   */
+  /** Absolute path of the command found in the login shell PATH. */
   path: string | null
 }
 

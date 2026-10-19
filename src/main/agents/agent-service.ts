@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
   failedMessage,
   installedMessage,
   INSTALL_NEEDS_NODE_MESSAGE,
+  INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
   isNewerVersion,
   updatedMessage,
   type AgentInstallation,
@@ -19,7 +19,7 @@ import type { Env } from '../env/env'
 import { prependToPath } from '../env/session-env'
 import type { Detection, LoginEnvironment } from '../tools/tool-service'
 import { commandProgram } from '../tools/command-program'
-import { canonicalPath, homeDisplayPath, withHootNode, type AgentPaths } from './agent-paths'
+import { canonicalPath, homeDisplayPath } from './agent-paths'
 import {
   detectInstallMethod,
   OFFICIAL_UPDATE_COMMANDS,
@@ -43,7 +43,6 @@ export interface AgentServiceOptions {
   detectTools(): Promise<Detection>
   /** The login shell environment read last. */
   getLoginEnvironment(): Promise<LoginEnvironment>
-  paths: AgentPaths
   /** The home folder. */
   home: string
   /** The latest version of an npm package on registry.npmjs.org; `null` when it cannot be read. */
@@ -63,8 +62,6 @@ interface Installation extends AgentInstallation {
 interface Plan {
   name: string
   command: CommandSpec
-  /** Whether it installs into Hoot's folder of agents, which it creates first. */
-  intoAgentsDirectory: boolean
 }
 
 /** Why an operation could not run its command. */
@@ -148,9 +145,8 @@ function uncancellable(operation: Operation): void {
  * The agents of the Agents page: where each is installed, how, which version
  * it is and which is the latest; and the installs and updates started from
  * the page, one at a time in the order they were asked for, each of which can
- * be cancelled. An install uses the computer's npm when the user can install
- * into its global folder, and otherwise the npm that comes with Hoot, into
- * Hoot's folder of agents. An update runs what the installation's method
+ * be cancelled. An install uses the computer's npm, when the user can install
+ * into its global folder. An update runs what the installation's method
  * updates it with, in its place.
  */
 export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
@@ -406,12 +402,13 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   }
 
   private async targetOf(npm: ComputerNpm | null): Promise<InstallTarget> {
-    if (npm?.usable && (this.platform === 'darwin' || this.platform === 'win32')) {
-      return { kind: 'npm', prefix: npm.prefix, displayPrefix: await this.displayPath(npm.prefix) }
+    if (npm === null || (this.platform !== 'darwin' && this.platform !== 'win32')) {
+      return { kind: 'node-required' }
     }
-    if (this.platform !== 'darwin') return { kind: 'node-required' }
-    const directory = this.options.paths.directory
-    return { kind: 'hoot', directory, displayDirectory: await this.displayPath(directory) }
+    const displayPrefix = await this.displayPath(npm.prefix)
+    return npm.usable
+      ? { kind: 'npm', prefix: npm.prefix, displayPrefix }
+      : { kind: 'npm-not-writable', prefix: npm.prefix, displayPrefix }
   }
 
   /** An agent's installation as a detection found it, how it was installed and its version. */
@@ -423,18 +420,16 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const command = detection.state.tools.find((entry) => entry.id === tool.id)?.path ?? null
     if (command === null) return null
     const { env } = detection.login
-    const { home, paths } = this.options
+    const { home } = this.options
     const [method, version, displayPath] = await Promise.all([
       detectInstallMethod(tool, command, {
         home,
-        agentsDirectory: paths.directory,
         env,
         computerNpm: npm,
         npmGlobalFolder: (other) => npmGlobalFolderOf(other, env, home, this.platform),
         platform: this.platform,
       }),
-      // As a session runs it, so that the Codex in Hoot's folder of agents finds a node.
-      readVersion(command, withHootNode(env, paths, this.platform), home, this.platform),
+      readVersion(command, env, home, this.platform),
       this.displayPath(command),
     ])
     return {
@@ -501,9 +496,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     try {
       plan = await this.plan(record.tool, kind, before)
       if (!operation.cancelled) {
-        if (plan.intoAgentsDirectory) {
-          await fs.mkdir(this.options.paths.directory, { recursive: true })
-        }
         const process = startProcess(plan.command, (text) => {
           void output.write(text).then(() => {
             if (operation.state.status !== 'running') return
@@ -563,8 +555,9 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const npmArgs = ['install', '-g', latest, '--loglevel=http']
     if (kind === 'install') {
       const npm = await findComputerNpm(env, home, this.platform)
-      if (npm?.usable) return this.npmPlan(npm.path, npmArgs, env)
-      return this.hootNpmPlan(latest, env)
+      if (npm === null) throw new OperationFailure(INSTALL_NEEDS_NODE_MESSAGE)
+      if (!npm.usable) throw new OperationFailure(INSTALL_NEEDS_WRITE_ACCESS_MESSAGE)
+      return this.npmPlan(npm.path, npmArgs, env)
     }
     if (before === null) throw new OperationFailure(`${tool.label} is not installed`)
     if (before.version === null) throw new OperationFailure(`${tool.label} doesn't run`)
@@ -578,8 +571,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         }
         return this.npmPlan(method.npm, npmArgs, npmEnv)
       }
-      case 'hoot':
-        return this.hootNpmPlan(latest, env)
       case 'homebrew':
         return {
           name: 'brew',
@@ -589,14 +580,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
             env,
             cwd: home,
           },
-          intoAgentsDirectory: false,
         }
       case 'official': {
         const subcommand = OFFICIAL_UPDATE_COMMANDS[tool.id]
         return {
           name: `${tool.command} ${subcommand}`,
           command: { file: before.path, args: [subcommand], env, cwd: home },
-          intoAgentsDirectory: false,
         }
       }
       case 'unknown':
@@ -620,36 +609,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         env,
         cwd: this.options.home,
       },
-      intoAgentsDirectory: false,
-    }
-  }
-
-  /**
-   * The npm that comes with Hoot, run by Hoot's executable as Node.js, which
-   * installs into Hoot's folder of agents. Its packages' install scripts find
-   * Hoot's `node` last on PATH. There is no such npm outside macOS, where
-   * Hoot installs with the computer's npm alone.
-   */
-  private hootNpmPlan(latest: string, env: Env): Plan {
-    if (this.platform !== 'darwin') throw new OperationFailure(INSTALL_NEEDS_NODE_MESSAGE)
-    const { paths, home } = this.options
-    return {
-      name: 'npm',
-      command: {
-        file: paths.executable,
-        args: [
-          paths.npmCli,
-          'install',
-          '-g',
-          '--prefix',
-          paths.directory,
-          latest,
-          '--loglevel=http',
-        ],
-        env: { ...withHootNode(env, paths, this.platform), ELECTRON_RUN_AS_NODE: '1' },
-        cwd: home,
-      },
-      intoAgentsDirectory: true,
     }
   }
 

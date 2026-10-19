@@ -3,18 +3,13 @@ import type { ToolAvailability, ToolsState } from '../../shared/ipc'
 import { TOOLS } from '../../shared/tools'
 import type { Env } from '../env/env'
 import { resolveLoginShellEnv } from '../env/login-shell-env'
-import { findAgentCommand } from './find-command'
+import { findCommand } from './find-command'
 
 export interface ToolServiceOptions {
   /** The program of the shell Shell sessions run, whose login environment is read outside Windows. */
   shell: string
   baseEnv: Env
   cwd: string
-  /**
-   * Hoot's folder of agents' commands, where a coding tool that is not on the
-   * login shell PATH is looked for; `null` where Hoot has none, as on Windows.
-   */
-  agentsBinDirectory?: string | null
   /** Replaceable for tests. */
   resolveEnv?: typeof resolveLoginShellEnv
   platform?: NodeJS.Platform
@@ -34,10 +29,9 @@ export interface Detection {
 
 /**
  * Reads the login shell environment (on Windows, takes the one Hoot started
- * with) and checks which tools can be found: on its PATH, or else, for a
- * coding tool, in Hoot's folder of agents. Detection runs at startup and
- * again whenever the user asks for it, or an agent has been installed or
- * updated.
+ * with) and checks which tools can be found on its PATH. Detection runs at
+ * startup and again whenever the user asks for it, or an agent has been
+ * installed or updated.
  */
 export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   private state: ToolsState = { detecting: false, tools: [], error: null }
@@ -135,11 +129,10 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     const login = await this.readLoginEnvironment()
     this.login = login
 
-    const agentsBin = this.options.agentsBinDirectory ?? null
     const tools: ToolAvailability[] = await Promise.all(
       TOOLS.map(async (tool) => {
         if (!tool.command) return { id: tool.id, available: true, path: this.options.shell }
-        const found = await findAgentCommand(tool.command, login.env, agentsBin)
+        const found = await findCommand(tool.command, login.env)
         return { id: tool.id, available: found !== null, path: found }
       }),
     )

@@ -9,22 +9,16 @@ import { onPath, writeNodeCommand } from './test-support'
 import { ToolService } from './tool-service'
 
 let bin: string
-let agentsBin: string
-/** The stand-ins of the commands, as a lookup finds them. */
+/** The stand-in of the command, as a lookup finds it. */
 let claude: string
-let agentsCodex: string
 
 beforeAll(async () => {
   bin = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-tools-')))
   claude = await writeNodeCommand(path.join(bin, 'claude'), '')
-  agentsBin = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-agents-bin-')))
-  await writeNodeCommand(path.join(agentsBin, 'claude'), '')
-  agentsCodex = await writeNodeCommand(path.join(agentsBin, 'codex'), '')
 })
 
 afterAll(() => {
   fs.rmSync(bin, { recursive: true, force: true })
-  fs.rmSync(agentsBin, { recursive: true, force: true })
 })
 
 const availability = (state: ToolsState) =>
@@ -111,28 +105,6 @@ describe('ToolService', () => {
     expect((await service.detect()).error).toBeNull()
     expect(await service.getLoginEnvironment()).toEqual({ env: baseEnv, error: null })
     expect(resolveEnv).not.toHaveBeenCalled()
-  })
-
-  it('looks for a coding tool missing from PATH in the folder of agents', async () => {
-    const service = new ToolService({
-      shell: '/bin/zsh',
-      baseEnv: {},
-      cwd: '/',
-      agentsBinDirectory: agentsBin,
-      resolveEnv: async () => ({ PATH: onPath(bin, '/usr/bin') }),
-      platform: 'darwin',
-    })
-    const state = await service.detect()
-    expect(availability(state)).toEqual({
-      claude: true,
-      codex: true,
-      opencode: false,
-      shell: true,
-    })
-    const pathOf = (id: string) => state.tools.find((tool) => tool.id === id)?.path
-    // The one on PATH comes first.
-    expect(pathOf('claude')).toSatisfy(isCommand(claude))
-    expect(pathOf('codex')).toSatisfy(isCommand(agentsCodex))
   })
 
   it('starts another detection after the running one for every call made meanwhile', async () => {

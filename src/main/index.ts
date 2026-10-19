@@ -14,7 +14,6 @@ import {
   windowControlsArgument,
   windowControlsFor,
 } from '../shared/window-controls'
-import { agentPaths, lastOnSessionPath } from './agents/agent-paths'
 import { AgentService } from './agents/agent-service'
 import { fetchLatestVersion } from './agents/latest-version'
 import { readAppInfo } from './app-info'
@@ -68,19 +67,6 @@ const hootCli = hootCliSetup({
   executable: process.execPath,
   mainDirectory: import.meta.dirname,
 })
-// Whether Hoot's own folder of agents goes on PATH and holds the agents Hoot
-// installs itself: on macOS alone, where Hoot installs agents with the npm
-// that comes with it, into the home folder, so that an installed Hoot and one
-// run from its repository share them. On Windows Hoot manages agents with the
-// computer's npm, from Node.js, and installs nothing of its own.
-const hootOwnsAgents = process.platform === 'darwin'
-const agentFolders = agentPaths({
-  home: os.homedir(),
-  packaged: app.isPackaged,
-  resourcesPath: process.resourcesPath,
-  appPath: app.getAppPath(),
-  executable: process.execPath,
-})
 const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.
@@ -107,7 +93,6 @@ const tools = new ToolService({
   shell: shell.file,
   baseEnv,
   cwd: os.homedir(),
-  agentsBinDirectory: hootOwnsAgents ? agentFolders.binDirectory : null,
 })
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
@@ -127,9 +112,6 @@ const sessions = new SessionManager({
         getLoginEnvironment: () => tools.getLoginEnvironment(),
         permissionLevel: (tool) => permissionLevels.level(tool),
         hoot: { ...hootCli, sessionId },
-        agents: hootOwnsAgents
-          ? { binDirectory: agentFolders.binDirectory, lastOnPath: lastOnSessionPath(agentFolders) }
-          : null,
       },
       toolId,
       cwd,
@@ -141,7 +123,6 @@ const sessions = new SessionManager({
 const agents = new AgentService({
   detectTools: () => tools.detectWithEnvironment(),
   getLoginEnvironment: () => tools.getLoginEnvironment(),
-  paths: agentFolders,
   home: os.homedir(),
   // Through Electron's network stack, which takes the system's proxy settings.
   latestVersion: (npmPackage) =>

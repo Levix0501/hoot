@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AGENTS_PATH_COMMAND,
   CANCELLED_MESSAGE,
   failedMessage,
   installedMessage,
@@ -42,7 +41,6 @@ describe('isNewerVersion', () => {
 describe('the texts of the Agents page', () => {
   it('names each install method, but none it cannot tell', () => {
     expect(installMethodLabel('npm')).toBe('npm')
-    expect(installMethodLabel('hoot')).toBe("Installed by Hoot · only in Hoot's sessions")
     expect(installMethodLabel('homebrew')).toBe('Homebrew')
     expect(installMethodLabel('official')).toBe('Official installer')
     expect(installMethodLabel('unknown')).toBeNull()
@@ -64,9 +62,5 @@ describe('the texts of the Agents page', () => {
       '✕ Update failed: the version is still 1.0.0',
     )
     expect(CANCELLED_MESSAGE).toBe('Cancelled')
-  })
-
-  it('copies a line that puts the folder of agents on PATH', () => {
-    expect(AGENTS_PATH_COMMAND).toBe('export PATH="$HOME/.hoot/agents/bin:$PATH"')
   })
 })

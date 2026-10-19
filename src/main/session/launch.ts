@@ -12,7 +12,7 @@ import {
 } from '../env/session-env'
 import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
-import { findAgentCommand } from '../tools/find-command'
+import { findCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import { SessionError, type SessionLaunch } from './session-manager'
@@ -28,13 +28,6 @@ export interface LaunchContext {
   permissionLevel(tool: CodingToolId): PermissionLevel
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
-  /**
-   * On macOS, where Hoot installs agents: Hoot's folder of agents' commands,
-   * where a coding tool that is not on the login shell PATH is looked for,
-   * and the folders that go last on the PATH of every session (the one of
-   * Hoot's `node`, and that folder). `null` elsewhere, as on Windows.
-   */
-  agents: { binDirectory: string; lastOnPath: readonly string[] } | null
 }
 
 /**
@@ -155,16 +148,14 @@ async function checkFolder(cwd: string): Promise<void> {
  * default shell with its arguments, as a login shell outside Windows,
  * starting from the same environment a terminal opened from the Dock or the
  * Start menu would give it. A coding tool runs its command directly, the one
- * found on the login shell PATH or else, on macOS, in Hoot's folder of
- * agents: the installation the Agents page shows. On Windows, where the
- * command that npm or pnpm makes is a batch file, the tool runs what that
- * points to instead (see `commandProgram`). It runs with the login shell
- * environment and with exactly the arguments of its permission level: the one
- * `permissionLevel` names, or else the one picked now. Claude Code, when it is
- * sent an issue, also gets the arguments that send it, once the issue's files
- * are written; the launch's cleanup removes their folder. Either
- * environment also has what hoot needs to run in the session, and the folders
- * that go last on its PATH.
+ * found on the login shell PATH: the installation the Agents page shows. On
+ * Windows, where the command that npm or pnpm makes is a batch file, the tool
+ * runs what that points to instead (see `commandProgram`). It runs with the
+ * login shell environment and with exactly the arguments of its permission
+ * level: the one `permissionLevel` names, or else the one picked now. Claude
+ * Code, when it is sent an issue, also gets the arguments that send it, once
+ * the issue's files are written; the launch's cleanup removes their folder.
+ * Either environment also has what hoot needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -186,7 +177,6 @@ export async function resolveLaunch(
         ...context.terminal(),
         cwd,
         hoot: context.hoot,
-        lastOnPath: context.agents?.lastOnPath,
       }),
     }
   }
@@ -199,11 +189,7 @@ export async function resolveLaunch(
     context.permissionLevel(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
-  const found = await findAgentCommand(
-    tool.command,
-    login.env,
-    context.agents?.binDirectory ?? null,
-  )
+  const found = await findCommand(tool.command, login.env)
   if (!found) {
     throw new SessionError(
       `${tool.label} is not available. Install it with: ${tool.installCommand}`,
@@ -218,7 +204,6 @@ export async function resolveLaunch(
     ...context.terminal(),
     cwd,
     hoot: context.hoot,
-    lastOnPath: context.agents?.lastOnPath,
   })
   const args = [...program.args, ...level.args]
   if (issue === null) return { file: program.file, args, env }

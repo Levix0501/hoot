@@ -20,7 +20,6 @@ export type DetectedInstallMethod =
       /** Whether that npm is the computer's, the first on the login shell PATH. */
       computer: boolean
     }
-  | { kind: 'hoot' }
   | { kind: 'homebrew'; brew: string; name: string; cask: boolean }
   | { kind: 'official' }
   | { kind: 'unknown' }
@@ -28,8 +27,6 @@ export type DetectedInstallMethod =
 export interface InstallMethodContext {
   /** The home folder. */
   home: string
-  /** Hoot's folder of agents. */
-  agentsDirectory: string
   /** The login shell environment, which may say where Codex keeps its files. */
   env: Env
   /** The computer's npm, if it runs. */
@@ -84,18 +81,17 @@ export function npmPrefixOf(
 
 /**
  * An installation by npm: the file is in the global packages folder of a
- * global folder P other than Hoot's, which is the computer's npm's, or has an
- * npm of its own beside its global packages whose global folder it is.
+ * global folder P, which is the computer's npm's, or has an npm of its own
+ * beside its global packages whose global folder it is.
  */
 async function npmMethod(
   tool: CodingToolDefinition,
   target: string,
-  agentsDirectory: string,
   context: ResolvedContext,
 ): Promise<DetectedInstallMethod | null> {
   const { platform } = context
   const prefix = npmPrefixOf(target, tool.npmPackage, platform)
-  if (prefix === null || samePath(prefix, agentsDirectory, platform)) return null
+  if (prefix === null) return null
   const computer = context.computerNpm
   if (computer && samePath(computer.prefix, prefix, platform)) {
     return { kind: 'npm', prefix, npm: computer.path, computer: true }
@@ -194,9 +190,9 @@ async function isOfficialInstallation(
 /**
  * How an agent's command was installed, told from the file it leads to once
  * its symbolic links are followed, and, on Windows, once what an npm shim for
- * a command points to is read: by Hoot, into Hoot's folder of agents; by npm,
- * into another global folder; by Homebrew; by the agent's official installer;
- * or, when it is none of these, some way Hoot cannot tell.
+ * a command points to is read: by npm, into a global folder; by Homebrew; by
+ * the agent's official installer; or, when it is none of these, some way Hoot
+ * cannot tell.
  */
 export async function detectInstallMethod(
   tool: CodingToolDefinition,
@@ -205,17 +201,8 @@ export async function detectInstallMethod(
 ): Promise<DetectedInstallMethod> {
   const platform = context.platform ?? process.platform
   const target = await canonicalPath(await commandTarget(command, platform))
-  const agentsDirectory = await canonicalPath(context.agentsDirectory)
-  const paths = pathRules(platform)
-  const hootPackages =
-    platform === 'win32'
-      ? paths.join(agentsDirectory, 'node_modules')
-      : paths.join(agentsDirectory, 'lib', 'node_modules')
-  if (isInside(target, paths.join(hootPackages, tool.npmPackage), platform)) {
-    return { kind: 'hoot' }
-  }
   return (
-    (await npmMethod(tool, target, agentsDirectory, { ...context, platform })) ??
+    (await npmMethod(tool, target, { ...context, platform })) ??
     (await homebrewMethod(target)) ??
     ((await isOfficialInstallation(tool, command, target, { ...context, platform }))
       ? { kind: 'official' }

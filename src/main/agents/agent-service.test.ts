@@ -8,14 +8,12 @@ import type { AgentsState } from '../../shared/agents'
 import type { CodingToolId } from '../../shared/tools'
 import { writeNodeCommand, writeNodeScript } from '../tools/test-support'
 import { ToolService } from '../tools/tool-service'
-import { agentPaths } from './agent-paths'
 import { AgentService } from './agent-service'
 import { linkCommand, npmCommandsFolder, npmPackagesFolder } from './test-support'
 
 /**
  * Windows, where npm lays out a global folder in a way of its own (see
- * `npmCommandsFolder`), and where Hoot has no npm and no folder of agents of
- * its own, which it has on macOS alone.
+ * `npmCommandsFolder`).
  */
 const windows = process.platform === 'win32'
 
@@ -27,9 +25,9 @@ const SHELL_QUOTE = createRequire(import.meta.url).resolve('shell-quote')
 
 /**
  * A stand-in npm, a Node.js script. `prefix -g` says its global folder;
- * `install -g <package>@latest` (with `--prefix`, into that folder instead)
- * installs a stand-in of the package, laid out as npm lays out a global
- * folder, whose command reports the version in `latest-<command>`. A test can
+ * `install -g <package>@latest` installs a stand-in of the package there,
+ * laid out as npm lays out a global folder, whose command reports the version
+ * in `latest-<command>`. A test can
  * add to what it does with `npmScript`, which it runs first; it logs how it
  * was run in `npm.log`: its path, that of the command that runs it (the
  * script without `.cjs`), and its arguments.
@@ -45,15 +43,14 @@ const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const self = process.argv[1].replace(/\\.cjs$/, '')
 const args = process.argv.slice(2)
 fs.appendFileSync(path.join(root, 'npm.log'), [self, ...args].join(' ') + '\\n')
-let prefix = fs.realpathSync.native(windows ? path.dirname(self) : path.join(path.dirname(self), '..'))
+const prefix = fs.realpathSync.native(windows ? path.dirname(self) : path.join(path.dirname(self), '..'))
 let spec = null
-for (let index = 0; index < args.length; index++) {
-  if (args[index] === 'prefix') {
+for (const arg of args) {
+  if (arg === 'prefix') {
     say(prefix)
     process.exit(0)
   }
-  if (args[index] === '--prefix') prefix = args[++index]
-  else if (args[index].endsWith('@latest')) spec = args[index].slice(0, -'@latest'.length)
+  if (arg.endsWith('@latest')) spec = arg.slice(0, -'@latest'.length)
 }
 
 async function install(npmPackage, command, script) {
@@ -102,24 +99,6 @@ async function main() {
 main().then((code) => {
   process.exitCode = code
 })
-`
-
-/** The stand-in of the npm that comes with Hoot, which Hoot's executable runs as Node.js. */
-const FAKE_HOOT_NPM = `const { spawnSync } = require('node:child_process')
-const fs = require('node:fs')
-fs.appendFileSync(
-  __ROOT__ + '/hoot-npm.log',
-  JSON.stringify({
-    args: process.argv.slice(2),
-    runAsNode: process.env.ELECTRON_RUN_AS_NODE,
-    hootNode: process.env.HOOT_NODE,
-    path: process.env.PATH,
-  }) + '\\n',
-)
-const result = spawnSync(process.execPath, [__ROOT__ + '/fake-npm', ...process.argv.slice(2)], {
-  stdio: 'inherit',
-})
-process.exit(result.status ?? 1)
 `
 
 const PACKAGES: Record<CodingToolId, string> = {
@@ -195,7 +174,6 @@ beforeEach(async () => {
   write(path.join(root, 'fake-npm'), fakeNpm())
   await writeNodeCommand(path.join(npmCommandsFolder(prefix), 'npm'), fakeNpm())
   fs.mkdirSync(npmPackagesFolder(prefix), { recursive: true })
-  write(path.join(root, 'npm-cli.cjs'), FAKE_HOOT_NPM.replaceAll('__ROOT__', JSON.stringify(root)))
   for (const id of ['claude', 'codex', 'opencode'] as const) setLatest(id, '2.0.0')
 })
 
@@ -217,15 +195,9 @@ function setup(
     beforeLoginEnvironment?: () => Promise<void>
   } = {},
 ) {
-  const paths = agentPaths({
-    home,
-    packaged: false,
-    resourcesPath: '/nowhere',
-    appPath: root,
-    executable: process.execPath,
-  })
-  paths.npmCli = path.join(root, 'npm-cli.cjs')
+  // ~/.local/bin, where an official installer may put an agent, comes first.
   const loginPath = [
+    path.join(home, '.local', 'bin'),
     ...(options.withNpm === false ? [] : [npmCommandsFolder(prefix)]),
     // The system's folders, which a login shell's PATH has on macOS.
     ...(windows ? [] : ['/usr/bin', '/bin']),
@@ -236,7 +208,6 @@ function setup(
     // On Windows, where no login shell is read, the environment Hoot started with.
     baseEnv: loginEnv,
     cwd: home,
-    agentsBinDirectory: paths.binDirectory,
     resolveEnv: async () => ({ ...loginEnv }),
   })
   const latestCalls: string[] = []
@@ -246,7 +217,6 @@ function setup(
       return tools.detectWithEnvironment()
     },
     getLoginEnvironment: () => tools.getLoginEnvironment(),
-    paths,
     home,
     latestVersion: async (npmPackage) => {
       latestCalls.push(npmPackage)
@@ -276,7 +246,7 @@ function setup(
       },
       { timeout: 10_000, interval: 20 },
     )
-  return { service, paths, tools, states, agent, ended, latestCalls }
+  return { service, tools, states, agent, ended, latestCalls }
 }
 
 /**
@@ -305,6 +275,10 @@ function heldSetup() {
 describe('AgentService detection', () => {
   it('finds each agent, how it was installed, its version and the latest one', async () => {
     await installInto(prefix, 'claude', '1.0.0')
+    await writeNodeCommand(
+      path.join(home, '.local', 'bin', 'codex'),
+      "require('node:fs').writeSync(1, 'codex-cli 2.0.0\\n')\n",
+    )
     const { service, agent, latestCalls } = setup({ latest: { claude: '1.5.0' } })
     expect(agent('claude').checking).toBe(true)
     await service.detect()
@@ -320,6 +294,13 @@ describe('AgentService detection', () => {
       latestFailed: false,
       operation: null,
     })
+    const codex = commandIn(path.join(home, '.local', 'bin'), 'codex')
+    expect(agent('codex').installation).toMatchObject({
+      path: codex,
+      displayPath: path.join('~', path.relative(home, codex)),
+      method: 'unknown',
+      version: '2.0.0',
+    })
     expect(agent('opencode').installation).toBeNull()
     expect(service.getState().installTarget).toEqual({
       kind: 'npm',
@@ -329,47 +310,30 @@ describe('AgentService detection', () => {
     expect(latestCalls.toSorted()).toEqual(Object.values(PACKAGES).toSorted())
   })
 
-  // Hoot has a folder of agents of its own on macOS alone.
-  it.skipIf(windows)("finds an agent installed in Hoot's folder of agents", async () => {
-    const { service, paths, agent } = setup()
-    await installInto(paths.directory, 'codex', '2.0.0')
+  it('no longer finds the agents an earlier Hoot installed in its own folder, ~/.hoot/agents', async () => {
+    await installInto(path.join(home, '.hoot', 'agents'), 'codex', '1.0.0')
+    const { service, agent } = setup()
     await service.detect()
-    expect(agent('codex').installation).toMatchObject({
-      path: path.join(paths.binDirectory, 'codex'),
-      displayPath: '~/.hoot/agents/bin/codex',
-      method: 'hoot',
-      version: '2.0.0',
-    })
+    expect(agent('codex').installation).toBeNull()
   })
 
-  // Hoot has a folder of agents to install into on macOS alone; Windows has
-  // no permissions on folders that keep the user from creating files.
+  // Windows has no permissions on folders that keep the user from creating files.
   it.skipIf(windows)(
-    "installs into Hoot's folder when the user cannot create files in npm's global folder",
+    "shows that Install needs write access to npm's global folder when the user cannot create files in it",
     async () => {
       const { service } = setup()
       fs.chmodSync(npmPackagesFolder(prefix), 0o555)
       await service.detect()
       expect(service.getState().installTarget).toEqual({
-        kind: 'hoot',
-        directory: path.join(home, '.hoot', 'agents'),
-        displayDirectory: '~/.hoot/agents',
+        kind: 'npm-not-writable',
+        prefix,
+        displayPrefix: prefix,
       })
     },
   )
 
-  // On Windows, Install then needs Node.js and npm, as the next test shows.
-  it.skipIf(windows)(
-    "installs into Hoot's folder when the login shell PATH has no npm",
-    async () => {
-      const { service } = setup({ withNpm: false })
-      await service.detect()
-      expect(service.getState().installTarget?.kind).toBe('hoot')
-    },
-  )
-
-  it('shows that Install needs Node.js and npm where Hoot has no npm to install with', async () => {
-    const { service } = setup({ withNpm: false, platform: 'win32' })
+  it('shows that Install needs Node.js and npm when the login shell PATH has no npm', async () => {
+    const { service } = setup({ withNpm: false })
     await service.detect()
     expect(service.getState().installTarget).toEqual({ kind: 'node-required' })
   })
@@ -429,56 +393,8 @@ describe('AgentService installs', () => {
     expect(tools.getState().tools.find((tool) => tool.id === 'claude')?.available).toBe(true)
   })
 
-  // Hoot has an npm and a folder of agents of its own on macOS alone.
-  it.skipIf(windows)(
-    "installs with Hoot's npm into Hoot's folder when the computer has no npm",
-    async () => {
-      const { service, paths, agent, ended } = setup({ withNpm: false })
-      await service.detect()
-      service.install('codex')
-      await ended('codex')
-      expect(agent('codex').operation).toMatchObject({
-        status: 'succeeded',
-        message: '✓ Installed 2.0.0',
-      })
-      expect(agent('codex').installation).toMatchObject({
-        path: path.join(paths.binDirectory, 'codex'),
-        method: 'hoot',
-      })
-      expect(
-        fs.existsSync(path.join(paths.directory, 'lib', 'node_modules', '@openai', 'codex')),
-      ).toBe(true)
-      const [run] = fs
-        .readFileSync(path.join(root, 'hoot-npm.log'), 'utf8')
-        .trim()
-        .split('\n')
-        .map(
-          (line) =>
-            JSON.parse(line) as {
-              args: string[]
-              runAsNode: string
-              hootNode: string
-              path: string
-            },
-        )
-      expect(run?.args).toEqual([
-        'install',
-        '-g',
-        '--prefix',
-        paths.directory,
-        '@openai/codex@latest',
-        '--loglevel=http',
-      ])
-      expect(run?.runAsNode).toBe('1')
-      expect(run?.hootNode).toBe(process.execPath)
-      expect(run?.path).toBe(`/usr/bin:/bin:${paths.nodeDirectory}:${paths.binDirectory}`)
-      // Nothing went into the computer's global folder.
-      expect(fs.readdirSync(path.join(prefix, 'lib', 'node_modules'))).toEqual([])
-    },
-  )
-
-  it('fails, saying Node.js and npm are needed, where Hoot has no npm to install with', async () => {
-    const { service, paths, agent, ended } = setup({ withNpm: false, platform: 'win32' })
+  it('fails, saying Node.js and npm are needed, when the computer has no npm', async () => {
+    const { service, agent, ended } = setup({ withNpm: false })
     await service.detect()
     service.install('claude')
     await ended('claude')
@@ -487,9 +403,28 @@ describe('AgentService installs', () => {
       status: 'failed',
       message: '✕ Install failed: Install needs Node.js and npm',
     })
-    // Hoot installed nothing of its own: outside macOS it has no npm of its own.
-    expect(fs.existsSync(paths.directory)).toBe(false)
+    // Hoot installed nothing of its own.
+    expect(fs.existsSync(path.join(home, '.hoot'))).toBe(false)
   })
+
+  // Windows has no permissions on folders that keep the user from creating files.
+  it.skipIf(windows)(
+    "fails, saying write access is needed, when the user cannot write to npm's global folder",
+    async () => {
+      const { service, agent, ended } = setup()
+      fs.chmodSync(npmCommandsFolder(prefix), 0o555)
+      await service.detect()
+      service.install('codex')
+      await ended('codex')
+      expect(agent('codex').operation).toMatchObject({
+        kind: 'install',
+        status: 'failed',
+        message: "✕ Install failed: Install needs write access to npm's folder",
+      })
+      expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
+      expect(fs.existsSync(path.join(home, '.hoot'))).toBe(false)
+    },
+  )
 
   it('fails when npm fails, with the last lines of what it wrote and all of it', async () => {
     npmScript(`
@@ -563,7 +498,7 @@ describe('AgentService updates', () => {
     await installInto(prefix, 'claude', '1.0.0')
     setLatest('claude', '2.1.0')
     let sessions = ['s1', 's2', 's3']
-    const { service, paths, agent, ended } = setup({ sessions: () => sessions })
+    const { service, agent, ended } = setup({ sessions: () => sessions })
     await service.detect()
     service.update('claude')
     // One session ends during the update.
@@ -578,23 +513,6 @@ describe('AgentService updates', () => {
     expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
       `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@latest --loglevel=http`,
     ])
-    expect(fs.existsSync(paths.directory)).toBe(false)
-  })
-
-  // Hoot has an npm and a folder of agents of its own on macOS alone.
-  it.skipIf(windows)("updates the installation in Hoot's folder with Hoot's npm", async () => {
-    const { service, paths, agent, ended } = setup()
-    await installInto(paths.directory, 'codex', '1.0.0')
-    setLatest('codex', '1.2.0')
-    await service.detect()
-    service.update('codex')
-    await ended('codex')
-    expect(agent('codex').operation).toMatchObject({
-      status: 'succeeded',
-      message: '✓ Updated to 1.2.0',
-    })
-    expect(fs.readFileSync(path.join(root, 'hoot-npm.log'), 'utf8')).toContain('--prefix')
-    expect(fs.existsSync(path.join(prefix, 'lib', 'node_modules', '@openai'))).toBe(false)
   })
 
   it('fails when the version did not change', async () => {
@@ -627,23 +545,30 @@ describe('AgentService updates', () => {
     })
   })
 
-  // Hoot has a folder of agents of its own, which it updates, on macOS alone.
-  it.skipIf(windows)('fails when the agent is found somewhere else afterwards', async () => {
-    const { service, paths, agent, ended } = setup()
-    await installInto(paths.directory, 'codex', '1.0.0')
+  it('fails when the agent is found somewhere else afterwards', async () => {
+    await installInto(prefix, 'codex', '1.0.0')
     setLatest('codex', '1.2.0')
-    // Meanwhile a Codex comes on the login shell PATH, which comes first.
-    const elsewhere = path.join(prefix, 'bin', 'codex')
+    // Meanwhile a Codex comes into a folder that comes first on the login shell PATH.
+    const elsewhere = path.join(home, '.local', 'bin')
+    await writeNodeCommand(
+      path.join(elsewhere, 'codex'),
+      "require('node:fs').writeSync(1, '3.0.0\\n')\n",
+    )
+    const aside = path.join(home, '.local', 'aside')
+    fs.renameSync(elsewhere, aside)
     npmScript(`
-      fs.writeFileSync(${JSON.stringify(elsewhere)}, '#!/bin/sh\\necho 3.0.0\\n')
-      fs.chmodSync(${JSON.stringify(elsewhere)}, 0o755)
+      if (fs.existsSync(${JSON.stringify(aside)})) {
+        fs.renameSync(${JSON.stringify(aside)}, ${JSON.stringify(elsewhere)})
+      }
     `)
+    const { service, agent, ended } = setup()
     await service.detect()
     service.update('codex')
     await ended('codex')
+    const codex = commandIn(elsewhere, 'codex')
     expect(agent('codex').operation).toMatchObject({
       status: 'failed',
-      message: `✕ Update failed: npm finished, but Codex is now found at ${elsewhere}`,
+      message: `✕ Update failed: npm finished, but Codex is now found at ${path.join('~', path.relative(home, codex))}`,
     })
   })
 

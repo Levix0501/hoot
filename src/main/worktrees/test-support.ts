@@ -7,9 +7,17 @@ import path from 'node:path'
 import { gitEnvironment } from '../git/git'
 import type { GitContext } from './repositories'
 
-/** A temporary directory, with a home directory that has no Git configuration. */
+/**
+ * A temporary directory, with a home directory that has no Git configuration.
+ * The git of the context reads no configuration of the system either, as the
+ * tests' own git: Git for Windows's would have it check files out with
+ * Windows line endings, which that git takes for changes.
+ */
 export function makeSandbox(prefix: string): { root: string; home: string; context: GitContext } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
+  // The native realpath also writes out the short names of Windows folders,
+  // such as RUNNER~1 in the temporary folder of GitHub's runners, as Hoot's
+  // own realpath does.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
   const home = path.join(root, 'home')
   fs.mkdirSync(home)
   return {
@@ -17,7 +25,10 @@ export function makeSandbox(prefix: string): { root: string; home: string; conte
     home,
     context: {
       git: 'git',
-      env: gitEnvironment({ PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home }),
+      env: {
+        ...gitEnvironment({ PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home }),
+        GIT_CONFIG_NOSYSTEM: '1',
+      },
     },
   }
 }
@@ -60,12 +71,16 @@ export function addBranch(repository: string, branch: string): void {
   git(repository, 'checkout', '-q', current)
 }
 
-/** The paths of a repository's linked worktrees and whether each is prunable. */
+/**
+ * The paths of a repository's linked worktrees and whether each is prunable.
+ * The paths are written as Node.js writes them: Git writes them with `/`
+ * also on Windows.
+ */
 export function linkedWorktrees(repository: string): Array<{ path: string; prunable: boolean }> {
   const entries: Array<{ path: string; prunable: boolean }> = []
   for (const field of git(repository, 'worktree', 'list', '--porcelain', '-z').split('\0')) {
     if (field.startsWith('worktree ')) {
-      entries.push({ path: field.slice('worktree '.length), prunable: false })
+      entries.push({ path: path.normalize(field.slice('worktree '.length)), prunable: false })
     } else if (field.startsWith('prunable') && entries.length > 0) {
       entries.at(-1)!.prunable = true
     }

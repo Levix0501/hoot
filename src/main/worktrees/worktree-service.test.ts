@@ -294,7 +294,7 @@ describe('WorktreeService', () => {
     expect(await service.isValidBranchName('')).toBe(false)
     expect(await service.previewPath(project, 'feat/login')).toEqual({
       path: path.join(W, 'project', 'feat-login'),
-      displayPath: '~/.hoot/worktrees/project/feat-login',
+      displayPath: path.join('~', '.hoot', 'worktrees', 'project', 'feat-login'),
     })
     expect(fs.existsSync(W)).toBe(false)
   })
@@ -768,7 +768,7 @@ describe('WorktreeService', () => {
     fs.symlinkSync(elsewhere, path.join(home, '.hoot'))
     await start()
     expect((await service.previewPath(project, 'feat/l'))?.displayPath).toBe(
-      '~/.hoot/worktrees/project/feat-l',
+      path.join('~', '.hoot', 'worktrees', 'project', 'feat-l'),
     )
     const result = await service.create({
       projectRoot: project,
@@ -867,7 +867,7 @@ describe('WorktreeService', () => {
 
     // New worktrees go to the same project folder.
     expect((await service.previewPath(project, 'feat/a'))?.displayPath).toBe(
-      '~/.hoot/worktrees/project/feat-a',
+      path.join('~', '.hoot', 'worktrees', 'project', 'feat-a'),
     )
     const after = await service.create({
       projectRoot: project,

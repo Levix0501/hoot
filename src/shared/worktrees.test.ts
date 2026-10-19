@@ -44,6 +44,12 @@ describe('isWithin', () => {
     expect(isWithin('/w/G/feature', '/w/G/feat')).toBe(false)
     expect(isWithin('/w/G', '/w/G/feat')).toBe(false)
   })
+
+  it('reads the paths of Windows, with \\ between folders', () => {
+    expect(isWithin('C:\\w\\G\\feat\\inner', 'C:\\w\\G\\feat')).toBe(true)
+    expect(isWithin('C:\\w\\G\\feature', 'C:\\w\\G\\feat')).toBe(false)
+    expect(isWithin('C:\\w', 'C:\\')).toBe(true)
+  })
 })
 
 describe('inspectionIsClean', () => {

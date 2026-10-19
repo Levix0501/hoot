@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import path from 'node:path'
 import type { Env } from '../env/env'
 
 /** Environment for running git: no repository overrides and untranslated messages. */
@@ -76,8 +77,15 @@ export interface WorktreeEntry {
   prunable: boolean
 }
 
-/** Parses `git worktree list --porcelain -z`. The main worktree comes first. */
-export function parseWorktreeList(output: string): WorktreeEntry[] {
+/**
+ * Parses `git worktree list --porcelain -z`. The main worktree comes first.
+ * Git writes the paths with `/` also on Windows; there they are given with
+ * `\`, as Node.js writes paths, so that they compare equal to Hoot's own.
+ */
+export function parseWorktreeList(
+  output: string,
+  platform: NodeJS.Platform = process.platform,
+): WorktreeEntry[] {
   const entries: WorktreeEntry[] = []
   let current: WorktreeEntry | null = null
   for (const field of output.split('\0')) {
@@ -86,8 +94,9 @@ export function parseWorktreeList(output: string): WorktreeEntry[] {
       continue
     }
     if (field.startsWith('worktree ')) {
+      const written = field.slice('worktree '.length)
       current = {
-        path: field.slice('worktree '.length),
+        path: platform === 'win32' ? path.win32.normalize(written) : written,
         bare: false,
         head: null,
         branch: null,

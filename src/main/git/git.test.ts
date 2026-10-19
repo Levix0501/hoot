@@ -6,10 +6,21 @@ describe('parseWorktreeList', () => {
     expect(
       parseWorktreeList(
         'worktree /r/bare.git\0bare\0\0worktree /r/linked\0HEAD 0123\0branch refs/heads/main\0\0',
+        'darwin',
       ).map(({ path, bare }) => ({ path, bare })),
     ).toEqual([
       { path: '/r/bare.git', bare: true },
       { path: '/r/linked', bare: false },
+    ])
+  })
+
+  it('gives the paths with \\ on Windows, where Git writes them with /', () => {
+    const output =
+      'worktree C:/Users/me/r\0HEAD aaa\0branch refs/heads/main\0\0' +
+      'worktree //server/share/r/feat\0HEAD bbb\0branch refs/heads/feat\0\0'
+    expect(parseWorktreeList(output, 'win32').map(({ path }) => path)).toEqual([
+      'C:\\Users\\me\\r',
+      '\\\\server\\share\\r\\feat',
     ])
   })
 
@@ -20,7 +31,7 @@ describe('parseWorktreeList', () => {
       'worktree /r/usb\0HEAD ccc\0branch refs/heads/feat/x\0locked on usb\nstick\0',
       'worktree /r/gone\0HEAD ddd\0branch refs/heads/gone\0prunable gitdir file points to non-existent location\0',
     ].join('\0')
-    expect(parseWorktreeList(`${output}\0`)).toEqual([
+    expect(parseWorktreeList(`${output}\0`, 'darwin')).toEqual([
       {
         path: '/r/main',
         bare: false,

@@ -53,11 +53,14 @@ export function defaultNestedBase(
   return repository.current
 }
 
-/** Whether a path is a directory or inside it. */
+/**
+ * Whether a path is a directory or inside it, its folders separated by `/`
+ * or, as on Windows, by `\`.
+ */
 export function isWithin(file: string, directory: string): boolean {
-  return (
-    file === directory || file.startsWith(directory.endsWith('/') ? directory : `${directory}/`)
-  )
+  if (file === directory) return true
+  const below = /[\\/]$/.test(directory) ? [directory] : [`${directory}/`, `${directory}\\`]
+  return below.some((start) => file.startsWith(start))
 }
 
 /** What the new worktree dialog of a project offers. */

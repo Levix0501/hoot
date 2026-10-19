@@ -33,7 +33,7 @@ describe('WorktreeLayout', () => {
 
   it('shows the home directory as ~', () => {
     expect(layout.displayPath(path.join(directory, 'G', 'feat-login'))).toBe(
-      '~/.hoot/worktrees/G/feat-login',
+      path.join('~', '.hoot', 'worktrees', 'G', 'feat-login'),
     )
     expect(layout.displayPath(home)).toBe('~')
     expect(layout.displayPath(`${home}-other/x`)).toBe(`${home}-other/x`)

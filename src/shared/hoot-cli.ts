@@ -18,6 +18,8 @@
  * - `DELETE /labels/<name>`: deletes the label with this name.
  * - `POST /sessions`: starts a session for an issue of the project, from a
  *   `SessionRequest`.
+ * - `POST /hook-events`: reports an event of a hook Hoot adds to the
+ *   session's Claude Code, from a `HookEventReport`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
  * answer is a JSON `HootAnswer`.
@@ -183,6 +185,23 @@ export interface SessionRequest {
   prompt?: string
 }
 
+/**
+ * The events of the hooks Hoot adds to every Claude Code session it starts,
+ * which hoot reports to Hoot to show what the session is doing: Claude Code
+ * asks the user to approve a tool call or a plan, or to answer a question
+ * (`PermissionRequest`); an MCP server asks the user for input
+ * (`Elicitation`); a turn ends (`Stop`); and a turn stops on an API error
+ * (`StopFailure`).
+ */
+export const HOOK_EVENTS = ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure'] as const
+
+export type HookEvent = (typeof HOOK_EVENTS)[number]
+
+/** An event of a hook of the session's Claude Code, by the name Claude Code gives it. */
+export interface HookEventReport {
+  event: HookEvent
+}
+
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */
 export type HootAnswer<T> =
   | ({ ok: true; project: HootProject } & T)
@@ -198,3 +217,4 @@ export type LabelAnswer = HootAnswer<{ label: HootLabel }>
 export type DeletedLabelAnswer = HootAnswer<object>
 /** The session started: the root of the worktree it runs in. */
 export type SessionAnswer = HootAnswer<{ worktreePath: string }>
+export type HookEventAnswer = HootAnswer<object>

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { quote } from 'shell-quote'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   permissionLevelOrDefault,
@@ -14,6 +15,7 @@ import { firstMessage, workflowFileText } from '../../shared/workflow-text'
 import type { WorkflowStep } from '../../shared/workflows'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import {
+  claudeCodeHookSettings,
   issueFileText,
   resolveLaunch,
   sentIssueArgs,
@@ -103,6 +105,9 @@ const hootVariables = {
   HOOT_CLI: hoot.script,
 }
 
+/** The arguments that give Claude Code the hooks that report what it is doing to Hoot. */
+const hookSettings = ['--settings', claudeCodeHookSettings(path.join(hoot.binDirectory, 'hoot'))]
+
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
     const launch = await resolveLaunch(context({ PATH: onPath(bin, '/usr/bin') }), 'shell', project)
@@ -145,6 +150,7 @@ describe('resolveLaunch', () => {
       ...program(bin, 'claude').args,
       '--permission-mode',
       'plan',
+      ...hookSettings,
     ])
     expect((await resolveLaunch(context(loginEnv, levels), 'codex', project)).args).toEqual([
       ...program(bin, 'codex').args,
@@ -166,11 +172,27 @@ describe('resolveLaunch', () => {
       ...claude,
       '--permission-mode',
       'acceptEdits',
+      ...hookSettings,
     ])
-    expect(await args('claude', 'manual')).toEqual([...claude, '--permission-mode', 'manual'])
-    expect(await args('claude', null)).toEqual([...claude, '--permission-mode', 'plan'])
+    expect(await args('claude', 'manual')).toEqual([
+      ...claude,
+      '--permission-mode',
+      'manual',
+      ...hookSettings,
+    ])
+    expect(await args('claude', null)).toEqual([
+      ...claude,
+      '--permission-mode',
+      'plan',
+      ...hookSettings,
+    ])
     // Codex has no level of that name; the shell has no levels at all.
-    expect(await args('claude', 'full-access')).toEqual([...claude, '--permission-mode', 'plan'])
+    expect(await args('claude', 'full-access')).toEqual([
+      ...claude,
+      '--permission-mode',
+      'plan',
+      ...hookSettings,
+    ])
     expect(await args('codex', 'full-access')).toEqual([
       ...program(bin, 'codex').args,
       '--dangerously-bypass-approvals-and-sandbox',
@@ -200,7 +222,37 @@ describe('resolveLaunch', () => {
     expect((await launching).args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
+      ...hookSettings,
     ])
+  })
+
+  it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const claude = await resolveLaunch(context(loginEnv), 'claude', project)
+    const settings = claude.args[claude.args.indexOf('--settings') + 1]!
+    const hook = {
+      type: 'command',
+      // hoot's path, quoted for the shell that runs the hook.
+      command: `${quote([path.join(hoot.binDirectory, 'hoot')])} hook`,
+      async: true,
+    }
+    expect(JSON.parse(settings)).toEqual({
+      hooks: {
+        PermissionRequest: [{ hooks: [hook] }],
+        Elicitation: [{ hooks: [hook] }],
+        Stop: [{ hooks: [hook] }],
+        StopFailure: [{ hooks: [hook] }],
+      },
+    })
+    for (const toolId of ['codex', 'shell'] as const) {
+      expect((await resolveLaunch(context(loginEnv), toolId, project)).args).not.toContain(
+        '--settings',
+      )
+    }
+    // A folder with a space in its path is still one word of the command.
+    expect(JSON.parse(claudeCodeHookSettings('/Users/me/My Apps/Hoot/bin/hoot'))).toMatchObject({
+      hooks: { Stop: [{ hooks: [{ command: "'/Users/me/My Apps/Hoot/bin/hoot' hook" }] }] },
+    })
   })
 
   it('sends Claude Code an issue after the arguments of its permission level', async () => {
@@ -229,6 +281,7 @@ describe('resolveLaunch', () => {
       ...claude.args,
       '--permission-mode',
       'acceptEdits',
+      ...hookSettings,
       '--name=Fix the login bug',
       '--',
       messageAt(triage)({
@@ -243,7 +296,12 @@ describe('resolveLaunch', () => {
     // Any other session, Claude Code's included, has no arguments but its level's, after those
     // that run its command.
     const other = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)
-    expect(other.args).toEqual([...claude.args, '--permission-mode', 'acceptEdits'])
+    expect(other.args).toEqual([
+      ...claude.args,
+      '--permission-mode',
+      'acceptEdits',
+      ...hookSettings,
+    ])
     expect(other.cleanup).toBeUndefined()
     expect(issueFolders(project)).toEqual([])
   })

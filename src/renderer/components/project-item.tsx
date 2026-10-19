@@ -7,12 +7,15 @@ import {
   PlusIcon,
   Trash2Icon,
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
 import type { ToolId } from '../../shared/tools'
 import { api } from '../lib/api'
+import { projectSummary, sessionState } from '../lib/session-state'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import { OpenIssueCount } from './open-issue-count'
+import { StateLightWithTooltip } from './state-light'
 import { CollapsibleTrigger } from './ui/collapsible'
 import {
   ContextMenu,
@@ -54,7 +57,10 @@ export const contextComponents: ToolMenuComponents = {
 
 /**
  * A project's row in the sidebar: click it to expand or collapse the project.
- * It shows the project's name, and how many of its issues are open. Pointing
+ * It shows the project's name; while the project is collapsed, right of the
+ * name, the light of the state of its sessions that needs the user most, if
+ * any does, which counts them when pointed at; and how many of its issues
+ * are open. Pointing
  * at it, or moving the keyboard focus into it, shows its buttons: Issues
  * shows the issue list with only the project checked in its Project filter,
  * and `+`, `⋯` and its context menu start sessions, create worktrees and
@@ -73,6 +79,16 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
     (state) =>
       state.issues.filter((issue) => issue.projectId === project.id && isIssueOpen(issue)).length,
   )
+  // The states of its sessions, in any of its worktrees.
+  const states = useAppStore(
+    useShallow((state) =>
+      state.sessions
+        .filter((session) => session.projectRoot === project.root)
+        .map((session) => sessionState(session)),
+    ),
+  )
+  // Its rows show the sessions themselves while it is expanded.
+  const summary = expanded ? null : projectSummary(states)
   // A project cannot be removed while one of its sessions runs, in any of its worktrees.
   const runningHere = useAppStore((state) =>
     state.sessions.some(
@@ -105,8 +121,17 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           }
         >
           <Folder className="text-muted-foreground" data-testid="project-folder-icon" />
-          <span className="min-w-0 flex-1 truncate font-medium" data-testid="project-name">
-            {project.name}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 truncate font-medium" data-testid="project-name">
+              {project.name}
+            </span>
+            {summary && (
+              <StateLightWithTooltip
+                state={summary.state}
+                tooltip={summary.tooltip}
+                testId="project-light"
+              />
+            )}
           </span>
           <OpenIssueCount count={openIssues} testId="project-open-issues" />
           {/* Room for the row's buttons while they show, right of the open issue count. */}

@@ -60,6 +60,7 @@ import type {
   WorktreeInfo,
   WorktreeInspection,
 } from '../../shared/worktrees'
+import { afterHookEvent, afterTitle, type Attention } from '../lib/session-state'
 import { api } from '../lib/api'
 import { isOnList, type ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
@@ -123,6 +124,16 @@ export interface UiSession {
   exit: SessionExit | null
   /** The terminal title the session's program set last; empty until it sets one. */
   title: string
+  /**
+   * For Claude Code, what its hooks last said it stopped for, until its next
+   * turn starts; see `sessionState`.
+   */
+  attention: Attention
+  /**
+   * For Claude Code, whether it stopped working while the session was not
+   * being viewed, and the session has not been viewed since.
+   */
+  unread: boolean
   /** The name the user gave the session, if any. */
   customName: string | null
   /** Set once the session is being closed, until it is gone. */
@@ -321,6 +332,8 @@ export interface AppState {
   collapsedProjects: ReadonlySet<number>
   /** Whether the window is in full screen. */
   fullScreen: boolean
+  /** Whether the window is the system's active window. */
+  windowFocused: boolean
   /** The appearance picked in the settings. */
   appearance: Appearance
   /**
@@ -579,6 +592,16 @@ export function currentSessionId(state: Pick<AppState, 'currentPage'>): string |
 }
 
 /**
+ * The session the user is viewing: the one the main area shows, while the
+ * window is the system's active window; `null` for none.
+ */
+export function viewedSessionId(
+  state: Pick<AppState, 'currentPage' | 'windowFocused'>,
+): string | null {
+  return state.windowFocused ? currentSessionId(state) : null
+}
+
+/**
  * Whether a page shows a session among `sessionIds`, or the page of an issue
  * among `issueIds`. The issue list and the settings are never among them.
  */
@@ -672,7 +695,15 @@ export function isSessionRunning(session: UiSession): boolean {
 }
 
 function fromInfo(info: SessionInfo): UiSession {
-  return { ...info, permissionLevel: null, title: '', customName: null, closing: false }
+  return {
+    ...info,
+    permissionLevel: null,
+    title: '',
+    attention: null,
+    unread: false,
+    customName: null,
+    closing: false,
+  }
 }
 
 /**
@@ -1004,10 +1035,12 @@ export const useAppStore = create<AppState>()((set, get) => {
     terminal.onData((data) => api.writeSession(id, data))
     terminal.onBinary((data) => api.writeSession(id, data, true))
     terminal.onResize(({ cols, rows }) => api.resizeSession(id, cols, rows))
+    // What Claude Code is doing follows its title too.
     terminal.onTitleChange((title) => {
-      if (findSession(id)?.title !== title) {
-        set((state) => ({ sessions: updateSession(state.sessions, id, { title }) }))
-      }
+      const session = findSession(id)
+      if (!session || session.title === title) return
+      const change = afterTitle(session, title, viewedSessionId(get()) === id)
+      set((state) => ({ sessions: updateSession(state.sessions, id, { title, ...change }) }))
     })
     terminals.set(id, sessionTerminal)
     return sessionTerminal
@@ -1365,6 +1398,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           status: 'starting',
           exit: null,
           title: '',
+          attention: null,
+          unread: false,
           customName: null,
           closing: false,
         },
@@ -1600,20 +1635,23 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarEdgeDragging: false,
     collapsedProjects: new Set(),
     fullScreen: false,
+    windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
     settingsSection: 'appearance',
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
+      api.onWindowFocusChanged((windowFocused) => set({ windowFocused }))
       api.onAppearanceChanged((appearance) => set({ appearance }))
-      const [{ sidebarOpen, sidebarWidth, collapsedProjects, fullScreen }, appearance] =
+      const [{ sidebarOpen, sidebarWidth, collapsedProjects, fullScreen, focused }, appearance] =
         await Promise.all([api.getWindowState(), api.getAppearance()])
       set({
         sidebarOpen,
         sidebarWidth,
         collapsedProjects: new Set(collapsedProjects),
         fullScreen,
+        windowFocused: focused,
         appearance,
       })
     },
@@ -1640,6 +1678,17 @@ export const useAppStore = create<AppState>()((set, get) => {
         }
       })
       api.onSessionData((id, data) => terminals.get(id)?.terminal.write(data))
+      // Taken once the terminal has read what the session wrote before it,
+      // such as the title Claude Code sets when a dialog opens.
+      api.onSessionHookEvent((id, event) =>
+        terminals.get(id)?.terminal.write('', () => {
+          const session = findSession(id)
+          if (!session) return
+          const change = afterHookEvent(session, event)
+          if (Object.keys(change).length === 0) return
+          set((state) => ({ sessions: updateSession(state.sessions, id, change) }))
+        }),
+      )
       api.onProjectsChanged(applyProjects)
       // An issue created by hoot in a session joins its project's issues, and
       // so shows wherever they show; nothing else changes.
@@ -2531,5 +2580,14 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       closeEndedSessionsIn(path)
     },
+  }
+})
+
+// A session Claude Code finished a turn in while it was not viewed is done
+// until the user views it: shown while the window is the active one.
+useAppStore.subscribe((state) => {
+  const id = viewedSessionId(state)
+  if (id !== null && state.sessions.some((session) => session.id === id && session.unread)) {
+    useAppStore.setState({ sessions: updateSession(state.sessions, id, { unread: false }) })
   }
 })

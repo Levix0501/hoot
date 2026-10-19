@@ -258,6 +258,9 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   // Nothing is watched: what changed outside Hoot, such as a worktree's
   // folder deleted, shows when the window gets the focus.
   window.on('focus', () => worktrees.refreshAll())
+  // A session shown while the window is the active one counts as seen.
+  window.on('focus', () => window.webContents.send(IpcChannel.windowFocusChanged, true))
+  window.on('blur', () => window.webContents.send(IpcChannel.windowFocusChanged, false))
   // In full screen macOS hides the traffic lights, and the page moves its
   // navigation into their place.
   window.on('enter-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, true))
@@ -428,6 +431,7 @@ function startWithDatabase(database: DatabaseSync): void {
         workflows.progress(issue.id),
       ),
     startSession: (issueId, prompt) => sessionStarts.request(issueId, prompt),
+    hookEvent: (sessionId, event) => sessions.reportHookEvent(sessionId, event),
   })
   hootServer.start().catch((error: unknown) => {
     console.error(`Could not listen for hoot on ${hootCli.socket}:`, error)

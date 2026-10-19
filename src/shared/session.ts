@@ -50,19 +50,24 @@ export function describeExitShort(exit: SessionExit): string {
   return `Exited (${exit.code ?? '?'})`
 }
 
-/** How the session ended, as briefly as the sidebar's session rows need it. */
-export function describeExitCompact(exit: SessionExit): string {
-  if (exit.abnormal) return 'Ended unexpectedly'
-  if (exit.signal) return exit.signal
-  return `Exited (${exit.code ?? '?'})`
-}
-
 /**
  * The marks Claude Code puts, followed by a space, before the text of the
  * terminal titles it sets: one while it is idle and two it alternates between
  * while it works.
  */
 const CLAUDE_CODE_TITLE_MARKS = ['✳', '◐', '◑']
+
+/** The marks of `CLAUDE_CODE_TITLE_MARKS` that Claude Code alternates between while it works. */
+const CLAUDE_CODE_WORKING_MARKS = ['◐', '◑']
+
+/**
+ * Whether a terminal title says that Claude Code is working: it starts with
+ * one of the marks Claude Code alternates between while it works, followed
+ * by a space.
+ */
+export function isClaudeCodeWorkingTitle(title: string): boolean {
+  return CLAUDE_CODE_WORKING_MARKS.some((mark) => title.startsWith(`${mark} `))
+}
 
 /**
  * The name of a session that the user has not named: its terminal title, with

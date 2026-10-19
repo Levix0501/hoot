@@ -1,10 +1,12 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'
 import { MAX_BLOCKED_BY, MAX_BLOCKING } from '../shared/dependencies'
 import {
+  HOOK_EVENTS,
   HOOT_ENV,
   MAX_PROMPT_LENGTH,
   type BatchIssue,
   type BatchReference,
+  type HookEvent,
   type HootAnswer,
   type IssueEdit,
 } from '../shared/hoot-cli'
@@ -245,6 +247,23 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
   } catch {
     throw new CliError(`The ${what} in ${source} is not UTF-8 text.`)
   }
+}
+
+/**
+ * The event of a Claude Code hook whose input is `input`, the JSON Claude
+ * Code gives a hook on standard input, when it is one Hoot takes; `null` for
+ * any other input.
+ */
+export function hookEventOf(input: Uint8Array): HookEvent | null {
+  let value: unknown
+  try {
+    value = JSON.parse(new TextDecoder().decode(input))
+  } catch {
+    return null
+  }
+  if (typeof value !== 'object' || value === null) return null
+  const name = (value as { hook_event_name?: unknown }).hook_event_name
+  return HOOK_EVENTS.find((event) => event === name) ?? null
 }
 
 /**
@@ -728,6 +747,23 @@ export function hootProgram(io: CliIo): Command {
       }
       const { worktreePath } = answered(await connect().startSession(digits, prompt))
       io.write(`${worktreePath}\n`)
+    })
+
+  // Not for people: the command of the hooks Hoot adds to its Claude Code sessions.
+  program
+    .command('hook', { hidden: true })
+    .description(
+      "Report the event of a Claude Code hook, from the hook's input on standard input, to Hoot, " +
+        'which shows what the session is doing. It prints nothing and always succeeds, so that ' +
+        'it never changes what Claude Code does.',
+    )
+    .action(async () => {
+      try {
+        const event = hookEventOf(await io.readStdin())
+        if (event !== null) await connect().reportHookEvent(event)
+      } catch {
+        // Hoot shows less of what the session is doing; Claude Code goes on as it would.
+      }
     })
 
   return program

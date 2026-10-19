@@ -1,6 +1,6 @@
 import { PencilIcon, XIcon } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { describeExit, describeExitCompact, sessionName } from '../../shared/session'
+import { sessionName } from '../../shared/session'
 import {
   currentSessionId,
   focusAfterOverlay,
@@ -8,7 +8,9 @@ import {
   useAppStore,
   type UiSession,
 } from '../store/app-store'
+import { sessionState, stateTooltip } from '../lib/session-state'
 import { cn } from '../lib/utils'
+import { StateLight, StateLightWithTooltip } from './state-light'
 import { ToolIcon } from './tool-icon'
 import {
   ContextMenu,
@@ -20,37 +22,7 @@ import {
 import { Input } from './ui/input'
 import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
 
-/** A green dot while the session runs; how it ended once it has. */
-function SessionRowStatus({ session }: { session: UiSession }) {
-  if (session.status !== 'exited' || !session.exit) {
-    return (
-      <span
-        className="mr-0.5 size-2 shrink-0 rounded-full bg-emerald-500"
-        title="Running"
-        data-testid="session-item-status"
-        data-state="running"
-      >
-        <span className="sr-only">Running</span>
-      </span>
-    )
-  }
-  return (
-    <span
-      className={cn(
-        'shrink-0 text-xs',
-        session.exit.abnormal ? 'font-medium text-destructive' : 'text-muted-foreground',
-      )}
-      title={describeExit(session.exit)}
-      data-testid="session-item-status"
-      data-state="exited"
-      data-abnormal={session.exit.abnormal}
-    >
-      {describeExitCompact(session.exit)}
-    </span>
-  )
-}
-
-/** The field that replaces a session's name while the user renames it. */
+/** The field that replaces a session's name, right of its light and icon, while the user renames it. */
 function RenameField({ session }: { session: UiSession }) {
   const finishRenaming = useAppStore((state) => state.finishRenaming)
   const [value, setValue] = useState(() => sessionName(session))
@@ -71,6 +43,7 @@ function RenameField({ session }: { session: UiSession }) {
 
   return (
     <div className="flex h-7 items-center gap-2 px-2">
+      <StateLight state={sessionState(session)} />
       <ToolIcon toolId={session.toolId} className="size-4 shrink-0" />
       <Input
         ref={inputRef}
@@ -100,9 +73,11 @@ function RenameField({ session }: { session: UiSession }) {
 }
 
 /**
- * A session's row in the sidebar: click it to show the session, double-click
- * it or use its context menu to rename it, and close it with the button that
- * appears on hover or from the context menu.
+ * A session's row in the sidebar: the light of the session's state, which
+ * names the state when pointed at, the tool's icon and the session's name.
+ * Click it to show the session, double-click it or use its context menu to
+ * rename it, and close it with the button that appears on hover or from the
+ * context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
@@ -111,6 +86,7 @@ export function SessionItem({ session }: { session: UiSession }) {
   const startRenaming = useAppStore((state) => state.startRenaming)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const name = sessionName(session)
+  const state = sessionState(session)
 
   return (
     <ContextMenu>
@@ -121,6 +97,7 @@ export function SessionItem({ session }: { session: UiSession }) {
         data-session-id={session.id}
         data-status={session.status}
         data-tool={session.toolId}
+        data-state={state}
         data-current={current}
       >
         {renaming ? (
@@ -136,6 +113,11 @@ export function SessionItem({ session }: { session: UiSession }) {
             onDoubleClick={() => startRenaming(session.id)}
             data-testid="session-item-button"
           >
+            <StateLightWithTooltip
+              state={state}
+              tooltip={stateTooltip(state, session.exit)}
+              testId="session-light"
+            />
             <ToolIcon toolId={session.toolId} />
             <span
               className="min-w-0 flex-1 truncate"
@@ -145,7 +127,6 @@ export function SessionItem({ session }: { session: UiSession }) {
             >
               {name}
             </span>
-            <SessionRowStatus session={session} />
           </SidebarMenuSubButton>
         )}
         {!renaming && (

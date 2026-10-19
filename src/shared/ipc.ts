@@ -2,6 +2,7 @@ import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { Dependencies, Dependency } from './dependencies'
+import type { HookEvent } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
 import type { PermissionLevelSettings } from './permission-levels'
@@ -163,6 +164,8 @@ export interface WindowState {
   collapsedProjects: number[]
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
+  /** Whether the window is the system's active window. */
+  focused: boolean
 }
 
 /**
@@ -207,6 +210,7 @@ export const IpcChannel = {
   resizeSession: 'session:resize',
   sessionData: 'session:data',
   sessionUpdated: 'session:updated',
+  sessionHookEvent: 'session:hook-event',
   sessionCommand: 'session:command',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
@@ -214,6 +218,7 @@ export const IpcChannel = {
   setProjectExpanded: 'window:set-project-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
+  windowFocusChanged: 'window:focus-changed',
   showSettingsRequested: 'settings:show-requested',
   showAboutRequested: 'settings:show-about-requested',
   getAppearance: 'appearance:get',
@@ -350,6 +355,11 @@ export interface HootApi {
   resizeSession(id: string, cols: number, rows: number): void
   onSessionData(listener: (id: string, data: string) => void): () => void
   onSessionUpdated(listener: (session: SessionInfo) => void): () => void
+  /**
+   * A running Claude Code session's hook reported an event, which comes in
+   * order with the session's output, as `onSessionData` gives it.
+   */
+  onSessionHookEvent(listener: (id: string, event: HookEvent) => void): () => void
   /** The application menu chose a session command. */
   onSessionCommand(listener: (command: SessionCommand) => void): () => void
   getWindowState(): Promise<WindowState>
@@ -362,6 +372,8 @@ export interface HootApi {
   /** The application menu asked to show or hide the sidebar. */
   onToggleSidebarRequested(listener: () => void): () => void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+  /** The window became the system's active window, or stopped being it. */
+  onWindowFocusChanged(listener: (focused: boolean) => void): () => void
   /** The application menu asked to show the settings. */
   onShowSettingsRequested(listener: () => void): () => void
   /** The application menu asked to show the settings' About page. */

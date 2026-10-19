@@ -6,6 +6,8 @@ import {
   type CreatedIssueAnswer,
   type DeletedLabelAnswer,
   type EditedIssueAnswer,
+  type HookEvent,
+  type HookEventAnswer,
   type HootAnswer,
   type IssueAnswer,
   type IssueEdit,
@@ -29,6 +31,12 @@ const ANSWER_TIMEOUT_MS = 30_000
  * created first: a little longer than Hoot waits for its window.
  */
 const SESSION_TIMEOUT_MS = 6 * 60_000
+
+/**
+ * How long hoot waits for Hoot to take an event of a hook. Claude Code runs
+ * the hook in the background, so a hoot waiting longer would only linger.
+ */
+const HOOK_EVENT_TIMEOUT_MS = 5_000
 
 /** Why hoot could not reach Hoot, by the error that the connection ended with. */
 export function connectionProblem(error: NodeJS.ErrnoException): string {
@@ -120,6 +128,11 @@ export class HootClient {
       { issue: digits, ...(prompt === null ? {} : { prompt }) },
       SESSION_TIMEOUT_MS,
     )
+  }
+
+  /** Reports an event of a hook that Hoot added to the session's Claude Code. */
+  reportHookEvent(event: HookEvent): Promise<HookEventAnswer> {
+    return this.ask('POST', '/hook-events', { event }, HOOK_EVENT_TIMEOUT_MS)
   }
 
   /** Sends a request, and settles with Hoot's answer; rejects with a `CliError` when there is none. */

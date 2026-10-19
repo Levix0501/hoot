@@ -380,6 +380,7 @@ export function registerIpc(deps: IpcDependencies): void {
     sidebarWidth: deps.sidebar.width,
     collapsedProjects: deps.sidebar.collapsedProjects,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
+    focused: deps.getWindow()?.isFocused() ?? false,
   }))
   on(IpcChannel.setSidebarOpen, (open) => {
     const parsed = z.boolean().safeParse(open)
@@ -505,6 +506,8 @@ export function registerIpc(deps: IpcDependencies): void {
 
   deps.sessions.on('data', (id, data) => send(IpcChannel.sessionData, id, data))
   deps.sessions.on('updated', (session) => send(IpcChannel.sessionUpdated, session))
+  // Sent as the session's output is, so that the window gets the two in the order they came.
+  deps.sessions.on('hook-event', (id, event) => send(IpcChannel.sessionHookEvent, id, event))
 
   on(IpcChannel.quitResponse, (confirmed) => {
     void deps.quitGuard.answer(z.literal(true).safeParse(confirmed).success)

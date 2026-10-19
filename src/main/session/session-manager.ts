@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
+import type { HookEvent } from '../../shared/hoot-cli'
 import type { StartSessionRequest } from '../../shared/ipc'
 import type { PtySpawnRequest } from '../../shared/pty-protocol'
 import type { SessionExit, SessionInfo } from '../../shared/session'
@@ -82,12 +83,14 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
 
 /**
  * Tracks every session Hoot runs: starting each one, routing its input and
- * output, ending its process when it is closed or Hoot quits, and marking the
- * running ones ended when the pty host stops.
+ * output and the events of its Claude Code's hooks, ending its process when it
+ * is closed or Hoot quits, and marking the running ones ended when the pty
+ * host stops.
  */
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
   updated: [session: SessionInfo]
+  'hook-event': [id: string, event: HookEvent]
 }> {
   /** In the order the sessions were started. */
   private readonly records = new Map<string, SessionRecord>()
@@ -223,6 +226,23 @@ export class SessionManager extends EventEmitter<{
       throw error
     } finally {
       settle()
+    }
+  }
+
+  /**
+   * Passes on an event of a hook of a running Claude Code session, in order
+   * with its output: from what the session wrote before the event was
+   * reported, and before what it writes after.
+   */
+  reportHookEvent(id: string, event: HookEvent): void {
+    const record = this.records.get(id)
+    if (
+      record &&
+      !record.starting &&
+      record.info.status === 'running' &&
+      record.info.toolId === 'claude'
+    ) {
+      this.emit('hook-event', id, event)
     }
   }
 

@@ -221,6 +221,39 @@ describe('SessionManager', () => {
     ])
   })
 
+  it('passes on the events of the hooks of a running Claude Code session, in order with its output', async () => {
+    const { promise: launched, resolve: release } = Promise.withResolvers<void>()
+    const { manager, host } = setup({
+      resolveLaunch: async (toolId, _cwd, _issue, sessionId) => {
+        if (sessionId === 'c3') await launched
+        return { file: toolId, args: [], env: {} }
+      },
+    })
+    const reported: Array<[string, string]> = []
+    manager.on('data', (id, data) => reported.push([id, data]))
+    manager.on('hook-event', (id, event) => reported.push([id, event]))
+    await manager.start(request('c1', 'claude'))
+    await manager.start(request('c2', 'claude'))
+    await manager.start(request('s1'))
+    const starting = manager.start(request('c3', 'claude'))
+    host.emit('data', 'c1', '\x1b]0;\u2733 Fix\x07')
+    manager.reportHookEvent('c1', 'PermissionRequest')
+    manager.reportHookEvent('c2', 'Stop')
+    // Only Claude Code has these hooks, and only a running session reports them.
+    manager.reportHookEvent('s1', 'Stop')
+    manager.reportHookEvent('c3', 'Stop')
+    manager.reportHookEvent('unknown', 'Stop')
+    host.emit('exit', 'c2', 1, 0)
+    manager.reportHookEvent('c2', 'StopFailure')
+    expect(reported).toEqual([
+      ['c1', '\x1b]0;\u2733 Fix\x07'],
+      ['c1', 'PermissionRequest'],
+      ['c2', 'Stop'],
+    ])
+    release()
+    await starting
+  })
+
   it('closes a running session by ending its process, then forgets it', async () => {
     const { manager, host } = setup()
     await manager.start(request('s1'))

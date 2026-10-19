@@ -293,6 +293,48 @@ describe('HootServer', () => {
     }
   })
 
+  it("takes the events of the hooks of a session's Claude Code, and nothing else", async () => {
+    for (const event of ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure']) {
+      expect(await request('POST', '/hook-events', { body: JSON.stringify({ event }) })).toEqual({
+        status: 200,
+        answer: { ok: true, project: { id: hoot.gamma.id, name: 'gamma' } },
+      })
+    }
+    expect(
+      await request('POST', '/hook-events', {
+        session: 'hotel-session',
+        body: JSON.stringify({ event: 'Stop' }),
+      }),
+    ).toMatchObject({ status: 200, answer: { ok: true } })
+    for (const body of [
+      JSON.stringify({ event: 'Notification' }),
+      JSON.stringify({ event: 'Stop', extra: true }),
+      JSON.stringify({}),
+    ]) {
+      expect(await request('POST', '/hook-events', { body })).toEqual({
+        status: 400,
+        answer: { ok: false, message: 'Invalid hook event.' },
+      })
+    }
+    expect(
+      await request('POST', '/hook-events', {
+        session: 'closed',
+        body: JSON.stringify({ event: 'Stop' }),
+      }),
+    ).toEqual({ status: 404, answer: { ok: false, message: 'No such session.' } })
+    expect(await request('GET', '/hook-events')).toEqual({
+      status: 404,
+      answer: { ok: false, message: 'Hoot does not know this request.' },
+    })
+    expect(hoot.hookEvents).toEqual([
+      { sessionId: 'gamma-session', event: 'PermissionRequest' },
+      { sessionId: 'gamma-session', event: 'Elicitation' },
+      { sessionId: 'gamma-session', event: 'Stop' },
+      { sessionId: 'gamma-session', event: 'StopFailure' },
+      { sessionId: 'hotel-session', event: 'Stop' },
+    ])
+  })
+
   it('answers with the parents and sub-issues of issues, of any project shown, in order', async () => {
     const parent = hoot.issues.create({ projectId: null, ...issue, title: 'Parent' })!
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
@@ -509,6 +551,7 @@ describe('HootServer', () => {
         issueCreated: () => {},
         startBlockers: () => [],
         startSession: async () => ({ ok: false, message: 'none' }),
+        hookEvent: () => {},
       })
       await server.start()
       const answer = await new Promise<string>((resolve, reject) => {
@@ -540,6 +583,7 @@ describe('HootServer', () => {
       issueCreated: () => {},
       startBlockers: () => [],
       startSession: async () => ({ ok: false, message: 'none' }),
+      hookEvent: () => {},
     })
     await server.stop()
     const started = server.start()

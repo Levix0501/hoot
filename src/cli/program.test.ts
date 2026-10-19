@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Issue, IssuePriority, IssueStatus } from '../shared/issues'
 import { leaveSocket, startTestHoot, type TestHoot } from '../main/hoot-cli/test-support'
-import { runHoot } from './program'
+import { hookEventOf, runHoot } from './program'
 
 let hoot: TestHoot
 
@@ -1737,6 +1737,77 @@ describe('hoot session start', () => {
     hoot.setStartSession(async () => ({ ok: false, message: 'Claude Code exited.' }))
     const stderr = await expectRefused(['session', 'start', id(a)], 'Claude Code exited.')
     expect(stderr).toBe('error: Claude Code exited.\n')
+  })
+})
+
+/** The input Claude Code gives a hook on standard input, for an event. */
+const hookInput = (event: string) =>
+  JSON.stringify({
+    session_id: 'b2b7c1f0-0000-4000-8000-000000000000',
+    transcript_path: '/tmp/transcript.jsonl',
+    cwd: '/work/gamma',
+    hook_event_name: event,
+  })
+
+describe('hoot hook', () => {
+  it("reports to Hoot each event Hoot takes, from the hook's input, and prints nothing", async () => {
+    for (const event of ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure']) {
+      expect(await run(['hook'], { stdin: hookInput(event) })).toEqual({
+        code: 0,
+        stdout: '',
+        stderr: '',
+      })
+    }
+    expect(await run(['hook'], { session: 'hotel-session', stdin: hookInput('Stop') })).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
+    expect(hoot.hookEvents).toEqual([
+      { sessionId: 'gamma-session', event: 'PermissionRequest' },
+      { sessionId: 'gamma-session', event: 'Elicitation' },
+      { sessionId: 'gamma-session', event: 'Stop' },
+      { sessionId: 'gamma-session', event: 'StopFailure' },
+      { sessionId: 'hotel-session', event: 'Stop' },
+    ])
+  })
+
+  it('reports nothing for any other input, and still succeeds without a word', async () => {
+    for (const stdin of [hookInput('Notification'), '', 'not JSON', '[]', 'null', '{}']) {
+      expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })
+    }
+    expect(hoot.hookEvents).toEqual([])
+    expect(hookEventOf(Buffer.from(hookInput('StopFailure')))).toBe('StopFailure')
+    expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
+  })
+
+  it('succeeds without a word when it cannot report, so that Claude Code goes on as it would', async () => {
+    expect(await run(['hook'], { session: 'closed-session', stdin: hookInput('Stop') })).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
+    let output = ''
+    const code = await runHoot(['hook'], {
+      env: {},
+      write: (text) => (output += text),
+      writeError: (text) => (output += text),
+      readStdin: async () => Buffer.from(hookInput('Stop')),
+      readFile: async () => new Uint8Array(),
+    })
+    expect({ code, output }).toEqual({ code: 0, output: '' })
+    await hoot.server.stop()
+    expect(await run(['hook'], { stdin: hookInput('Stop') })).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
+    expect(hoot.hookEvents).toEqual([])
+  })
+
+  it('is left out of the help', async () => {
+    const { stdout } = await run(['--help'])
+    expect(stdout).not.toMatch(/\bhook\b/)
   })
 })
 

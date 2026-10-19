@@ -1,6 +1,8 @@
 import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { quote } from 'shell-quote'
+import { HOOK_EVENTS } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import { findPermissionLevel, type PermissionLevel } from '../../shared/permission-levels'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
@@ -66,6 +68,23 @@ const WORKFLOW_FILE_NAME = 'workflow.md'
  */
 function withoutNul(text: string): string {
   return text.replaceAll('\0', '')
+}
+
+/**
+ * The settings Hoot adds to every Claude Code session it starts, with
+ * `--settings`, on top of the user's own: a hook for each of `HOOK_EVENTS`,
+ * which runs hoot's `hook` command, here the command `hoot`, with the hook's
+ * input, so that the session's hoot reports the event to Hoot. Each runs in
+ * the background, so that it neither delays nor shows anything in Claude
+ * Code; it prints nothing and always succeeds, so that it decides nothing.
+ * The user's own hooks run as well, and a user who turned off all hooks
+ * turns off these too.
+ */
+export function claudeCodeHookSettings(hoot: string): string {
+  const hook = { type: 'command', command: quote([hoot, 'hook']), async: true }
+  return JSON.stringify({
+    hooks: Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [hook] }]])),
+  })
 }
 
 /**
@@ -151,11 +170,13 @@ async function checkFolder(cwd: string): Promise<void> {
  * found on the login shell PATH: the installation the Agents page shows. On
  * Windows, where the command that npm or pnpm makes is a batch file, the tool
  * runs what that points to instead (see `commandProgram`). It runs with the
- * login shell environment and with exactly the arguments of its permission
- * level: the one `permissionLevel` names, or else the one picked now. Claude
- * Code, when it is sent an issue, also gets the arguments that send it, once
- * the issue's files are written; the launch's cleanup removes their folder.
- * Either environment also has what hoot needs to run in the session.
+ * login shell environment and with the arguments of its permission level: the
+ * one `permissionLevel` names, or else the one picked now. Claude Code also
+ * gets the settings of the hooks that report what it is doing (see
+ * `claudeCodeHookSettings`) and, when it is sent an issue, the arguments that
+ * send it, once the issue's files are written; the launch's cleanup removes
+ * their folder. Either environment also has what hoot needs to run in the
+ * session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -206,6 +227,9 @@ export async function resolveLaunch(
     hoot: context.hoot,
   })
   const args = [...program.args, ...level.args]
+  if (tool.id === 'claude') {
+    args.push('--settings', claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot')))
+  }
   if (issue === null) return { file: program.file, args, env }
   // Written last, so that a launch that fails leaves no folder of its own behind.
   const issueFolder = await writeIssueFolder(cwd, issue)

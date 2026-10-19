@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import { z } from 'zod'
 import {
+  HOOK_EVENTS,
   SESSION_HEADER,
   type BatchAnswer,
   type BatchIssue,
@@ -9,6 +10,9 @@ import {
   type CreatedIssueAnswer,
   type DeletedLabelAnswer,
   type EditedIssueAnswer,
+  type HookEvent,
+  type HookEventAnswer,
+  type HookEventReport,
   type HootAnswer,
   type HootIssue,
   type HootLabel,
@@ -119,6 +123,10 @@ const sessionRequest = z.strictObject({
   prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 }) satisfies z.ZodType<SessionRequest>
 
+const hookEventReport = z.strictObject({
+  event: z.enum(HOOK_EVENTS),
+}) satisfies z.ZodType<HookEventReport>
+
 /** The project a session runs for, or why there is none. */
 export type SessionProject = { ok: true; project: Project } | { ok: false; message: string }
 
@@ -166,6 +174,8 @@ export interface HootServerOptions {
    * it has started, or could not.
    */
   startSession(issueId: number, prompt: string | null): Promise<StartedSession>
+  /** Called with each event of a hook of a session's Claude Code that hoot reports. */
+  hookEvent(sessionId: string, event: HookEvent): void
 }
 
 type Reply = { status: number; answer: HootAnswer<object> }
@@ -244,8 +254,9 @@ function hootLabel(label: NamedLabel): HootLabel {
  * Answers hoot, run in a session this Hoot started: it reads the issues of the
  * session's project, creates issues in it, alone or as sub-issues of an issue
  * all at once, changes their parents, sub-issues, dependencies and labels,
- * reads, creates, changes and deletes labels, and starts sessions for the
- * issues. It listens only where the sessions' environment tells hoot to
+ * reads, creates, changes and deletes labels, starts sessions for the
+ * issues, and takes the events of the hooks Hoot adds to the sessions' Claude
+ * Code. It listens only where the sessions' environment tells hoot to
  * connect, through a Unix domain socket that only the user can connect to, or
  * on Windows a named pipe.
  */
@@ -512,6 +523,14 @@ export class HootServer {
       const parsed = sessionRequest.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid session.')
       return this.startSession(projectId, project, parsed.data)
+    }
+
+    if (pathname === '/hook-events' && request.method === 'POST') {
+      const parsed = hookEventReport.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid hook event.')
+      this.options.hookEvent(sessionId, parsed.data.event)
+      const answer: HookEventAnswer = { ok: true, project }
+      return { status: 200, answer }
     }
 
     return failure(404, 'Hoot does not know this request.')

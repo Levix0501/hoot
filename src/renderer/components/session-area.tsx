@@ -1,6 +1,8 @@
 import { FolderPlusIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
-import { describeExit, describeExitShort, sessionName } from '../../shared/session'
+import { describeExit, sessionName } from '../../shared/session'
+import { sessionState, stateLabel } from '../lib/session-state'
 import { useAppStore, worktreeDisplayName, type UiSession } from '../store/app-store'
+import { StateLight } from './state-light'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
 import { useTopRowInset } from './window-navigation'
@@ -19,27 +21,13 @@ function projectName(root: string): string {
   return root.split('/').filter(Boolean).at(-1) ?? root
 }
 
+/** The light of the session's state, and right of it the state's name or how the session ended. */
 function StatusBadge({ session }: { session: UiSession }) {
-  if (session.status !== 'exited' || !session.exit) {
-    return (
-      <Badge
-        variant="secondary"
-        className="gap-1.5"
-        data-testid="session-status"
-        data-state="running"
-      >
-        <span className="size-1.5 rounded-full bg-emerald-500" />
-        Running
-      </Badge>
-    )
-  }
+  const state = sessionState(session)
   return (
-    <Badge
-      variant={session.exit.abnormal ? 'destructive' : 'outline'}
-      data-testid="session-status"
-      data-state="exited"
-    >
-      {describeExitShort(session.exit)}
+    <Badge variant="secondary" className="gap-1.5" data-testid="session-status" data-state={state}>
+      <StateLight state={state} />
+      {stateLabel(state, session.exit)}
     </Badge>
   )
 }

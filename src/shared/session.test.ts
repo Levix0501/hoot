@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   defaultSessionName,
   describeExit,
-  describeExitCompact,
   describeAgentOperations,
   describeExitShort,
   describeQuit,
   describeRunningSessions,
+  isClaudeCodeWorkingTitle,
   isNormalExit,
   quitConfirmationLabel,
   quitQuestion,
@@ -25,13 +25,11 @@ describe('describeExit', () => {
   it('reports the exit code', () => {
     expect(describeExit(exit({ code: 3 }))).toBe('Process exited with code 3.')
     expect(describeExitShort(exit({ code: 3 }))).toBe('Exited (3)')
-    expect(describeExitCompact(exit({ code: 3 }))).toBe('Exited (3)')
   })
 
   it('reports the terminating signal', () => {
     expect(describeExit(exit({ signal: 'SIGKILL' }))).toBe('Process terminated by signal SIGKILL.')
     expect(describeExitShort(exit({ signal: 'SIGKILL' }))).toBe('Terminated (SIGKILL)')
-    expect(describeExitCompact(exit({ signal: 'SIGKILL' }))).toBe('SIGKILL')
   })
 
   it('marks an abnormal end', () => {
@@ -39,7 +37,6 @@ describe('describeExit', () => {
       'The terminal host stopped unexpectedly. The session has ended.',
     )
     expect(describeExitShort(exit({ abnormal: true }))).toBe('Ended unexpectedly')
-    expect(describeExitCompact(exit({ abnormal: true }))).toBe('Ended unexpectedly')
   })
 })
 
@@ -49,6 +46,20 @@ describe('isNormalExit', () => {
     expect(isNormalExit(exit({ code: 1 }))).toBe(false)
     expect(isNormalExit(exit({ signal: 'SIGHUP' }))).toBe(false)
     expect(isNormalExit(exit({ abnormal: true }))).toBe(false)
+  })
+})
+
+describe('isClaudeCodeWorkingTitle', () => {
+  it('is true for the titles Claude Code sets while it works, and only for them', () => {
+    expect(isClaudeCodeWorkingTitle('◐ Fix login bug')).toBe(true)
+    expect(isClaudeCodeWorkingTitle('◑ Fix login bug')).toBe(true)
+    expect(isClaudeCodeWorkingTitle('◐ ')).toBe(true)
+    expect(isClaudeCodeWorkingTitle('✳ Fix login bug')).toBe(false)
+    expect(isClaudeCodeWorkingTitle('')).toBe(false)
+    expect(isClaudeCodeWorkingTitle('Plain title')).toBe(false)
+    // Only a mark followed by a space, at the start.
+    expect(isClaudeCodeWorkingTitle('◐Fix')).toBe(false)
+    expect(isClaudeCodeWorkingTitle('Fix ◐ login')).toBe(false)
   })
 })
 

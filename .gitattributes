@@ -1,7 +1,9 @@
+# Text files have Unix line endings in every checkout, as oxfmt writes them,
+# also where Git for Windows would check them out with Windows line endings.
+* text=auto eol=lf
 # cmd reads batch files with Windows line endings.
 *.cmd text eol=crlf
-# sh, Git Bash's too, cannot run a script with Windows line endings, which
-# Git for Windows checks text files out with by default.
+# sh, Git Bash's too, cannot run a script with Windows line endings.
 resources/bin/hoot text eol=lf
 # The launcher of node, which Hoot puts on the PATH of its sessions on macOS.
 resources/node/node text eol=lf

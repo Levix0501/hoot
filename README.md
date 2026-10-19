@@ -155,29 +155,44 @@ point at it); or **Not installed** and where **Install** would put it. On the ri
 the computer has no npm that runs, it says **Install needs Node.js and npm** instead of
 **Install**: install Node.js, which comes with npm, and the page offers it. Where npm runs but
 you cannot create files in its global folder, such as one that belongs to root, it says
-**Install needs write access to npm's folder**, and the row names the folder. Showing the page,
-and **Re-detect** at its top right, read your login shell environment again, look for each agent
-(the first on its `PATH`, the one sessions run), run it with `--version`, and read the latest
-version.
+**Install needs write access to npm's folder**, and the row names the folder. Where the agent's
+latest version runs on Node.js (its command is a JavaScript file, as Codex's is; Claude Code's and
+OpenCode's are programs of their own) and needs a newer Node.js than the first `node` on your login
+shell's `PATH`, the one its sessions would run it with, it says **Install needs Node.js** and the
+versions, such as **Install needs Node.js 22.19.0 or later**, and the row says which version yours
+is. Showing the page, and **Re-detect** at its top right, read your login shell environment again,
+look for each agent (the first on its `PATH`, the one sessions run), run it with `--version`, and
+read the latest version.
 The latest version is the one the `latest` tag names on registry.npmjs.org, whatever registry your
-npm uses; Hoot asks registry.npmjs.org only then, never in the background.
+npm uses, with the Node.js versions it needs (its package's `engines` field) and whether its command
+is a JavaScript file (its `bin` field); Hoot asks registry.npmjs.org only then, never in the
+background.
 
 - **Install** installs the npm package's latest version (`@anthropic-ai/claude-code`,
   `@openai/codex`, `@opencode/cli`) with your npm, never with an agent's install script. When the
   first `npm` on your login shell's `PATH` runs and you can create files in its global folder's
   `lib/node_modules` and `bin` (on Windows, its `node_modules` and the global folder itself), Hoot
   runs `npm install -g <package>@latest` with it, as you would in a terminal, so the agent works in
-  your terminals too. Hoot comes with no npm or Node.js of its own, and changes none of your
+  your terminals too. Pointing at **Install** shows the command it runs, such as
+  `Runs ~/.nvm/versions/node/v24.15.0/bin/npm install -g @openai/codex@latest --loglevel=http`.
+  npm only warns about a Node.js that a package's `engines` field does not allow, so Hoot checks
+  it first, as above. Hoot comes with no npm or Node.js of its own, and changes none of your
   shell's configuration files.
 - **Update to** updates the installation the row shows, in its place, the way it was
   installed: `npm install -g <package>@latest` with the npm of its global folder,
   `brew upgrade --cask` or `--formula` for the cask or formula it
   comes from, or the agent's own update command for its official installer (`claude update`,
   `codex update`, `opencode upgrade`). Hoot cannot update an agent installed any other way, and
-  says so. It never uses `sudo` or changes the owner or permissions of a file: an installation you
-  are not allowed to change, such as one installed with `sudo npm`, fails with npm's own error
-  message. Running sessions go on with the version they started with, and the result says how many
-  still do; sessions started afterwards run the new version.
+  says so. Pointing at **Update to** shows the command it runs. For an installation by npm, Hoot
+  first checks that you can create files in its global folder and, where the latest version runs
+  on Node.js, that it does on your `node`; where either does not hold, the row says the latest
+  version **is out** instead of offering **Update to**, and the line below the agent's name says
+  why: **npm's folder isn't writable**, such as one installed with `sudo npm`, or which Node.js the
+  version needs and which version yours is. It never uses `sudo` or changes the owner or
+  permissions of a file: an installation by Homebrew or an official installer that you are not
+  allowed to change fails with the command's own error message. Running sessions go on with the
+  version they started with, and the result says how many still do; sessions started afterwards
+  run the new version.
 - **Progress and results**: while it runs, the row shows **Installing…** or **Updating…** and the
   last line the command wrote. Installs and updates run one at a time, in the order you clicked
   them: the others say **Waiting…**. **Cancel** takes a waiting one off the list, or sends the

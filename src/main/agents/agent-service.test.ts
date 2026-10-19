@@ -161,6 +161,22 @@ function setLatest(id: CodingToolId, version: string): void {
   fs.writeFileSync(path.join(root, `latest-${id}`), version)
 }
 
+/** Puts a stand-in node that reports a version first on the login shell PATH. */
+function fakeNode(version: string): void {
+  write(path.join(home, '.local', 'bin', 'node'), `#!/bin/sh\necho "v${version}"\n`, 0o755)
+}
+
+/**
+ * Installs a stand-in Claude Code as its official installer does: its
+ * versions in ~/.local/share/claude/versions, and its command in ~/.local/bin.
+ */
+function installOfficialClaude(version: string): void {
+  const file = path.join(home, '.local', 'share', 'claude', 'versions', version)
+  write(file, `#!/bin/sh\necho "${version} (Claude Code)"\n`, 0o755)
+  fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+  fs.symlinkSync(file, path.join(home, '.local', 'bin', 'claude'))
+}
+
 function npmRuns(): string[] {
   const log = path.join(root, 'npm.log')
   return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []
@@ -188,6 +204,8 @@ function setup(
     /** Whether the computer's npm is on the login shell PATH. */
     withNpm?: boolean
     latest?: Partial<Record<CodingToolId, string | null>>
+    /** The Node.js versions each latest version needs, where its command runs on Node.js. */
+    latestNode?: Partial<Record<CodingToolId, string>>
     sessions?: () => string[]
     /** The platform Hoot runs on, as it is on the computer by default. */
     platform?: NodeJS.Platform
@@ -218,13 +236,14 @@ function setup(
     },
     getLoginEnvironment: () => tools.getLoginEnvironment(),
     home,
-    latestVersion: async (npmPackage) => {
+    latestRelease: async (npmPackage) => {
       latestCalls.push(npmPackage)
       const id = (Object.keys(PACKAGES) as CodingToolId[]).find(
         (key) => PACKAGES[key] === npmPackage,
       )
       const latest = id ? options.latest?.[id] : undefined
-      return latest === undefined ? '2.0.0' : latest
+      if (latest === null) return null
+      return { version: latest ?? '2.0.0', node: (id && options.latestNode?.[id]) || null }
     },
     runningSessions: () => options.sessions?.() ?? [],
     platform: options.platform,
@@ -310,6 +329,74 @@ describe('AgentService detection', () => {
     expect(latestCalls.toSorted()).toEqual(Object.values(PACKAGES).toSorted())
   })
 
+  it('shows the commands Install and Update run with npm', async () => {
+    await installInto(prefix, 'codex', '1.0.0')
+    const { service, agent } = setup()
+    await service.detect()
+    const npm = commandIn(npmCommandsFolder(prefix), 'npm')
+    expect(agent('opencode').installCommand).toBe(
+      `${npm} install -g @opencode/cli@latest --loglevel=http`,
+    )
+    expect(agent('codex').installation?.updateCommand).toBe(
+      `${npm} install -g @openai/codex@latest --loglevel=http`,
+    )
+  })
+
+  // On Windows the official installers install programs, which no script can stand in for.
+  it.skipIf(windows)(
+    "shows the command of an official installer's update, with ~ for the home folder",
+    async () => {
+      installOfficialClaude('1.0.0')
+      const { service, agent } = setup()
+      await service.detect()
+      expect(agent('claude').installation).toMatchObject({
+        method: 'official',
+        updateCommand: '~/.local/bin/claude update',
+      })
+    },
+  )
+
+  // Windows has no permissions on folders that keep the user from creating files.
+  it.skipIf(windows)(
+    'tells an installation by npm whose global folder the user cannot write to',
+    async () => {
+      await installInto(prefix, 'codex', '1.0.0')
+      installOfficialClaude('1.0.0')
+      const { service, agent } = setup()
+      await service.detect()
+      expect(agent('codex').installation?.writable).toBe(true)
+      fs.chmodSync(npmPackagesFolder(prefix), 0o555)
+      await service.detect()
+      expect(agent('codex').installation?.writable).toBe(false)
+      // Hoot does not check the folders of the others.
+      expect(agent('claude').installation?.writable).toBe(true)
+    },
+  )
+
+  // On Windows node is a program, node.exe, which no script can stand in for.
+  it.skipIf(windows)(
+    'tells the Node.js a latest version needs where npm would install it, when the node on the login shell PATH is too old',
+    async () => {
+      fakeNode('20.19.6')
+      await installInto(prefix, 'codex', '1.0.0')
+      installOfficialClaude('1.0.0')
+      const { service, agent } = setup({
+        latestNode: { claude: '>=22.0.0', codex: '>=22.19.0', opencode: '>=22' },
+      })
+      await service.detect()
+      expect(agent('codex').nodeRequirement).toEqual({ range: '>=22.19.0', found: '20.19.6' })
+      // Not installed, so Install would install it with npm.
+      expect(agent('opencode').nodeRequirement).toEqual({ range: '>=22', found: '20.19.6' })
+      // Installed by its official installer, which npm's package does not apply to.
+      expect(agent('claude').nodeRequirement).toBeNull()
+
+      fakeNode('24.15.0')
+      await service.detect()
+      expect(agent('codex').nodeRequirement).toBeNull()
+      expect(agent('opencode').nodeRequirement).toBeNull()
+    },
+  )
+
   it('no longer finds the agents an earlier Hoot installed in its own folder, ~/.hoot/agents', async () => {
     await installInto(path.join(home, '.hoot', 'agents'), 'codex', '1.0.0')
     const { service, agent } = setup()
@@ -321,7 +408,7 @@ describe('AgentService detection', () => {
   it.skipIf(windows)(
     "shows that Install needs write access to npm's global folder when the user cannot create files in it",
     async () => {
-      const { service } = setup()
+      const { service, agent } = setup()
       fs.chmodSync(npmPackagesFolder(prefix), 0o555)
       await service.detect()
       expect(service.getState().installTarget).toEqual({
@@ -329,13 +416,15 @@ describe('AgentService detection', () => {
         prefix,
         displayPrefix: prefix,
       })
+      expect(agent('codex').installCommand).toBeNull()
     },
   )
 
   it('shows that Install needs Node.js and npm when the login shell PATH has no npm', async () => {
-    const { service } = setup({ withNpm: false })
+    const { service, agent } = setup({ withNpm: false })
     await service.detect()
     expect(service.getState().installTarget).toEqual({ kind: 'node-required' })
+    expect(agent('codex').installCommand).toBeNull()
   })
 
   it('tells an installation that does not run, and keeps what it wrote', async () => {
@@ -423,6 +512,37 @@ describe('AgentService installs', () => {
       })
       expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
       expect(fs.existsSync(path.join(home, '.hoot'))).toBe(false)
+    },
+  )
+
+  // On Windows node is a program, node.exe, which no script can stand in for.
+  it.skipIf(windows)(
+    'fails, saying which Node.js is needed, when the node on the login shell PATH is too old for the latest version',
+    async () => {
+      fakeNode('20.19.6')
+      const { service, agent, ended } = setup({ latestNode: { codex: '>=22.19.0' } })
+      await service.detect()
+      service.install('codex')
+      await ended('codex')
+      expect(agent('codex').operation).toMatchObject({
+        kind: 'install',
+        status: 'failed',
+        message: '✕ Install failed: 2.0.0 needs Node.js 22.19.0 or later (yours is 20.19.6)',
+      })
+      expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
+    },
+  )
+
+  // On Windows node is a program, node.exe, which no script can stand in for.
+  it.skipIf(windows)(
+    'installs when the node on the login shell PATH is new enough for the latest version',
+    async () => {
+      fakeNode('24.15.0')
+      const { service, agent, ended } = setup({ latestNode: { codex: '>=22.19.0' } })
+      await service.detect()
+      service.install('codex')
+      await ended('codex')
+      expect(agent('codex').operation).toMatchObject({ status: 'succeeded' })
     },
   )
 
@@ -683,6 +803,42 @@ describe('AgentService updates', () => {
       `${path.join(prefix, 'bin', 'claude')} update\n`,
     )
   })
+
+  // Windows has no permissions on folders that keep the user from creating files.
+  it.skipIf(windows)(
+    'does not update an npm installation whose global folder the user cannot write to',
+    async () => {
+      await installInto(prefix, 'codex', '1.0.0')
+      const { service, agent, ended } = setup()
+      fs.chmodSync(npmCommandsFolder(prefix), 0o555)
+      await service.detect()
+      service.update('codex')
+      await ended('codex')
+      expect(agent('codex').operation).toMatchObject({
+        status: 'failed',
+        message: "✕ Update failed: npm's folder isn't writable",
+      })
+      expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
+    },
+  )
+
+  // On Windows node is a program, node.exe, which no script can stand in for.
+  it.skipIf(windows)(
+    'does not update an npm installation when the node on the login shell PATH is too old for the latest version',
+    async () => {
+      fakeNode('20.19.6')
+      await installInto(prefix, 'codex', '1.0.0')
+      const { service, agent, ended } = setup({ latestNode: { codex: '>=22.19.0' } })
+      await service.detect()
+      service.update('codex')
+      await ended('codex')
+      expect(agent('codex').operation).toMatchObject({
+        status: 'failed',
+        message: '✕ Update failed: 2.0.0 needs Node.js 22.19.0 or later (yours is 20.19.6)',
+      })
+      expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([])
+    },
+  )
 
   it('does not update an installation it cannot tell the method of', async () => {
     await writeNodeCommand(

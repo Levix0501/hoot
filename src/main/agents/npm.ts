@@ -89,11 +89,26 @@ export async function canCreateFilesIn(directory: string): Promise<boolean> {
 }
 
 /**
+ * Whether the user can install packages into an npm global folder, which
+ * npm puts in its `lib/node_modules` folder, with their commands in its `bin`
+ * folder; on Windows, in its `node_modules` folder and in the global folder
+ * itself.
+ */
+export async function canInstallInto(
+  prefix: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  const modules =
+    platform === 'win32'
+      ? path.join(prefix, 'node_modules')
+      : path.join(prefix, 'lib', 'node_modules')
+  const commands = platform === 'win32' ? prefix : path.join(prefix, 'bin')
+  return (await canCreateFilesIn(modules)) && (await canCreateFilesIn(commands))
+}
+
+/**
  * The computer's npm, the first on the login shell PATH, if it runs: where
- * its global folder is, and whether the user can install packages into it,
- * which npm puts in its `lib/node_modules` folder, with their commands in its
- * `bin` folder; on Windows, in its `node_modules` folder and in the global
- * folder itself.
+ * its global folder is, and whether the user can install packages into it.
  */
 export async function findComputerNpm(
   env: Env,
@@ -104,11 +119,5 @@ export async function findComputerNpm(
   if (npm === null) return null
   const prefix = await npmGlobalFolder(npm, env, cwd, platform)
   if (prefix === null) return null
-  const modules =
-    platform === 'win32'
-      ? path.join(prefix, 'node_modules')
-      : path.join(prefix, 'lib', 'node_modules')
-  const commands = platform === 'win32' ? prefix : path.join(prefix, 'bin')
-  const usable = (await canCreateFilesIn(modules)) && (await canCreateFilesIn(commands))
-  return { path: npm, prefix, usable }
+  return { path: npm, prefix, usable: await canInstallInto(prefix, platform) }
 }

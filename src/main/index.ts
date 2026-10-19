@@ -15,7 +15,7 @@ import {
   windowControlsFor,
 } from '../shared/window-controls'
 import { AgentService } from './agents/agent-service'
-import { fetchLatestVersion } from './agents/latest-version'
+import { fetchLatestRelease } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { databaseFile, openDatabase, transaction } from './database/database'
@@ -125,8 +125,8 @@ const agents = new AgentService({
   getLoginEnvironment: () => tools.getLoginEnvironment(),
   home: os.homedir(),
   // Through Electron's network stack, which takes the system's proxy settings.
-  latestVersion: (npmPackage) =>
-    fetchLatestVersion(npmPackage, (url, init) => net.fetch(url, init)),
+  latestRelease: (npmPackage, command) =>
+    fetchLatestRelease(npmPackage, command, (url, init) => net.fetch(url, init)),
   runningSessions: (id) => sessions.runningIdsOf(id),
 })
 

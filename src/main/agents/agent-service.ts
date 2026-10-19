@@ -2,10 +2,13 @@ import { EventEmitter } from 'node:events'
 import path from 'node:path'
 import {
   failedMessage,
+  FOLDER_NOT_WRITABLE_MESSAGE,
   installedMessage,
   INSTALL_NEEDS_NODE_MESSAGE,
   INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
   isNewerVersion,
+  nodeRequirementMessage,
+  shownCommand,
   updatedMessage,
   type AgentInstallation,
   type AgentOperation,
@@ -13,6 +16,7 @@ import {
   type AgentOperationSummary,
   type AgentsState,
   type InstallTarget,
+  type UnmetNodeRequirement,
 } from '../../shared/agents'
 import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
@@ -25,7 +29,9 @@ import {
   OFFICIAL_UPDATE_COMMANDS,
   type DetectedInstallMethod,
 } from './install-method'
-import { findComputerNpm, npmGlobalFolderOf, type ComputerNpm } from './npm'
+import type { LatestRelease } from './latest-version'
+import { readNodeVersion, unmetNodeRequirement } from './node'
+import { canInstallInto, findComputerNpm, npmGlobalFolderOf, type ComputerNpm } from './npm'
 import { startProcess, type CommandSpec, type ProcessEnd, type RunningProcess } from './processes'
 import { TerminalText } from './terminal-text'
 import { readVersion } from './version'
@@ -45,8 +51,12 @@ export interface AgentServiceOptions {
   getLoginEnvironment(): Promise<LoginEnvironment>
   /** The home folder. */
   home: string
-  /** The latest version of an npm package on registry.npmjs.org; `null` when it cannot be read. */
-  latestVersion(npmPackage: string): Promise<string | null>
+  /**
+   * The latest version of an agent's npm package on registry.npmjs.org, and
+   * the Node.js it needs where the agent's command runs on Node.js; `null`
+   * when it cannot be read.
+   */
+  latestRelease(npmPackage: string, command: string): Promise<LatestRelease | null>
   /** The ids of an agent's sessions that are starting or running. */
   runningSessions(id: CodingToolId): string[]
   /** The platform Hoot runs on: what its commands are, and where agents live. */
@@ -98,10 +108,47 @@ interface AgentRecord {
   /** The latest of those readings, which alone sets its installation. */
   readingId: number
   latest: string | null
+  /** The Node.js versions the latest version needs, where its command runs on Node.js. */
+  latestNode: string | null
   latestFailed: boolean
   latestReadings: number
   latestId: number
   operation: Operation | null
+}
+
+/** The arguments npm installs an agent's latest version with, in a global folder. */
+function npmInstallArgs(tool: CodingToolDefinition): string[] {
+  return ['install', '-g', `${tool.npmPackage}@latest`, '--loglevel=http']
+}
+
+/** A command as a user would run it: on Windows, npm's batch file rather than what it points to. */
+interface UserCommand {
+  program: string
+  args: string[]
+}
+
+/**
+ * What updating an installation runs, as a user would run it; `null` where
+ * Hoot cannot tell how it was installed.
+ */
+function updateCommandOf(
+  tool: CodingToolDefinition,
+  command: string,
+  method: DetectedInstallMethod,
+): UserCommand | null {
+  switch (method.kind) {
+    case 'npm':
+      return { program: method.npm, args: npmInstallArgs(tool) }
+    case 'homebrew':
+      return {
+        program: method.brew,
+        args: ['upgrade', method.cask ? '--cask' : '--formula', method.name],
+      }
+    case 'official':
+      return { program: command, args: [OFFICIAL_UPDATE_COMMANDS[tool.id]] }
+    case 'unknown':
+      return null
+  }
 }
 
 function isPending(operation: Operation | null): boolean {
@@ -147,7 +194,10 @@ function uncancellable(operation: Operation): void {
  * the page, one at a time in the order they were asked for, each of which can
  * be cancelled. An install uses the computer's npm, when the user can install
  * into its global folder. An update runs what the installation's method
- * updates it with, in its place.
+ * updates it with, in its place; for npm, when the user can write to its
+ * global folder. Where npm installs an agent whose command runs on Node.js,
+ * the node that sessions would run it with must be one its latest version
+ * needs.
  */
 export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   private readonly records: AgentRecord[] = CODING_TOOLS.map((tool) => ({
@@ -157,12 +207,17 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     readings: 0,
     readingId: 0,
     latest: null,
+    latestNode: null,
     latestFailed: false,
     latestReadings: 0,
     latestId: 0,
     operation: null,
   }))
   private installTarget: InstallTarget | null = null
+  /** The computer's npm as Install would run it, with `~` for the home folder, when Install can. */
+  private installNpm: string | null = null
+  /** The version of the node that sessions run agents' JavaScript commands with. */
+  private nodeVersion: string | null = null
   private readonly canonicalHome: Promise<string>
   private detecting: Promise<void> | null = null
   private queuedDetection: Promise<void> | null = null
@@ -195,9 +250,16 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           method: record.installation.method,
           version: record.installation.version,
           versionOutput: record.installation.versionOutput,
+          updateCommand: record.installation.updateCommand,
+          writable: record.installation.writable,
         },
         latest: record.latest,
         latestFailed: record.latestFailed,
+        installCommand:
+          this.installNpm === null
+            ? null
+            : shownCommand([this.installNpm, ...npmInstallArgs(record.tool)]),
+        nodeRequirement: this.nodeRequirementOf(record),
         operation: record.operation?.state ?? null,
       })),
       installTarget: this.installTarget,
@@ -314,6 +376,16 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     this.emit('changed', this.getState())
   }
 
+  /**
+   * The Node.js that an agent's latest version needs and the node that
+   * sessions run agents with does not meet, where npm would install it: when
+   * it is not installed, or installed by npm.
+   */
+  private nodeRequirementOf(record: AgentRecord): UnmetNodeRequirement | null {
+    if (record.installation !== null && record.installation.method !== 'npm') return null
+    return unmetNodeRequirement(record.latestNode, this.nodeVersion)
+  }
+
   /** Passes on a running operation's last line soon, at most every so often. */
   private changedSoon(): void {
     if (this.progressTimer) return
@@ -339,9 +411,10 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   /**
    * Reads the login shell environment again, then looks for these agents'
-   * installations and reads their versions; also where Install puts an agent.
-   * Returns what it found for each, also when a later reading has started
-   * since, whose result then stands instead.
+   * installations and reads their versions; also where Install puts an agent,
+   * and the version of the node that sessions run agents with. Returns what
+   * it found for each, also when a later reading has started since, whose
+   * result then stands instead.
    */
   private async readInstallations(records: AgentRecord[]): Promise<Array<Installation | null>> {
     const ids = records.map((record) => {
@@ -359,8 +432,15 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     }
     try {
       const detection = await this.options.detectTools()
-      const npm = await findComputerNpm(detection.login.env, this.options.home, this.platform)
+      const { env } = detection.login
+      const [npm, nodeVersion] = await Promise.all([
+        findComputerNpm(env, this.options.home, this.platform),
+        readNodeVersion(env, this.options.home, this.platform),
+      ])
       this.installTarget = await this.targetOf(npm)
+      this.installNpm =
+        npm !== null && this.installTarget.kind === 'npm' ? await this.displayPath(npm.path) : null
+      this.nodeVersion = nodeVersion
       return await Promise.all(
         records.map(async (record, index) => {
           try {
@@ -386,10 +466,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const id = record.latestId
     this.changed()
     try {
-      const latest = await this.options.latestVersion(record.tool.npmPackage).catch(() => null)
+      const { tool } = record
+      const release = await this.options
+        .latestRelease(tool.npmPackage, tool.command)
+        .catch(() => null)
       if (id === record.latestId) {
-        record.latest = latest
-        record.latestFailed = latest === null
+        record.latest = release?.version ?? null
+        record.latestNode = release?.node ?? null
+        record.latestFailed = release === null
       }
     } finally {
       record.latestReadings -= 1
@@ -411,7 +495,10 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       : { kind: 'npm-not-writable', prefix: npm.prefix, displayPrefix }
   }
 
-  /** An agent's installation as a detection found it, how it was installed and its version. */
+  /**
+   * An agent's installation as a detection found it: how it was installed,
+   * its version, and what updating it runs and needs.
+   */
   private async describe(
     tool: CodingToolDefinition,
     detection: Detection,
@@ -432,12 +519,18 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       readVersion(command, env, home, this.platform),
       this.displayPath(command),
     ])
+    const update = updateCommandOf(tool, command, method)
     return {
       path: command,
       displayPath,
       method: method.kind,
       version: version.version,
       versionOutput: version.output,
+      updateCommand:
+        update === null
+          ? null
+          : shownCommand([await this.displayPath(update.program), ...update.args]),
+      writable: method.kind === 'npm' ? await canInstallInto(method.prefix, this.platform) : true,
       detectedMethod: method,
     }
   }
@@ -494,7 +587,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     let end: ProcessEnd | null = null
     let failure: string | null = null
     try {
-      plan = await this.plan(record.tool, kind, before)
+      plan = await this.plan(record, kind, before)
       if (!operation.cancelled) {
         const process = startProcess(plan.command, (text) => {
           void output.write(text).then(() => {
@@ -543,56 +636,68 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     }
   }
 
-  /** What an operation runs, from the login shell environment read last. */
+  /**
+   * What an operation runs, from the login shell environment read last. What
+   * an install or an update by npm needs is checked again first, as it may
+   * have changed since the agent was last read.
+   */
   private async plan(
-    tool: CodingToolDefinition,
+    record: AgentRecord,
     kind: AgentOperationKind,
     before: Installation | null,
   ): Promise<Plan> {
+    const { tool } = record
     const { home } = this.options
     const { env } = await this.options.getLoginEnvironment()
-    const latest = `${tool.npmPackage}@latest`
-    const npmArgs = ['install', '-g', latest, '--loglevel=http']
     if (kind === 'install') {
       const npm = await findComputerNpm(env, home, this.platform)
       if (npm === null) throw new OperationFailure(INSTALL_NEEDS_NODE_MESSAGE)
       if (!npm.usable) throw new OperationFailure(INSTALL_NEEDS_WRITE_ACCESS_MESSAGE)
-      return this.npmPlan(npm.path, npmArgs, env)
+      await this.checkNode(record, env)
+      return this.npmPlan(npm.path, npmInstallArgs(tool), env)
     }
     if (before === null) throw new OperationFailure(`${tool.label} is not installed`)
     if (before.version === null) throw new OperationFailure(`${tool.label} doesn't run`)
     const method = before.detectedMethod
+    const update = updateCommandOf(tool, before.path, method)
+    if (method.kind === 'unknown' || update === null) {
+      throw new OperationFailure(
+        `Hoot cannot tell how ${tool.label} was installed; update it the way you installed it`,
+      )
+    }
+    const { program, args } = update
     switch (method.kind) {
       case 'npm': {
+        if (!(await canInstallInto(method.prefix, this.platform))) {
+          throw new OperationFailure(FOLDER_NOT_WRITABLE_MESSAGE)
+        }
+        await this.checkNode(record, env)
         const npmEnv = { ...env }
         // Another global folder's npm runs with the node beside it.
         if (!method.computer) {
           prependToPath(npmEnv, path.dirname(method.npm), this.platform)
         }
-        return this.npmPlan(method.npm, npmArgs, npmEnv)
+        return this.npmPlan(program, args, npmEnv)
       }
       case 'homebrew':
+        return { name: 'brew', command: { file: program, args, env, cwd: home } }
+      case 'official':
         return {
-          name: 'brew',
-          command: {
-            file: method.brew,
-            args: ['upgrade', method.cask ? '--cask' : '--formula', method.name],
-            env,
-            cwd: home,
-          },
+          name: `${tool.command} ${args.join(' ')}`,
+          command: { file: program, args, env, cwd: home },
         }
-      case 'official': {
-        const subcommand = OFFICIAL_UPDATE_COMMANDS[tool.id]
-        return {
-          name: `${tool.command} ${subcommand}`,
-          command: { file: before.path, args: [subcommand], env, cwd: home },
-        }
-      }
-      case 'unknown':
-        throw new OperationFailure(
-          `Hoot cannot tell how ${tool.label} was installed; update it the way you installed it`,
-        )
     }
+  }
+
+  /**
+   * Fails an install or an update by npm whose agent's latest version needs
+   * a newer Node.js than the node that sessions would run it with.
+   */
+  private async checkNode(record: AgentRecord, env: Env): Promise<void> {
+    if (record.latest === null || record.latestNode === null) return
+    const version = await readNodeVersion(env, this.options.home, this.platform)
+    const requirement = unmetNodeRequirement(record.latestNode, version)
+    if (requirement) throw new OperationFailure(nodeRequirementMessage(record.latest, requirement))
   }
 
   /**

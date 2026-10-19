@@ -3,14 +3,17 @@ import { cn } from 'cn'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   CANCELLED_MESSAGE,
+  FOLDER_NOT_WRITABLE_MESSAGE,
   INSTALL_NEEDS_NODE_MESSAGE,
   INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
   installMethodLabel,
+  installNeedsNodeVersionMessage,
+  nodeRequirementMessage,
   type AgentState,
   type InstallTarget,
 } from '../../../shared/agents'
 import { CODING_TOOLS, type CodingToolDefinition } from '../../../shared/tools'
-import { agentRowStatus } from '../../lib/agent-status'
+import { agentRowStatus, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
 import { Button } from '../ui/button'
@@ -26,6 +29,8 @@ function unknownAgent(id: CodingToolDefinition['id']): AgentState {
     installation: null,
     latest: null,
     latestFailed: false,
+    installCommand: null,
+    nodeRequirement: null,
     operation: null,
   }
 }
@@ -68,15 +73,25 @@ function joined(parts: ReactNode[]): ReactNode[] {
 
 /**
  * The line below an agent's name: its version, how it was installed and where
- * its command is; or, when it is not installed, where Install puts it, or why
- * there is no Install.
+ * its command is, then why its latest version cannot be installed, where it
+ * cannot; or, when it is not installed, where Install puts it, or why there
+ * is no Install.
  */
-function AgentDescription({ agent, target }: { agent: AgentState; target: InstallTarget | null }) {
+function AgentDescription({
+  agent,
+  target,
+  status,
+}: {
+  agent: AgentState
+  target: InstallTarget | null
+  status: AgentRowStatus
+}) {
   const id = agent.id
   const installation = agent.installation
   let content: ReactNode[]
   if (installation) {
     const method = installMethodLabel(installation.method)
+    const blocked = status.kind === 'update-blocked' ? status : null
     content = joined([
       ...(installation.version === null ? [] : [installation.version]),
       ...(method === null ? [] : [method]),
@@ -86,7 +101,14 @@ function AgentDescription({ agent, target }: { agent: AgentState; target: Instal
         full={installation.path}
         testId={`agent-path-${id}`}
       />,
+      ...(blocked?.node ? [nodeRequirementMessage(blocked.version, blocked.node)] : []),
+      ...(blocked && !blocked.writable ? [FOLDER_NOT_WRITABLE_MESSAGE] : []),
     ])
+  } else if (status.kind === 'needs-newer-node') {
+    content = [
+      'Not installed · ',
+      `${installNeedsNodeVersionMessage(status.requirement)} (yours is ${status.requirement.found})`,
+    ]
   } else if (target?.kind === 'npm') {
     content = [
       'Not installed · Install uses npm, into ',
@@ -206,6 +228,34 @@ function OperationLine({ agent }: { agent: AgentState }) {
   }
 }
 
+/** A row's button, which shows the command it runs while it is pointed at. */
+function CommandButton({
+  command,
+  onClick,
+  testId,
+  children,
+}: {
+  command: string | null
+  onClick: () => void
+  testId: string
+  children: ReactNode
+}) {
+  const props = { variant: 'outline', size: 'sm', onClick, 'data-testid': testId } as const
+  if (command === null) return <Button {...props}>{children}</Button>
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button {...props} />}>{children}</TooltipTrigger>
+      <TooltipContent
+        side="bottom"
+        className="max-w-[min(36rem,90vw)] break-all"
+        data-testid={`${testId}-command`}
+      >
+        Runs {command}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 /** The text on a row's right, where there is no button. */
 function StatusText({ children, testId }: { children: ReactNode; testId: string }) {
   return (
@@ -275,14 +325,13 @@ function AgentRow({
       break
     case 'install':
       right = (
-        <Button
-          variant="outline"
-          size="sm"
+        <CommandButton
+          command={agent.installCommand}
           onClick={() => installAgent(id)}
-          data-testid={`agent-install-${id}`}
+          testId={`agent-install-${id}`}
         >
           Install
-        </Button>
+        </CommandButton>
       )
       break
     case 'needs-node':
@@ -290,6 +339,13 @@ function AgentRow({
       break
     case 'needs-write-access':
       right = <StatusText testId={statusId}>{INSTALL_NEEDS_WRITE_ACCESS_MESSAGE}</StatusText>
+      break
+    case 'needs-newer-node':
+      right = (
+        <StatusText testId={statusId}>
+          {installNeedsNodeVersionMessage(status.requirement)}
+        </StatusText>
+      )
       break
     case 'does-not-run':
       right = (
@@ -321,15 +377,18 @@ function AgentRow({
       break
     case 'update':
       right = (
-        <Button
-          variant="outline"
-          size="sm"
+        <CommandButton
+          command={agent.installation?.updateCommand ?? null}
           onClick={() => updateAgent(id)}
-          data-testid={`agent-update-${id}`}
+          testId={`agent-update-${id}`}
         >
           Update to {status.version}
-        </Button>
+        </CommandButton>
       )
+      break
+    case 'update-blocked':
+      // The line below the name says why it cannot be updated.
+      right = <StatusText testId={statusId}>{status.version} is out</StatusText>
       break
   }
 
@@ -347,7 +406,7 @@ function AgentRow({
           <span className="text-sm leading-5 font-medium" data-testid={`agent-name-${id}`}>
             {tool.label}
           </span>
-          <AgentDescription agent={agent} target={target} />
+          <AgentDescription agent={agent} target={target} status={status} />
           <OperationLine agent={agent} />
         </div>
         <div className="flex min-h-7 shrink-0 items-center gap-2">{right}</div>
@@ -367,7 +426,8 @@ function AgentRow({
 /**
  * The settings' Agents page: Claude Code, Codex and OpenCode, whether and
  * how each is installed, its version and whether a newer one is out, with
- * Install and Update. Showing the page, and Re-detect, look for them again.
+ * Install and Update, which show the command they run, or why they cannot
+ * run. Showing the page, and Re-detect, look for them again.
  */
 export function AgentsPage() {
   const agents = useAppStore((state) => state.agents)

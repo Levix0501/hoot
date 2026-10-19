@@ -19,6 +19,29 @@ export interface AgentInstallation {
   version: string | null
   /** What the command wrote when it was run with `--version`, kept when it does not run. */
   versionOutput: string
+  /**
+   * The command Update runs, as the Agents page shows it (see
+   * `shownCommand`); `null` where Hoot cannot tell how it was installed.
+   */
+  updateCommand: string | null
+  /**
+   * Whether updating it can write where it is: for an installation by npm,
+   * whether the user can create files in its global folder, where npm puts
+   * packages and their commands; `true` for the others, which Hoot does not
+   * check.
+   */
+  writable: boolean
+}
+
+/**
+ * A Node.js requirement that the computer does not meet: the versions an
+ * agent's latest version needs, as its npm package's `engines` field says,
+ * and the version of the node its sessions would run it with, the first on
+ * the login shell PATH.
+ */
+export interface UnmetNodeRequirement {
+  range: string
+  found: string
 }
 
 /** An install or an update of an agent, started from the Agents page. */
@@ -56,6 +79,19 @@ export interface AgentState {
   latest: string | null
   /** Whether the last attempt to read the latest version failed. */
   latestFailed: boolean
+  /**
+   * The command Install runs, as the Agents page shows it (see
+   * `shownCommand`); `null` where Install cannot run, the computer having no
+   * npm that the user can install with.
+   */
+  installCommand: string | null
+  /**
+   * The Node.js its latest version needs, where npm would install it, when
+   * its command runs on Node.js and the node its sessions would run it with
+   * is too old; `null` otherwise, also when either is not known. Where it is
+   * installed some other way, as by Homebrew, npm's package does not apply.
+   */
+  nodeRequirement: UnmetNodeRequirement | null
   /** Its operation that waits, runs, or ended last since Hoot started. */
   operation: AgentOperation | null
 }
@@ -97,6 +133,43 @@ export const INSTALL_NEEDS_NODE_MESSAGE = 'Install needs Node.js and npm'
  * global folder of the computer's npm, which an agent's row also names.
  */
 export const INSTALL_NEEDS_WRITE_ACCESS_MESSAGE = "Install needs write access to npm's folder"
+
+/**
+ * Why Update cannot update an installation by npm where the user cannot
+ * write to its global folder, as the agent's row writes it after the path.
+ */
+export const FOLDER_NOT_WRITABLE_MESSAGE = "npm's folder isn't writable"
+
+/**
+ * A command as the Agents page shows it: the program, written as a user
+ * would run it, with `~` for the home folder, and its arguments, each in
+ * double quotes where it has a space.
+ */
+export function shownCommand(parts: string[]): string {
+  return parts.map((part) => (/\s/.test(part) ? `"${part}"` : part)).join(' ')
+}
+
+/**
+ * The Node.js versions a range names, as the Agents page writes them:
+ * `22.19.0 or later` for `>=22.19.0`, and any other range as it is written.
+ */
+export function nodeVersionsText(range: string): string {
+  const atLeast = /^>=\s*v?(\d+(?:\.\d+){0,2})$/.exec(range.trim())
+  return atLeast ? `${atLeast[1]} or later` : range.trim()
+}
+
+/** What the Agents page says about Install where the agent's latest version needs a newer Node.js. */
+export function installNeedsNodeVersionMessage(requirement: UnmetNodeRequirement): string {
+  return `Install needs Node.js ${nodeVersionsText(requirement.range)}`
+}
+
+/**
+ * Why a version of an agent cannot run on the computer, as the agent's row
+ * writes it: `1.3.0 needs Node.js 22.19.0 or later (yours is 20.19.6)`.
+ */
+export function nodeRequirementMessage(version: string, requirement: UnmetNodeRequirement): string {
+  return `${version} needs Node.js ${nodeVersionsText(requirement.range)} (yours is ${requirement.found})`
+}
 
 /**
  * The version a command reports in what it writes for `--version`, such as

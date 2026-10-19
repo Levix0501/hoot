@@ -8,7 +8,12 @@ const installation: AgentInstallation = {
   method: 'npm',
   version: '2.1.293',
   versionOutput: '',
+  updateCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
+  writable: true,
 }
+
+/** A Node.js requirement that the node on the login shell PATH does not meet. */
+const nodeRequirement = { range: '>=22.19.0', found: '20.19.6' }
 
 /** Where Install puts an agent: into the computer's npm's global folder. */
 const target: InstallTarget = {
@@ -23,6 +28,8 @@ const agent = (overrides: Partial<AgentState>): AgentState => ({
   installation,
   latest: '2.1.299',
   latestFailed: false,
+  installCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
+  nodeRequirement: null,
   operation: null,
   ...overrides,
 })
@@ -103,5 +110,55 @@ describe('agentRowStatus', () => {
         version: '2.1.299',
       })
     }
+  })
+
+  it('says Install needs a newer Node.js where its latest version does, once npm can install', () => {
+    expect(agentRowStatus(agent({ installation: null, nodeRequirement }), target)).toEqual({
+      kind: 'needs-newer-node',
+      requirement: nodeRequirement,
+    })
+    expect(
+      agentRowStatus(agent({ installation: null, nodeRequirement }), { kind: 'node-required' }),
+    ).toEqual({ kind: 'needs-node' })
+    expect(
+      agentRowStatus(agent({ installation: null, nodeRequirement }), {
+        kind: 'npm-not-writable',
+        prefix: '/usr/local',
+        displayPrefix: '/usr/local',
+      }),
+    ).toEqual({ kind: 'needs-write-access' })
+  })
+
+  it('says the latest version is out, without Update, where updating it needs a newer Node.js or write access', () => {
+    expect(agentRowStatus(agent({ nodeRequirement }), target)).toEqual({
+      kind: 'update-blocked',
+      version: '2.1.299',
+      node: nodeRequirement,
+      writable: true,
+    })
+    expect(
+      agentRowStatus(agent({ installation: { ...installation, writable: false } }), target),
+    ).toEqual({ kind: 'update-blocked', version: '2.1.299', node: null, writable: false })
+    expect(
+      agentRowStatus(
+        agent({ installation: { ...installation, writable: false }, nodeRequirement }),
+        target,
+      ),
+    ).toEqual({
+      kind: 'update-blocked',
+      version: '2.1.299',
+      node: nodeRequirement,
+      writable: false,
+    })
+    // Nothing to tell where there is no update, or Hoot cannot update it.
+    expect(agentRowStatus(agent({ latest: '2.1.293', nodeRequirement }), target)).toEqual({
+      kind: 'up-to-date',
+    })
+    expect(
+      agentRowStatus(
+        agent({ installation: { ...installation, method: 'unknown' }, nodeRequirement }),
+        target,
+      ),
+    ).toEqual({ kind: 'update-elsewhere' })
   })
 })

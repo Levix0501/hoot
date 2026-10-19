@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import type { Issue, IssueStatus } from '../../shared/issues'
-import type { WorkflowDefinition } from '../../shared/workflows'
+import type { WorkflowDefinition, WorkflowStep } from '../../shared/workflows'
 import { databaseFile, openDatabase } from '../database/database'
 import { IssueStore } from '../issues/issue-store'
 import { LabelStore } from '../labels/label-store'
@@ -86,6 +86,7 @@ describe('the workflow group', () => {
     expect(labels.list().map((label) => [label.group, label.name, label.color])).toEqual([
       ['Spec-driven', 'triaging', '4ea7fc'],
       ['Spec-driven', 'ready to design', 'bb87fc'],
+      ['Spec-driven', 'designing', '5e6ad2'],
       ['Spec-driven', 'waiting on sub-issues', '95a2b3'],
     ])
     expect(labels.snapshot().groups).toEqual([
@@ -94,7 +95,7 @@ describe('the workflow group', () => {
     db.close()
     databases.pop()
     const again = start()
-    expect(again.labels.list()).toHaveLength(3)
+    expect(again.labels.list()).toHaveLength(4)
     expect(again.labels.snapshot().groups).toHaveLength(1)
   })
 
@@ -114,7 +115,29 @@ describe('the workflow group', () => {
       color: '000000',
       description: 'Now',
     })
-    expect(labels.list()).toHaveLength(3)
+    expect(labels.list()).toHaveLength(4)
+  })
+
+  it('keeps a label that stays in the workflow as another kind, such as an end label that becomes a ready label', () => {
+    const [triage, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
+    const triageAlone: WorkflowDefinition = {
+      ...BUILT_IN_WORKFLOW,
+      steps: [triage],
+      endLabels: [
+        { ...design.readyLabel!, completeWithSubIssues: false },
+        ...BUILT_IN_WORKFLOW.endLabels,
+      ],
+    }
+    const old = start(triageAlone)
+    const issue = old.add('A')
+    old.give(issue, 'ready to design')
+    const { id } = old.labels.findByName('ready to design')!
+    old.db.close()
+    databases.pop()
+    const { labels, executor } = start()
+    expect(labels.findByName('ready to design')).toMatchObject({ id, group: 'Spec-driven' })
+    expect(labels.labelsOf(issue.id).map((label) => label.name)).toEqual(['ready to design'])
+    expect(executor.progress(issue.id)).toMatchObject({ kind: 'ready', step: { name: 'Design' } })
   })
 
   it('lets go of a label the workflow no longer has, which stays on its issues without a group', () => {
@@ -133,7 +156,7 @@ describe('the workflow group', () => {
     const { labels, executor } = start()
     const implemented = labels.findByName('Implemented')!
     expect(implemented.group).toBeNull()
-    expect(labels.list().filter((label) => label.group === 'Spec-driven')).toHaveLength(3)
+    expect(labels.list().filter((label) => label.group === 'Spec-driven')).toHaveLength(4)
     expect(labels.labelsOf(issue.id).map((label) => label.name)).toEqual(['Implemented'])
     expect(executor.progress(issue.id)).toEqual({ kind: 'not-started' })
     // Like any label without a group, it can be changed and deleted now.
@@ -155,8 +178,18 @@ describe('progress', () => {
     })
     give(issue, 'ready to design')
     expect(executor.progress(issue.id)).toMatchObject({
+      kind: 'ready',
+      step: { name: 'Design' },
+    })
+    give(issue, 'designing')
+    expect(executor.progress(issue.id)).toMatchObject({
+      kind: 'at-step',
+      step: { name: 'Design' },
+    })
+    give(issue, 'waiting on sub-issues')
+    expect(executor.progress(issue.id)).toMatchObject({
       kind: 'finished',
-      label: { name: 'ready to design' },
+      label: { name: 'waiting on sub-issues' },
     })
   })
 })
@@ -221,6 +254,29 @@ describe('sessionStart', () => {
     )
   })
 
+  it('starts Design for an issue ready for it or at it, saying to stop once it is done, with no file of the workflow', () => {
+    const { executor, add, give } = start()
+    for (const label of ['ready to design', 'designing']) {
+      const issue = add(label)
+      give(issue, label)
+      const design = executor.sessionStart(issue.id, 'ISS-1')
+      expect(design.ok && design.step.name).toBe('Design')
+      if (!design.ok) return
+      expect(design.workflowFile).toBeNull()
+      const message = design.firstMessage(files)
+      expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
+      expect(message).toContain(
+        '## Interview\n\nInterview the user until every decision is settled.',
+      )
+      expect(message).toContain(
+        '## Summary\n\nWhen the frontier is empty, present a concise summary',
+      )
+      expect(message.endsWith('\n\nWhen this step is done, stop.')).toBe(true)
+      expect(message).not.toContain('hoot issue edit')
+      expect(message).not.toContain('workflow.md')
+    }
+  })
+
   it('refuses an issue whose workflow is finished', () => {
     const { executor, add, give } = start()
     const issue = add('A')
@@ -232,31 +288,63 @@ describe('sessionStart', () => {
   })
 })
 
+/** The names of labels, in their order. */
+function labelNames(labels: Array<{ name: string }>): string[] {
+  return labels.map((label) => label.name)
+}
+
 describe('sessionStarted', () => {
-  it('gives an issue not started the first step’s label, by whoever opened the session, and nothing else', () => {
+  const [triage, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
+
+  it('gives an issue still waiting for the step the label of the step, by whoever opened the session', () => {
     const { executor, labels, add, give, status } = start()
     const user = add('A', 'backlog')
     const agent = add('B')
+    const ready = add('C')
+    give(ready, 'ready to design')
     clock = 2_000
-    executor.sessionStarted(user.id, 'user')
-    executor.sessionStarted(agent.id, 'agent')
-    executor.sessionStarted(agent.id, 'agent')
-    const at = add('C')
-    give(at, 'ready to design')
-    executor.sessionStarted(at.id, 'user')
-    expect(labels.labelsOf(user.id).map((label) => label.name)).toEqual(['triaging'])
-    expect(labels.labelsOf(at.id).map((label) => label.name)).toEqual(['ready to design'])
+    executor.sessionStarted(user.id, triage, 'user')
+    executor.sessionStarted(agent.id, triage, 'agent')
+    executor.sessionStarted(agent.id, triage, 'agent')
+    executor.sessionStarted(ready.id, design, 'agent')
+    expect(labelNames(labels.labelsOf(user.id))).toEqual(['triaging'])
+    expect(labelNames(labels.labelsOf(agent.id))).toEqual(['triaging'])
+    expect(labelNames(labels.labelsOf(ready.id))).toEqual(['designing'])
     expect(
       labels.eventsOfShown().map((event) => [event.issueId, event.kind, event.label, event.actor]),
     ).toEqual([
+      [ready.id, 'added', 'Spec-driven › ready to design', 'user'],
       [user.id, 'added', 'Spec-driven › triaging', 'user'],
       [agent.id, 'added', 'Spec-driven › triaging', 'agent'],
-      [at.id, 'added', 'Spec-driven › ready to design', 'user'],
+      [ready.id, 'removed', 'Spec-driven › ready to design', 'agent'],
+      [ready.id, 'added', 'Spec-driven › designing', 'agent'],
     ])
     // Its status is the window's to change.
     expect(status(user)).toBe('backlog')
     // An issue deleted meanwhile is given nothing.
-    expect(() => executor.sessionStarted(999, 'user')).not.toThrow()
+    expect(() => executor.sessionStarted(999, triage, 'user')).not.toThrow()
+  })
+
+  it('gives nothing to an issue at the step already, finished, or whose label changed meanwhile', () => {
+    const { executor, labels, add, give } = start()
+    const at = add('A')
+    give(at, 'designing')
+    const finished = add('B')
+    give(finished, 'waiting on sub-issues')
+    const moved = add('C')
+    give(moved, 'ready to design')
+    const cleared = add('D')
+    const before = labels.eventsOfShown().length
+    executor.sessionStarted(at.id, design, 'user')
+    executor.sessionStarted(finished.id, triage, 'user')
+    // Their sessions were asked for at Triage and at Design.
+    executor.sessionStarted(moved.id, triage, 'user')
+    executor.sessionStarted(cleared.id, design, 'user')
+    expect(labelNames(labels.labelsOf(at.id))).toEqual(['designing'])
+    expect(labelNames(labels.labelsOf(finished.id))).toEqual(['waiting on sub-issues'])
+    expect(labelNames(labels.labelsOf(moved.id))).toEqual(['ready to design'])
+    expect(labels.labelsOf(cleared.id)).toEqual([])
+    expect(labels.eventsOfShown()).toHaveLength(before)
   })
 })
 

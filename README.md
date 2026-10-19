@@ -342,12 +342,13 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   list. On an issue's page, also while you type in its fields, ⌘⇧O adds a sub-issue and ⌘⇧P picks
   its parent.
 - **The workflow**: work on an issue goes through Hoot's built-in workflow, **Spec-driven**, in
-  Claude Code sessions started from the issue. For now it has one step, **Triage**. How far an issue
-  has come is the label of the group **Spec-driven** it has, and nothing else: none before it
-  starts, **triaging** while it is at Triage, and **ready to design** or **waiting on sub-issues**
-  once it is finished. Changing the label, in the window or with `hoot`, moves the issue on or back;
-  taking it off makes the issue not started again. In **Triage**, the agent judges the issue against
-  the project: whether it is one piece of work, or several, results that could each be delivered and
+  Claude Code sessions started from the issue. For now it has two steps, **Triage** and **Design**.
+  How far an issue has come is the label of the group **Spec-driven** it has, and nothing else: none
+  before it starts, **triaging** while it is at Triage, **ready to design** while it waits for you
+  to start Design, **designing** while it is at Design, and **waiting on sub-issues** once it is
+  finished. Changing the label, in the window or with `hoot`, moves the issue on or back; taking it
+  off makes the issue not started again. In **Triage**, the agent judges the issue against the
+  project: whether it is one piece of work, or several, results that could each be delivered and
   accepted on their own. If it is one, the agent says why, changes the issue's label to
   **ready to design** with [`hoot issue edit`](#the-hoot-command) without asking you, and stops. If
   several, it splits the issue into one issue per result, each with a title, a description and the
@@ -361,16 +362,29 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   Hoot shows (it has at least one) becomes done or canceled, or goes, the issue, unless it is done
   or canceled already, becomes Done when one of them is done, and Canceled otherwise; this happens
   only as that comes to be, so an issue you open again stays open, and so does one given a sub-issue
-  to do. The workflow is data, which Hoot runs as it would run any workflow; its prompts name no
-  agent. A label that the group had and the workflow no longer has, such as one of a step taken out,
-  leaves the group, and stays on its issues like any other label. Labels change no status, and
+  to do. In **Design**, the agent interviews you until every decision about the issue is settled: in
+  rounds, with its tool for asking structured questions if it has one, or with numbered options in
+  its reply, each round asking every open decision whose prerequisites (the decisions and facts its
+  options depend on) are settled, those that unblock the most first, each with the option it
+  recommends first, its main reason and its cost. It asks you only for decisions and for facts only
+  you can provide, finds out every other fact itself, even one you stated, and puts to you as a
+  decision what it finds that contradicts you. Once nothing is left open, it sums up the outcome and
+  its boundaries, the requirements and decisions as you settled them, and the facts it relied on,
+  each with how it established it, and the risks you accepted, and stops. Nothing comes after Design
+  for now: the issue stays at **designing**, and starting work on it again starts Design over in a
+  new session. The workflow is data, which Hoot runs as it would run any workflow; its prompts name
+  no agent. A label that the group had and the workflow no longer has, such as one of a step taken
+  out, leaves the group, and stays on its issues like any other label. Labels change no status, and
   changing the status, the project or anything else of the issue changes nothing of its progress.
 - **Starting work**: the start button of an issue that is neither done nor canceled, at the end of
   its row in the list and above the properties on its page, hands the issue to Claude Code in a
-  worktree of its own, at the first step of its workflow when it has not started, and at the step of
-  its label otherwise. It shows a paper plane, which turns into Claude Code's mark while you point at it
-  or move the keyboard focus to it, and its tooltip says what it does, such as **Start Triage with
-  Claude Code in a new worktree** or **Continue Triage with Claude Code in this issue's worktree**.
+  worktree of its own, at the first step of its workflow when it has not started, at the step it is
+  ready for when it has a step's ready label, such as Design for **ready to design**, and at the
+  step of its label otherwise. It shows a paper plane, which turns into Claude Code's mark while you
+  point at it or move the keyboard focus to it, and its tooltip says what it does, such as
+  **Start Triage with Claude Code in a new worktree**,
+  **Start Design with Claude Code in this issue's worktree** or
+  **Continue Triage with Claude Code in this issue's worktree**.
   Clicking it saves what you typed in the issue, then starts Claude Code, at the permission level
   picked in the Agents menu at the click, in the issue's worktree, and shows the session as soon as
   it appears, whatever page is shown then, with the keyboard focus in its terminal; going back shows
@@ -384,22 +398,26 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   repositories that **New Worktree…** includes by default, at
   `~/.hoot/worktrees/<project>/<branch>`. The project expands to show the worktree's row. Meanwhile
   the button spins and clicking it does nothing; the rest of Hoot can be used as usual. The branch
-  keeps its name when the title changes. The session is named after the issue's title. An issue that
-  had not started gets the first step's label, **Spec-driven › triaging**, once the session has
-  started, which its activity records as yours. Hoot writes the issue, its title as a heading and
+  keeps its name when the title changes. The session is named after the issue's title. Once the
+  session has started, an issue that had not started gets the first step's label,
+  **Spec-driven › triaging**, and one ready for a step gets the step's label in place of the ready
+  label, such as **designing** for **ready to design**, which its activity records as yours; one
+  whose label changed meanwhile keeps it. Hoot writes the issue, its title as a heading and
   its description below it, to `issue.md` in a new folder of the session's own in `.hoot/tmp` of
   the worktree, where Claude Code reads its files without asking at any permission level; NUL
   characters are left out. A `.gitignore` there has Git ignore everything in `.hoot/tmp`, itself
   included, which leaves the rest of `.hoot` to files a project might commit. When the session can
   go on from the step it starts at to another, Hoot also writes beside it the whole workflow to
-  `workflow.md`: its name, each step in order with its label, its prompt and its outcomes (the
-  label each changes to, what it means and what to do first, and whether the agent goes on or
-  stops afterwards), and the end labels, with what **waiting on sub-issues** does; a session of
-  Triage, which stops either way, gets `issue.md` alone. The first message says where `issue.md` is,
-  and `workflow.md` when there is one, and names the worktree's branch; then it gives the step's
-  prompt and its outcomes, each with what it means, the command that changes the label, such as
+  `workflow.md`: its name, each step in order with its label, and its ready label if it has one, its
+  prompt and its outcomes (the label each changes to, what it means and what to do first, and
+  whether the agent goes on or stops afterwards), or that it stops once it is done, and the end
+  labels, with what **waiting on sub-issues** does; a session of Triage or Design, which stop either
+  way, gets `issue.md` alone. The first message says where `issue.md` is, and `workflow.md` when
+  there is one, and names the worktree's branch; then it gives the step's prompt and its outcomes,
+  each with what it means, the command that changes the label, such as
   `hoot issue edit ISS-12 --add-label 'ready to design'`, and whether to go on with that label's
-  step from `workflow.md` afterwards, or stop. The message would do for any agent, and the issue
+  step from `workflow.md` afterwards, or stop; for a step without outcomes, such as Design, it says
+  to stop once the step is done. The message would do for any agent, and the issue
   stays out of it, where an agent could take some of its text for a command or a mention. Like any
   other session, this one can change files as far as its permission level lets it. Once the session
   has started, an issue in the Backlog or Todo is In Progress. Hoot removes the session's folder
@@ -543,9 +561,10 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
   by their names, whatever their case; a label in a group by its name alone.
 - **`hoot session start <issue>`** starts a Claude Code session for an issue of the project, as its
   start button opens one: in the issue's worktree, created first when it has none, at the
-  permission level picked in the Agents menu, giving an issue not started the first step's label
-  (recorded as the agent's), and moving one in the Backlog or Todo to In Progress. The session
-  shows in the sidebar, and the window goes on showing what it showed. With
+  permission level picked in the Agents menu, giving an issue not started the first step's label,
+  and one ready for a step the step's label (recorded as the agent's), and moving one in the Backlog
+  or Todo to In Progress. The session shows in the sidebar, and the window goes on showing what it
+  showed. With
   `--prompt-file <file>`, the session's first message is all that the file holds, instead of the
   one its start button would give; the issue's files are written all the same. `hoot` prints the
   root of the worktree once the session has started. It refuses, opening nothing, what the start

@@ -6,6 +6,7 @@ import { startHint, startState } from './issue-start'
 
 const notStarted: WorkflowProgress = { kind: 'not-started' }
 const atTriage: WorkflowProgress = { kind: 'at-step', step: BUILT_IN_WORKFLOW.steps[0]! }
+const readyToDesign: WorkflowProgress = { kind: 'ready', step: BUILT_IN_WORKFLOW.steps[1]! }
 const finished: WorkflowProgress = { kind: 'finished', label: BUILT_IN_WORKFLOW.endLabels[0]! }
 
 describe('startState', () => {
@@ -44,7 +45,7 @@ describe('startHint', () => {
   const newWorktree = { kind: 'new-worktree' } as const
 
   it('says that it shows the session opened last from the issue', () => {
-    for (const progress of [notStarted, atTriage, finished]) {
+    for (const progress of [notStarted, atTriage, readyToDesign, finished]) {
       expect(startHint({ kind: 'show', sessionId: 's1' }, progress, BUILT_IN_WORKFLOW)).toBe(
         'Show the Claude Code session opened last from this issue',
       )
@@ -57,6 +58,15 @@ describe('startHint', () => {
     )
     expect(startHint(newWorktree, notStarted, BUILT_IN_WORKFLOW)).toBe(
       'Start Triage with Claude Code in a new worktree',
+    )
+  })
+
+  it('starts the step the issue is ready for', () => {
+    expect(startHint(worktree, readyToDesign, BUILT_IN_WORKFLOW)).toBe(
+      "Start Design with Claude Code in this issue's worktree",
+    )
+    expect(startHint(newWorktree, readyToDesign, BUILT_IN_WORKFLOW)).toBe(
+      'Start Design with Claude Code in a new worktree',
     )
   })
 

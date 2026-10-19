@@ -3,10 +3,12 @@
  * definition, plain data that could be written as JSON and read back, which
  * Hoot runs whatever it says: the built-in one and any other alike, once it
  * has passed the check in `workflow-check`. A workflow has a group of labels:
- * one for each step, and end labels. An issue's progress through the
- * workflow is the label of that group it carries, and nothing else: none
- * before it starts, a step's label while it is at that step, or an end label
- * once it is finished. Changing the label moves the issue on.
+ * one for each step, a ready label for a step that has one, and end labels.
+ * An issue's progress through the workflow is the label of that group it
+ * carries, and nothing else: none before it starts, a step's ready label
+ * while it waits for a session of that step, a step's label while it is at
+ * that step, or an end label once it is finished. Changing the label moves
+ * the issue on.
  */
 
 /** A label of a workflow's group, as the workflow gives it. */
@@ -27,10 +29,13 @@ export interface WorkflowLabel {
  * identifier, such as `ISS-12`.
  */
 export interface WorkflowOutcome {
-  /** The name of a step's label or of an end label of the workflow. */
+  /** The name of a step's label, of a step's ready label or of an end label of the workflow. */
   label: string
   instruction: string
-  /** On: goes on with the step of the label, in the same session; off: stops once it is changed. */
+  /**
+   * On: goes on with the step of the label, in the same session, which a
+   * step's label alone allows; off: stops once it is changed.
+   */
   goOn: boolean
 }
 
@@ -40,9 +45,18 @@ export interface WorkflowStep {
   name: string
   /** The label that an issue at this step carries. */
   label: WorkflowLabel
+  /**
+   * The label an issue carries while it waits for a session of this step,
+   * if the step has one: a session started from it starts at this step, and
+   * once the session has started, the issue carries `label` instead.
+   */
+  readyLabel?: WorkflowLabel
   /** What the agent is asked to do in the step; `{issue}` stands for the issue's identifier. */
   prompt: string
-  /** The results the step can end with, in the order they are offered. */
+  /**
+   * The results the step can end with, in the order they are offered; none
+   * for a step that stops once it is done, leaving the issue at the step.
+   */
   outcomes: WorkflowOutcome[]
 }
 
@@ -76,6 +90,16 @@ export function stepOfLabel(workflow: WorkflowDefinition, label: string): Workfl
   return workflow.steps.find((step) => sameName(step.label.name, label))
 }
 
+/** The step whose ready label has this name, if any. */
+export function stepOfReadyLabel(
+  workflow: WorkflowDefinition,
+  label: string,
+): WorkflowStep | undefined {
+  return workflow.steps.find(
+    (step) => step.readyLabel !== undefined && sameName(step.readyLabel.name, label),
+  )
+}
+
 /** The end label with this name, if any. */
 export function endLabelNamed(
   workflow: WorkflowDefinition,
@@ -84,21 +108,32 @@ export function endLabelNamed(
   return workflow.endLabels.find((end) => sameName(end.name, label))
 }
 
-/** Every label of the workflow's group: the steps', in order, then the end labels. */
+/**
+ * Every label of the workflow's group: in the order of the steps, each
+ * step's ready label, if it has one, and its label; then the end labels.
+ */
 export function workflowLabels(workflow: WorkflowDefinition): WorkflowLabel[] {
-  return [...workflow.steps.map((step) => step.label), ...workflow.endLabels]
+  return [
+    ...workflow.steps.flatMap((step) =>
+      step.readyLabel === undefined ? [step.label] : [step.readyLabel, step.label],
+    ),
+    ...workflow.endLabels,
+  ]
 }
 
 /** Where an issue is in its workflow. */
 export type WorkflowProgress =
   | { kind: 'not-started' }
+  /** It waits for a session of the step. */
+  | { kind: 'ready'; step: WorkflowStep }
   | { kind: 'at-step'; step: WorkflowStep }
   | { kind: 'finished'; label: WorkflowEndLabel }
 
 /**
  * Where an issue is in its workflow, from the names of the labels of the
  * workflow's group it carries, of which it carries at most one: not started
- * without any, at the step of a step's label, or finished with an end label.
+ * without any, ready for the step of a step's ready label, at the step of a
+ * step's label, or finished with an end label.
  */
 export function workflowProgress(
   workflow: WorkflowDefinition,
@@ -107,6 +142,8 @@ export function workflowProgress(
   for (const name of carried) {
     const step = stepOfLabel(workflow, name)
     if (step) return { kind: 'at-step', step }
+    const ready = stepOfReadyLabel(workflow, name)
+    if (ready) return { kind: 'ready', step: ready }
     const end = endLabelNamed(workflow, name)
     if (end) return { kind: 'finished', label: end }
   }

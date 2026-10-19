@@ -51,8 +51,9 @@ const outcomeSchema = z.strictObject({
 const stepSchema = z.strictObject({
   name: line('A step name'),
   label: z.strictObject(labelFields),
+  readyLabel: z.strictObject(labelFields).optional(),
   prompt: text("A step's prompt"),
-  outcomes: z.array(outcomeSchema).min(1, 'A step has no outcome.'),
+  outcomes: z.array(outcomeSchema),
 })
 
 const endLabelSchema = z.strictObject({ ...labelFields, completeWithSubIssues: z.boolean() })
@@ -79,9 +80,13 @@ const workflowSchema = z
       if (labels.has(key(name))) problem(`Two labels have the name "${name}".`, path)
       labels.add(key(name))
     }
-    workflow.steps.forEach((step, index) => label(step.label.name, ['steps', index, 'label']))
+    workflow.steps.forEach((step, index) => {
+      if (step.readyLabel) label(step.readyLabel.name, ['steps', index, 'readyLabel'])
+      label(step.label.name, ['steps', index, 'label'])
+    })
     workflow.endLabels.forEach((end, index) => label(end.name, ['endLabels', index, 'name']))
     const ends = new Set(workflow.endLabels.map((end) => key(end.name)))
+    const ready = new Set(workflow.steps.flatMap((step) => step.readyLabel?.name ?? []).map(key))
     workflow.steps.forEach((step, index) => {
       step.outcomes.forEach((outcome, position) => {
         const path = ['steps', index, 'outcomes', position]
@@ -93,6 +98,11 @@ const workflowSchema = z
         } else if (ends.has(key(outcome.label)) && outcome.goOn) {
           problem(
             `The outcome changes to the end label "${outcome.label}", after which there is no step to go on with.`,
+            [...path, 'goOn'],
+          )
+        } else if (ready.has(key(outcome.label)) && outcome.goOn) {
+          problem(
+            `The outcome changes to the ready label "${outcome.label}", which waits for a session of its step: it cannot go on.`,
             [...path, 'goOn'],
           )
         }
@@ -107,12 +117,12 @@ export type WorkflowCheck =
 /**
  * Checks that something is a workflow definition Hoot can run: a name, the
  * name of its group of labels, at least one step and any end labels. Each
- * step has a name, a label, a prompt and at least one outcome; each outcome
- * the label it changes the issue's to, one of the workflow's, an
- * instruction, and whether the agent goes on afterwards, which it cannot
- * after an end label. Labels have a name, a color and a description. Step
- * names and label names are each different, without regard to case, and
- * nothing else is in it.
+ * step has a name, a label, maybe a ready label, a prompt and any outcomes;
+ * each outcome the label it changes the issue's to, one of the workflow's,
+ * an instruction, and whether the agent goes on afterwards, which it can
+ * only after a step's label. Labels have a name, a color and a description.
+ * Step names and label names are each different, without regard to case,
+ * and nothing else is in it.
  */
 export function checkWorkflow(value: unknown): WorkflowCheck {
   const parsed = workflowSchema.safeParse(value)

@@ -44,6 +44,7 @@ import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
+import type { WorkflowStep } from '../shared/workflows'
 import type {
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
@@ -424,6 +425,8 @@ export function registerIpc(deps: IpcDependencies): void {
       saved = found.issue
     }
     let issue: SentIssue | null = null
+    /** The step of the issue's workflow the session starts at. */
+    let step: WorkflowStep | null = null
     if (request.worktreePath !== null) {
       // As it is now, which the sidebar then shows: it may be gone or missing since it last did.
       const worktree = await deps.worktrees.currentWorktree(
@@ -451,6 +454,7 @@ export function registerIpc(deps: IpcDependencies): void {
         // of the label it carries now.
         const start = deps.workflows.sessionStart(saved.id, issueIdentifier(saved.id))
         if (!start.ok) return start
+        step = start.step
         const { prompt } = request
         issue = {
           title: saved.title,
@@ -464,8 +468,8 @@ export function registerIpc(deps: IpcDependencies): void {
     try {
       const session = await deps.sessions.start(request, issue)
       // Work on the issue goes on in the session from now on.
-      if (request.issueId !== null) {
-        deps.workflows.sessionStarted(request.issueId, request.startedBy ?? 'user')
+      if (request.issueId !== null && step !== null) {
+        deps.workflows.sessionStarted(request.issueId, step, request.startedBy ?? 'user')
       }
       return { ok: true, session }
     } catch (error) {

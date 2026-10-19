@@ -7,7 +7,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
 import { waitedOnIds } from '../../shared/dependencies'
 import type { ToolsState } from '../../shared/ipc'
-import type { Issue } from '../../shared/issues'
+import { issueIdentifier, type Issue } from '../../shared/issues'
 import { startBlockers } from '../../shared/start-blockers'
 import { databaseFile, openDatabase, transaction } from '../database/database'
 import { IssueStore } from '../issues/issue-store'
@@ -32,8 +32,8 @@ export const CLAUDE_FOUND: ToolsState = {
  * executor of the issues' workflow, and the server that answers hoot,
  * listening on a socket in the same folder. Sessions it is asked for are
  * started as `setStartSession` says, by default in the worktree
- * `/worktrees/<project>/iss-<n>`, giving the issue the first step's label as
- * the window does.
+ * `/worktrees/<project>/iss-<n>`, giving the issue the label of the step it
+ * starts at as the window does.
  */
 export async function startTestHoot() {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-cli-')))
@@ -49,7 +49,8 @@ export async function startTestHoot() {
   let startSession = async (issueId: number): Promise<StartedSession> => {
     const issue = issues.get(issueId)!
     const project = projects.list().find((candidate) => candidate.id === issue.projectId)!
-    workflows.sessionStarted(issueId, 'agent')
+    const start = workflows.sessionStart(issueId, issueIdentifier(issueId))
+    if (start.ok) workflows.sessionStarted(issueId, start.step, 'agent')
     return { ok: true, worktreePath: `/worktrees/${project.name}/iss-${issueId}` }
   }
   const gamma = projects.add('/work/gamma').project

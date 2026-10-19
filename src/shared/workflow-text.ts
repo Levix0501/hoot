@@ -74,16 +74,21 @@ function outcomeText(
   )
 }
 
+/** How a step without outcomes ends, leaving the issue's label as it is. */
+const STOP = 'When this step is done, stop.'
+
 /**
  * How a step asks to be ended: with one of its outcomes, each its
  * instruction, then the command that changes the issue's label, and whether
- * the agent goes on or stops afterwards.
+ * the agent goes on or stops afterwards; by stopping, for a step without
+ * outcomes.
  */
 export function outcomeInstructions(
   workflow: WorkflowDefinition,
   step: Pick<WorkflowStep, 'outcomes'>,
   identifier: string,
 ): string {
+  if (step.outcomes.length === 0) return STOP
   return [
     'When this step is done, end it with the one of these outcomes that applies:',
     '',
@@ -141,36 +146,48 @@ function endLabelText(end: WorkflowEndLabel): string {
   )
 }
 
+/** A step's labels, as `workflow.md` says them: its label, and its ready label if it has one. */
+function stepLabelsText(step: WorkflowStep): string {
+  const label = `Label: ${labelName(step.label.name)}`
+  if (step.readyLabel === undefined) return label
+  return `${label}, or ${labelName(step.readyLabel.name)} while the issue waits for a session of it`
+}
+
 /**
  * The file of an issue's workflow, `workflow.md`: the workflow's name, how
  * the labels of its group mark the issue's progress, each step in order,
- * with its label, its prompt and its outcomes (the label each changes to,
- * its instruction, and whether the agent goes on or stops), and the end
- * labels, with what they do. It ends with a line break.
+ * with its labels, its prompt and its outcomes (the label each changes to,
+ * its instruction, and whether the agent goes on or stops), or that it
+ * stops, and the end labels, with what they do. It ends with a line break.
  */
 export function workflowFileText(workflow: WorkflowDefinition, identifier: string): string {
   const steps = workflow.steps.map((step, index) =>
     [
       `## ${index + 1}. ${step.name}`,
-      `Label: ${labelName(step.label.name)}`,
+      stepLabelsText(step),
       filledIn(step.prompt, identifier),
-      [
-        'Outcomes:',
-        '',
-        ...step.outcomes.map((outcome) => outcomeText(workflow, outcome, identifier, 'here')),
-      ].join('\n'),
+      step.outcomes.length === 0
+        ? STOP
+        : [
+            'Outcomes:',
+            '',
+            ...step.outcomes.map((outcome) => outcomeText(workflow, outcome, identifier, 'here')),
+          ].join('\n'),
     ].join('\n\n'),
   )
   const ends =
     workflow.endLabels.length === 0
       ? 'The workflow has no end labels.'
       : workflow.endLabels.map(endLabelText).join('\n')
+  const ready = workflow.steps.some((step) => step.readyLabel !== undefined)
+    ? "a step's ready label while it waits for a session of that step, "
+    : ''
   return `${[
     `# ${workflow.name}`,
     `The workflow ${identifier} goes through. How far the issue has come is the label of the group ` +
-      `${workflow.group} it carries: none before it starts, the label of the step it is at, or an ` +
-      'end label once it is finished. An issue carries one label of the group at most: adding one ' +
-      `with \`hoot issue edit ${identifier} --add-label <label>\` takes the other off.`,
+      `${workflow.group} it carries: none before it starts, ${ready}the label of the step it is at, ` +
+      'or an end label once it is finished. An issue carries one label of the group at most: adding ' +
+      `one with \`hoot issue edit ${identifier} --add-label <label>\` takes the other off.`,
     ...steps,
     '## End labels',
     ends,

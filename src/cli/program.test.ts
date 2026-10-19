@@ -1606,7 +1606,7 @@ describe('hoot label', () => {
     ).toEqual({ code: 0, stdout: '', stderr: '' })
     const listed = (await run(['label', 'list'])).stdout
     expect(listed).toMatch(/^area +No group +ff8800 +Area of code$/m)
-    for (const name of ['triaging', 'ready to design', 'waiting on sub-issues']) {
+    for (const name of ['triaging', 'ready to design', 'designing', 'waiting on sub-issues']) {
       expect(listed).toMatch(new RegExp(`^${name} +Spec-driven +[0-9a-f]{6} `, 'm'))
     }
     const json = JSON.parse((await run(['label', 'list', '--json'])).stdout)
@@ -1674,6 +1674,17 @@ describe('hoot session start', () => {
     })
     expect(hoot.startedSessions).toEqual([{ issueId: a.id, prompt: null }])
     expect(labelsOf(a)).toEqual(['Spec-driven › triaging'])
+  })
+
+  it('starts an issue ready for a step at that step, giving it the label of the step', async () => {
+    const a = addIssue('A')
+    hoot.labels.changeIssueLabels(
+      a.id,
+      { add: [hoot.labels.findByName('ready to design')!.id] },
+      'user',
+    )
+    expect((await run(['session', 'start', id(a)])).code).toBe(0)
+    expect(labelsOf(a)).toEqual(['Spec-driven › designing'])
   })
 
   it('gives the session the first message of a file', async () => {

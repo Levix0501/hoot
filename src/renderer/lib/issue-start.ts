@@ -34,8 +34,9 @@ export function startState({
 
 /**
  * What the tooltip of a start button that can be used says it does: shows
- * the session; or starts the workflow's first step, or continues the step
- * the issue is at, in the issue's worktree or a new one.
+ * the session; or starts the workflow's first step, or the step the issue
+ * is ready for, or continues the step the issue is at, in the issue's
+ * worktree or a new one.
  */
 export function startHint(
   state: Exclude<StartState, { kind: 'blocked' }>,
@@ -44,7 +45,9 @@ export function startHint(
 ): string {
   if (state.kind === 'show') return 'Show the Claude Code session opened last from this issue'
   const where = state.kind === 'worktree' ? "this issue's worktree" : 'a new worktree'
-  return progress.kind === 'at-step'
-    ? `Continue ${progress.step.name} with Claude Code in ${where}`
-    : `Start ${firstStep(workflow).name} with Claude Code in ${where}`
+  if (progress.kind === 'at-step') {
+    return `Continue ${progress.step.name} with Claude Code in ${where}`
+  }
+  const step = progress.kind === 'ready' ? progress.step : firstStep(workflow)
+  return `Start ${step.name} with Claude Code in ${where}`
 }

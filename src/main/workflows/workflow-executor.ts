@@ -58,10 +58,11 @@ const SHOWN_CHILD = `(c.project_id IS NULL OR c.project_id IN
  * definition: puts the workflow's group of labels in place; tells where an
  * issue is in the workflow by the label of the group it carries; says how a
  * session started from an issue starts, with the file of the workflow and
- * the first message, and gives an issue not started the first step's label
- * once its session has started; and completes an issue carrying an end
- * label that says so once its sub-issues are completed. It says which issues
- * it completed, once the change that made it do so is saved.
+ * the first message, and gives an issue not started, or ready for the step,
+ * the label of the step once its session has started; and completes an
+ * issue carrying an end label that says so once its sub-issues are
+ * completed. It says which issues it completed, once the change that made it
+ * do so is saved.
  */
 export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues: Issue[]] }> {
   private readonly statements
@@ -149,8 +150,9 @@ export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues
 
   /**
    * How a new session started from the issue starts: at the step the issue
-   * is at, or at the first step when it has not started; refused once its
-   * workflow is finished. `identifier` is the issue's, such as `ISS-12`.
+   * is ready for or at, or at the first step when it has not started;
+   * refused once its workflow is finished. `identifier` is the issue's, such
+   * as `ISS-12`.
    */
   sessionStart(issueId: number, identifier: string): SessionStart {
     const progress = this.progress(issueId)
@@ -160,7 +162,7 @@ export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues
         message: `The workflow of ${identifier} is finished: it has the label "${progress.label.name}".`,
       }
     }
-    const step = progress.kind === 'at-step' ? progress.step : firstStep(this.workflow)
+    const step = progress.kind === 'not-started' ? firstStep(this.workflow) : progress.step
     return {
       ok: true,
       step,
@@ -171,12 +173,19 @@ export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues
   }
 
   /**
-   * A session started from the issue has started, opened by `actor`: an
-   * issue that has not started is given the first step's label.
+   * A session started from the issue at `step` has started, opened by
+   * `actor`: an issue still waiting for it, not started when `step` is the
+   * first step or ready for `step`, is given the step's label. One whose
+   * label was changed meanwhile keeps it.
    */
-  sessionStarted(issueId: number, actor: LabelActor): void {
-    if (this.progress(issueId).kind !== 'not-started') return
-    const label = this.labelIds.get(firstStep(this.workflow).label.name)!
+  sessionStarted(issueId: number, step: WorkflowStep, actor: LabelActor): void {
+    const progress = this.progress(issueId)
+    const waiting =
+      progress.kind === 'not-started'
+        ? firstStep(this.workflow).name === step.name
+        : progress.kind === 'ready' && progress.step.name === step.name
+    if (!waiting) return
+    const label = this.labelIds.get(step.label.name)!
     try {
       this.labels.changeIssueLabels(issueId, { add: [label] }, actor)
     } catch (error) {

@@ -71,14 +71,14 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
  * and on its page, where it is the same button. While a session opened from
  * the issue is in the sidebar, it shows the one opened last. Otherwise it
  * starts work on the issue with Claude Code, at the step of its workflow it
- * is at, or the first, in the issue's worktree, which it creates when there
- * is none; it cannot be used while Claude Code is not found, the issue has
- * no project, waits on issues or its workflow is finished. It has only an
- * icon: a paper plane, which turns into Claude Code's mark under the pointer
- * or with the keyboard focus while it can be used, and into a spinner while
- * the issue's worktree is created. Its tooltip says what it does, or why it
- * cannot be used now, also while it is disabled: the tooltip's trigger
- * wraps the button.
+ * is ready for or at, or the first, in the issue's worktree, which it
+ * creates when there is none; it cannot be used while Claude Code is not
+ * found, the issue has no project, waits on issues or its workflow is
+ * finished. It has only an icon: a paper plane, which turns into Claude
+ * Code's mark under the pointer or with the keyboard focus while it can be
+ * used, and into a spinner while the issue's worktree is created. Its
+ * tooltip says what it does, or why it cannot be used now, also while it is
+ * disabled: the tooltip's trigger wraps the button.
  */
 export function IssueStartButton({
   issue,

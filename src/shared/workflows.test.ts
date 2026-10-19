@@ -5,6 +5,7 @@ import {
   endLabelNamed,
   firstStep,
   stepOfLabel,
+  stepOfReadyLabel,
   workflowLabels,
   workflowProgress,
   type WorkflowDefinition,
@@ -39,6 +40,14 @@ function sample(): WorkflowDefinition {
   }
 }
 
+/** The sample, with a ready label for Make, which Look may also end at, stopping. */
+function withReady(): WorkflowDefinition {
+  const workflow = sample()
+  workflow.steps[1]!.readyLabel = { name: 'To make', color: 'f2c94c', description: 'Later' }
+  workflow.steps[0]!.outcomes.push({ label: 'To make', instruction: 'Later.', goOn: false })
+  return workflow
+}
+
 describe('the built-in workflow', () => {
   it('passes the same check as any other workflow definition', () => {
     expect(checkWorkflow(BUILT_IN_WORKFLOW)).toEqual({ ok: true, workflow: BUILT_IN_WORKFLOW })
@@ -51,21 +60,25 @@ describe('the built-in workflow', () => {
     expect(checkWorkflow(read)).toEqual({ ok: true, workflow: BUILT_IN_WORKFLOW })
   })
 
-  it('is Spec-driven, with the group Spec-driven, and has one step for now: Triage', () => {
+  it('is Spec-driven, with the group Spec-driven, and has two steps for now: Triage and Design', () => {
     expect(BUILT_IN_WORKFLOW.name).toBe('Spec-driven')
     expect(BUILT_IN_WORKFLOW.group).toBe('Spec-driven')
-    expect(BUILT_IN_WORKFLOW.steps.map((step) => [step.name, step.label.name])).toEqual([
-      ['Triage', 'triaging'],
+    expect(
+      BUILT_IN_WORKFLOW.steps.map((step) => [step.name, step.readyLabel?.name, step.label.name]),
+    ).toEqual([
+      ['Triage', undefined, 'triaging'],
+      ['Design', 'ready to design', 'designing'],
     ])
     expect(workflowLabels(BUILT_IN_WORKFLOW).map((label) => label.name)).toEqual([
       'triaging',
       'ready to design',
+      'designing',
       'waiting on sub-issues',
     ])
     expect(firstStep(BUILT_IN_WORKFLOW).name).toBe('Triage')
   })
 
-  it('ends Triage at ready to design or waiting on sub-issues, stopping either way', () => {
+  it('ends Triage at ready to design or waiting on sub-issues, stopping either way, and Design without an outcome', () => {
     expect(
       BUILT_IN_WORKFLOW.steps.map((step) => ({
         step: step.name,
@@ -79,19 +92,17 @@ describe('the built-in workflow', () => {
           ['waiting on sub-issues', false],
         ],
       },
+      { step: 'Design', outcomes: [] },
     ])
   })
 
-  it('completes an issue split once its sub-issues are, and not one ready to design', () => {
+  it('completes an issue split once its sub-issues are', () => {
     expect(
       BUILT_IN_WORKFLOW.endLabels.map(({ name, completeWithSubIssues }) => [
         name,
         completeWithSubIssues,
       ]),
-    ).toEqual([
-      ['ready to design', false],
-      ['waiting on sub-issues', true],
-    ])
+    ).toEqual([['waiting on sub-issues', true]])
   })
 
   it('tells the agent what each outcome means, and how to write a split back', () => {
@@ -130,14 +141,45 @@ describe('checkWorkflow', () => {
     }
   })
 
-  it('refuses a workflow without steps, and a step without outcomes', () => {
-    expect(checkWorkflow({ ...sample(), steps: [] }).ok).toBe(false)
+  it('refuses a workflow without steps', () => {
+    expect(checkWorkflow({ ...sample(), steps: [] })).toEqual({
+      ok: false,
+      problems: ['steps: The workflow has no step.'],
+    })
+  })
+
+  it('takes a step without outcomes, which stops once it is done', () => {
     const workflow = sample()
     workflow.steps[1]!.outcomes = []
+    expect(checkWorkflow(workflow)).toEqual({ ok: true, workflow })
+  })
+
+  it('takes a ready label for a step, which an outcome may change to, and stop', () => {
+    expect(checkWorkflow(withReady())).toEqual({ ok: true, workflow: withReady() })
+  })
+
+  it('refuses an outcome that goes on after a ready label', () => {
+    const workflow = withReady()
+    workflow.steps[0]!.outcomes[2]!.goOn = true
     expect(checkWorkflow(workflow)).toEqual({
       ok: false,
-      problems: ['steps.1.outcomes: A step has no outcome.'],
+      problems: [
+        'steps.0.outcomes.2.goOn: The outcome changes to the ready label "To make", which waits for a session of its step: it cannot go on.',
+      ],
     })
+  })
+
+  it('refuses a ready label with the name of another label, whatever its case', () => {
+    const workflow = withReady()
+    workflow.steps[0]!.outcomes.pop()
+    workflow.steps[1]!.readyLabel!.name = 'looking'
+    expect(checkWorkflow(workflow)).toEqual({
+      ok: false,
+      problems: ['steps.1.readyLabel: Two labels have the name "looking".'],
+    })
+    const color = withReady()
+    color.steps[1]!.readyLabel!.color = 'F2C94C'
+    expect(checkWorkflow(color).ok).toBe(false)
   })
 
   it('refuses an outcome that changes to a label the workflow does not have', () => {
@@ -220,6 +262,13 @@ describe('workflowProgress', () => {
     })
   })
 
+  it("is ready for the step of a step's ready label, whatever its case", () => {
+    expect(workflowProgress(withReady(), ['bug', 'to MAKE'])).toEqual({
+      kind: 'ready',
+      step: withReady().steps[1],
+    })
+  })
+
   it('is finished with an end label', () => {
     expect(workflowProgress(sample(), ['bug', 'Dropped'])).toEqual({
       kind: 'finished',
@@ -232,5 +281,20 @@ describe('workflowProgress', () => {
     expect(stepOfLabel(sample(), 'Made')).toBeUndefined()
     expect(endLabelNamed(sample(), 'made')?.name).toBe('Made')
     expect(endLabelNamed(sample(), 'Looking')).toBeUndefined()
+    expect(stepOfReadyLabel(withReady(), 'TO MAKE')?.name).toBe('Make')
+    expect(stepOfReadyLabel(withReady(), 'Making')).toBeUndefined()
+    expect(stepOfLabel(withReady(), 'To make')).toBeUndefined()
+  })
+})
+
+describe('workflowLabels', () => {
+  it("lists each step's ready label before its label, in the order of the steps, then the end labels", () => {
+    expect(workflowLabels(withReady()).map((label) => label.name)).toEqual([
+      'Looking',
+      'To make',
+      'Making',
+      'Made',
+      'Dropped',
+    ])
   })
 })

@@ -19,12 +19,14 @@ function splitInstruction(confirmed: string, label: string): string {
 
 /**
  * The workflow Hoot comes with, as data in the format of any other. It has
- * one step for now, Triage, which judges whether the issue is one piece of
- * work or several, and stops either way: an issue of one piece ends at
- * ready to design; one of several is split into sub-issues, each at ready to
- * design, and ends at waiting on sub-issues, which it is completed with once
- * its sub-issues are. The labels of the group Spec-driven mark them. It passes the same
- * check as any other definition.
+ * two steps for now. Triage judges whether the issue is one piece of work or
+ * several, and stops either way: an issue of one piece is then ready to
+ * design; one of several is split into sub-issues, each ready to design, and
+ * ends at waiting on sub-issues, which it is completed with once its
+ * sub-issues are. Design, started from ready to design, interviews the user
+ * until every decision about the issue is settled, sums up what was settled
+ * and stops, leaving the issue at designing. The labels of the group
+ * Spec-driven mark them. It passes the same check as any other definition.
  */
 const SPEC_DRIVEN: WorkflowDefinition = {
   name: 'Spec-driven',
@@ -64,14 +66,43 @@ const SPEC_DRIVEN: WorkflowDefinition = {
         },
       ],
     },
+    {
+      name: 'Design',
+      readyLabel: {
+        name: 'ready to design',
+        color: 'bb87fc',
+        description: 'One piece of work, ready for its design',
+      },
+      label: {
+        name: 'designing',
+        color: '5e6ad2',
+        description: 'Settling every decision about the issue',
+      },
+      prompt: [
+        '## Interview',
+        '',
+        "Interview the user until every decision is settled. Model the work as a design tree: a decision's prerequisites are the upstream decisions and environment facts its options depend on, and its answer opens the decisions below it.",
+        '',
+        'The frontier is every unsettled decision whose prerequisites are all settled. Two frontier decisions never depend on each other, so a dependency chain settles one link per round.',
+        '',
+        'Ask the user only for decisions and for facts only they can provide. A choice the implementer may not replace is a decision, whoever proposed it. Every other fact is a prerequisite you settle yourself from the environment, even one the user stated: what they say about the environment may never have been measured, and a false premise found now costs a question, found in implementation costs the build. A check that contradicts the user is a decision to put to them. While a lookup is running, its dependents stay out of the frontier.',
+        '',
+        "Each round is one call of the harness's structured question tool, covering as much of the frontier as its per-call limit allows, starting with the questions that unblock the most. Without such a tool, ask in the reply with numbered options. In each question, put the recommended option first with its main reason and cost. Wait for the answers, update the tree, recompute the frontier, and ask the next round.",
+        '',
+        'The interview ends when the frontier is empty: every decision is settled and nothing is left silently assumed. Do not act on the result until the user confirms the summary.',
+        '',
+        '## Summary',
+        '',
+        'When the frontier is empty, present a concise summary of what was settled:',
+        '',
+        '- the outcome and its boundaries',
+        '- the requirements and decisions the work must honor, each as the user settled it',
+        '- the facts relied on, each with how it was established, and the risks accepted',
+      ].join('\n'),
+      outcomes: [],
+    },
   ],
   endLabels: [
-    {
-      name: 'ready to design',
-      color: 'bb87fc',
-      description: 'One piece of work, ready for its design',
-      completeWithSubIssues: false,
-    },
     {
       name: 'waiting on sub-issues',
       color: '95a2b3',

@@ -8,7 +8,8 @@ import type { WorkflowProgress } from './workflows'
 
 const notStarted: WorkflowProgress = { kind: 'not-started' }
 const atTriage: WorkflowProgress = { kind: 'at-step', step: BUILT_IN_WORKFLOW.steps[0]! }
-const split: WorkflowProgress = { kind: 'finished', label: BUILT_IN_WORKFLOW.endLabels[1]! }
+const readyToDesign: WorkflowProgress = { kind: 'ready', step: BUILT_IN_WORKFLOW.steps[1]! }
+const split: WorkflowProgress = { kind: 'finished', label: BUILT_IN_WORKFLOW.endLabels[0]! }
 
 /** The tools state once a detection has found Claude Code, or has not. */
 function detected(claude: boolean): ToolsState {
@@ -49,6 +50,7 @@ describe('startBlockers', () => {
   it('has none once Claude Code is found, for an issue in a project that waits on nothing', () => {
     expect(startBlockers(detected(true), inProject, [], notStarted)).toEqual([])
     expect(startBlockers(detected(true), inProject, [], atTriage)).toEqual([])
+    expect(startBlockers(detected(true), inProject, [], readyToDesign)).toEqual([])
   })
 
   it('says Claude Code is still being checked for, or is not installed', () => {

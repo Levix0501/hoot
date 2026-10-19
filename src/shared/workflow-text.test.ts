@@ -10,7 +10,7 @@ import {
 } from './workflow-text'
 import type { WorkflowDefinition, WorkflowStep } from './workflows'
 
-const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
+const [triage, design] = BUILT_IN_WORKFLOW.steps as [WorkflowStep, WorkflowStep]
 
 /** The prompt of the built-in Triage, word for word. */
 const TRIAGE_PROMPT = [
@@ -26,6 +26,29 @@ const TRIAGE_PROMPT = [
   '5. Ask me to confirm the split. If I object or ask for changes, revise it and ask me again, until I confirm.',
   '',
   "Write titles and descriptions in the issue's language. Where the issue leaves open something that changes your answer, say what you assumed.",
+].join('\n')
+
+/** The prompt of the built-in Design, word for word. */
+const DESIGN_PROMPT = [
+  '## Interview',
+  '',
+  "Interview the user until every decision is settled. Model the work as a design tree: a decision's prerequisites are the upstream decisions and environment facts its options depend on, and its answer opens the decisions below it.",
+  '',
+  'The frontier is every unsettled decision whose prerequisites are all settled. Two frontier decisions never depend on each other, so a dependency chain settles one link per round.',
+  '',
+  'Ask the user only for decisions and for facts only they can provide. A choice the implementer may not replace is a decision, whoever proposed it. Every other fact is a prerequisite you settle yourself from the environment, even one the user stated: what they say about the environment may never have been measured, and a false premise found now costs a question, found in implementation costs the build. A check that contradicts the user is a decision to put to them. While a lookup is running, its dependents stay out of the frontier.',
+  '',
+  "Each round is one call of the harness's structured question tool, covering as much of the frontier as its per-call limit allows, starting with the questions that unblock the most. Without such a tool, ask in the reply with numbered options. In each question, put the recommended option first with its main reason and cost. Wait for the answers, update the tree, recompute the frontier, and ask the next round.",
+  '',
+  'The interview ends when the frontier is empty: every decision is settled and nothing is left silently assumed. Do not act on the result until the user confirms the summary.',
+  '',
+  '## Summary',
+  '',
+  'When the frontier is empty, present a concise summary of what was settled:',
+  '',
+  '- the outcome and its boundaries',
+  '- the requirements and decisions the work must honor, each as the user settled it',
+  '- the facts relied on, each with how it was established, and the risks accepted',
 ].join('\n')
 
 /** A workflow of two steps: Look, which goes on to Make or stops, and Make. */
@@ -57,9 +80,10 @@ const SAMPLE: WorkflowDefinition = {
 
 const [look, make] = SAMPLE.steps as [WorkflowStep, WorkflowStep]
 
-describe('the built-in prompt', () => {
-  it('is word for word as settled', () => {
+describe('the built-in prompts', () => {
+  it('are word for word as settled', () => {
     expect(triage.prompt).toBe(TRIAGE_PROMPT)
+    expect(design.prompt).toBe(DESIGN_PROMPT)
   })
 })
 
@@ -87,6 +111,7 @@ describe('goesOn', () => {
     expect(goesOn(look)).toBe(true)
     expect(goesOn(make)).toBe(false)
     expect(goesOn(triage)).toBe(false)
+    expect(goesOn(design)).toBe(false)
   })
 })
 
@@ -114,6 +139,15 @@ describe('outcomeInstructions', () => {
       '  Tidy up.',
       '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
     ])
+  })
+
+  it('says to stop once a step without outcomes is done, changing no label', () => {
+    expect(outcomeInstructions(SAMPLE, { outcomes: [] }, 'ISS-7')).toBe(
+      'When this step is done, stop.',
+    )
+    expect(outcomeInstructions(BUILT_IN_WORKFLOW, design, 'ISS-7')).toBe(
+      'When this step is done, stop.',
+    )
   })
 
   it('ends Triage at ready to design or waiting on sub-issues, stopping either way', () => {
@@ -159,6 +193,26 @@ describe('firstMessage', () => {
 
   it('ends without a line break', () => {
     expect(message.endsWith('\n')).toBe(false)
+  })
+
+  it('gives Design its prompt, then says to stop, without the file of the workflow', () => {
+    expect(
+      firstMessage({
+        workflow: BUILT_IN_WORKFLOW,
+        identifier: 'ISS-7',
+        issueFile: '/work/a/.hoot/tmp/issue-x/issue.md',
+        workflowFile: '/work/a/.hoot/tmp/issue-x/workflow.md',
+        branch: 'iss-7-fix-it',
+        step: design,
+      }),
+    ).toBe(
+      [
+        'The issue is in `/work/a/.hoot/tmp/issue-x/issue.md`.',
+        'This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue.',
+        DESIGN_PROMPT,
+        'When this step is done, stop.',
+      ].join('\n\n'),
+    )
   })
 
   it('says where the file of the workflow is too when the step may go on to another', () => {
@@ -229,5 +283,37 @@ describe('workflowFileText', () => {
         '',
       ].join('\n'),
     )
+  })
+
+  it("names a step's ready label with its label, and says that a step without outcomes stops", () => {
+    const workflow: WorkflowDefinition = {
+      ...SAMPLE,
+      steps: [
+        look,
+        {
+          ...make,
+          readyLabel: { name: 'to make', color: 'f2c94c', description: '' },
+          outcomes: [],
+        },
+      ],
+    }
+    const text = workflowFileText(workflow, 'ISS-7')
+    expect(text).toContain(
+      "it carries: none before it starts, a step's ready label while it waits for a session of that step, the label of the step it is at, or an end label once it is finished.",
+    )
+    expect(text).toContain(
+      [
+        '## 2. Make',
+        '',
+        'Label: `Making`, or `to make` while the issue waits for a session of it',
+        '',
+        'Make: build it.',
+        '',
+        'When this step is done, stop.',
+        '',
+        '## End labels',
+      ].join('\n'),
+    )
+    expect(text).toContain('Label: `Looking`\n')
   })
 })

@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { createBirpc } from 'birpc'
 import type { IPty } from 'node-pty'
 import type { PtyHostEvents, PtyHostFunctions } from '../shared/pty-protocol'
+import { CONPTY_OPTIONS } from './conpty'
 import { endWindowsSession } from './end-windows-session'
 
 const require = createRequire(import.meta.url)
@@ -23,6 +24,7 @@ const functions: PtyHostFunctions = {
       cwd: request.cwd,
       env: request.env,
       encoding: 'utf8',
+      ...CONPTY_OPTIONS,
     })
     sessions.set(request.id, child)
     child.onData((data) => void main.data(request.id, data))

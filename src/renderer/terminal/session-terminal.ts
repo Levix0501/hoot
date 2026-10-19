@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { api } from '../lib/api'
 import { connectClipboard } from './terminal-clipboard'
 import { TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from './terminal-font'
 import { terminalTheme, type ColorScheme } from './themes'
@@ -42,6 +43,11 @@ export function createSessionTerminal(scheme: ColorScheme): SessionTerminal {
     // the kitty keyboard protocol.
     vtExtensions: { kittyKeyboard: false },
     theme: terminalTheme(scheme),
+    // On Windows, sessions run in node-pty's ConPTY, which reflows its own
+    // screen when the terminal is resized, the line with the cursor included,
+    // and leaves the terminal to reflow its screen the same way: set up as VS
+    // Code sets up its terminals with that ConPTY.
+    ...(api.windowsPty && { windowsPty: api.windowsPty, reflowCursorLine: true }),
   })
   const fit = new FitAddon()
   terminal.loadAddon(fit)

@@ -10,6 +10,7 @@ import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
 import type { UpdateStatus } from './updates'
 import type { WindowControls } from './window-controls'
+import type { WindowsPty } from './windows-pty'
 import type {
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
@@ -303,6 +304,11 @@ export interface HootApi {
    * and sends to it from the new session menu. On macOS and Windows.
    */
   manageAgents: boolean
+  /**
+   * The pseudo terminal sessions run in on Windows, which their terminals
+   * are set up for; none elsewhere.
+   */
+  windowsPty: WindowsPty | undefined
   getStartupState(): Promise<StartupState>
   /** What the About page tells of Hoot and of what it runs on. */
   getAppInfo(): Promise<AppInfo>

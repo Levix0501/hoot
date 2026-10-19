@@ -14,8 +14,8 @@ const closed = new WeakSet<IPty>()
  * under it, found by its parent, as Claude Code ends its background commands
  * when it is quit with Ctrl+C. It runs first, while the session's process is
  * running: once a process has exited, those it started are no longer found
- * under it. node-pty then ends whatever else is attached to the session's
- * console, and closes the console.
+ * under it. node-pty then closes the session's console, which ends whatever
+ * is still attached to it, such as a program whose parent has already ended.
  */
 export function endWindowsSession(session: IPty): Promise<void> {
   return new Promise((resolve) => {

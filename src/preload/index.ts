@@ -3,6 +3,7 @@ import { fileManagerName } from '../shared/file-manager'
 import { IpcChannel, type HootApi } from '../shared/ipc'
 import { managesAgents } from '../shared/managed-agents'
 import { windowControlsFromArguments } from '../shared/window-controls'
+import { windowsPtyFor } from '../shared/windows-pty'
 
 function subscribe<Args extends unknown[]>(
   channel: string,
@@ -21,6 +22,7 @@ const api: HootApi = {
   windowsClipboardKeys: process.platform === 'win32',
   fileManager: fileManagerName(process.platform),
   manageAgents: managesAgents(process.platform),
+  windowsPty: windowsPtyFor(process.platform, process.getSystemVersion()),
   getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),
   getAppInfo: () => ipcRenderer.invoke(IpcChannel.getAppInfo),
   revealDatabase: () => ipcRenderer.send(IpcChannel.revealDatabase),

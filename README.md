@@ -18,15 +18,18 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   Right-click a project, or use its `⋯` menu, to remove it from the list (its files and its issues
   are never touched).
 - **The project row**: a project's row in the sidebar shows its name, and how many of its
-  [issues](#issues) are neither done nor canceled. Click it to expand or collapse the project: its
-  sessions and [worktrees](#worktrees) are listed below it while it is expanded, and slide open and
-  closed as it expands and collapses (or show and hide at once when macOS is set to reduce motion);
-  a project with neither shows **No sessions** instead. Each project stays expanded or collapsed as
-  you left it, also after Hoot quits; a project added to the list is expanded. Point at the row, or
-  move the keyboard focus into it, to show its buttons: **Issues** shows the
-  [issue list](#issues) with only the project checked in its **Project** dropdown (leaving the
-  project expanded or collapsed), `+` starts a session or creates a worktree, and `⋯` removes the
-  project from the list.
+  [issues](#issues) are neither done nor canceled. While the project is collapsed, a light right of
+  its name shows the state of its sessions that needs you most (in its main worktree and its
+  worktrees alike), in this order: Waiting for you, Ended unexpectedly, Stopped by an error, Ended,
+  Done; pointing at it counts the sessions in each, such as "2 sessions waiting for you, 1 session
+  done". Click it to expand or collapse the project: its sessions and [worktrees](#worktrees) are
+  listed below it while it is expanded, and slide open and closed as it expands and collapses (or
+  show and hide at once when macOS is set to reduce motion); a project with neither shows **No
+  sessions** instead. Each project stays expanded or collapsed as you left it, also after Hoot
+  quits; a project added to the list is expanded. Point at the row, or move the keyboard focus into
+  it, to show its buttons: **Issues** shows the [issue list](#issues) with only the project checked
+  in its **Project** dropdown (leaving the project expanded or collapsed), `+` starts a session or
+  creates a worktree, and `⋯` removes the project from the list.
 - **Sessions**: start Claude Code (`claude`), Codex (`codex`), OpenCode (`opencode`) or your
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
@@ -35,25 +38,41 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   [permission level](#permission-levels) (a Claude Code session
   [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell
   (on Windows, the shell is PowerShell: PowerShell 7 when it is on `Path`, or else the Windows
-  PowerShell that comes with Windows). A tool's command is the first on your login shell's `PATH`;
-  Hoot looks for them when it starts. On Windows, where the command npm or pnpm installs is a
-  batch file, the session starts what it points to instead, the agent's program or its script
-  with Node.js, so that `cmd.exe` never reads the arguments. To the environment of each session's
-  process Hoot adds the terminal's variables (`TERM`, `COLORTERM`, `TERM_PROGRAM` and
-  `TERM_PROGRAM_VERSION`) and what [`hoot`](#the-hoot-command) needs: the variables
-  `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the folder `hoot` is in, first
-  on `PATH`. Tools that are not
+  PowerShell that comes with Windows). Claude Code also gets, with `--settings`, the hooks that
+  tell Hoot what it is doing (see **Session lights**), on top of your own hooks. A tool's command
+  is the first on your login shell's `PATH`; Hoot looks for them when it starts. On Windows, where
+  the command npm or pnpm installs is a batch file, the session starts what it points to instead,
+  the agent's program or its script with Node.js, so that `cmd.exe` never reads the arguments. To
+  the environment of each session's process Hoot adds the terminal's variables (`TERM`,
+  `COLORTERM`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION`) and what [`hoot`](#the-hoot-command)
+  needs: the variables `HOOT_SOCKET`, `HOOT_SESSION_ID`, `HOOT_NODE` and `HOOT_CLI`, and the
+  folder `hoot` is in, first on `PATH`. Tools that are not
   installed are shown disabled, with **Install in Settings…** below them, which shows the
   [Agents](#agents) page, and **Re-detect Tools**, the
   last item of the new session menu, looks for them again at any time (on Windows, in the folders
   `Path` had when Hoot started).
-- **Many sessions at once**: any number of sessions can run at the same time, in the same project
-  or in different ones. Each project lists its sessions below it in the sidebar while it is
-  expanded, in the order they started, with the tool's own icon, the
-  session's name and its state: a green dot while it runs, or how it ended. Click a session to show
-  it; the keyboard focus goes to its terminal. A collapsed project expands when one of its sessions
-  is shown, however it is shown. Sessions that are not shown keep running, and their output is all
-  there when you come back to them.
+- **Many sessions at once**: any number of sessions can run at the same time, in the same project or
+  in different ones. Each project lists its sessions below it in the sidebar while it is expanded,
+  in the order they started, each with the light of its state, the tool's own icon and the session's
+  name. Click a session to show it; the keyboard focus goes to its terminal. A collapsed project
+  expands when one of its sessions is shown, however it is shown. Sessions that are not shown keep
+  running, and their output is all there when you come back to them.
+- **Session lights**: left of a session's icon, a light shows its state, which the light names when
+  you point at it, and the session header shows the same light with the name beside it. Every
+  session is **Starting** (a gray spinner) until its process runs, and once it has ended **Ended**
+  (a gray ring; the tooltip says how it ended, and the header says it briefly, such as "Exited
+  (1)"), or **Ended unexpectedly** (a red dot) when the terminal host stopped. While it runs, a
+  Codex, OpenCode or shell session is **Running** (a green dot), and a Claude Code session is
+  **Working** (a spinner) while it works on a message, **Waiting for you** (an amber dot) while it
+  asks you to approve a tool call or a plan, asks you a question, or shows an MCP server's request
+  for input, **Stopped by an error** (a red dot) after an API error ends a turn, until the next one
+  starts, **Done** (a blue dot) when it stopped working while you were not looking, until you look,
+  and **Idle** (a green dot) otherwise. You are looking at a session while it is shown and Hoot's
+  window is the active one. Waiting for you and Stopped by an error come from hooks that Hoot adds
+  to every Claude Code session it starts: they run `hoot` in the background, print nothing and
+  decide nothing, and `/hooks` lists them. Your own hooks still run, and with
+  `"disableAllHooks": true` in your settings, neither yours nor Hoot's run, and those sessions show
+  only Working, Done and Idle. With macOS set to reduce motion, spinners stand still.
 - **Names**: a session is named after the title its program gives the terminal (without the ✳, ◐
   or ◑ that Claude Code puts first), or after its tool until there is one. Double-click a session,
   or choose **Rename** from its context menu, to name it yourself: Enter saves, Esc cancels, and an

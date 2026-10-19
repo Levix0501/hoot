@@ -178,8 +178,10 @@ const sessionStartAnswer = z.union([
 const agentId = z.enum(CODING_TOOL_IDS)
 /**
  * Text put on the clipboard: what is selected in a session's terminal, up to
- * its whole scrollback; an issue's identifier or title; what the About page
- * tells of Hoot; or the line that puts Hoot's folder of agents on PATH.
+ * its whole scrollback, or what one of its programs puts there, which
+ * xterm.js takes in sequences of at most 10 million characters; an issue's
+ * identifier or title; what the About page tells of Hoot; or the line that
+ * puts Hoot's folder of agents on PATH.
  */
 const clipboardText = z.string().max(10_000_000)
 

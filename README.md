@@ -70,7 +70,7 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   and **Idle** (a green dot) otherwise. You are looking at a session while it is shown and Hoot's
   window is the active one. Waiting for you and Stopped by an error come from hooks that Hoot adds
   to every Claude Code session it starts: they run `hoot` in the background, print nothing and
-  decide nothing, and `/hooks` lists them. Your own hooks still run, and with
+  decide nothing. Your own hooks still run, and with
   `"disableAllHooks": true` in your settings, neither yours nor Hoot's run, and those sessions show
   only Working, Done and Idle. With macOS set to reduce motion, spinners stand still.
 - **Names**: a session is named after the title its program gives the terminal (without the ✳, ◐

@@ -253,8 +253,9 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 
 /**
  * The event of a Claude Code hook whose input is `input`, the JSON Claude
- * Code gives a hook on standard input, when it is one Hoot takes, and whether
- * a subagent met it (the input names the agent); `null` for any other input.
+ * Code gives a hook on standard input, when it is one Hoot takes, whether a
+ * subagent met it (the input names the agent), and the turn it belongs to;
+ * `null` for any other input.
  */
 export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
@@ -264,13 +265,18 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     return null
   }
   if (typeof value !== 'object' || value === null) return null
-  const { hook_event_name: name, agent_id: agent } = value as {
-    hook_event_name?: unknown
-    agent_id?: unknown
-  }
+  const {
+    hook_event_name: name,
+    agent_id: agent,
+    prompt_id: turn,
+  } = value as { hook_event_name?: unknown; agent_id?: unknown; prompt_id?: unknown }
   const event = HOOK_EVENTS.find((candidate) => candidate === name)
   if (event === undefined) return null
-  return { event, subagent: typeof agent === 'string' && agent !== '' }
+  return {
+    event,
+    subagent: typeof agent === 'string' && agent !== '',
+    turn: typeof turn === 'string' && turn !== '' ? turn : null,
+  }
 }
 
 /**

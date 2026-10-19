@@ -1744,27 +1744,46 @@ describe('hoot session start', () => {
   })
 })
 
-/** The input Claude Code gives a hook on standard input, for an event, met by a subagent if `agent` names one. */
-const hookInput = (event: string, agent?: string) =>
+/** The id Claude Code gives the turn of the hooks in these tests. */
+const TURN = '1586a9b7-c200-4274-9799-b0abf09a7d2c'
+
+/**
+ * The input Claude Code gives a hook on standard input, for an event in the
+ * turn `turn` (none if `null`), met by a subagent if `agent` names one.
+ */
+const hookInput = (event: string, agent?: string, turn: string | null = TURN) =>
   JSON.stringify({
     session_id: 'b2b7c1f0-0000-4000-8000-000000000000',
     transcript_path: '/tmp/transcript.jsonl',
     cwd: '/work/gamma',
+    ...(turn === null ? {} : { prompt_id: turn }),
     ...(agent === undefined ? {} : { agent_id: agent, agent_type: 'general-purpose' }),
     hook_event_name: event,
   })
 
 /** What the test Hoot was told of an event of a hook of a session, as hoot ran in the tests. */
-const reported = (sessionId: string, event: string, subagent = false) => ({
+const reported = (
+  sessionId: string,
+  event: string,
+  subagent = false,
+  turn: string | null = TURN,
+) => ({
   sessionId,
   event,
   startedAt: STARTED_AT,
   subagent,
+  turn,
 })
 
 describe('hoot hook', () => {
   it("reports to Hoot each event Hoot takes, from the hook's input, with when hoot started, and prints nothing", async () => {
-    for (const event of ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure']) {
+    for (const event of [
+      'PermissionRequest',
+      'Elicitation',
+      'UserPromptSubmit',
+      'Stop',
+      'StopFailure',
+    ]) {
       expect(await run(['hook'], { stdin: hookInput(event) })).toEqual({
         code: 0,
         stdout: '',
@@ -1780,13 +1799,21 @@ describe('hoot hook', () => {
     expect(
       await run(['hook'], { stdin: hookInput('PermissionRequest', 'a8d85a123a0a052c3') }),
     ).toEqual({ code: 0, stdout: '', stderr: '' })
+    // Without the id of its turn.
+    expect(await run(['hook'], { stdin: hookInput('StopFailure', undefined, null) })).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
     expect(hoot.hookEvents).toEqual([
       reported('gamma-session', 'PermissionRequest'),
       reported('gamma-session', 'Elicitation'),
+      reported('gamma-session', 'UserPromptSubmit'),
       reported('gamma-session', 'Stop'),
       reported('gamma-session', 'StopFailure'),
       reported('hotel-session', 'Stop'),
       reported('gamma-session', 'PermissionRequest', true),
+      reported('gamma-session', 'StopFailure', false, null),
     ])
   })
 
@@ -1798,15 +1825,21 @@ describe('hoot hook', () => {
     expect(hookEventOf(Buffer.from(hookInput('StopFailure')))).toEqual({
       event: 'StopFailure',
       subagent: false,
+      turn: TURN,
     })
     expect(hookEventOf(Buffer.from(hookInput('Elicitation', 'a1')))).toEqual({
       event: 'Elicitation',
       subagent: true,
+      turn: TURN,
     })
-    expect(hookEventOf(Buffer.from(hookInput('Stop', '')))).toEqual({
+    expect(hookEventOf(Buffer.from(hookInput('Stop', '', '')))).toEqual({
       event: 'Stop',
       subagent: false,
+      turn: null,
     })
+    expect(
+      hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 'Stop', prompt_id: 7 }))),
+    ).toEqual({ event: 'Stop', subagent: false, turn: null })
     expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
   })
 

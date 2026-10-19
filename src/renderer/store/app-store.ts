@@ -60,7 +60,7 @@ import type {
   WorktreeInfo,
   WorktreeInspection,
 } from '../../shared/worktrees'
-import { afterHookEvent, afterTitle, type Attention } from '../lib/session-state'
+import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib/session-state'
 import { api } from '../lib/api'
 import { isOnList, type ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
@@ -130,10 +130,17 @@ export interface UiSession {
    */
   workingSince: number | null
   /**
-   * For Claude Code, what its hooks last said it stopped for, until its next
-   * turn starts; see `sessionState`.
+   * For Claude Code, the dialog its hooks last said waits for the user, until
+   * it works again; see `sessionState`.
    */
   attention: Attention
+  /** For Claude Code, the latest turns its hooks told of; see `afterHookEvent`. */
+  turns: readonly string[]
+  /**
+   * For Claude Code, the turn its hooks said stopped on an API error, until a
+   * later one starts; see `sessionState`.
+   */
+  failure: Failure | null
   /**
    * For Claude Code, whether it stopped working while the session was not
    * being viewed, and the session has not been viewed since.
@@ -725,6 +732,8 @@ function fromInfo(info: SessionInfo): UiSession {
     title: '',
     workingSince: null,
     attention: null,
+    turns: [],
+    failure: null,
     unread: false,
     customName: null,
     closing: false,
@@ -1429,6 +1438,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           title: '',
           workingSince: null,
           attention: null,
+          turns: [],
+          failure: null,
           unread: false,
           customName: null,
           closing: false,

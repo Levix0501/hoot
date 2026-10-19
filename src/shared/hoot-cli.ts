@@ -190,10 +190,17 @@ export interface SessionRequest {
  * which hoot reports to Hoot to show what the session is doing: Claude Code
  * asks the user to approve a tool call or a plan, or to answer a question
  * (`PermissionRequest`); an MCP server asks the user for input
- * (`Elicitation`); a turn ends (`Stop`); and a turn stops on an API error
- * (`StopFailure`).
+ * (`Elicitation`); a turn starts, on a message of the user's or the
+ * notification that a background agent is done (`UserPromptSubmit`); a turn
+ * ends (`Stop`); and a turn stops on an API error (`StopFailure`).
  */
-export const HOOK_EVENTS = ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure'] as const
+export const HOOK_EVENTS = [
+  'PermissionRequest',
+  'Elicitation',
+  'UserPromptSubmit',
+  'Stop',
+  'StopFailure',
+] as const
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
@@ -211,6 +218,11 @@ export interface HookEventReport {
    * agent, met the event, such as a background agent asking to run a command.
    */
   subagent: boolean
+  /**
+   * The turn the event belongs to, by the id Claude Code gives it (the
+   * hook's `prompt_id`); `null` when the hook's input has none.
+   */
+  turn: string | null
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */

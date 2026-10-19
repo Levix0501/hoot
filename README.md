@@ -65,9 +65,12 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   Codex, OpenCode or shell session is **Running** (a green dot), and a Claude Code session is
   **Working** (a spinner) while it works on a message, **Waiting for you** (an amber dot) while it
   asks you to approve a tool call or a plan, asks you a question, or shows an MCP server's request
-  for input, **Stopped by an error** (a red dot) after an API error ends a turn, until the next one
-  starts, **Done** (a blue dot) when it stopped working while you were not looking, until you look,
-  and **Idle** (a green dot) otherwise. You are looking at a session while it is shown and Hoot's
+  for input (also for one of its background agents), **Stopped by an error** (a red dot) after an
+  API error ends a turn, until the next one starts (your next message, or Claude taking the news
+  that a background agent is done; meanwhile a background agent that still works or asks you
+  something shows first, and a background agent's own API error ends no turn), **Done** (a blue
+  dot) when it stopped working while you were not looking, until you look, and **Idle** (a green
+  dot) otherwise. You are looking at a session while it is shown and Hoot's
   window is the active one. Waiting for you and Stopped by an error come from hooks that Hoot adds
   to every Claude Code session it starts: they run `hoot` in the background, print nothing and
   decide nothing. Your own hooks still run, and with

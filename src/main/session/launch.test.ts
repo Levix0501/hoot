@@ -240,6 +240,7 @@ describe('resolveLaunch', () => {
       hooks: {
         PermissionRequest: [{ hooks: [hook] }],
         Elicitation: [{ hooks: [hook] }],
+        UserPromptSubmit: [{ hooks: [hook] }],
         Stop: [{ hooks: [hook] }],
         StopFailure: [{ hooks: [hook] }],
       },

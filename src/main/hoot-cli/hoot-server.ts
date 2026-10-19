@@ -126,6 +126,7 @@ const hookEventReport = z.strictObject({
   event: z.enum(HOOK_EVENTS),
   startedAt: z.number().finite(),
   subagent: z.boolean(),
+  turn: z.string().min(1).nullable(),
 }) satisfies z.ZodType<HookEventReport>
 
 /** The project a session runs for, or why there is none. */

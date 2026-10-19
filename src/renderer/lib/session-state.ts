@@ -8,11 +8,22 @@ import {
 import type { ToolId } from '../../shared/tools'
 
 /**
- * What the hooks of a Claude Code session last said it stopped for, until its
- * next turn starts: a dialog of its own agent that waits for the user, one of
- * a subagent's, which can stay open after the turn ends, or an API error.
+ * What the hooks of a Claude Code session last said waits for the user, until
+ * Claude Code works again: a dialog of its own agent, or one of a subagent's,
+ * which can stay open after the turn ends.
  */
-export type Attention = 'waiting' | 'subagent-waiting' | 'error' | null
+export type Attention = 'waiting' | 'subagent-waiting' | null
+
+/**
+ * A turn of a Claude Code session's main agent that stopped on an API error,
+ * by the id Claude Code gives it; `null` when its hook gave none.
+ */
+export interface Failure {
+  turn: string | null
+}
+
+/** How many of a session's latest turns `StateSource.turns` keeps. */
+const KEPT_TURNS = 16
 
 /** What a session's state comes from. */
 export interface StateSource {
@@ -27,6 +38,14 @@ export interface StateSource {
    */
   workingSince: number | null
   attention: Attention
+  /**
+   * The turns of the main agent whose start its hooks reported, or whose
+   * stop on an API error they reported first, by the ids Claude Code gives
+   * them, oldest first: the latest `KEPT_TURNS` of them.
+   */
+  turns: readonly string[]
+  /** The turn that stopped on an API error, until a later one starts. */
+  failure: Failure | null
   /**
    * Claude Code stopped working while the session was not being viewed, and
    * the user has not viewed it since.
@@ -52,29 +71,33 @@ export type SessionState =
 
 /**
  * The state of a session. A running Claude Code session waits for the user
- * while one of its dialogs does, has stopped on an error until its next turn
- * starts, works while its title says so, is done once it stopped working
- * while it was not viewed, until it is viewed, and is idle otherwise.
+ * while one of its dialogs does, works while its title says so, has stopped
+ * on an error otherwise once a turn of its main agent did, until a later turn
+ * starts (while a background agent goes on, its dialogs and its work show
+ * first), is done once it stopped working while it was not viewed, until it
+ * is viewed, and is idle otherwise.
  */
 export function sessionState(session: StateSource): SessionState {
   if (session.status === 'starting') return 'starting'
   if (session.status === 'exited') return session.exit?.abnormal ? 'ended-unexpectedly' : 'ended'
   if (session.toolId !== 'claude') return 'running'
   if (session.attention === 'waiting' || session.attention === 'subagent-waiting') return 'waiting'
-  if (session.attention === 'error') return 'error'
   if (isClaudeCodeWorkingTitle(session.title)) return 'working'
+  if (session.failure !== null) return 'error'
   return session.unread ? 'done' : 'idle'
 }
 
 /** What changes about where a session's state comes from. */
-export type StateChange = Partial<Pick<StateSource, 'workingSince' | 'attention' | 'unread'>>
+export type StateChange = Partial<
+  Pick<StateSource, 'workingSince' | 'attention' | 'turns' | 'failure' | 'unread'>
+>
 
 /**
  * What changes about a session's state when its program sets `title`, in
  * output that arrived at `arrivedAt`, given whether the user is viewing the
- * session. Claude Code working again ends what it stopped for: a dialog
- * answered, or an error followed by the next turn. When it stops working, it
- * is done unless the user is viewing it.
+ * session. Claude Code working again ends the dialog it waited on, which the
+ * user answered. When it stops working, it is done unless the user is
+ * viewing it.
  */
 export function afterTitle(
   session: StateSource,
@@ -93,25 +116,56 @@ export function afterTitle(
 
 /**
  * What changes about a running Claude Code session's state when one of its
- * hooks reports an event: a dialog that waits for the user opened, a turn
- * stopped on an API error, or a turn ended, which no dialog of the session's
- * own agent waits on any more (a subagent's can). A report can arrive long
- * after its hook ran; one whose hook ran before Claude Code last started
- * working tells of what is over by now, such as a dialog the user has
- * answered, and changes nothing.
+ * hooks reports an event: a dialog that waits for the user opened; a turn
+ * started, which ends an earlier turn's stop on an API error; a turn of the
+ * main agent stopped on an API error (a subagent's error stops no turn: the
+ * main agent takes the news of it in a turn of its own); or a turn ended,
+ * which no dialog of the session's own agent waits on any more (a
+ * subagent's can).
+ *
+ * A report can arrive long after its hook ran, and after reports of later
+ * hooks. A dialog or the end of a turn whose hook ran before Claude Code last
+ * started working is over by now, such as a dialog the user has answered,
+ * and changes nothing. Turns are told apart by their ids instead: the stop
+ * of a turn older than one that has started changes nothing, nor does the
+ * start of a turn whose stop came first.
  */
 export function afterHookEvent(session: StateSource, report: HookEventReport): StateChange {
   if (session.toolId !== 'claude' || session.status !== 'running') return {}
+  switch (report.event) {
+    case 'UserPromptSubmit':
+      return afterTurnStarted(session, report.turn)
+    case 'StopFailure':
+      return report.subagent ? {} : afterTurnFailed(session, report.turn)
+  }
   if (session.workingSince !== null && report.startedAt < session.workingSince) return {}
   switch (report.event) {
     case 'PermissionRequest':
     case 'Elicitation':
       return { attention: report.subagent ? 'subagent-waiting' : 'waiting' }
-    case 'StopFailure':
-      return { attention: 'error' }
     case 'Stop':
       return session.attention === 'waiting' ? { attention: null } : {}
   }
+}
+
+/** The latest turns of a session with `turn` after them. */
+function withTurn(session: StateSource, turn: string): string[] {
+  return [...session.turns, turn].slice(-KEPT_TURNS)
+}
+
+/** What changes when the turn `turn` of the main agent starts: a stop of an earlier one ends. */
+function afterTurnStarted(session: StateSource, turn: string | null): StateChange {
+  if (turn === null) return session.failure === null ? {} : { failure: null }
+  if (session.turns.includes(turn)) return {}
+  return { turns: withTurn(session, turn), failure: null }
+}
+
+/** What changes when the turn `turn` of the main agent stops on an API error, unless a later one has started. */
+function afterTurnFailed(session: StateSource, turn: string | null): StateChange {
+  if (turn === null) return { failure: { turn } }
+  if (!session.turns.includes(turn)) return { turns: withTurn(session, turn), failure: { turn } }
+  if (session.turns.at(-1) !== turn) return {}
+  return { failure: { turn } }
 }
 
 /** The names of the states of running sessions. */

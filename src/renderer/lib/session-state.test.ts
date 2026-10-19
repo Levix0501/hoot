@@ -18,6 +18,8 @@ const claude = (changes: Partial<StateSource> = {}): StateSource => ({
   title: '✳ Claude Code',
   workingSince: null,
   attention: null,
+  turns: [],
+  failure: null,
   unread: false,
   ...changes,
 })
@@ -29,12 +31,13 @@ const exit = (changes: Partial<SessionExit>): SessionExit => ({
   ...changes,
 })
 
-/** A report of a hook that ran at `startedAt`. */
-const report = (event: HookEvent, startedAt: number, subagent = false): HookEventReport => ({
-  event,
-  startedAt,
-  subagent,
-})
+/** A report of a hook that ran at `startedAt`, in the turn `turn`. */
+const report = (
+  event: HookEvent,
+  startedAt: number,
+  subagent = false,
+  turn: string | null = null,
+): HookEventReport => ({ event, startedAt, subagent, turn })
 
 /**
  * A session after its program set the titles, the hooks reported the events,
@@ -46,7 +49,7 @@ function play(
   session: StateSource,
   ...steps: Array<
     | { title: string; viewed?: boolean }
-    | { event: HookEvent; ranBefore?: number; subagent?: boolean }
+    | { event: HookEvent; ranBefore?: number; subagent?: boolean; turn?: string }
   >
 ): StateSource {
   let current = session
@@ -58,7 +61,12 @@ function play(
         ? afterTitle(current, step.title, step.viewed ?? false, clock)
         : afterHookEvent(
             current,
-            report(step.event, clock - 500 - 1_000 * (step.ranBefore ?? 0), step.subagent),
+            report(
+              step.event,
+              clock - 500 - 1_000 * (step.ranBefore ?? 0),
+              step.subagent,
+              step.turn ?? null,
+            ),
           )
     current = { ...current, ...change, ...('title' in step ? { title: step.title } : {}) }
   }
@@ -91,14 +99,17 @@ describe('sessionState', () => {
     }
   })
 
-  it('is, for Claude Code, waiting or stopped by an error first, then working, done or idle', () => {
+  it('is, for Claude Code, waiting first, then working, stopped by an error, done or idle', () => {
     expect(sessionState(claude())).toBe('idle')
     expect(sessionState(claude({ title: '' }))).toBe('idle')
     expect(sessionState(claude({ title: '◐ Fix' }))).toBe('working')
     expect(sessionState(claude({ title: '◑ Fix' }))).toBe('working')
     expect(sessionState(claude({ unread: true }))).toBe('done')
-    expect(sessionState(claude({ attention: 'waiting', unread: true }))).toBe('waiting')
-    expect(sessionState(claude({ attention: 'error', unread: true }))).toBe('error')
+    const failure = { turn: 't1' }
+    expect(sessionState(claude({ attention: 'waiting', failure, unread: true }))).toBe('waiting')
+    expect(sessionState(claude({ attention: 'subagent-waiting', failure }))).toBe('waiting')
+    expect(sessionState(claude({ title: '◐ Fix', failure }))).toBe('working')
+    expect(sessionState(claude({ failure, unread: true }))).toBe('error')
   })
 })
 
@@ -171,12 +182,23 @@ describe('what a Claude Code session does', () => {
     const retried = play(
       claude(),
       { title: '◐ Fix' },
+      { event: 'UserPromptSubmit', turn: 't1' },
       { title: '✳ Fix', viewed: true },
       { title: '◐ Retry' },
-      { event: 'StopFailure', ranBefore: 1 },
+      { event: 'UserPromptSubmit', turn: 't2' },
+      { event: 'StopFailure', turn: 't1', ranBefore: 3 },
     )
     expect(sessionState(retried)).toBe('working')
     expect(sessionState(play(retried, { title: '✳ Retry', viewed: true }))).toBe('idle')
+    // The start of a turn reported after the API error that stopped it.
+    const failedFast = play(
+      claude(),
+      { title: '◐ Fix' },
+      { title: '✳ Fix', viewed: true },
+      { event: 'StopFailure', turn: 't1' },
+      { event: 'UserPromptSubmit', turn: 't1', ranBefore: 2 },
+    )
+    expect(sessionState(failedFast)).toBe('error')
     // The end of a turn reported once the next one had asked the user something.
     const asked = play(
       claude(),
@@ -235,25 +257,100 @@ describe('what a Claude Code session does', () => {
       const failed = play(
         claude(),
         { title: '◐ Fix' },
+        { event: 'UserPromptSubmit', turn: 't1' },
         { title: '✳ Fix', viewed },
-        { event: 'StopFailure' },
+        { event: 'StopFailure', turn: 't1' },
       )
       expect(sessionState(failed)).toBe('error')
       expect(sessionState({ ...failed, unread: false })).toBe('error')
       expect(sessionState(play(failed, { title: '✳ Fix', viewed: true }))).toBe('error')
-      expect(sessionState(play(failed, { title: '◐ Retry' }))).toBe('working')
+      const next = play(failed, { title: '◐ Retry' }, { event: 'UserPromptSubmit', turn: 't2' })
+      expect(sessionState(next)).toBe('working')
+      expect(sessionState(play(next, { title: '✳ Retry', viewed: true }))).toBe('idle')
+      // Without the id of the turn, the start of the next one still ends it.
+      const unnamed = play(
+        claude(),
+        { title: '◐ Fix' },
+        { title: '✳ Fix', viewed },
+        { event: 'StopFailure' },
+      )
+      expect(sessionState(unnamed)).toBe('error')
+      expect(sessionState(play(unnamed, { event: 'UserPromptSubmit' }))).toBe(
+        viewed ? 'idle' : 'done',
+      )
     }
   })
 
+  it("shows a background agent's dialog and work over an API error of the main agent's, until the next turn", () => {
+    // A background agent asks to run a command, and then the main agent's request fails.
+    const failed = play(
+      claude(),
+      { title: '◐ Fix' },
+      { event: 'UserPromptSubmit', turn: 't1' },
+      { title: '✳ Fix', viewed: true },
+      { event: 'PermissionRequest', subagent: true, turn: 't1' },
+      { event: 'StopFailure', turn: 't1' },
+    )
+    expect(sessionState(failed)).toBe('waiting')
+    // Answered: the background agent works, and then it is done.
+    const working = play(failed, { title: '◐ Fix' })
+    expect(sessionState(working)).toBe('working')
+    const agentDone = play(working, { title: '✳ Fix', viewed: true })
+    expect(sessionState(agentDone)).toBe('error')
+    // The main agent takes the notification that the agent is done: the next turn.
+    const notified = play(agentDone, { title: '◐ Fix' }, { event: 'UserPromptSubmit', turn: 't2' })
+    expect(sessionState(notified)).toBe('working')
+    expect(sessionState(play(notified, { title: '✳ Fix', viewed: true }))).toBe('idle')
+    // Which fails again.
+    expect(
+      sessionState(
+        play(notified, { title: '✳ Fix', viewed: true }, { event: 'StopFailure', turn: 't2' }),
+      ),
+    ).toBe('error')
+  })
+
+  it("takes a background agent's API error for no stop of a turn", () => {
+    const working = play(claude(), { title: '◐ Fix' }, { event: 'UserPromptSubmit', turn: 't1' })
+    expect(afterHookEvent(working, report('StopFailure', 9_000, true, 't1'))).toEqual({})
+    // The main agent goes on, and takes the news in a turn that ends as usual.
+    expect(
+      sessionState(
+        play(
+          working,
+          { event: 'StopFailure', subagent: true, turn: 't1' },
+          { title: '✳ Fix', viewed: true },
+          { event: 'Stop', turn: 't1' },
+          { title: '◐ Fix' },
+          { event: 'UserPromptSubmit', turn: 't2' },
+          { title: '✳ Fix', viewed: true },
+          { event: 'Stop', turn: 't2' },
+        ),
+      ),
+    ).toBe('idle')
+  })
+
+  it('keeps the ids of the latest turns only', () => {
+    let session = claude()
+    for (let n = 1; n <= 20; n++) {
+      session = play(session, { event: 'UserPromptSubmit', turn: `t${n}` })
+    }
+    expect(session.turns).toEqual(Array.from({ length: 16 }, (_, n) => `t${n + 5}`))
+  })
+
   it('takes no event of a hook for a session that is not running Claude Code', () => {
-    for (const event of ['PermissionRequest', 'Elicitation', 'StopFailure'] as const) {
+    for (const event of [
+      'PermissionRequest',
+      'Elicitation',
+      'UserPromptSubmit',
+      'StopFailure',
+    ] as const) {
       expect(afterHookEvent({ ...claude(), toolId: 'shell' }, report(event, 0))).toEqual({})
       expect(afterHookEvent(claude({ status: 'starting' }), report(event, 0))).toEqual({})
       expect(
         afterHookEvent(claude({ status: 'exited', exit: exit({ code: 1 }) }), report(event, 0)),
       ).toEqual({})
     }
-    expect(afterHookEvent(claude({ attention: 'error' }), report('Stop', 0))).toEqual({})
+    expect(afterHookEvent(claude({ failure: { turn: 't1' } }), report('Stop', 0))).toEqual({})
     expect(afterTitle({ ...claude({ title: '◐ x' }), toolId: 'shell' }, '✳ x', false, 0)).toEqual(
       {},
     )

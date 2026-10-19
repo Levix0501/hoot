@@ -131,6 +131,7 @@ const report = (event: HookEvent, subagent = false): HookEventReport => ({
   event,
   startedAt: 1_000,
   subagent,
+  turn: 't1',
 })
 
 describe('SessionManager', () => {

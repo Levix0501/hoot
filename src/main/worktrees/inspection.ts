@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { RepositoryChanges } from '../../shared/worktrees'
 import { gitErrorMessage, runGit } from '../git/git'
-import { git, walkRepositories, type GitContext } from './repositories'
+import { git, relativeGitPath, walkRepositories, type GitContext } from './repositories'
 
 /** How many changed files are listed for a repository; the total is always given. */
 export const LISTED_FILES = 10
@@ -167,7 +167,7 @@ async function foreignRepositories(
   }
   const rootSubmodules = await withSubmodulesOf(root, '', new Set())
   await walkRepositories(root, rootSubmodules, async (directory, submodules) => {
-    const relativePath = path.relative(root, directory)
+    const relativePath = relativeGitPath(root, directory)
     if (members.has(relativePath) || submodules.has(relativePath)) {
       return withSubmodulesOf(directory, relativePath, submodules)
     }

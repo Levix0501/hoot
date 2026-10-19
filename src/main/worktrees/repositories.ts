@@ -13,6 +13,11 @@ export function git(context: GitContext, args: readonly string[], timeout?: numb
   return runGit(context.git, args, context.env, { timeout })
 }
 
+/** The path of `to` relative to `from`, separated by `/` as Git writes paths, also on Windows. */
+export function relativeGitPath(from: string, to: string): string {
+  return path.relative(from, to).split(path.sep).join('/')
+}
+
 /**
  * Directories whose repositories are dependencies that package managers
  * download, at any depth: they are neither inner repositories nor foreign
@@ -210,13 +215,13 @@ export async function findInnerRepositories(
     const location = await locateRepository(context, directory)
     const canonical = await realpath(directory)
     if (!location || location.topLevel !== canonical) return null
-    const withinContainer = path.relative(container, directory)
+    const withinContainer = relativeGitPath(container, directory)
     if (await recordsPath(context, container, withinContainer, submodulePathsOf(container))) {
       return null
     }
     const repository = {
       path: canonical,
-      relativePath: path.relative(projectRoot, directory),
+      relativePath: relativeGitPath(projectRoot, directory),
       commonDir: location.commonDir,
     }
     // A linked worktree: its files belong to the repository it was made from.

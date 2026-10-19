@@ -18,6 +18,7 @@ function subscribe<Args extends unknown[]>(
 const api: HootApi = {
   testHooks: process.argv.includes('--hoot-test-hooks'),
   windowControls: windowControlsFromArguments(process.argv),
+  windowsClipboardKeys: process.platform === 'win32',
   fileManager: fileManagerName(process.platform),
   manageAgents: managesAgents(process.platform),
   getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),

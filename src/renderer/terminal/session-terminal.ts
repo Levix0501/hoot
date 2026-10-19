@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
+import { connectClipboard } from './terminal-clipboard'
 import { TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from './terminal-font'
 import { terminalTheme, type ColorScheme } from './themes'
 import { applyCurrentUnicodeWidths } from './unicode-widths'
@@ -44,6 +45,7 @@ export function createSessionTerminal(scheme: ColorScheme): SessionTerminal {
   })
   const fit = new FitAddon()
   terminal.loadAddon(fit)
+  connectClipboard(terminal)
   applyCurrentUnicodeWidths(terminal)
   return { terminal, fit }
 }

@@ -23,7 +23,7 @@ const electron = vi.hoisted(() => {
       handle: (channel: string, handler: Listener) => handlers.set(channel, handler),
       on: (channel: string, listener: Listener) => listeners.set(channel, listener),
     },
-    clipboard: { writeText: vi.fn<(text: string) => void>() },
+    clipboard: { writeText: vi.fn<(text: string) => Promise<void>>(async () => {}) },
     app: {},
     dialog: {},
     shell: {},
@@ -382,6 +382,31 @@ describe('the messages of the Agents page', () => {
   it('put the line that adds the folder of agents to PATH on the clipboard', () => {
     send(IpcChannel.writeClipboardText, AGENTS_PATH_COMMAND)
     expect(electron.clipboard.writeText).toHaveBeenCalledWith(AGENTS_PATH_COMMAND)
+  })
+})
+
+describe("the messages of a session's terminal", () => {
+  it('put what is selected in it on the clipboard, longer than any issue title', () => {
+    const selection = 'a line of output\r\n'.repeat(100_000)
+    send(IpcChannel.writeClipboardText, selection)
+    expect(electron.clipboard.writeText).toHaveBeenCalledWith(selection)
+  })
+
+  it('put only text there, at most 10 million characters long', () => {
+    send(IpcChannel.writeClipboardText, 42)
+    send(IpcChannel.writeClipboardText, 'x'.repeat(10_000_001))
+    expect(electron.clipboard.writeText).not.toHaveBeenCalled()
+  })
+
+  it('log a write the clipboard refuses', async () => {
+    const refused = new Error('The clipboard is in use.')
+    electron.clipboard.writeText.mockRejectedValueOnce(refused)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    send(IpcChannel.writeClipboardText, 'a line of output')
+    await vi.waitFor(() =>
+      expect(logged).toHaveBeenCalledWith('Could not put text on the clipboard:', refused),
+    )
+    logged.mockRestore()
   })
 })
 

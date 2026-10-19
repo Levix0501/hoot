@@ -32,7 +32,6 @@ import {
   type WindowState,
 } from '../shared/ipc'
 import {
-  ISSUE_TITLE_MAX_LENGTH,
   issueIdentifier,
   type Issue,
   type IssueChanges,
@@ -178,10 +177,11 @@ const sessionStartAnswer = z.union([
 ]) satisfies z.ZodType<SessionStartAnswer>
 const agentId = z.enum(CODING_TOOL_IDS)
 /**
- * The longest text put on the clipboard, which only ever gets an issue's
- * identifier or title, or the line that puts Hoot's folder of agents on PATH.
+ * Text put on the clipboard: what is selected in a session's terminal, up to
+ * its whole scrollback; an issue's identifier or title; what the About page
+ * tells of Hoot; or the line that puts Hoot's folder of agents on PATH.
  */
-const clipboardText = z.string().max(ISSUE_TITLE_MAX_LENGTH)
+const clipboardText = z.string().max(10_000_000)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -779,7 +779,10 @@ export function registerIpc(deps: IpcDependencies): void {
 
   on(IpcChannel.writeClipboardText, (value) => {
     const parsed = clipboardText.safeParse(value)
-    if (parsed.success) clipboard.writeText(parsed.data)
+    if (!parsed.success) return
+    clipboard.writeText(parsed.data).catch((error: unknown) => {
+      console.error('Could not put text on the clipboard:', error)
+    })
   })
 
   on(IpcChannel.openExternalLink, (value) => {

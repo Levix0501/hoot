@@ -290,6 +290,12 @@ export interface HootApi {
   testHooks: boolean
   /** The window's own buttons, and the room the page leaves for them in its top row. */
   windowControls: WindowControls
+  /**
+   * Whether the keys of Windows terminals copy and paste in a session's
+   * terminal, Ctrl+C and Ctrl+V among them: on Windows. On macOS ⌘C and ⌘V
+   * do, through the Edit menu.
+   */
+  windowsClipboardKeys: boolean
   /** The app that shows files and folders: Finder, or File Explorer on Windows. */
   fileManager: string
   /**

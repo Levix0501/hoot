@@ -1,5 +1,21 @@
 # hoot
 
+## 0.1.0-alpha.9
+
+### Minor Changes
+
+- [`60ec1e2`](https://github.com/Levix0501/hoot/commit/60ec1e2b1ec3e4690cbacc0e8584045a95a1d338) - The Agents page shows on Install and Update the command each runs, and says beforehand when it cannot work: when an agent that runs on Node.js needs a newer Node.js than yours, or when you cannot write to the npm folder of the installation to update.
+
+- [`0bd98f9`](https://github.com/Levix0501/hoot/commit/0bd98f96350aa2a00dbeae1c61cd78e925a4948d) - Hoot no longer comes with npm or a `node` of its own: on macOS, as on Windows, Install uses your npm, and where there is none it can install with, the Agents page says whether Node.js and npm are missing or npm's global folder isn't writable; agents an earlier Hoot installed in `~/.hoot/agents` are no longer used.
+
+- [`d487642`](https://github.com/Levix0501/hoot/commit/d487642924526e7fa13c658d919a115160a07755) - A light left of each session's tool icon now shows what the session is doing, and for Claude Code whether it is working, waiting for you, done while you were away, idle or stopped by an API error; the session header shows the same, and a collapsed project shows the sessions in it that need you.
+
+### Patch Changes
+
+- [`1b8889c`](https://github.com/Levix0501/hoot/commit/1b8889c555986416bcfa278a0239f6bdcc2def98) - On Windows, when an agent or npm takes too long to report its version or its global folder, Hoot also ends the programs it started, instead of waiting for them before the Agents page shows what it found.
+
+- [`546349e`](https://github.com/Levix0501/hoot/commit/546349edbf5390c5c2717ebb30425a403172b737) - On Windows, creating a worktree, also to start work on an issue, no longer fails with "git exited with code 0" once Git has made it, and Hoot lists the inner repositories of a worktree and deletes them with it, along with the worktrees made inside it.
+
 ## 0.1.0-alpha.8
 
 ### Minor Changes

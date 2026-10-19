@@ -250,114 +250,130 @@ function NewWorktreeForm({
   }
 
   return (
-    <form className="grid gap-4" onSubmit={(event) => void create(event)}>
-      <div className="grid gap-2">
-        <Label htmlFor="worktree-branch">Branch name</Label>
-        <Input
-          id="worktree-branch"
-          value={branch}
-          onChange={(event) => {
-            setBranch(event.target.value)
-            setError(null)
-          }}
-          onKeyDown={(event) => {
-            // Also before the name has been checked, while Create is still disabled.
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void create(event)
-          }}
-          disabled={creating}
-          autoFocus
-          spellCheck={false}
-          autoComplete="off"
-          placeholder="feat/new-idea"
-          aria-invalid={nameInvalid}
-          data-testid="worktree-branch-input"
-        />
-        {nameInvalid && (
-          <p className="text-xs text-destructive" role="alert" data-testid="worktree-branch-error">
-            This is not a valid branch name.
+    <form className="flex min-h-0 flex-col gap-4" onSubmit={(event) => void create(event)}>
+      {/* The fields scroll; the title and the buttons stay. Its padding keeps focus rings in. */}
+      <div
+        className="-mx-4 -my-1 grid min-h-0 gap-4 overflow-y-auto px-4 py-1"
+        data-testid="new-worktree-fields"
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="worktree-branch">Branch name</Label>
+          <Input
+            id="worktree-branch"
+            value={branch}
+            onChange={(event) => {
+              setBranch(event.target.value)
+              setError(null)
+            }}
+            onKeyDown={(event) => {
+              // Also before the name has been checked, while Create is still disabled.
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) void create(event)
+            }}
+            disabled={creating}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="feat/new-idea"
+            aria-invalid={nameInvalid}
+            data-testid="worktree-branch-input"
+          />
+          {nameInvalid && (
+            <p
+              className="text-xs text-destructive"
+              role="alert"
+              data-testid="worktree-branch-error"
+            >
+              This is not a valid branch name.
+            </p>
+          )}
+        </div>
+
+        <div className="grid gap-2">
+          <Label>Base branch</Label>
+          <BranchSelect
+            branches={options.branches}
+            value={base}
+            onChange={changeBase}
+            disabled={creating}
+            label="Base branch"
+            testId="worktree-base-select"
+          />
+        </div>
+
+        {options.nested.length > 0 && (
+          <div className="grid gap-2">
+            <Label>Nested repositories</Label>
+            <p className="text-xs text-muted-foreground">
+              Each one gets the same branch, at the same path inside the new worktree.
+            </p>
+            <ul
+              className="-mx-1 grid max-h-64 gap-2 overflow-y-auto px-1 py-0.5"
+              data-testid="worktree-nested-list"
+            >
+              {options.nested.map((repository) => (
+                <NestedRepositoryRow
+                  key={repository.relativePath}
+                  repository={repository}
+                  choice={nested[repository.relativePath]!}
+                  disabled={creating}
+                  onChange={(change) =>
+                    setNested((choices) => ({
+                      ...choices,
+                      [repository.relativePath]: {
+                        ...choices[repository.relativePath]!,
+                        ...change,
+                      },
+                    }))
+                  }
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {submodules.length > 0 && (
+          <div
+            className="grid gap-1 text-xs text-muted-foreground"
+            data-testid="worktree-submodules"
+          >
+            <span>These submodules will not be populated; their folders stay empty:</span>
+            <ul className="grid max-h-40 gap-0.5 overflow-y-auto">
+              {submodules.map((submodule) => (
+                <li
+                  key={submodule}
+                  className="font-mono text-foreground"
+                  data-path=""
+                  data-testid="worktree-submodule"
+                >
+                  {submodule}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="grid gap-1">
+          <span className="text-sm font-medium">Location</span>
+          <span
+            className="font-mono text-xs break-all text-muted-foreground"
+            data-path=""
+            data-testid="worktree-location"
+          >
+            {branch !== '' && location?.name === branch ? location.displayPath : '—'}
+          </span>
+        </div>
+
+        {error !== null && (
+          <p
+            className="max-h-40 overflow-auto rounded-md bg-destructive/10 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-destructive"
+            role="alert"
+            data-path=""
+            data-testid="worktree-create-error"
+          >
+            {error}
           </p>
         )}
       </div>
-
-      <div className="grid gap-2">
-        <Label>Base branch</Label>
-        <BranchSelect
-          branches={options.branches}
-          value={base}
-          onChange={changeBase}
-          disabled={creating}
-          label="Base branch"
-          testId="worktree-base-select"
-        />
-      </div>
-
-      {options.nested.length > 0 && (
-        <div className="grid gap-2">
-          <Label>Nested repositories</Label>
-          <p className="text-xs text-muted-foreground">
-            Each one gets the same branch, at the same path inside the new worktree.
-          </p>
-          <ul
-            className="-mx-1 grid max-h-64 gap-2 overflow-y-auto px-1 py-0.5"
-            data-testid="worktree-nested-list"
-          >
-            {options.nested.map((repository) => (
-              <NestedRepositoryRow
-                key={repository.relativePath}
-                repository={repository}
-                choice={nested[repository.relativePath]!}
-                disabled={creating}
-                onChange={(change) =>
-                  setNested((choices) => ({
-                    ...choices,
-                    [repository.relativePath]: { ...choices[repository.relativePath]!, ...change },
-                  }))
-                }
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {submodules.length > 0 && (
-        <div className="grid gap-1 text-xs text-muted-foreground" data-testid="worktree-submodules">
-          <span>These submodules will not be populated; their folders stay empty:</span>
-          <ul className="grid gap-0.5">
-            {submodules.map((submodule) => (
-              <li
-                key={submodule}
-                className="font-mono text-foreground"
-                data-path=""
-                data-testid="worktree-submodule"
-              >
-                {submodule}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="grid gap-1">
-        <span className="text-sm font-medium">Location</span>
-        <span
-          className="font-mono text-xs break-all text-muted-foreground"
-          data-path=""
-          data-testid="worktree-location"
-        >
-          {branch !== '' && location?.name === branch ? location.displayPath : '—'}
-        </span>
-      </div>
-
-      {error !== null && (
-        <p
-          className="max-h-40 overflow-auto rounded-md bg-destructive/10 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-destructive"
-          role="alert"
-          data-path=""
-          data-testid="worktree-create-error"
-        >
-          {error}
-        </p>
-      )}
 
       <DialogFooter>
         <Button
@@ -482,7 +498,9 @@ export function NewWorktreeDialog() {
     >
       <DialogContent
         showCloseButton={false}
-        className="sm:max-w-lg"
+        // Below the window's top row, whose blank parts drag the window, however many
+        // nested repositories and submodules there are.
+        className="flex max-h-[calc(100dvh-7rem)] flex-col sm:max-w-lg"
         finalFocus={focusAfterOverlay}
         data-testid="new-worktree-dialog"
         data-creating={busy}

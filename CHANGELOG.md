@@ -1,5 +1,27 @@
 # hoot
 
+## 0.1.0-alpha.7
+
+### Minor Changes
+
+- [`3d7a29e`](https://github.com/Levix0501/hoot/commit/3d7a29e6d0c15f21a8828e32541d9ae89f70eec7) - Starting work on an issue now takes it through a built-in workflow of Scope, Design and Implement, in which the agent reports each step with `hoot step report` and the issue's page shows the step it is at and what each step found, and lets you report a step yourself or start over.
+
+- [`cfa8851`](https://github.com/Levix0501/hoot/commit/cfa88515ab2293e8347c5a0200e17abaa8052b72) - The built-in workflow now goes on to a Design step: the start button of an issue at `ready to design` starts it, the issue gets `designing` once its session has started, and the agent interviews you until every decision about the issue is settled, then sums up what was settled and stops.
+
+- [`2dcf402`](https://github.com/Levix0501/hoot/commit/2dcf4023ea080be6de203c7a667c44eaf6d9f1de) - Issues can now be blocked by other issues, as in Linear and GitHub: an issue's page lists what it is blocked by and what it blocks, Blocked by… and Blocking… in its menus add a dependency or create an issue with one, the list shows how many issues each waits on and blocks, and hoot adds and removes dependencies with `issue create` and `issue edit`, shows them in `issue view` and `--json`, and splits an issue into sub-issues with dependencies with the new `issue split`.
+
+- [`7cd733f`](https://github.com/Levix0501/hoot/commit/7cd733f94232231537567a533b70e74581421b2b) - Issues now have labels, as in Linear, given and filtered on the list and the issue's page, managed on a new Labels page in the settings and with `hoot label`, and the built-in workflow's progress is the issue's label of the group Spec-driven, which the agent changes with `hoot issue edit` instead of `hoot step report`, writing a confirmed split back as sub-issues with `hoot issue create-batch` (formerly `hoot issue split`) so that the issue is completed once they are; an issue can have several sessions, opened with Start new session or `hoot session start`, cannot be started while it waits on other issues, and can be blocked by its parent or sub-issues.
+
+- [`a64972b`](https://github.com/Levix0501/hoot/commit/a64972bbeaacc461c7780ad248f82d1f2d09005b) - Issues can have sub-issues, as in Linear: an issue's page lists its sub-issues with their progress and creates new ones in place, a sub-issue's page names its parent, the menus set, change or remove an issue's parent, and `hoot issue create --parent`, the new `hoot issue edit` and `hoot issue view` do the same from a session.
+
+- [`ecd101a`](https://github.com/Levix0501/hoot/commit/ecd101ae04b24439704dd9b929515c26d8bf8382) - The built-in workflow now has a single step, Triage (label `triaging`), which judges whether an issue is one piece of work or several and then stops: one piece gets `ready to design` without asking you, and a split you confirm becomes sub-issues labeled `ready to design`, with the issue labeled `waiting on sub-issues`; the Design and Implement steps are gone for now.
+
+### Patch Changes
+
+- [`8b7ae30`](https://github.com/Levix0501/hoot/commit/8b7ae3006c8ffc56123288be466f30818fbfb10f) - Hoot now writes the files of an issue it sends to a session to `.hoot/tmp` in the issue's worktree, a folder Git ignores, instead of the system's temporary folder.
+
+- [`0680a85`](https://github.com/Levix0501/hoot/commit/0680a85e62f26a7ebe3b9986f09441b3ce76d34b) - The icons of Claude Code, Codex and opencode are now their own marks: Claude Code's in its orange, Codex's blossom and opencode's logo in the grays of the theme.
+
 ## 0.1.0-alpha.6
 
 ### Patch Changes

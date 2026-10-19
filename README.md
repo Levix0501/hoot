@@ -873,6 +873,11 @@ pnpm test          # Vitest unit tests
 pnpm check         # all of the above
 ```
 
+The release workflow runs `pnpm check` on macOS and on Windows, where the tests of what Hoot does
+only on the other platform are skipped. On Windows the tests need Git for Windows, and they make
+symbolic links, which Windows lets you make in Developer Mode (**Settings** > **System** > **For
+developers**) or as an administrator.
+
 To check a change in the running app, drive the built app with Playwright's Electron support
 (`_electron.launch`). Give it a temporary `--user-data-dir` so that it keeps its own projects,
 issues and settings, and `--background` so that its window stays off screen. With `--test-hooks`

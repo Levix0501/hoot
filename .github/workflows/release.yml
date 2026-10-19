@@ -26,8 +26,15 @@ permissions:
   contents: read
 
 jobs:
+  # On both platforms Hoot is released for: some of what Hoot does differs
+  # between them, and so do some of the tests.
   check:
-    runs-on: macos-26
+    strategy:
+      # A failure on one platform does not stop the other's run.
+      fail-fast: false
+      matrix:
+        os: [macos-26, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

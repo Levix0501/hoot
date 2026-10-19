@@ -1,6 +1,10 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { Env } from '../env/env'
+
+/** By its full path, so that no program of that name in the working directory runs instead. */
+const TASKKILL = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
 
 /** A command to run: the file, its arguments, its environment and its working directory. */
 export interface CommandSpec {
@@ -89,9 +93,25 @@ export interface CommandResult extends ProcessEnd {
 }
 
 /**
+ * Ends a process on Windows together with the processes it started, which
+ * Windows, having neither signals nor process groups, leaves running when the
+ * process alone is ended. taskkill finds them by their parent, while the
+ * process still runs, as a closed session's processes are ended (see
+ * `endWindowsSession`); the process then exits with code 1.
+ */
+function endProcessTree(child: ReturnType<typeof spawn>): void {
+  if (!child.pid) return
+  // When it fails, the process has ended meanwhile, or taskkill cannot end it.
+  execFile(TASKKILL, ['/T', '/F', '/PID', String(child.pid)], (error) => {
+    if (error) child.kill('SIGKILL')
+  })
+}
+
+/**
  * Runs a command to its end and returns what it wrote. A command that is not
- * done within `timeoutMs` is ended with SIGKILL, together with the processes
- * it started, which could otherwise keep its output open.
+ * done within `timeoutMs` is ended together with the processes it started,
+ * which could otherwise keep its output open: with SIGKILL to its process
+ * group, or on Windows with taskkill.
  */
 export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<CommandResult> {
   let stdout = ''
@@ -122,6 +142,10 @@ export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
+    if (process.platform === 'win32') {
+      endProcessTree(child)
+      return
+    }
     try {
       if (child.pid) process.kill(-child.pid, 'SIGKILL')
     } catch {

@@ -60,11 +60,10 @@ export const contextComponents: ToolMenuComponents = {
  * It shows the project's name; while the project is collapsed, right of the
  * name, the light of the state of its sessions that needs the user most, if
  * any does, which counts them when pointed at; and how many of its issues
- * are open. Pointing
- * at it, or moving the keyboard focus into it, shows its buttons: Issues
- * shows the issue list with only the project checked in its Project filter,
- * and `+`, `⋯` and its context menu start sessions, create worktrees and
- * remove the project.
+ * are open. Pointing at it, or moving the keyboard focus into it, shows its
+ * buttons: Issues shows the issue list with only the project checked in its
+ * Project filter, and `+`, `⋯` and its context menu start sessions, create
+ * worktrees and remove the project.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const tools = useAppStore((state) => state.tools)

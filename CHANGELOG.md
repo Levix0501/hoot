@@ -1,5 +1,23 @@
 # hoot
 
+## 0.1.0-alpha.8
+
+### Minor Changes
+
+- [`4777f36`](https://github.com/Levix0501/hoot/commit/4777f36188b3fa9283d754f1179db13b0a0c2c7d) - Programs in a session can put text on the clipboard with OSC 52, the sequence Claude Code and other terminal programs copy with, also over SSH. They cannot read the clipboard.
+
+### Patch Changes
+
+- [`04bda73`](https://github.com/Levix0501/hoot/commit/04bda73899ddbb38e6d0ab568cc0c317d39beab0) - On Windows, the paths of nested repositories use `/`, as those of submodules do, and deleting a worktree removes a nested repository inside another one first, and no longer counts it as an uncommitted change of the outer one, or a populated submodule in a subfolder as a foreign repository.
+
+- [`5c419e7`](https://github.com/Levix0501/hoot/commit/5c419e71ba360b55c7a0ff40129de8f5427455c3) - The new worktree dialog fits in the window however many nested repositories and submodules a project has: its fields scroll between its title and its Cancel and Create buttons, and a long list of submodules that stay empty scrolls on its own, instead of the dialog spilling past the top and bottom of the window.
+
+- [`4d55273`](https://github.com/Levix0501/hoot/commit/4d55273b25f94bbdcfaf42034fad78b163dfb7e3) - The resize cursor stays for the whole of a drag of the sidebar's edge, also as the sidebar slides out and back in when the edge is dragged past its narrowest width.
+
+- [`aa46d1f`](https://github.com/Levix0501/hoot/commit/aa46d1f353317aefbfdc586fdda92771346168a6) - On Windows, Ctrl+C copies the text selected in a session's terminal, and interrupts the program as before when nothing is selected, and Ctrl+V pastes instead of reaching the program as a control character. Ctrl+Shift+C and Ctrl+Insert copy too, as in Windows Terminal.
+
+- [`50636b1`](https://github.com/Levix0501/hoot/commit/50636b136317091b8b0d2b1bb1580efe090a0bd3) - On Windows, a session's output no longer breaks up when the terminal changes width, as when the sidebar is shown or hidden: lines are no longer repeated, cut short or moved to the end of other lines.
+
 ## 0.1.0-alpha.7
 
 ### Minor Changes

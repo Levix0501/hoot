@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
+import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import type { SentIssue } from './launch'
 import {
@@ -125,6 +126,13 @@ function cleanedLaunches(options: { held?: Promise<void>; failing?: boolean } = 
   }
 }
 
+/** A report of an event of a hook of a session's Claude Code. */
+const report = (event: HookEvent, subagent = false): HookEventReport => ({
+  event,
+  startedAt: 1_000,
+  subagent,
+})
+
 describe('SessionManager', () => {
   it('starts a session in the project root with the launch command', async () => {
     const { host, manager } = setup()
@@ -229,26 +237,26 @@ describe('SessionManager', () => {
         return { file: toolId, args: [], env: {} }
       },
     })
-    const reported: Array<[string, string]> = []
+    const reported: Array<[string, string | HookEventReport]> = []
     manager.on('data', (id, data) => reported.push([id, data]))
-    manager.on('hook-event', (id, event) => reported.push([id, event]))
+    manager.on('hook-event', (id, hook) => reported.push([id, hook]))
     await manager.start(request('c1', 'claude'))
     await manager.start(request('c2', 'claude'))
     await manager.start(request('s1'))
     const starting = manager.start(request('c3', 'claude'))
     host.emit('data', 'c1', '\x1b]0;\u2733 Fix\x07')
-    manager.reportHookEvent('c1', 'PermissionRequest')
-    manager.reportHookEvent('c2', 'Stop')
+    manager.reportHookEvent('c1', report('PermissionRequest', true))
+    manager.reportHookEvent('c2', report('Stop'))
     // Only Claude Code has these hooks, and only a running session reports them.
-    manager.reportHookEvent('s1', 'Stop')
-    manager.reportHookEvent('c3', 'Stop')
-    manager.reportHookEvent('unknown', 'Stop')
+    manager.reportHookEvent('s1', report('Stop'))
+    manager.reportHookEvent('c3', report('Stop'))
+    manager.reportHookEvent('unknown', report('Stop'))
     host.emit('exit', 'c2', 1, 0)
-    manager.reportHookEvent('c2', 'StopFailure')
+    manager.reportHookEvent('c2', report('StopFailure'))
     expect(reported).toEqual([
       ['c1', '\x1b]0;\u2733 Fix\x07'],
-      ['c1', 'PermissionRequest'],
-      ['c2', 'Stop'],
+      ['c1', report('PermissionRequest', true)],
+      ['c2', report('Stop')],
     ])
     release()
     await starting

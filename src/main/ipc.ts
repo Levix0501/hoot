@@ -507,7 +507,7 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.sessions.on('data', (id, data) => send(IpcChannel.sessionData, id, data))
   deps.sessions.on('updated', (session) => send(IpcChannel.sessionUpdated, session))
   // Sent as the session's output is, so that the window gets the two in the order they came.
-  deps.sessions.on('hook-event', (id, event) => send(IpcChannel.sessionHookEvent, id, event))
+  deps.sessions.on('hook-event', (id, report) => send(IpcChannel.sessionHookEvent, id, report))
 
   on(IpcChannel.quitResponse, (confirmed) => {
     void deps.quitGuard.answer(z.literal(true).safeParse(confirmed).success)

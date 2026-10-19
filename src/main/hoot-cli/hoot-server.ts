@@ -10,7 +10,6 @@ import {
   type CreatedIssueAnswer,
   type DeletedLabelAnswer,
   type EditedIssueAnswer,
-  type HookEvent,
   type HookEventAnswer,
   type HookEventReport,
   type HootAnswer,
@@ -125,6 +124,8 @@ const sessionRequest = z.strictObject({
 
 const hookEventReport = z.strictObject({
   event: z.enum(HOOK_EVENTS),
+  startedAt: z.number().finite(),
+  subagent: z.boolean(),
 }) satisfies z.ZodType<HookEventReport>
 
 /** The project a session runs for, or why there is none. */
@@ -175,7 +176,7 @@ export interface HootServerOptions {
    */
   startSession(issueId: number, prompt: string | null): Promise<StartedSession>
   /** Called with each event of a hook of a session's Claude Code that hoot reports. */
-  hookEvent(sessionId: string, event: HookEvent): void
+  hookEvent(sessionId: string, report: HookEventReport): void
 }
 
 type Reply = { status: number; answer: HootAnswer<object> }
@@ -528,7 +529,7 @@ export class HootServer {
     if (pathname === '/hook-events' && request.method === 'POST') {
       const parsed = hookEventReport.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid hook event.')
-      this.options.hookEvent(sessionId, parsed.data.event)
+      this.options.hookEvent(sessionId, parsed.data)
       const answer: HookEventAnswer = { ok: true, project }
       return { status: 200, answer }
     }

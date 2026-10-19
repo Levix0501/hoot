@@ -2,7 +2,7 @@ import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { Dependencies, Dependency } from './dependencies'
-import type { HookEvent } from './hoot-cli'
+import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
 import type { PermissionLevelSettings } from './permission-levels'
@@ -359,7 +359,7 @@ export interface HootApi {
    * A running Claude Code session's hook reported an event, which comes in
    * order with the session's output, as `onSessionData` gives it.
    */
-  onSessionHookEvent(listener: (id: string, event: HookEvent) => void): () => void
+  onSessionHookEvent(listener: (id: string, report: HookEventReport) => void): () => void
   /** The application menu chose a session command. */
   onSessionCommand(listener: (command: SessionCommand) => void): () => void
   getWindowState(): Promise<WindowState>

@@ -125,6 +125,11 @@ export interface UiSession {
   /** The terminal title the session's program set last; empty until it sets one. */
   title: string
   /**
+   * For Claude Code, when the output arrived that last set a working title
+   * after one that is not; see `afterHookEvent`.
+   */
+  workingSince: number | null
+  /**
    * For Claude Code, what its hooks last said it stopped for, until its next
    * turn starts; see `sessionState`.
    */
@@ -579,6 +584,25 @@ declare global {
 /** The terminal of every session, which exists for as long as the session. */
 const terminals = new Map<string, SessionTerminal>()
 
+/**
+ * For the terminal of every session, when each piece written to it that it
+ * has not read yet arrived, oldest first: what a piece does, such as setting
+ * the title, counts from then, however long the terminal takes to read it.
+ */
+const arrivals = new Map<string, number[]>()
+
+/** Writes to a session's terminal what arrived for it now, and calls `onRead` once it is read. */
+function writeArrived(id: string, data: string, onRead?: () => void): void {
+  const terminal = terminals.get(id)?.terminal
+  const pending = arrivals.get(id)
+  if (!terminal || !pending) return
+  pending.push(Date.now())
+  terminal.write(data, () => {
+    pending.shift()
+    onRead?.()
+  })
+}
+
 export function getSessionTerminal(id: string | null): SessionTerminal | undefined {
   return id === null ? undefined : terminals.get(id)
 }
@@ -699,6 +723,7 @@ function fromInfo(info: SessionInfo): UiSession {
     ...info,
     permissionLevel: null,
     title: '',
+    workingSince: null,
     attention: null,
     unread: false,
     customName: null,
@@ -1035,14 +1060,17 @@ export const useAppStore = create<AppState>()((set, get) => {
     terminal.onData((data) => api.writeSession(id, data))
     terminal.onBinary((data) => api.writeSession(id, data, true))
     terminal.onResize(({ cols, rows }) => api.resizeSession(id, cols, rows))
-    // What Claude Code is doing follows its title too.
+    // What Claude Code is doing follows its title too, from when the output
+    // that set it arrived.
     terminal.onTitleChange((title) => {
       const session = findSession(id)
       if (!session || session.title === title) return
-      const change = afterTitle(session, title, viewedSessionId(get()) === id)
+      const arrivedAt = arrivals.get(id)?.[0] ?? Date.now()
+      const change = afterTitle(session, title, viewedSessionId(get()) === id, arrivedAt)
       set((state) => ({ sessions: updateSession(state.sessions, id, { title, ...change }) }))
     })
     terminals.set(id, sessionTerminal)
+    arrivals.set(id, [])
     return sessionTerminal
   }
 
@@ -1160,6 +1188,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       for (const id of ids) {
         terminals.get(id)?.terminal.dispose()
         terminals.delete(id)
+        arrivals.delete(id)
       }
       // A newly shown session's terminal takes the focus by itself. Otherwise
       // give the focus back to the terminal if what had it went away.
@@ -1398,6 +1427,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           status: 'starting',
           exit: null,
           title: '',
+          workingSince: null,
           attention: null,
           unread: false,
           customName: null,
@@ -1677,14 +1707,14 @@ export const useAppStore = create<AppState>()((set, get) => {
           setTerminalColorScheme(sessionTerminal, scheme)
         }
       })
-      api.onSessionData((id, data) => terminals.get(id)?.terminal.write(data))
+      api.onSessionData((id, data) => writeArrived(id, data))
       // Taken once the terminal has read what the session wrote before it,
       // such as the title Claude Code sets when a dialog opens.
-      api.onSessionHookEvent((id, event) =>
-        terminals.get(id)?.terminal.write('', () => {
+      api.onSessionHookEvent((id, report) =>
+        writeArrived(id, '', () => {
           const session = findSession(id)
           if (!session) return
-          const change = afterHookEvent(session, event)
+          const change = afterHookEvent(session, report)
           if (Object.keys(change).length === 0) return
           set((state) => ({ sessions: updateSession(state.sessions, id, change) }))
         }),

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { HookEvent } from '../../shared/hoot-cli'
+import type { HookEventReport } from '../../shared/hoot-cli'
 import type { StartSessionRequest } from '../../shared/ipc'
 import type { PtySpawnRequest } from '../../shared/pty-protocol'
 import type { SessionExit, SessionInfo } from '../../shared/session'
@@ -90,7 +90,7 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
   updated: [session: SessionInfo]
-  'hook-event': [id: string, event: HookEvent]
+  'hook-event': [id: string, report: HookEventReport]
 }> {
   /** In the order the sessions were started. */
   private readonly records = new Map<string, SessionRecord>()
@@ -234,7 +234,7 @@ export class SessionManager extends EventEmitter<{
    * with its output: from what the session wrote before the event was
    * reported, and before what it writes after.
    */
-  reportHookEvent(id: string, event: HookEvent): void {
+  reportHookEvent(id: string, report: HookEventReport): void {
     const record = this.records.get(id)
     if (
       record &&
@@ -242,7 +242,7 @@ export class SessionManager extends EventEmitter<{
       record.info.status === 'running' &&
       record.info.toolId === 'claude'
     ) {
-      this.emit('hook-event', id, event)
+      this.emit('hook-event', id, report)
     }
   }
 

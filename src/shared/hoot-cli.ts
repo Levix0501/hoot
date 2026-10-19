@@ -197,9 +197,20 @@ export const HOOK_EVENTS = ['PermissionRequest', 'Elicitation', 'Stop', 'StopFai
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
-/** An event of a hook of the session's Claude Code, by the name Claude Code gives it. */
+/** An event of a hook of the session's Claude Code, as hoot reports it. */
 export interface HookEventReport {
+  /** The event, by the name Claude Code gives it. */
   event: HookEvent
+  /**
+   * When the hook's hoot started, in milliseconds since the Unix epoch: just
+   * after Claude Code ran the hook, while the report can arrive much later.
+   */
+  startedAt: number
+  /**
+   * Whether one of Claude Code's subagents, rather than the session's own
+   * agent, met the event, such as a background agent asking to run a command.
+   */
+  subagent: boolean
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */

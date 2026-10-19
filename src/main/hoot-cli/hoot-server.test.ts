@@ -77,6 +77,9 @@ function related(saved: Issue, project: string | null) {
 const gamma = () => ({ id: hoot.gamma.id, name: 'gamma' })
 const hotel = () => ({ id: hoot.hotel.id, name: 'hotel' })
 
+/** What hoot reports of an event of a hook, by any name. */
+const report = (event: string, subagent = false) => ({ event, startedAt: 1_000.5, subagent })
+
 describe('HootServer', () => {
   it("answers with the session's project and its issues", async () => {
     const alpha = hoot.issues.create({ projectId: hoot.gamma.id, ...issue, title: 'Alpha' })!
@@ -295,7 +298,9 @@ describe('HootServer', () => {
 
   it("takes the events of the hooks of a session's Claude Code, and nothing else", async () => {
     for (const event of ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure']) {
-      expect(await request('POST', '/hook-events', { body: JSON.stringify({ event }) })).toEqual({
+      expect(
+        await request('POST', '/hook-events', { body: JSON.stringify(report(event)) }),
+      ).toEqual({
         status: 200,
         answer: { ok: true, project: { id: hoot.gamma.id, name: 'gamma' } },
       })
@@ -303,12 +308,15 @@ describe('HootServer', () => {
     expect(
       await request('POST', '/hook-events', {
         session: 'hotel-session',
-        body: JSON.stringify({ event: 'Stop' }),
+        body: JSON.stringify(report('PermissionRequest', true)),
       }),
     ).toMatchObject({ status: 200, answer: { ok: true } })
     for (const body of [
-      JSON.stringify({ event: 'Notification' }),
-      JSON.stringify({ event: 'Stop', extra: true }),
+      JSON.stringify(report('Notification')),
+      JSON.stringify({ ...report('Stop'), extra: true }),
+      JSON.stringify({ event: 'Stop' }),
+      JSON.stringify({ event: 'Stop', startedAt: '1000', subagent: false }),
+      JSON.stringify({ event: 'Stop', startedAt: 1_000, subagent: 'no' }),
       JSON.stringify({}),
     ]) {
       expect(await request('POST', '/hook-events', { body })).toEqual({
@@ -319,7 +327,7 @@ describe('HootServer', () => {
     expect(
       await request('POST', '/hook-events', {
         session: 'closed',
-        body: JSON.stringify({ event: 'Stop' }),
+        body: JSON.stringify(report('Stop')),
       }),
     ).toEqual({ status: 404, answer: { ok: false, message: 'No such session.' } })
     expect(await request('GET', '/hook-events')).toEqual({
@@ -327,11 +335,11 @@ describe('HootServer', () => {
       answer: { ok: false, message: 'Hoot does not know this request.' },
     })
     expect(hoot.hookEvents).toEqual([
-      { sessionId: 'gamma-session', event: 'PermissionRequest' },
-      { sessionId: 'gamma-session', event: 'Elicitation' },
-      { sessionId: 'gamma-session', event: 'Stop' },
-      { sessionId: 'gamma-session', event: 'StopFailure' },
-      { sessionId: 'hotel-session', event: 'Stop' },
+      { sessionId: 'gamma-session', ...report('PermissionRequest') },
+      { sessionId: 'gamma-session', ...report('Elicitation') },
+      { sessionId: 'gamma-session', ...report('Stop') },
+      { sessionId: 'gamma-session', ...report('StopFailure') },
+      { sessionId: 'hotel-session', ...report('PermissionRequest', true) },
     ])
   })
 

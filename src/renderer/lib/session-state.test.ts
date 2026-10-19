@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { HookEvent } from '../../shared/hoot-cli'
+import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionExit } from '../../shared/session'
 import {
   afterHookEvent,
@@ -16,6 +16,7 @@ const claude = (changes: Partial<StateSource> = {}): StateSource => ({
   status: 'running',
   exit: null,
   title: '✳ Claude Code',
+  workingSince: null,
   attention: null,
   unread: false,
   ...changes,
@@ -28,17 +29,37 @@ const exit = (changes: Partial<SessionExit>): SessionExit => ({
   ...changes,
 })
 
-/** A session after its program set the titles, the hooks reported the events, and so on. */
+/** A report of a hook that ran at `startedAt`. */
+const report = (event: HookEvent, startedAt: number, subagent = false): HookEventReport => ({
+  event,
+  startedAt,
+  subagent,
+})
+
+/**
+ * A session after its program set the titles, the hooks reported the events,
+ * and so on, a second apart: each title arrives at its step's time, and each
+ * report comes from a hook that ran half a second earlier, after the step
+ * before it, or `ranBefore` steps earlier still, for one that arrives late.
+ */
 function play(
   session: StateSource,
-  ...steps: Array<{ title: string; viewed?: boolean } | { event: HookEvent }>
+  ...steps: Array<
+    | { title: string; viewed?: boolean }
+    | { event: HookEvent; ranBefore?: number; subagent?: boolean }
+  >
 ): StateSource {
   let current = session
+  let clock = (session.workingSince ?? 0) + 1_000
   for (const step of steps) {
+    clock += 1_000
     const change =
       'title' in step
-        ? afterTitle(current, step.title, step.viewed ?? false)
-        : afterHookEvent(current, step.event)
+        ? afterTitle(current, step.title, step.viewed ?? false, clock)
+        : afterHookEvent(
+            current,
+            report(step.event, clock - 500 - 1_000 * (step.ranBefore ?? 0), step.subagent),
+          )
     current = { ...current, ...change, ...('title' in step ? { title: step.title } : {}) }
   }
   return current
@@ -115,7 +136,7 @@ describe('what a Claude Code session does', () => {
       const approved = play(asked, { title: '◐ Fix' })
       expect(sessionState(approved)).toBe('working')
       expect(
-        sessionState(play(approved, { event: 'Stop' }, { title: '✳ Fix', viewed: true })),
+        sessionState(play(approved, { title: '✳ Fix', viewed: true }, { event: 'Stop' })),
       ).toBe('idle')
     }
     const elicited = play(
@@ -128,9 +149,49 @@ describe('what a Claude Code session does', () => {
     // Denied: nothing is reported, and it waits until the next turn starts.
     expect(sessionState(play(elicited, { title: '✳ Fix', viewed: true }))).toBe('waiting')
     expect(sessionState(play(elicited, { title: '◐ Next' }))).toBe('working')
+    // A report that arrives before the title of the dialog it tells of.
+    const early = play(claude(), { title: '◐ Fix' }, { event: 'PermissionRequest' })
+    expect(sessionState(early)).toBe('waiting')
+    expect(sessionState(play(early, { title: '✳ Fix', viewed: true }))).toBe('waiting')
   })
 
-  it('stops waiting when the turn ends, as after a dialog answered before it was reported', () => {
+  it('takes no late report of what is over by the time it arrives', () => {
+    // A dialog the user answered before its report arrived, interrupted next:
+    // idle, not waiting.
+    const answered = play(
+      claude(),
+      { title: '◐ Fix' },
+      { title: '✳ Fix' },
+      { title: '◐ Fix' },
+      { event: 'PermissionRequest', ranBefore: 1 },
+    )
+    expect(sessionState(answered)).toBe('working')
+    expect(sessionState(play(answered, { title: '✳ Fix', viewed: true }))).toBe('idle')
+    // An API error reported once the next turn had started, which ends at once.
+    const retried = play(
+      claude(),
+      { title: '◐ Fix' },
+      { title: '✳ Fix', viewed: true },
+      { title: '◐ Retry' },
+      { event: 'StopFailure', ranBefore: 1 },
+    )
+    expect(sessionState(retried)).toBe('working')
+    expect(sessionState(play(retried, { title: '✳ Retry', viewed: true }))).toBe('idle')
+    // The end of a turn reported once the next one had asked the user something.
+    const asked = play(
+      claude(),
+      { title: '◐ Fix' },
+      { title: '✳ Fix', viewed: true },
+      { title: '◐ Next' },
+      { title: '✳ Next', viewed: true },
+      { event: 'PermissionRequest' },
+      { event: 'Stop', ranBefore: 3 },
+    )
+    expect(sessionState(asked)).toBe('waiting')
+  })
+
+  it('stops waiting when the turn ends, after a dialog answered before a report too late to tell', () => {
+    // The hook's hoot started only after Claude Code worked again.
     const late = play(
       claude(),
       { title: '◐ Fix' },
@@ -147,6 +208,26 @@ describe('what a Claude Code session does', () => {
     expect(sessionState(play(late, { title: '✳ Fix', viewed: false }, { event: 'Stop' }))).toBe(
       'done',
     )
+  })
+
+  it("waits while a subagent's dialog does, also after the turn ends, until it is answered", () => {
+    for (const viewed of [true, false]) {
+      // A background agent asks to run a command while the turn goes on.
+      const asked = play(
+        claude(),
+        { title: '◐ Fix' },
+        { title: '✳ Fix', viewed },
+        { event: 'PermissionRequest', subagent: true },
+      )
+      expect(sessionState(asked)).toBe('waiting')
+      const ended = play(asked, { event: 'Stop' })
+      expect(sessionState(ended)).toBe('waiting')
+      // Answered: the agent goes on, and the session works again.
+      expect(sessionState(play(ended, { title: '◐ Fix' }))).toBe('working')
+      expect(sessionState(play(ended, { title: '◐ Fix' }, { title: '✳ Fix', viewed: true }))).toBe(
+        'idle',
+      )
+    }
   })
 
   it('has stopped by an error, viewed or not, until its next turn starts', () => {
@@ -166,14 +247,28 @@ describe('what a Claude Code session does', () => {
 
   it('takes no event of a hook for a session that is not running Claude Code', () => {
     for (const event of ['PermissionRequest', 'Elicitation', 'StopFailure'] as const) {
-      expect(afterHookEvent({ ...claude(), toolId: 'shell' }, event)).toEqual({})
-      expect(afterHookEvent(claude({ status: 'starting' }), event)).toEqual({})
-      expect(afterHookEvent(claude({ status: 'exited', exit: exit({ code: 1 }) }), event)).toEqual(
-        {},
-      )
+      expect(afterHookEvent({ ...claude(), toolId: 'shell' }, report(event, 0))).toEqual({})
+      expect(afterHookEvent(claude({ status: 'starting' }), report(event, 0))).toEqual({})
+      expect(
+        afterHookEvent(claude({ status: 'exited', exit: exit({ code: 1 }) }), report(event, 0)),
+      ).toEqual({})
     }
-    expect(afterHookEvent(claude({ attention: 'error' }), 'Stop')).toEqual({})
-    expect(afterTitle({ ...claude({ title: '◐ x' }), toolId: 'shell' }, '✳ x', false)).toEqual({})
+    expect(afterHookEvent(claude({ attention: 'error' }), report('Stop', 0))).toEqual({})
+    expect(afterTitle({ ...claude({ title: '◐ x' }), toolId: 'shell' }, '✳ x', false, 0)).toEqual(
+      {},
+    )
+  })
+
+  it('counts working from when the output that started it arrived', () => {
+    expect(afterTitle(claude(), '◐ Fix', true, 5_000)).toEqual({
+      attention: null,
+      unread: false,
+      workingSince: 5_000,
+    })
+    // Still working: the same start.
+    expect(
+      afterTitle(claude({ title: '◐ Fix', workingSince: 5_000 }), '◑ Fix', true, 6_000),
+    ).toEqual({ attention: null, unread: false })
   })
 })
 

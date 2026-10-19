@@ -16,4 +16,5 @@ process.exitCode = await runHoot(process.argv.slice(2), {
   writeError: (text) => process.stderr.write(text),
   readStdin,
   readFile: (file) => readFile(file),
+  startedAt: performance.timeOrigin,
 })

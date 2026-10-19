@@ -431,7 +431,7 @@ function startWithDatabase(database: DatabaseSync): void {
         workflows.progress(issue.id),
       ),
     startSession: (issueId, prompt) => sessionStarts.request(issueId, prompt),
-    hookEvent: (sessionId, event) => sessions.reportHookEvent(sessionId, event),
+    hookEvent: (sessionId, report) => sessions.reportHookEvent(sessionId, report),
   })
   hootServer.start().catch((error: unknown) => {
     console.error(`Could not listen for hoot on ${hootCli.socket}:`, error)

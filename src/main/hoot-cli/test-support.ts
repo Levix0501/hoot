@@ -6,7 +6,7 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
 import { waitedOnIds } from '../../shared/dependencies'
-import type { HookEvent } from '../../shared/hoot-cli'
+import type { HookEventReport } from '../../shared/hoot-cli'
 import type { ToolsState } from '../../shared/ipc'
 import { issueIdentifier, type Issue } from '../../shared/issues'
 import { startBlockers } from '../../shared/start-blockers'
@@ -63,7 +63,7 @@ export async function startTestHoot() {
   ])
   const created: Issue[] = []
   /** The events of hooks reported, in order, with the session each came from. */
-  const hookEvents: Array<{ sessionId: string; event: HookEvent }> = []
+  const hookEvents: Array<{ sessionId: string } & HookEventReport> = []
   const socket = socketIn(directory, 'hoot.sock')
   const server = new HootServer({
     address: socket,
@@ -92,7 +92,7 @@ export async function startTestHoot() {
       startedSessions.push({ issueId, prompt })
       return startSession(issueId)
     },
-    hookEvent: (sessionId, event) => hookEvents.push({ sessionId, event }),
+    hookEvent: (sessionId, report) => hookEvents.push({ sessionId, ...report }),
   })
   await server.start()
   return {

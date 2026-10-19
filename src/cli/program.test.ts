@@ -15,6 +15,9 @@ afterEach(async () => {
   await hoot.stop()
 })
 
+/** When hoot started, as the tests run it. */
+const STARTED_AT = Date.UTC(2026, 9, 19, 9, 0)
+
 /** Runs hoot as it runs in a session of the test Hoot, by default one of gamma. */
 async function run(
   args: string[],
@@ -32,6 +35,7 @@ async function run(
     writeError: (text) => (stderr += text),
     readStdin: async () => Buffer.from(options.stdin ?? ''),
     readFile: (file) => fs.promises.readFile(file),
+    startedAt: STARTED_AT,
   })
   return { code, stdout, stderr }
 }
@@ -1740,17 +1744,26 @@ describe('hoot session start', () => {
   })
 })
 
-/** The input Claude Code gives a hook on standard input, for an event. */
-const hookInput = (event: string) =>
+/** The input Claude Code gives a hook on standard input, for an event, met by a subagent if `agent` names one. */
+const hookInput = (event: string, agent?: string) =>
   JSON.stringify({
     session_id: 'b2b7c1f0-0000-4000-8000-000000000000',
     transcript_path: '/tmp/transcript.jsonl',
     cwd: '/work/gamma',
+    ...(agent === undefined ? {} : { agent_id: agent, agent_type: 'general-purpose' }),
     hook_event_name: event,
   })
 
+/** What the test Hoot was told of an event of a hook of a session, as hoot ran in the tests. */
+const reported = (sessionId: string, event: string, subagent = false) => ({
+  sessionId,
+  event,
+  startedAt: STARTED_AT,
+  subagent,
+})
+
 describe('hoot hook', () => {
-  it("reports to Hoot each event Hoot takes, from the hook's input, and prints nothing", async () => {
+  it("reports to Hoot each event Hoot takes, from the hook's input, with when hoot started, and prints nothing", async () => {
     for (const event of ['PermissionRequest', 'Elicitation', 'Stop', 'StopFailure']) {
       expect(await run(['hook'], { stdin: hookInput(event) })).toEqual({
         code: 0,
@@ -1763,12 +1776,17 @@ describe('hoot hook', () => {
       stdout: '',
       stderr: '',
     })
+    // A subagent's, such as a background agent asking to run a command.
+    expect(
+      await run(['hook'], { stdin: hookInput('PermissionRequest', 'a8d85a123a0a052c3') }),
+    ).toEqual({ code: 0, stdout: '', stderr: '' })
     expect(hoot.hookEvents).toEqual([
-      { sessionId: 'gamma-session', event: 'PermissionRequest' },
-      { sessionId: 'gamma-session', event: 'Elicitation' },
-      { sessionId: 'gamma-session', event: 'Stop' },
-      { sessionId: 'gamma-session', event: 'StopFailure' },
-      { sessionId: 'hotel-session', event: 'Stop' },
+      reported('gamma-session', 'PermissionRequest'),
+      reported('gamma-session', 'Elicitation'),
+      reported('gamma-session', 'Stop'),
+      reported('gamma-session', 'StopFailure'),
+      reported('hotel-session', 'Stop'),
+      reported('gamma-session', 'PermissionRequest', true),
     ])
   })
 
@@ -1777,7 +1795,18 @@ describe('hoot hook', () => {
       expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })
     }
     expect(hoot.hookEvents).toEqual([])
-    expect(hookEventOf(Buffer.from(hookInput('StopFailure')))).toBe('StopFailure')
+    expect(hookEventOf(Buffer.from(hookInput('StopFailure')))).toEqual({
+      event: 'StopFailure',
+      subagent: false,
+    })
+    expect(hookEventOf(Buffer.from(hookInput('Elicitation', 'a1')))).toEqual({
+      event: 'Elicitation',
+      subagent: true,
+    })
+    expect(hookEventOf(Buffer.from(hookInput('Stop', '')))).toEqual({
+      event: 'Stop',
+      subagent: false,
+    })
     expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
   })
 
@@ -1794,6 +1823,7 @@ describe('hoot hook', () => {
       writeError: (text) => (output += text),
       readStdin: async () => Buffer.from(hookInput('Stop')),
       readFile: async () => new Uint8Array(),
+      startedAt: STARTED_AT,
     })
     expect({ code, output }).toEqual({ code: 0, output: '' })
     await hoot.server.stop()
@@ -1931,6 +1961,7 @@ describe('what hoot cannot do', () => {
       writeError: (text) => (stderr += text),
       readStdin: async () => new Uint8Array(),
       readFile: async () => new Uint8Array(),
+      startedAt: STARTED_AT,
     })
     expect(code).toBe(1)
     expect(stderr).toContain('works only in the sessions that Hoot starts')

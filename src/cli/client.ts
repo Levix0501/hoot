@@ -6,8 +6,8 @@ import {
   type CreatedIssueAnswer,
   type DeletedLabelAnswer,
   type EditedIssueAnswer,
-  type HookEvent,
   type HookEventAnswer,
+  type HookEventReport,
   type HootAnswer,
   type IssueAnswer,
   type IssueEdit,
@@ -131,8 +131,8 @@ export class HootClient {
   }
 
   /** Reports an event of a hook that Hoot added to the session's Claude Code. */
-  reportHookEvent(event: HookEvent): Promise<HookEventAnswer> {
-    return this.ask('POST', '/hook-events', { event }, HOOK_EVENT_TIMEOUT_MS)
+  reportHookEvent(report: HookEventReport): Promise<HookEventAnswer> {
+    return this.ask('POST', '/hook-events', report, HOOK_EVENT_TIMEOUT_MS)
   }
 
   /** Sends a request, and settles with Hoot's answer; rejects with a `CliError` when there is none. */

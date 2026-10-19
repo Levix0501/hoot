@@ -1,4 +1,4 @@
-import type { HookEvent } from '../../shared/hoot-cli'
+import type { HookEventReport } from '../../shared/hoot-cli'
 import {
   describeExit,
   describeExitShort,
@@ -9,9 +9,10 @@ import type { ToolId } from '../../shared/tools'
 
 /**
  * What the hooks of a Claude Code session last said it stopped for, until its
- * next turn starts: a dialog that waits for the user, or an API error.
+ * next turn starts: a dialog of its own agent that waits for the user, one of
+ * a subagent's, which can stay open after the turn ends, or an API error.
  */
-export type Attention = 'waiting' | 'error' | null
+export type Attention = 'waiting' | 'subagent-waiting' | 'error' | null
 
 /** What a session's state comes from. */
 export interface StateSource {
@@ -20,6 +21,11 @@ export interface StateSource {
   exit: SessionExit | null
   /** The terminal title the session's program set last. */
   title: string
+  /**
+   * When the output arrived that last set a working title after one that is
+   * not, in milliseconds since the Unix epoch; `null` until there was one.
+   */
+  workingSince: number | null
   attention: Attention
   /**
    * Claude Code stopped working while the session was not being viewed, and
@@ -54,24 +60,33 @@ export function sessionState(session: StateSource): SessionState {
   if (session.status === 'starting') return 'starting'
   if (session.status === 'exited') return session.exit?.abnormal ? 'ended-unexpectedly' : 'ended'
   if (session.toolId !== 'claude') return 'running'
-  if (session.attention === 'waiting') return 'waiting'
+  if (session.attention === 'waiting' || session.attention === 'subagent-waiting') return 'waiting'
   if (session.attention === 'error') return 'error'
   if (isClaudeCodeWorkingTitle(session.title)) return 'working'
   return session.unread ? 'done' : 'idle'
 }
 
 /** What changes about where a session's state comes from. */
-export type StateChange = Partial<Pick<StateSource, 'attention' | 'unread'>>
+export type StateChange = Partial<Pick<StateSource, 'workingSince' | 'attention' | 'unread'>>
 
 /**
- * What changes about a session's state when its program sets `title`, given
- * whether the user is viewing the session. Claude Code working again ends
- * what it stopped for: a dialog answered, or an error followed by the next
- * turn. When it stops working, it is done unless the user is viewing it.
+ * What changes about a session's state when its program sets `title`, in
+ * output that arrived at `arrivedAt`, given whether the user is viewing the
+ * session. Claude Code working again ends what it stopped for: a dialog
+ * answered, or an error followed by the next turn. When it stops working, it
+ * is done unless the user is viewing it.
  */
-export function afterTitle(session: StateSource, title: string, viewed: boolean): StateChange {
+export function afterTitle(
+  session: StateSource,
+  title: string,
+  viewed: boolean,
+  arrivedAt: number,
+): StateChange {
   if (session.toolId !== 'claude') return {}
-  if (isClaudeCodeWorkingTitle(title)) return { attention: null, unread: false }
+  if (isClaudeCodeWorkingTitle(title)) {
+    if (isClaudeCodeWorkingTitle(session.title)) return { attention: null, unread: false }
+    return { attention: null, unread: false, workingSince: arrivedAt }
+  }
   if (isClaudeCodeWorkingTitle(session.title)) return { unread: !viewed }
   return {}
 }
@@ -79,14 +94,19 @@ export function afterTitle(session: StateSource, title: string, viewed: boolean)
 /**
  * What changes about a running Claude Code session's state when one of its
  * hooks reports an event: a dialog that waits for the user opened, a turn
- * stopped on an API error, or a turn ended, which no dialog waits on any more.
+ * stopped on an API error, or a turn ended, which no dialog of the session's
+ * own agent waits on any more (a subagent's can). A report can arrive long
+ * after its hook ran; one whose hook ran before Claude Code last started
+ * working tells of what is over by now, such as a dialog the user has
+ * answered, and changes nothing.
  */
-export function afterHookEvent(session: StateSource, event: HookEvent): StateChange {
+export function afterHookEvent(session: StateSource, report: HookEventReport): StateChange {
   if (session.toolId !== 'claude' || session.status !== 'running') return {}
-  switch (event) {
+  if (session.workingSince !== null && report.startedAt < session.workingSince) return {}
+  switch (report.event) {
     case 'PermissionRequest':
     case 'Elicitation':
-      return { attention: 'waiting' }
+      return { attention: report.subagent ? 'subagent-waiting' : 'waiting' }
     case 'StopFailure':
       return { attention: 'error' }
     case 'Stop':

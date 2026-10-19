@@ -6,7 +6,7 @@ import {
   MAX_PROMPT_LENGTH,
   type BatchIssue,
   type BatchReference,
-  type HookEvent,
+  type HookEventReport,
   type HootAnswer,
   type IssueEdit,
 } from '../shared/hoot-cli'
@@ -34,6 +34,8 @@ export interface CliIo {
   /** All of standard input. */
   readStdin(): Promise<Uint8Array>
   readFile(path: string): Promise<Uint8Array>
+  /** When hoot started, in milliseconds since the Unix epoch. */
+  startedAt: number
 }
 
 /**
@@ -251,10 +253,10 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 
 /**
  * The event of a Claude Code hook whose input is `input`, the JSON Claude
- * Code gives a hook on standard input, when it is one Hoot takes; `null` for
- * any other input.
+ * Code gives a hook on standard input, when it is one Hoot takes, and whether
+ * a subagent met it (the input names the agent); `null` for any other input.
  */
-export function hookEventOf(input: Uint8Array): HookEvent | null {
+export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
   try {
     value = JSON.parse(new TextDecoder().decode(input))
@@ -262,8 +264,13 @@ export function hookEventOf(input: Uint8Array): HookEvent | null {
     return null
   }
   if (typeof value !== 'object' || value === null) return null
-  const name = (value as { hook_event_name?: unknown }).hook_event_name
-  return HOOK_EVENTS.find((event) => event === name) ?? null
+  const { hook_event_name: name, agent_id: agent } = value as {
+    hook_event_name?: unknown
+    agent_id?: unknown
+  }
+  const event = HOOK_EVENTS.find((candidate) => candidate === name)
+  if (event === undefined) return null
+  return { event, subagent: typeof agent === 'string' && agent !== '' }
 }
 
 /**
@@ -759,8 +766,8 @@ export function hootProgram(io: CliIo): Command {
     )
     .action(async () => {
       try {
-        const event = hookEventOf(await io.readStdin())
-        if (event !== null) await connect().reportHookEvent(event)
+        const hook = hookEventOf(await io.readStdin())
+        if (hook !== null) await connect().reportHookEvent({ ...hook, startedAt: io.startedAt })
       } catch {
         // Hoot shows less of what the session is doing; Claude Code goes on as it would.
       }

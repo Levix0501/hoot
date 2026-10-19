@@ -39,9 +39,9 @@ export interface StateSource {
   workingSince: number | null
   attention: Attention
   /**
-   * The turns of the main agent whose start its hooks reported, or whose
-   * stop on an API error they reported first, by the ids Claude Code gives
-   * them, oldest first: the latest `KEPT_TURNS` of them.
+   * The turns of the main agent that its hooks told of, by their start or
+   * whatever event of the turn they reported first, by the ids Claude Code
+   * gives them, oldest first: the latest `KEPT_TURNS` of them.
    */
   turns: readonly string[]
   /** The turn that stopped on an API error, until a later one starts. */
@@ -123,6 +123,11 @@ export function afterTitle(
  * which no dialog of the session's own agent waits on any more (a
  * subagent's can).
  *
+ * Some turns of the main agent start without a UserPromptSubmit of their
+ * own, such as the turn that answers a message the user queued while the
+ * turn before it ran, or a bash-mode command: the first event of the main
+ * agent's from a turn the hooks have not told of tells that it started.
+ *
  * A report can arrive long after its hook ran, and after reports of later
  * hooks. A dialog or the end of a turn whose hook ran before Claude Code last
  * started working is over by now, such as a dialog the user has answered,
@@ -139,12 +144,15 @@ export function afterHookEvent(session: StateSource, report: HookEventReport): S
       return report.subagent ? {} : afterTurnFailed(session, report.turn)
   }
   if (session.workingSince !== null && report.startedAt < session.workingSince) return {}
+  // A subagent's events name the main agent's turn of the moment, which tells nothing of its start.
+  const started =
+    report.subagent || report.turn === null ? {} : afterTurnStarted(session, report.turn)
   switch (report.event) {
     case 'PermissionRequest':
     case 'Elicitation':
-      return { attention: report.subagent ? 'subagent-waiting' : 'waiting' }
+      return { ...started, attention: report.subagent ? 'subagent-waiting' : 'waiting' }
     case 'Stop':
-      return session.attention === 'waiting' ? { attention: null } : {}
+      return session.attention === 'waiting' ? { ...started, attention: null } : started
   }
 }
 

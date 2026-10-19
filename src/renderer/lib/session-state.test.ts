@@ -281,6 +281,86 @@ describe('what a Claude Code session does', () => {
     }
   })
 
+  it('has stopped by an error until a turn starts that only its later events tell of', () => {
+    for (const viewed of [true, false]) {
+      // A message queued while the turn ran: its UserPromptSubmit names that turn, and the turn
+      // that answers it once that one failed fires none, so its Stop tells of it first.
+      const queued = play(
+        claude(),
+        { title: '◐ Fix' },
+        { event: 'UserPromptSubmit', turn: 't1' },
+        { event: 'UserPromptSubmit', turn: 't1' },
+        { event: 'StopFailure', turn: 't1' },
+      )
+      expect(sessionState(queued)).toBe('working')
+      expect(sessionState(play(queued, { title: '✳ Fix', viewed }))).toBe('error')
+      const answered = play(queued, { event: 'Stop', turn: 't2' }, { title: '✳ Fix', viewed })
+      expect(answered.failure).toBeNull()
+      expect(sessionState(answered)).toBe(viewed ? 'idle' : 'done')
+      // A bash-mode command after the API error, which the main agent answers.
+      const failed = play(queued, { title: '✳ Fix', viewed })
+      const bang = play(failed, { title: '◐ Fix' }, { event: 'Stop', turn: 't2' })
+      expect(sessionState(play(bang, { title: '✳ Fix', viewed }))).toBe(viewed ? 'idle' : 'done')
+      expect(
+        sessionState(
+          play(
+            failed,
+            { title: '◐ Fix' },
+            { event: 'StopFailure', turn: 't2' },
+            { title: '✳ Fix' },
+          ),
+        ),
+      ).toBe('error')
+      // A dialog of the main agent's in such a turn tells of it too.
+      const asked = play(failed, { title: '◐ Fix' }, { event: 'PermissionRequest', turn: 't2' })
+      expect(asked.failure).toBeNull()
+      expect(sessionState(asked)).toBe('waiting')
+    }
+  })
+
+  it('takes no start of a turn from a late report or from a subagent', () => {
+    const failed = play(
+      claude(),
+      { title: '◐ Fix' },
+      { event: 'UserPromptSubmit', turn: 't1' },
+      { title: '✳ Fix', viewed: true },
+      { event: 'StopFailure', turn: 't1' },
+    )
+    // The end of a turn whose hook ran before Claude Code last started working.
+    expect(
+      sessionState(
+        play(
+          failed,
+          { title: '◐ Fix' },
+          { event: 'Stop', turn: 't0', ranBefore: 2 },
+          {
+            title: '✳ Fix',
+            viewed: true,
+          },
+        ),
+      ),
+    ).toBe('error')
+    // A background agent's events name the main agent's turn of the moment.
+    const agent = play(failed, { event: 'PermissionRequest', subagent: true, turn: 't2' })
+    expect(agent.failure).toEqual({ turn: 't1' })
+    expect(sessionState(play(agent, { title: '◐ Fix' }, { title: '✳ Fix', viewed: true }))).toBe(
+      'error',
+    )
+    // The API error of a turn reported after a later turn told of itself by its end.
+    expect(
+      sessionState(
+        play(
+          claude(),
+          { title: '◐ Fix' },
+          { event: 'UserPromptSubmit', turn: 't1' },
+          { event: 'Stop', turn: 't2' },
+          { event: 'StopFailure', turn: 't1', ranBefore: 2 },
+          { title: '✳ Fix', viewed: true },
+        ),
+      ),
+    ).toBe('idle')
+  })
+
   it("shows a background agent's dialog and work over an API error of the main agent's, until the next turn", () => {
     // A background agent asks to run a command, and then the main agent's request fails.
     const failed = play(

@@ -246,8 +246,12 @@ function setup(
       return { version: latest ?? '2.0.0', node: (id && options.latestNode?.[id]) || null }
     },
     runningSessions: () => options.sessions?.() ?? [],
-    launchOptions: async () => ({ models: [], defaultEfforts: [] }),
-    claudeHookSettings: '{"hooks":{}}',
+    launchOptions: async () => ({
+      models: [],
+      defaultEfforts: [],
+      defaultModel: null,
+      defaultEffort: null,
+    }),
     now: () => now,
     platform: options.platform,
   })
@@ -615,10 +619,13 @@ describe('AgentService installs', () => {
       kind: 'install',
       status: 'failed',
       message: '✕ Install failed: npm exited with code 1',
+      reason: 'npm exited with code 1',
       tail: ['line 3', 'line 4', 'line 5', 'line 6', 'npm error code E404'],
       output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nnpm error code E404',
       command: `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @opencode/cli@latest --loglevel=http`,
       exitCode: 1,
+      // The test's clock stands still while npm runs.
+      seconds: 0,
     })
     expect(agent('opencode').installation).toBeNull()
   })

@@ -66,8 +66,6 @@ export interface AgentServiceOptions {
    * no model choice.
    */
   launchOptions(tool: CodingToolId, detection: Detection): Promise<AgentLaunchOptions | null>
-  /** The settings Hoot gives Claude Code, as its `--settings` argument. */
-  claudeHookSettings: string
   /** Hoot's clock, replaceable for tests. */
   now?(): number
   /** The platform Hoot runs on: what its commands are, and where agents live. */
@@ -285,7 +283,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       installTarget: this.installTarget,
       detecting: this.detecting !== null,
       detectedAt: this.lastDetectionStartedAt,
-      claudeHookSettings: this.options.claudeHookSettings,
     }
   }
 
@@ -666,10 +663,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const output = new TerminalText()
     let plan: Plan | null = null
     let end: ProcessEnd | null = null
+    let seconds: number | null = null
     let failure: string | null = null
     try {
       plan = await this.plan(record, kind, before)
       if (!operation.cancelled) {
+        const startedAt = this.now()
         const process = startProcess(plan.command, (text) => {
           void output.write(text)
         })
@@ -677,6 +676,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         // Cancelled while it started.
         if (operation.cancelled) terminate(operation)
         end = await process.ended
+        seconds = Math.round((this.now() - startedAt) / 1000)
         operation.process = null
         await output.settled()
       }
@@ -701,18 +701,17 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       if (operation.cancelled) {
         operation.state = { kind, status: 'cancelled' }
       } else if (failure !== null || plan === null || end === null) {
-        operation.state = this.failed(
-          kind,
-          failure ?? 'it did not run',
-          output,
+        operation.state = this.failed(kind, failure ?? 'it did not run', output, {
           command,
-          end?.code ?? null,
-        )
+          exitCode: end?.code ?? null,
+          seconds,
+        })
       } else {
         operation.state = this.outcome(record.tool, kind, plan, end, before, after, {
           sessionsBefore,
           output,
           command: command ?? '',
+          seconds,
         })
       }
     } finally {
@@ -815,7 +814,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     end: ProcessEnd,
     before: Installation | null,
     after: Installation | null,
-    context: { sessionsBefore: string[]; output: TerminalText; command: string },
+    context: {
+      sessionsBefore: string[]
+      output: TerminalText
+      command: string
+      seconds: number | null
+    },
   ): AgentOperation {
     const { name } = plan
     const label = tool.label
@@ -848,25 +852,28 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         message: updatedMessage(after.version, stillRunning, before.version),
       }
     }
-    return this.failed(kind, reason, context.output, command, exitCode)
+    return this.failed(kind, reason, context.output, {
+      command,
+      exitCode,
+      seconds: context.seconds,
+    })
   }
 
   private failed(
     kind: AgentOperationKind,
     reason: string,
     output: TerminalText,
-    command: string | null,
-    exitCode: number | null,
+    run: { command: string | null; exitCode: number | null; seconds: number | null },
   ): AgentOperation {
     const lines = output.lines()
     return {
       kind,
       status: 'failed',
       message: failedMessage(kind, reason),
+      reason,
       tail: lines.slice(-TAIL_LINES),
       output: lines.join('\n'),
-      command,
-      exitCode,
+      ...run,
     }
   }
 }

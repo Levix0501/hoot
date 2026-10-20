@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { parse } from 'smol-toml'
-import type { AgentLaunchOptions, AgentModelOption } from '../../shared/agents'
+import type { AgentLaunchOptions, AgentModelOption, ConfiguredDefault } from '../../shared/agents'
 import type { Env } from '../env/env'
 import { commandProgram } from '../tools/command-program'
 import { runCommand, type CommandResult } from './processes'
@@ -21,6 +21,7 @@ interface CodexCatalog {
 
 interface CodexConfig {
   model: string | null
+  reasoningEffort: string | null
   modelProvider: string | null
   hasCatalog: boolean
 }
@@ -53,12 +54,18 @@ export async function readCodexConfig(env: Env, home: string): Promise<CodexConf
     const parsed = objectOf(parse(await fs.readFile(file, 'utf8')))
     return {
       model: stringOf(parsed?.model),
+      reasoningEffort: stringOf(parsed?.model_reasoning_effort),
       modelProvider: stringOf(parsed?.model_provider),
       hasCatalog: stringOf(parsed?.model_catalog_json) !== null,
     }
   } catch {
-    return { model: null, modelProvider: null, hasCatalog: false }
+    return { model: null, reasoningEffort: null, modelProvider: null, hasCatalog: false }
   }
+}
+
+/** A value config.toml sets, as a default the Agents page names. */
+function fromConfig(value: string | null): ConfiguredDefault | null {
+  return value === null ? null : { value, source: 'config.toml' }
 }
 
 /** The catalog `codex debug models` prints, or `null` when it cannot be read. */
@@ -114,6 +121,10 @@ export async function readCodexLaunchOptions(options: {
     readCodexConfig(options.env, options.home),
     commandProgram(options.command, options.env, platform),
   ])
+  const defaults = {
+    defaultModel: fromConfig(config.model),
+    defaultEffort: fromConfig(config.reasoningEffort),
+  }
   const limited =
     config.modelProvider !== null && config.modelProvider !== 'openai' && !config.hasCatalog
   if (limited) {
@@ -121,6 +132,7 @@ export async function readCodexLaunchOptions(options: {
       models:
         config.model === null ? [] : [{ value: config.model, label: config.model, efforts: [] }],
       defaultEfforts: [],
+      ...defaults,
     }
   }
 
@@ -135,7 +147,7 @@ export async function readCodexLaunchOptions(options: {
     MODELS_TIMEOUT_MS,
   ).catch(() => null)
   const catalog = result === null || result.code !== 0 ? null : catalogOf(result.stdout)
-  if (catalog === null) return { models: [], defaultEfforts: [] }
+  if (catalog === null) return { models: [], defaultEfforts: [], ...defaults }
 
   const models: AgentModelOption[] = catalog.models
     .filter((model) => model.visibility === 'list')
@@ -144,5 +156,6 @@ export async function readCodexLaunchOptions(options: {
   return {
     models,
     defaultEfforts: configured === undefined ? [] : [...configured.levels],
+    ...defaults,
   }
 }

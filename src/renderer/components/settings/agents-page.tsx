@@ -1,10 +1,11 @@
 import {
+  ArrowDownToLineIcon,
   CheckIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CopyIcon,
   LockIcon,
+  PlusIcon,
   RefreshCwIcon,
   XIcon,
 } from 'lucide-react'
@@ -22,16 +23,20 @@ import {
 } from '../../../shared/agents'
 import {
   commandSegments,
+  displayArgument,
   displayCommand,
+  splitArguments,
   type CommandSegment,
 } from '../../../shared/launch-command'
-import type { AgentLaunchSettings } from '../../../shared/launch-settings'
+import type {
+  AgentLaunchSettings,
+  AgentLaunchSettingsChange,
+} from '../../../shared/launch-settings'
 import { CODING_TOOLS, type CodingToolDefinition } from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { agentRowStatus, updateAllIncludes, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 import {
@@ -43,11 +48,13 @@ import {
   DialogTitle,
 } from '../ui/dialog'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu'
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+} from '../ui/select'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
@@ -143,334 +150,271 @@ function notInstalledDescription(
   }
 }
 
-/** The line below an agent's name: its version, how it was installed and where its command is. */
-function InstallationDetails({ agent }: { agent: AgentState }) {
-  const installation = agent.installation
-  if (installation === null) return null
-  const method = installMethodLabel(installation.method) ?? 'Unknown'
+/** A chevron that points down while what it opens is open. */
+function Chevron({ open, className }: { open: boolean; className?: string }) {
   return (
-    <dl
-      className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground"
-      data-testid={`agent-details-${agent.id}`}
-    >
-      <dt>Version</dt>
-      <dd data-testid={`agent-details-version-${agent.id}`}>
-        {installation.version ?? "Doesn't run"}
-      </dd>
-      <dt>Installed with</dt>
-      <dd data-testid={`agent-details-method-${agent.id}`}>{method}</dd>
-      <dt>Path</dt>
-      <dd className="min-w-0">
-        <PathText
-          shown={installation.displayPath}
-          full={installation.path}
-          testId={`agent-path-${agent.id}`}
-        />
-      </dd>
-    </dl>
+    <ChevronRightIcon
+      className={cn(
+        'size-4 shrink-0 text-muted-foreground transition-transform duration-150',
+        open && 'rotate-90',
+        className,
+      )}
+    />
   )
 }
 
-/** A chip of the command editor, with a tooltip that says why it is as it is. */
-function SegmentChip({
-  segment,
-  testId,
-  children,
-}: {
-  segment: CommandSegment
-  testId: string
-  children?: ReactNode
-}) {
-  const chip = (
-    <span
-      className={cn(
-        'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs',
-        segment.locked
-          ? 'border-border bg-muted text-muted-foreground'
-          : 'border-border bg-background text-foreground',
-        segment.explanatory && 'border-dashed text-muted-foreground',
-      )}
-      data-testid={testId}
-    >
-      {segment.locked && <LockIcon className="size-3 shrink-0" />}
-      <span className="min-w-0 truncate">{segment.text}</span>
+/** The text on a row's right, where there is no button. */
+function StatusText({ children, testId }: { children: ReactNode; testId: string }) {
+  return (
+    <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground" data-testid={testId}>
       {children}
     </span>
   )
-  if (!segment.note) return chip
+}
+
+/** A button that runs a command, which pointing at it shows. */
+function RunsTooltip({ command, children }: { command: string | null; children: ReactNode }) {
+  if (command === null) return children
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex min-w-0" />}>{chip}</TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-80">
-        {segment.note}
+      <TooltipTrigger render={<span className="inline-flex" />}>{children}</TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-[min(36rem,90vw)] font-mono break-all">
+        Runs {command}
       </TooltipContent>
     </Tooltip>
   )
 }
 
-/** The choices of a model or effort segment, which selects one. */
-function ModelSegment({
-  tool,
-  settings,
-  segment,
-  agent,
-  onChange,
-}: {
-  tool: CodingToolDefinition
-  settings: AgentLaunchSettings
-  segment: CommandSegment
-  agent: AgentState
-  onChange: (change: { model: string | null; effort?: string | null }) => void
-}) {
-  if (segment.locked) return <SegmentChip segment={segment} testId={`agent-model-${tool.id}`} />
-  const models = agent.launchOptions?.models ?? []
-  const current = settings.model
-  const missing =
-    current !== null &&
-    agent.launchOptions !== null &&
-    !models.some((option) => option.value === current)
-  const currentOption = models.find((option) => option.value === current)
+/** Whether something was copied a moment ago, and a way to say that it just was. */
+function useCopied(): [copied: boolean, markCopied: () => void] {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1200)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  return [copied, () => setCopied(true)]
+}
+
+/** A chip of the command editor. */
+const CHIP = 'inline-flex h-6 max-w-full items-center gap-1 rounded-md px-1.5 font-mono text-xs'
+
+/** A chip that is a picker: filled once something is picked, dashed while it is not. */
+const PICKER_CHIP =
+  'h-6 gap-1 rounded-md py-0 pr-1 pl-1.5 font-mono text-xs data-[size=sm]:h-6 dark:bg-transparent'
+const PICKED =
+  'border-transparent bg-chart-1/10 text-chart-1 hover:bg-chart-1/15 dark:bg-chart-1/15'
+const NOT_PICKED = 'border-dashed text-muted-foreground'
+/** A picked model that the agent's configuration no longer offers. */
+const PICKED_MISSING =
+  'border-transparent bg-destructive/10 text-destructive hover:bg-destructive/15 dark:bg-destructive/15'
+
+/** The choice of a picker that leaves it to the agent's own configuration. */
+const DEFAULT_CHOICE = '\u0000default'
+
+/** What a picker shows: what it puts in the command, or what it would pick. */
+function PickerText({ segment, placeholder }: { segment: CommandSegment; placeholder: string }) {
+  if (segment.args.length > 0) return <span className="truncate">{segment.text}</span>
   return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              className={cn(
-                'inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                current === null
-                  ? 'border-dashed border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
-                  : 'border-border bg-background text-foreground hover:bg-muted',
-                missing && 'border-destructive/60 text-destructive',
-              )}
-              data-testid={`agent-model-${tool.id}`}
-            />
-          }
-        >
-          {segment.text}
-          {missing && <CircleAlertIcon className="size-3 shrink-0" />}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-auto min-w-52">
-          <DropdownMenuItem
-            onClick={() =>
-              onChange({
-                model: null,
-                effort:
-                  settings.effort !== null &&
-                  (agent.launchOptions?.defaultEfforts ?? []).includes(settings.effort)
-                    ? settings.effort
-                    : null,
-              })
-            }
-            data-testid={`agent-model-${tool.id}-default`}
-          >
-            <span>Default</span>
-            {current === null && <CheckIcon className="ml-auto" />}
-          </DropdownMenuItem>
-          {models.map((option) => (
-            <DropdownMenuItem
-              key={option.value}
-              onClick={() =>
-                onChange({
-                  model: option.value,
-                  effort:
-                    settings.effort !== null && option.efforts.includes(settings.effort)
-                      ? settings.effort
-                      : null,
-                })
-              }
-              data-testid={`agent-model-${tool.id}-option-${option.value}`}
-            >
-              <span className="truncate">{option.label}</span>
-              {option.value === current && <CheckIcon className="ml-auto" />}
-            </DropdownMenuItem>
-          ))}
-          {missing && currentOption === undefined && (
-            <p className="px-1.5 py-1 text-xs text-muted-foreground">
-              {current} is not in the current configuration.
-            </p>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {missing && (
-        <span
-          className="inline-flex items-center gap-1 text-xs text-destructive"
-          data-testid={`agent-model-missing-${tool.id}`}
-        >
-          Not in the current configuration
-        </span>
-      )}
+    <span className="flex items-center gap-1">
+      <PlusIcon className="size-3" />
+      {placeholder}
     </span>
   )
 }
 
-/** The effort segment, whose choices follow the selected model. */
-function EffortSegment({
+/** The Default choice of a picker, with what the agent's configuration sets, if it names it. */
+function DefaultChoice({
   tool,
+  configured,
+}: {
+  tool: CodingToolDefinition
+  configured: { value: string; source: string } | null
+}) {
+  return (
+    <SelectItem value={DEFAULT_CHOICE}>
+      <span>{configured === null ? 'Default' : `Default · ${configured.value}`}</span>
+      <span className="text-muted-foreground">
+        {configured === null ? `${tool.label}'s own setting` : configured.source}
+      </span>
+    </SelectItem>
+  )
+}
+
+/** The model chip, which picks a model from the agent's configuration. */
+function ModelPicker({
+  tool,
+  agent,
   settings,
   segment,
-  agent,
   onChange,
 }: {
   tool: CodingToolDefinition
+  agent: AgentState
   settings: AgentLaunchSettings
   segment: CommandSegment
-  agent: AgentState
-  onChange: (change: { effort: string | null }) => void
+  onChange: (change: AgentLaunchSettingsChange) => void
 }) {
-  if (segment.locked) return <SegmentChip segment={segment} testId={`agent-effort-${tool.id}`} />
   const options = agent.launchOptions
-  const currentEfforts =
+  const models = options?.models ?? []
+  const current = settings.model
+  const missing = current !== null && options !== null && !models.some((m) => m.value === current)
+  const pick = (value: string) => {
+    const model = value === DEFAULT_CHOICE ? null : value
+    const efforts =
+      model === null
+        ? (options?.defaultEfforts ?? [])
+        : (models.find((option) => option.value === model)?.efforts ?? [])
+    // An effort level the new model does not take goes back to Default.
+    const effort =
+      settings.effort !== null && efforts.includes(settings.effort) ? settings.effort : null
+    onChange({ model, effort })
+  }
+  return (
+    <Select
+      value={current ?? DEFAULT_CHOICE}
+      onValueChange={(value) => {
+        if (typeof value === 'string') pick(value)
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Model"
+        className={cn(
+          PICKER_CHIP,
+          current === null ? NOT_PICKED : missing ? PICKED_MISSING : PICKED,
+        )}
+        data-testid={`agent-model-${tool.id}`}
+      >
+        {missing && <CircleAlertIcon className="size-3" />}
+        <PickerText segment={segment} placeholder="model" />
+      </SelectTrigger>
+      {/* As wide as its longest choice, so that the check never covers one. */}
+      <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-64">
+        <SelectGroup>
+          <DefaultChoice tool={tool} configured={options?.defaultModel ?? null} />
+        </SelectGroup>
+        {missing && (
+          <SelectGroup>
+            <SelectLabel>Not in the current configuration</SelectLabel>
+            <SelectItem value={current}>
+              <span className="font-mono text-xs">{current}</span>
+            </SelectItem>
+          </SelectGroup>
+        )}
+        {models.length > 0 && (
+          <SelectGroup>
+            <SelectLabel>From your configuration</SelectLabel>
+            {models.map((model) => (
+              <SelectItem
+                key={model.value}
+                value={model.value}
+                data-testid={`agent-model-${tool.id}-option-${model.value}`}
+              >
+                <span className="font-mono text-xs">{model.value}</span>
+                {model.label !== model.value && (
+                  <span className="text-xs text-muted-foreground">{model.label}</span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** The effort chip, which picks one of the levels the selected model takes. */
+function EffortPicker({
+  tool,
+  agent,
+  settings,
+  segment,
+  onChange,
+}: {
+  tool: CodingToolDefinition
+  agent: AgentState
+  settings: AgentLaunchSettings
+  segment: CommandSegment
+  onChange: (change: AgentLaunchSettingsChange) => void
+}) {
+  const options = agent.launchOptions
+  const efforts =
     settings.model === null
       ? (options?.defaultEfforts ?? [])
       : (options?.models.find((option) => option.value === settings.model)?.efforts ?? [])
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <button
-            type="button"
-            className={cn(
-              'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              settings.effort === null
-                ? 'border-dashed border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
-                : 'border-border bg-background text-foreground hover:bg-muted',
-            )}
-            data-testid={`agent-effort-${tool.id}`}
-          />
-        }
+    <Select
+      value={settings.effort ?? DEFAULT_CHOICE}
+      onValueChange={(value) => {
+        if (typeof value === 'string') onChange({ effort: value === DEFAULT_CHOICE ? null : value })
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Effort"
+        className={cn(PICKER_CHIP, settings.effort === null ? NOT_PICKED : PICKED)}
+        data-testid={`agent-effort-${tool.id}`}
       >
-        {segment.text}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-auto min-w-40">
-        <DropdownMenuItem
-          onClick={() => onChange({ effort: null })}
-          data-testid={`agent-effort-${tool.id}-default`}
-        >
-          <span>Default</span>
-          {settings.effort === null && <CheckIcon className="ml-auto" />}
-        </DropdownMenuItem>
-        {currentEfforts.map((effort) => (
-          <DropdownMenuItem
+        <PickerText segment={segment} placeholder="effort" />
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-48">
+        <DefaultChoice tool={tool} configured={options?.defaultEffort ?? null} />
+        {efforts.map((effort) => (
+          <SelectItem
             key={effort}
-            onClick={() => onChange({ effort })}
+            value={effort}
             data-testid={`agent-effort-${tool.id}-option-${effort}`}
           >
-            <span>{effort}</span>
-            {effort === settings.effort && <CheckIcon className="ml-auto" />}
-          </DropdownMenuItem>
+            <span className="font-mono text-xs">{effort}</span>
+          </SelectItem>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </SelectContent>
+    </Select>
   )
 }
 
-/** One segment of the command editor. */
-function CommandSegmentView({
-  tool,
-  settings,
-  agent,
-  segment,
-  index,
-  onChange,
-}: {
-  tool: CodingToolDefinition
-  settings: AgentLaunchSettings
-  agent: AgentState
-  segment: CommandSegment
-  index: number
-  onChange: (change: {
-    model?: string | null
-    effort?: string | null
-    extraArgs?: string[]
-  }) => void
-}) {
-  if (segment.kind === 'program') {
-    return (
-      <span
-        className="font-mono text-sm font-medium text-foreground"
-        data-testid={`agent-command-program-${tool.id}`}
+/** The button that copies a command, and says for a moment that it did. */
+function CopyCommandButton({ command, testId }: { command: string; testId: string }) {
+  const [copied, markCopied] = useCopied()
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground"
+            aria-label="Copy command"
+            onClick={() => {
+              api.writeClipboardText(command)
+              markCopied()
+            }}
+            data-testid={testId}
+          />
+        }
       >
-        {segment.text}
-      </span>
-    )
-  }
-  if (segment.kind === 'settings') {
-    return (
-      <span
-        className="min-w-0 max-w-full font-mono text-[11px] break-all whitespace-pre-wrap text-muted-foreground select-text"
-        data-testid={`agent-command-settings-${tool.id}`}
-      >
-        {segment.text}
-      </span>
-    )
-  }
-  if (segment.kind === 'model') {
-    if (segment.selectable) {
-      return (
-        <ModelSegment
-          tool={tool}
-          settings={settings}
-          segment={segment}
-          agent={agent}
-          onChange={(change) => onChange(change)}
-        />
-      )
-    }
-    return <SegmentChip segment={segment} testId={`agent-model-${tool.id}`} />
-  }
-  if (segment.kind === 'effort') {
-    if (segment.selectable) {
-      return (
-        <EffortSegment
-          tool={tool}
-          settings={settings}
-          segment={segment}
-          agent={agent}
-          onChange={(change) => onChange(change)}
-        />
-      )
-    }
-    return <SegmentChip segment={segment} testId={`agent-effort-${tool.id}`} />
-  }
-  if (segment.kind === 'argument') {
-    const extraIndex = segment.extraIndex ?? index
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-md border border-border bg-background py-0.5 pr-0.5 pl-1.5 font-mono text-xs text-foreground"
-        data-testid={`agent-extra-${tool.id}-${extraIndex}`}
-      >
-        <span className="max-w-full truncate">{segment.text}</span>
-        <button
-          type="button"
-          aria-label={`Remove ${segment.text}`}
-          className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          onClick={() =>
-            onChange({ extraArgs: settings.extraArgs.filter((_, at) => at !== extraIndex) })
-          }
-          data-testid={`agent-extra-remove-${tool.id}-${extraIndex}`}
-        >
-          <XIcon className="size-3" />
-        </button>
-      </span>
-    )
-  }
-  return <SegmentChip segment={segment} testId={`agent-permission-${tool.id}`} />
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </TooltipTrigger>
+      <TooltipContent>{copied ? 'Copied' : 'Copy command'}</TooltipContent>
+    </Tooltip>
+  )
 }
 
-/** The command that a new session of an agent runs, which is also its editor. */
+/**
+ * The command a new session runs, as chips: the program, the permission flag
+ * that YOLO mode adds, the model and effort, which open their pickers, and the
+ * extra arguments, typed at the end and removed with their ×.
+ */
 function CommandEditor({
   tool,
   agent,
   settings,
-  hookSettings,
   yoloMode,
 }: {
   tool: CodingToolDefinition
   agent: AgentState
   settings: AgentLaunchSettings
-  hookSettings: string
   yoloMode: boolean
 }) {
   const changeAgentLaunchSettings = useAppStore((state) => state.changeAgentLaunchSettings)
@@ -480,80 +424,122 @@ function CommandEditor({
     settings.model === null
       ? []
       : (options?.models.find((option) => option.value === settings.model)?.efforts ?? [])
-  const defaultEfforts = options?.defaultEfforts ?? []
   const segments = commandSegments({
     tool: tool.id,
     program: tool.command,
     yoloMode,
     settings,
-    hookSettings: tool.id === 'claude' ? hookSettings : null,
     modelEfforts,
-    defaultEfforts,
+    defaultEfforts: options?.defaultEfforts ?? [],
   })
   const command = displayCommand(segments)
-  const change = (update: {
-    model?: string | null
-    effort?: string | null
-    extraArgs?: string[]
-  }) => changeAgentLaunchSettings(tool.id, update)
-  const addArguments = () => {
-    const parts = draft.trim().split(/\s+/).filter(Boolean)
+  const change = (update: AgentLaunchSettingsChange) => changeAgentLaunchSettings(tool.id, update)
+  const commit = () => {
+    const parts = splitArguments(draft)
     if (parts.length === 0) return
     change({ extraArgs: [...settings.extraArgs, ...parts] })
     setDraft('')
   }
 
+  const program = segments.find((segment) => segment.kind === 'program')
+  const permission = segments.find((segment) => segment.kind === 'permission')
+  const model = segments.find((segment) => segment.kind === 'model')
+  const effort = segments.find((segment) => segment.kind === 'effort')
+  // A picked model or effort stands where its arguments are; one not picked
+  // waits at the end, before the field that adds arguments.
+  const modelPicker = model && (
+    <ModelPicker tool={tool} agent={agent} settings={settings} segment={model} onChange={change} />
+  )
+  const effortPicker = effort && (
+    <EffortPicker
+      tool={tool}
+      agent={agent}
+      settings={settings}
+      segment={effort}
+      onChange={change}
+    />
+  )
+
   return (
-    <div
-      className="mt-3 flex items-start gap-2 rounded-lg border bg-muted/30 px-2.5 py-2"
-      role="group"
-      aria-label={`Command for ${tool.label}: ${command}`}
-      data-command={command}
-      data-testid={`agent-command-${tool.id}`}
-    >
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-1.5">
-        {segments.map((segment, index) => (
-          <CommandSegmentView
-            // Segments are positional: their texts may repeat, as extra arguments can.
-            key={`${segment.kind}-${index}`}
-            tool={tool}
-            settings={settings}
-            agent={agent}
-            segment={segment}
-            index={index}
-            onChange={change}
-          />
+    <div className="flex items-start gap-1">
+      {/* Lit while its field has focus, not while a chip keeps it after its picker closed. */}
+      <div
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-lg border border-input px-1.5 py-1 has-[input:focus]:border-ring has-[input:focus]:ring-3 has-[input:focus]:ring-ring/50 dark:bg-input/30"
+        role="group"
+        aria-label={`Command for ${tool.label}: ${command}`}
+        data-command={command}
+        data-testid={`agent-command-${tool.id}`}
+      >
+        {program && (
+          <span
+            className={cn(CHIP, 'px-1 font-semibold')}
+            data-testid={`agent-command-program-${tool.id}`}
+          >
+            {program.text}
+          </span>
+        )}
+        {permission && (
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex max-w-full" />}>
+              <span
+                className={cn(CHIP, 'bg-chart-3/10 text-chart-3 dark:bg-chart-3/15')}
+                data-testid={`agent-permission-${tool.id}`}
+              >
+                <LockIcon className="size-3 shrink-0" />
+                <span className="truncate">{permission.text}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{permission.note}</TooltipContent>
+          </Tooltip>
+        )}
+        {model && model.args.length > 0 && modelPicker}
+        {effort && effort.args.length > 0 && effortPicker}
+        {settings.extraArgs.map((argument, index) => (
+          <span
+            // Extra arguments are positional: their texts may repeat.
+            key={`${argument}-${index}`}
+            className={cn(CHIP, 'bg-muted pr-0.5 text-foreground')}
+            data-testid={`agent-extra-${tool.id}-${index}`}
+          >
+            <span className="truncate">{displayArgument(argument)}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${argument}`}
+              className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+              onClick={() =>
+                change({ extraArgs: settings.extraArgs.filter((_, at) => at !== index) })
+              }
+              data-testid={`agent-extra-remove-${tool.id}-${index}`}
+            >
+              <XIcon className="size-3" />
+            </button>
+          </span>
         ))}
+        {model && model.args.length === 0 && modelPicker}
+        {effort && effort.args.length === 0 && effortPicker}
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-            event.preventDefault()
-            addArguments()
+            if (event.nativeEvent.isComposing) return
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commit()
+            } else if (event.key === 'Backspace' && draft === '' && settings.extraArgs.length > 0) {
+              change({ extraArgs: settings.extraArgs.slice(0, -1) })
+            }
           }}
+          onBlur={commit}
           placeholder="Add arguments…"
-          aria-label={`Extra arguments for ${tool.label}`}
-          className="min-w-24 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          spellCheck={false}
+          aria-label={`Add arguments for ${tool.label}`}
+          className="h-6 min-w-28 flex-1 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-muted-foreground"
           data-testid={`agent-extra-input-${tool.id}`}
         />
       </div>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy command"
-              onClick={() => api.writeClipboardText(command)}
-              data-testid={`agent-copy-${tool.id}`}
-            />
-          }
-        >
-          <CopyIcon />
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Copy command</TooltipContent>
-      </Tooltip>
+      <span className="pt-1">
+        <CopyCommandButton command={command} testId={`agent-copy-${tool.id}`} />
+      </span>
     </div>
   )
 }
@@ -563,93 +549,146 @@ type AgentFailure =
   | { kind: 'operation'; agent: AgentState }
   | { kind: 'version'; agent: AgentState }
 
+/** A reason as a sentence of its own: npm keeps its lowercase name. */
+function asSentence(reason: string): string {
+  const text = reason.startsWith('npm') ? reason : reason.charAt(0).toUpperCase() + reason.slice(1)
+  return /[.!?]$/.test(text) ? text : `${text}.`
+}
+
 /** The details of a failed install or update, or of a version that could not be read. */
 function FailureDialog({ failure, onClose }: { failure: AgentFailure; onClose: () => void }) {
   const installAgent = useAppStore((state) => state.installAgent)
   const updateAgent = useAppStore((state) => state.updateAgent)
+  const [copied, markCopied] = useCopied()
   const { agent } = failure
-  const operation = failure.kind === 'operation' ? agent.operation : null
+  const label = CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id
+  const operation = agent.operation
+  const failed = failure.kind === 'operation' && operation?.status === 'failed' ? operation : null
   const installation = agent.installation
-  const failed = operation?.status === 'failed' ? operation : null
-  const title =
-    failure.kind === 'version'
-      ? "Doesn't run"
-      : failed?.kind === 'install'
-        ? 'Install failed'
-        : 'Update failed'
-  const command =
-    failure.kind === 'version' ? (installation?.versionCommand ?? null) : (failed?.command ?? null)
-  const exitCode = failure.kind === 'version' ? null : (failed?.exitCode ?? null)
-  const output =
-    failure.kind === 'version' ? (installation?.versionOutput ?? '') : (failed?.output ?? '')
-  const details = [
+  const lookUp = 'Copy the details to look it up, or to ask an agent about it.'
+
+  let title: string
+  let description: string
+  let command: string | null
+  let output: string
+  let details: string[]
+  if (failed === null) {
+    title = `${label} doesn't run`
+    description = `Its version command printed no version. ${lookUp}`
+    command = installation?.versionCommand ?? null
+    output = installation?.versionOutput ?? ''
+    details = []
+  } else {
+    title = `Couldn't ${failed.kind} ${label}`
+    const exited = failed.exitCode !== null && failed.exitCode !== 0
+    description = exited
+      ? `The command exited with code ${failed.exitCode}${
+          failed.seconds === null ? '' : ` after ${failed.seconds} seconds`
+        }. ${lookUp}`
+      : `${asSentence(failed.reason)} ${lookUp}`
+    command = failed.command
+    output = failed.output
+    details = exited
+      ? [
+          `Exited with code ${failed.exitCode}${
+            failed.seconds === null ? '' : ` after ${failed.seconds} s`
+          }`,
+        ]
+      : [asSentence(failed.reason)]
+  }
+  const copyText = [
     ...(command === null ? [] : [`$ ${command}`]),
-    ...(exitCode === null ? [] : [`Exit code: ${exitCode}`]),
+    ...details,
     ...(output === '' ? [] : ['', output]),
   ].join('\n')
-  const retry = () => {
-    if (failed?.kind === 'install') installAgent(agent.id)
-    else if (failed?.kind === 'update') updateAgent(agent.id)
-    onClose()
-  }
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-xl" data-testid="agent-failure-dialog">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {failed !== null && <DialogDescription>{failed.message}</DialogDescription>}
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-2">
           {command !== null && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Command</span>
-              <pre
-                className="max-h-32 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all whitespace-pre-wrap select-text"
-                data-testid="agent-failure-command"
-              >
-                {command}
-              </pre>
-            </div>
+            <code
+              className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all"
+              data-testid="agent-failure-command"
+            >
+              $ {command}
+            </code>
           )}
-          {exitCode !== null && (
-            <p className="text-xs text-muted-foreground" data-testid="agent-failure-exit-code">
-              Exit code: {exitCode}
-            </p>
-          )}
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Output</span>
+          {output !== '' && (
             <pre
-              className="max-h-80 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all whitespace-pre-wrap select-text"
+              className="max-h-64 overflow-y-auto rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all whitespace-pre-wrap text-foreground select-text"
               data-testid="agent-failure-output"
             >
               {output}
             </pre>
-          </div>
+          )}
         </div>
-        <DialogFooter className="flex-row justify-between sm:justify-between">
+        <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => api.writeClipboardText(details)}
+            onClick={() => {
+              api.writeClipboardText(copyText)
+              markCopied()
+            }}
             data-testid="agent-failure-copy"
           >
-            <CopyIcon />
-            Copy details
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? 'Copied' : 'Copy details'}
           </Button>
-          <div className="flex gap-2">
-            {failure.kind === 'operation' && failed !== null && (
-              <Button variant="outline" onClick={retry} data-testid="agent-failure-retry">
-                Try again
-              </Button>
-            )}
-            <Button onClick={onClose}>Close</Button>
-          </div>
+          {failed !== null && (
+            <Button
+              onClick={() => {
+                if (failed.kind === 'install') installAgent(agent.id)
+                else updateAgent(agent.id)
+                onClose()
+              }}
+              data-testid="agent-failure-retry"
+            >
+              <RefreshCwIcon />
+              Try again
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-/** What the row says and does on its right, from its state. */
+/** A red button that opens the details of what went wrong. */
+function FailureButton({
+  children,
+  onClick,
+  testId,
+}: {
+  children: ReactNode
+  onClick: () => void
+  testId: string
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      className="shrink-0 text-destructive hover:text-destructive"
+      onClick={onClick}
+      data-testid={testId}
+    >
+      <CircleAlertIcon />
+      {children}
+      <ChevronRightIcon className="-ml-0.5 opacity-60" />
+    </Button>
+  )
+}
+
+/**
+ * What an agent's installation is doing, or what can be done with it: a
+ * spinner and Cancel while it runs, a red link to the details once it has
+ * failed, Install or Update, or why there is neither; nothing when it is up
+ * to date.
+ */
 function AgentActions({
   agent,
   status,
@@ -665,8 +704,8 @@ function AgentActions({
   const id = agent.id
   const cancelButton = (
     <Button
-      variant="outline"
-      size="sm"
+      variant="ghost"
+      size="xs"
       onClick={() => cancel(id)}
       disabled={agent.operation?.status === 'running' && !agent.operation.cancellable}
       data-testid={`agent-cancel-${id}`}
@@ -677,23 +716,18 @@ function AgentActions({
   const failed = agent.operation?.status === 'failed' ? agent.operation : null
   if (failed !== null) {
     return (
-      <>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive"
-          onClick={() => onFailure({ kind: 'operation', agent })}
-          data-testid={`agent-failure-${id}`}
-        >
-          {failed.kind === 'install' ? 'Install failed' : 'Update failed'}
-        </Button>
-      </>
+      <FailureButton
+        onClick={() => onFailure({ kind: 'operation', agent })}
+        testId={`agent-failure-${id}`}
+      >
+        {failed.kind === 'install' ? 'Install failed' : 'Update failed'}
+      </FailureButton>
     )
   }
   switch (status.kind) {
     case 'waiting':
       return (
-        <>
+        <span className="flex shrink-0 items-center gap-2">
           <span
             className="text-xs whitespace-nowrap text-muted-foreground"
             data-testid={`agent-status-${id}`}
@@ -701,11 +735,11 @@ function AgentActions({
             Waiting…
           </span>
           {cancelButton}
-        </>
+        </span>
       )
     case 'running':
       return (
-        <>
+        <span className="flex shrink-0 items-center gap-2">
           <Spinner className="size-3.5 text-muted-foreground" />
           <span
             className="text-xs whitespace-nowrap text-muted-foreground"
@@ -714,39 +748,31 @@ function AgentActions({
             {status.operation === 'install' ? 'Installing…' : 'Updating…'}
           </span>
           {cancelButton}
-        </>
-      )
-    case 'checking':
-      return (
-        <span
-          className="text-xs whitespace-nowrap text-muted-foreground"
-          data-testid={`agent-status-${id}`}
-        >
-          Checking…
         </span>
       )
+    case 'checking':
+      return <StatusText testId={`agent-status-${id}`}>Checking…</StatusText>
     case 'does-not-run':
       return (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive"
+        <FailureButton
           onClick={() => onFailure({ kind: 'version', agent })}
-          data-testid={`agent-does-not-run-${id}`}
+          testId={`agent-does-not-run-${id}`}
         >
           Doesn't run
-        </Button>
+        </FailureButton>
       )
     case 'install':
       return (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => installAgent(id)}
-          data-testid={`agent-install-${id}`}
-        >
-          Install
-        </Button>
+        <RunsTooltip command={agent.installCommand}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => installAgent(id)}
+            data-testid={`agent-install-${id}`}
+          >
+            Install
+          </Button>
+        </RunsTooltip>
       )
     case 'needs-node':
       return <StatusText testId={`agent-status-${id}`}>{INSTALL_NEEDS_NODE_MESSAGE}</StatusText>
@@ -763,33 +789,58 @@ function AgentActions({
     case 'cannot-check':
       return <StatusText testId={`agent-status-${id}`}>Couldn't check for updates</StatusText>
     case 'up-to-date':
-      return <StatusText testId={`agent-status-${id}`}>Up to date</StatusText>
+      return null
     case 'update-elsewhere':
       return (
         <StatusText testId={`agent-status-${id}`}>Update it the way you installed it</StatusText>
       )
     case 'update':
       return (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => updateAgent(id)}
-          data-testid={`agent-update-${id}`}
-        >
-          Update
-        </Button>
+        <RunsTooltip command={agent.installation?.updateCommand ?? null}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => updateAgent(id)}
+            data-testid={`agent-update-${id}`}
+          >
+            Update to {status.version}
+          </Button>
+        </RunsTooltip>
       )
     case 'update-blocked':
       return <StatusText testId={`agent-status-${id}`}>{status.version} is out</StatusText>
   }
 }
 
-/** The text on a row's right, where there is no button. */
-function StatusText({ children, testId }: { children: ReactNode; testId: string }) {
+/** An installed agent's version, how it was installed and where, and its latest version. */
+function InstallationDetails({ agent }: { agent: AgentState }) {
+  const installation = agent.installation
+  if (installation === null) return null
+  const method = installMethodLabel(installation.method)
+  const latest = [
+    ...(agent.latest === null ? [] : [`Latest ${agent.latest}`]),
+    ...(installation.updateCommand === null ? [] : [`updates with ${installation.updateCommand}`]),
+  ].join(' · ')
   return (
-    <span className="text-xs whitespace-nowrap text-muted-foreground" data-testid={testId}>
-      {children}
-    </span>
+    <div
+      className="flex min-w-0 flex-col gap-1 rounded-lg bg-muted/60 px-3 py-2 sm:ml-8"
+      data-testid={`agent-details-${agent.id}`}
+    >
+      <span className="flex min-w-0 text-xs text-muted-foreground">
+        <span className="shrink-0 whitespace-pre">
+          {[installation.version ?? "Doesn't run", ...(method === null ? [] : [method])].join(
+            ' · ',
+          )}
+          {' · '}
+        </span>
+        <span className="truncate" title={installation.path} data-testid={`agent-path-${agent.id}`}>
+          {installation.displayPath}
+        </span>
+      </span>
+      {latest !== '' && (
+        <span className="truncate font-mono text-xs text-muted-foreground">{latest}</span>
+      )}
+    </div>
   )
 }
 
@@ -799,7 +850,6 @@ function AgentRow({
   agent,
   target,
   launchSettings,
-  hookSettings,
   yoloMode,
   onFailure,
 }: {
@@ -807,7 +857,6 @@ function AgentRow({
   agent: AgentState
   target: InstallTarget | null
   launchSettings: AgentLaunchSettings
-  hookSettings: string
   yoloMode: boolean
   onFailure: (failure: AgentFailure) => void
 }) {
@@ -815,111 +864,145 @@ function AgentRow({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const status = agentRowStatus(agent, target)
   const id = tool.id
+  const enabled = launchSettings.enabled
+  const version = agent.installation?.version ?? null
   return (
-    <div
-      className="flex flex-col px-4 py-3"
+    <Collapsible
+      open={detailsOpen}
+      onOpenChange={setDetailsOpen}
+      className="flex flex-col gap-2.5 px-4 py-3"
       data-testid={`agent-row-${id}`}
       data-status={agent.operation?.status === 'failed' ? 'failed' : status.kind}
-      data-enabled={launchSettings.enabled}
+      data-enabled={enabled}
     >
-      <div className="flex items-start gap-3">
-        <ToolIcon toolId={id} className="mt-0.5 size-4 shrink-0" />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-sm leading-5 font-medium" data-testid={`agent-name-${id}`}>
-              {tool.label}
+      {/* As tall as a button, so that rows line up whether they have one or not. */}
+      <div className="flex min-h-7 items-center gap-3">
+        <ToolIcon toolId={id} className={cn('size-5 shrink-0', !enabled && 'opacity-50')} />
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span
+            className={cn('text-sm font-medium', !enabled && 'text-muted-foreground')}
+            data-testid={`agent-name-${id}`}
+          >
+            {tool.label}
+          </span>
+          {!enabled && (
+            <span className="text-xs text-muted-foreground" data-testid={`agent-disabled-${id}`}>
+              Off
             </span>
-            {agent.installation?.version != null && (
-              <button
-                type="button"
-                className="inline-flex items-center gap-0.5 rounded-sm font-mono text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                aria-expanded={detailsOpen}
-                onClick={() => setDetailsOpen(!detailsOpen)}
-                data-testid={`agent-version-${id}`}
-              >
-                {agent.installation.version}
-                {detailsOpen ? (
-                  <ChevronDownIcon className="size-3" />
-                ) : (
-                  <ChevronRightIcon className="size-3" />
-                )}
-              </button>
-            )}
-            {!launchSettings.enabled && (
-              <Badge variant="secondary" data-testid={`agent-disabled-${id}`}>
-                Disabled
-              </Badge>
-            )}
-          </div>
-          {detailsOpen && <InstallationDetails agent={agent} />}
-          {status.kind === 'update-blocked' && (
-            <p className="text-xs text-muted-foreground">
-              {joined([
-                ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
-                ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
-              ])}
-            </p>
           )}
-        </div>
-        <div className="flex min-h-7 shrink-0 items-center gap-2">
-          <AgentActions agent={agent} status={status} onFailure={onFailure} />
-          <Switch
-            checked={launchSettings.enabled}
-            onCheckedChange={(enabled) => changeAgentLaunchSettings(id, { enabled })}
-            aria-label={`Enable ${tool.label}`}
-            data-testid={`agent-enabled-${id}`}
-          />
-        </div>
+        </span>
+        <AgentActions agent={agent} status={status} onFailure={onFailure} />
+        {version !== null && (
+          <CollapsibleTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                className="shrink-0 font-normal text-muted-foreground"
+                data-testid={`agent-version-${id}`}
+              />
+            }
+          >
+            {version}
+            <Chevron open={detailsOpen} className="size-3" />
+          </CollapsibleTrigger>
+        )}
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex" />}>
+            <Switch
+              checked={enabled}
+              onCheckedChange={(checked) => changeAgentLaunchSettings(id, { enabled: checked })}
+              aria-label={`Use ${tool.label}`}
+              data-testid={`agent-enabled-${id}`}
+            />
+          </TooltipTrigger>
+          <TooltipContent>
+            {enabled ? 'Shown in the new session menu' : 'Hidden from the new session menu'}
+          </TooltipContent>
+        </Tooltip>
       </div>
-      {launchSettings.enabled && (
-        <CommandEditor
-          tool={tool}
-          agent={agent}
-          settings={launchSettings}
-          hookSettings={hookSettings}
-          yoloMode={yoloMode}
-        />
+      <CollapsibleContent>
+        <InstallationDetails agent={agent} />
+      </CollapsibleContent>
+      {status.kind === 'update-blocked' && (
+        <p className="text-xs text-muted-foreground sm:pl-8">
+          {joined([
+            ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
+            ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
+          ])}
+        </p>
       )}
-    </div>
+      {enabled && (
+        <div className="min-w-0 sm:pl-8">
+          <CommandEditor tool={tool} agent={agent} settings={launchSettings} yoloMode={yoloMode} />
+        </div>
+      )}
+    </Collapsible>
   )
 }
 
-/** A not-installed agent's row, in the group at the bottom. */
-function NotInstalledRow({
-  tool,
-  agent,
+/** The agents that are not installed, in a group that ends the list and opens to show them. */
+function NotInstalledGroup({
+  tools,
+  states,
   target,
   onFailure,
 }: {
-  tool: CodingToolDefinition
-  agent: AgentState
+  tools: CodingToolDefinition[]
+  states: Map<string, AgentState>
   target: InstallTarget | null
   onFailure: (failure: AgentFailure) => void
 }) {
-  const status = agentRowStatus(agent, target)
-  const id = tool.id
-  const description = notInstalledDescription(agent, target)
+  const [open, setOpen] = useState(false)
+  if (tools.length === 0) return null
   return (
-    <div
-      className="flex items-start gap-3 px-4 py-3"
-      data-testid={`agent-row-${id}`}
-      data-status={agent.operation?.status === 'failed' ? 'failed' : status.kind}
-    >
-      <ToolIcon toolId={id} className="mt-0.5 size-4 shrink-0" />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-sm leading-5 font-medium" data-testid={`agent-name-${id}`}>
-          {tool.label}
-        </span>
-        {description !== null && (
-          <p className="text-xs text-muted-foreground" data-testid={`agent-description-${id}`}>
-            {description}
-          </p>
-        )}
-      </div>
-      <div className="flex min-h-7 shrink-0 items-center gap-2">
-        <AgentActions agent={agent} status={status} onFailure={onFailure} />
-      </div>
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger
+        className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+        data-testid="not-installed-group"
+      >
+        <Chevron open={open} />
+        Not installed · {tools.length}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-col divide-y border-t" data-testid="not-installed-list">
+          {tools.map((tool) => {
+            const agent = states.get(tool.id) ?? unknownAgent(tool.id)
+            const description = notInstalledDescription(agent, target)
+            return (
+              <div
+                key={tool.id}
+                className="flex items-center gap-3 px-4 py-3"
+                data-testid={`agent-row-${tool.id}`}
+                data-status={
+                  agent.operation?.status === 'failed'
+                    ? 'failed'
+                    : agentRowStatus(agent, target).kind
+                }
+              >
+                <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
+                    {tool.label}
+                  </span>
+                  <span
+                    className="text-xs text-muted-foreground"
+                    data-testid={`agent-description-${tool.id}`}
+                  >
+                    {description ?? 'Not installed'}
+                  </span>
+                </span>
+                <AgentActions
+                  agent={agent}
+                  status={agentRowStatus(agent, target)}
+                  onFailure={onFailure}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -935,7 +1018,6 @@ export function AgentsPage() {
   const detectAgents = useAppStore((state) => state.detectAgents)
   const updateAllAgents = useAppStore((state) => state.updateAllAgents)
   const setYoloMode = useAppStore((state) => state.setYoloMode)
-  const [notInstalledOpen, setNotInstalledOpen] = useState(false)
   const [failure, setFailure] = useState<AgentFailure | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
   // Whether the Update all run seen last has had an operation pending: it ends
@@ -972,6 +1054,21 @@ export function AgentsPage() {
   const showUpdateAll = updateAllCandidates.length >= 2 || updating
   const detecting = agents?.detecting ?? false
   const yoloMode = launchSettings?.yoloMode ?? true
+  const updateAllButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={updating}
+      onClick={() => {
+        setUpdatingAll(true)
+        updateAllAgents()
+      }}
+      data-testid="agents-update-all"
+    >
+      {updating ? <Spinner /> : <ArrowDownToLineIcon />}
+      {updating ? 'Updating all…' : 'Update all'}
+    </Button>
+  )
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-background" data-testid="agents-page">
@@ -981,49 +1078,46 @@ export function AgentsPage() {
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 pt-2 pb-10">
           <div className="flex items-center justify-between gap-4">
             <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
-            <div className="flex items-center gap-1.5">
-              {showUpdateAll && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={updating}
-                  onClick={() => {
-                    setUpdatingAll(true)
-                    updateAllAgents()
-                  }}
-                  data-testid="agents-update-all"
-                >
-                  {updating ? 'Updating all…' : 'Update all'}
-                </Button>
-              )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Re-detect"
-                      onClick={detectAgents}
-                      data-testid="agents-redetect"
-                    />
-                  }
-                >
-                  <RefreshCwIcon className={cn(detecting && 'animate-spin')} />
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Re-detect</TooltipContent>
-              </Tooltip>
+            <div className="flex items-center gap-2">
+              {showUpdateAll &&
+                (updating ? (
+                  updateAllButton
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="inline-flex" />}>
+                      {updateAllButton}
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {updateAllCandidates
+                        .map(
+                          (agent) =>
+                            `${CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id} ${agent.latest ?? ''}`,
+                        )
+                        .join(', ')}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Re-detect"
+                onClick={detectAgents}
+                data-testid="agents-redetect"
+              >
+                {detecting ? <Spinner /> : <RefreshCwIcon />}
+              </Button>
             </div>
           </div>
 
-          <div className="flex items-start justify-between gap-6 rounded-xl border px-4 py-3">
-            <div className="flex flex-col gap-0.5">
+          <label className="flex items-center gap-4 rounded-xl border px-4 py-3">
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="text-sm font-medium" id="yolo-mode-label">
                 YOLO mode
               </span>
               <span className="text-xs text-muted-foreground">
                 Agents act without asking for your approval.
               </span>
-            </div>
+            </span>
             <Switch
               checked={yoloMode}
               onCheckedChange={setYoloMode}
@@ -1031,7 +1125,7 @@ export function AgentsPage() {
               aria-labelledby="yolo-mode-label"
               data-testid="yolo-mode"
             />
-          </div>
+          </label>
 
           <div className="flex flex-col divide-y rounded-xl border" data-testid="agents-list">
             {installed.map((tool) => {
@@ -1040,13 +1134,13 @@ export function AgentsPage() {
               if (agents === null || settings === undefined) {
                 return (
                   <div
-                    className="flex items-start gap-3 px-4 py-3"
+                    className="flex items-center gap-3 px-4 py-3"
                     key={tool.id}
                     data-testid={`agent-row-${tool.id}`}
                     data-status="checking"
                   >
-                    <ToolIcon toolId={tool.id} className="mt-0.5 size-4 shrink-0" />
-                    <span className="flex-1 text-sm font-medium">{tool.label}</span>
+                    <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
+                    <span className="min-w-0 flex-1 text-sm font-medium">{tool.label}</span>
                     <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
                   </div>
                 )
@@ -1058,52 +1152,18 @@ export function AgentsPage() {
                   agent={agent}
                   target={target}
                   launchSettings={settings}
-                  hookSettings={agents?.claudeHookSettings ?? ''}
                   yoloMode={yoloMode}
                   onFailure={setFailure}
                 />
               )
             })}
+            <NotInstalledGroup
+              tools={notInstalled}
+              states={states}
+              target={target}
+              onFailure={setFailure}
+            />
           </div>
-
-          {notInstalled.length > 0 && (
-            <Collapsible open={notInstalledOpen} onOpenChange={setNotInstalledOpen}>
-              <CollapsibleTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start gap-1.5 px-1 text-muted-foreground hover:text-foreground"
-                    data-testid="not-installed-group"
-                  />
-                }
-              >
-                {notInstalledOpen ? (
-                  <ChevronDownIcon className="size-3.5" />
-                ) : (
-                  <ChevronRightIcon className="size-3.5" />
-                )}
-                Not installed
-                <span className="text-xs">({notInstalled.length})</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                <div
-                  className="flex flex-col divide-y rounded-xl border"
-                  data-testid="not-installed-list"
-                >
-                  {notInstalled.map((tool) => (
-                    <NotInstalledRow
-                      key={tool.id}
-                      tool={tool}
-                      agent={states.get(tool.id) ?? unknownAgent(tool.id)}
-                      target={target}
-                      onFailure={setFailure}
-                    />
-                  ))}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
         </div>
       </div>
       {failure !== null && <FailureDialog failure={failure} onClose={() => setFailure(null)} />}

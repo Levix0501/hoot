@@ -76,6 +76,13 @@ describe('readCodexLaunchOptions', () => {
       },
     ])
     expect(options.defaultEfforts).toEqual(['low', 'high', 'max'])
+    expect(options.defaultModel).toEqual({ value: 'deepseek-flash', source: 'config.toml' })
+    expect(options.defaultEffort).toBeNull()
+  })
+
+  it('names the effort level config.toml sets', async () => {
+    writeConfig('model = "deepseek-flash"\nmodel_reasoning_effort = "high"\n')
+    expect((await read()).defaultEffort).toEqual({ value: 'high', source: 'config.toml' })
   })
 
   it('offers only the configured model, without levels, for another provider and no catalog of its own', async () => {
@@ -83,6 +90,8 @@ describe('readCodexLaunchOptions', () => {
     expect(await read()).toEqual({
       models: [{ value: 'deepseek-flash', label: 'deepseek-flash', efforts: [] }],
       defaultEfforts: [],
+      defaultModel: { value: 'deepseek-flash', source: 'config.toml' },
+      defaultEffort: null,
     })
   })
 
@@ -119,6 +128,11 @@ describe('readCodexLaunchOptions', () => {
   it('offers nothing when the catalog cannot be read', async () => {
     command = await writeNodeCommand(path.join(root, 'bin', 'bad-codex'), 'process.exitCode = 1\n')
     writeConfig('model = "x"\n')
-    expect(await read()).toEqual({ models: [], defaultEfforts: [] })
+    expect(await read()).toEqual({
+      models: [],
+      defaultEfforts: [],
+      defaultModel: { value: 'x', source: 'config.toml' },
+      defaultEffort: null,
+    })
   })
 })

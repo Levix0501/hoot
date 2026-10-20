@@ -43,7 +43,6 @@ const agentsState: AgentsState = {
   installTarget: null,
   detecting: false,
   detectedAt: null,
-  claudeHookSettings: '{}',
 }
 const agents = Object.assign(new EventEmitter(), {
   getState: vi.fn<() => AgentsState>(() => agentsState),

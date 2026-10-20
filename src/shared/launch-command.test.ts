@@ -4,6 +4,7 @@ import {
   commandSegments,
   displayCommand,
   extraArgumentKinds,
+  splitArguments,
   YOLO_ARGUMENTS,
 } from './launch-command'
 
@@ -69,13 +70,12 @@ describe('extraArgumentKinds', () => {
 })
 
 describe('commandSegments', () => {
-  it('shows the program, the YOLO argument, the empty model and effort choices and the hooks', () => {
+  it('shows the program, the YOLO argument and the empty model and effort choices', () => {
     const segments = commandSegments({
       tool: 'claude',
       program: 'claude',
       yoloMode: true,
       settings: settings(),
-      hookSettings: '{"hooks":{}}',
       modelEfforts: [],
       defaultEfforts: ['low', 'high', 'max'],
     })
@@ -84,13 +84,9 @@ describe('commandSegments', () => {
       '--dangerously-skip-permissions',
       '+ model',
       '+ effort',
-      '--settings',
-      '{"hooks":{}}',
     ])
-    expect(segments[1]).toMatchObject({ locked: true, note: 'Added by YOLO mode.' })
-    expect(displayCommand(segments)).toBe(
-      'claude --dangerously-skip-permissions --settings {"hooks":{}}',
-    )
+    expect(segments[1]).toMatchObject({ locked: true, note: 'Added by YOLO mode' })
+    expect(displayCommand(segments)).toBe('claude --dangerously-skip-permissions')
   })
 
   it('shows the chosen model and effort as their arguments', () => {
@@ -99,7 +95,6 @@ describe('commandSegments', () => {
       program: 'claude',
       yoloMode: false,
       settings: settings({ model: 'opus', effort: 'max', extraArgs: ['--verbose'] }),
-      hookSettings: null,
       modelEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultEfforts: [],
     })
@@ -112,7 +107,7 @@ describe('commandSegments', () => {
     expect(displayCommand(segments)).toBe('claude --model opus --effort max --verbose')
   })
 
-  it('says when extra arguments decide a setting, and leaves their arguments alone', () => {
+  it('leaves out the model and effort that extra arguments decide, and leaves their arguments alone', () => {
     const segments = commandSegments({
       tool: 'codex',
       program: 'codex',
@@ -122,7 +117,6 @@ describe('commandSegments', () => {
         effort: 'max',
         extraArgs: ['-c', 'model_reasoning_effort=low', '--model', 'sonnet'],
       }),
-      hookSettings: null,
       modelEfforts: [],
       defaultEfforts: [],
     })
@@ -132,17 +126,11 @@ describe('commandSegments', () => {
         args: ['--dangerously-bypass-approvals-and-sandbox'],
         text: '--dangerously-bypass-approvals-and-sandbox',
         locked: true,
-        note: 'Added by YOLO mode.',
+        note: 'Added by YOLO mode',
       },
     ])
-    expect(segments.find((segment) => segment.kind === 'model')).toMatchObject({
-      text: 'Model set by extra arguments',
-      args: [],
-    })
-    expect(segments.find((segment) => segment.kind === 'effort')).toMatchObject({
-      text: 'Effort set by extra arguments',
-      args: [],
-    })
+    expect(segments.find((segment) => segment.kind === 'model')).toBeUndefined()
+    expect(segments.find((segment) => segment.kind === 'effort')).toBeUndefined()
     expect(
       segments
         .filter((segment) => segment.kind === 'argument')
@@ -164,15 +152,10 @@ describe('commandSegments', () => {
       program: 'claude',
       yoloMode: true,
       settings: settings({ extraArgs: ['--permission-mode', 'plan'] }),
-      hookSettings: null,
       modelEfforts: [],
       defaultEfforts: [],
     })
-    expect(segments.find((segment) => segment.kind === 'permission')).toMatchObject({
-      text: 'Permissions set by extra arguments',
-      locked: true,
-      args: [],
-    })
+    expect(segments.find((segment) => segment.kind === 'permission')).toBeUndefined()
     expect(displayCommand(segments)).toBe('claude --permission-mode plan')
     expect(YOLO_ARGUMENTS.claude).toEqual(['--dangerously-skip-permissions'])
   })
@@ -183,10 +166,27 @@ describe('commandSegments', () => {
       program: 'claude',
       yoloMode: false,
       settings: settings({ extraArgs: ['--append-system-prompt', 'Be brief'] }),
-      hookSettings: null,
       modelEfforts: [],
       defaultEfforts: [],
     })
     expect(displayCommand(segments)).toBe('claude --append-system-prompt "Be brief"')
+  })
+})
+
+describe('splitArguments', () => {
+  it('splits at spaces and keeps quoted text as one argument', () => {
+    expect(splitArguments('--model opus  --effort max')).toEqual([
+      '--model',
+      'opus',
+      '--effort',
+      'max',
+    ])
+    expect(splitArguments(`--append-system-prompt "Be brief" -c 'a b'`)).toEqual([
+      '--append-system-prompt',
+      'Be brief',
+      '-c',
+      'a b',
+    ])
+    expect(splitArguments('   ')).toEqual([])
   })
 })

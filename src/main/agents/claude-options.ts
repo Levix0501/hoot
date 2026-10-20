@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { AgentLaunchOptions, AgentModelOption } from '../../shared/agents'
+import type { AgentLaunchOptions, AgentModelOption, ConfiguredDefault } from '../../shared/agents'
 import type { Env } from '../env/env'
 
 const FIVE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -194,6 +194,18 @@ function allowedBy(
  * settings' `deniedModels`. Only this configuration's settings are read, not
  * the cache Claude Code keeps of gateway models.
  */
+/** A setting as the managed settings, or else the user's, set it, and which of them does. */
+function configuredSetting(
+  managed: JsonObject | null,
+  user: JsonObject | null,
+  key: string,
+): ConfiguredDefault | null {
+  const fromManaged = stringOf(managed?.[key])
+  if (fromManaged !== null) return { value: fromManaged, source: 'managed settings' }
+  const fromUser = stringOf(user?.[key])
+  return fromUser === null ? null : { value: fromUser, source: 'settings.json' }
+}
+
 export async function readClaudeLaunchOptions(options: {
   home: string
   env: Env
@@ -288,5 +300,10 @@ export async function readClaudeLaunchOptions(options: {
       ? aliasOption(configuredDefault, env).efforts
       : effortsOfKnownModel(configuredDefault))
 
-  return { models, defaultEfforts }
+  return {
+    models,
+    defaultEfforts,
+    defaultModel: configuredSetting(managed, user, 'model'),
+    defaultEffort: configuredSetting(managed, user, 'effortLevel'),
+  }
 }

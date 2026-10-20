@@ -68,10 +68,14 @@ export type AgentOperation =
       tail: string[]
       /** Everything its command wrote, as a terminal would show it at the end. */
       output: string
+      /** Why it failed, as the end of its message says it. */
+      reason: string
       /** The command that ran, as the Agents page shows it; `null` when none ran. */
       command: string | null
       /** Its exit code when it exited, otherwise `null`. */
       exitCode: number | null
+      /** How many seconds its command ran, rounded; `null` when none ran. */
+      seconds: number | null
     }
   | { kind: AgentOperationKind; status: 'cancelled' }
 
@@ -85,11 +89,22 @@ export interface AgentModelOption {
   efforts: string[]
 }
 
+/** A default that an agent's own configuration sets, and where it is set. */
+export interface ConfiguredDefault {
+  value: string
+  /** The file that sets it, as the Agents page names it, such as settings.json. */
+  source: string
+}
+
 /** The models, and Default's effort levels, that a detection read from an agent. */
 export interface AgentLaunchOptions {
   models: AgentModelOption[]
   /** The effort levels of the model a session uses when none is selected. */
   defaultEfforts: string[]
+  /** The model the agent's own configuration starts sessions with, when it names one. */
+  defaultModel: ConfiguredDefault | null
+  /** The effort level the agent's own configuration starts sessions with, when it names one. */
+  defaultEffort: ConfiguredDefault | null
 }
 
 export interface AgentState {
@@ -146,8 +161,6 @@ export interface AgentsState {
   detecting: boolean
   /** When the last detection started, on Hoot's clock; `null` before the first. */
   detectedAt: number | null
-  /** The settings Hoot gives Claude Code, as its `--settings` argument. */
-  claudeHookSettings: string
 }
 
 /** One operation that the quit confirmation tells about. */

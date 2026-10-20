@@ -167,31 +167,34 @@ project, and ⌘W and ⌘B do nothing. Changes apply at once; there is nothing t
 
 The **Agents** page shows how each new session of Claude Code, Codex and OpenCode starts. Each
 installed agent has a row with its icon, name, version and an enable switch; click the version to
-see how it was installed (**npm**, **Homebrew** or **Official installer**) and its command's path
-(with `~` for your home folder, cut in the middle when it is long, and in full when you point at
-it). Below an enabled agent is its command for a new session, which is also where its settings are
+see how it was installed (**npm**, **Homebrew** or **Official installer**), its command's path
+(with `~` for your home folder, cut at its end when it is long, and in full when you point at it),
+and its latest version with the command that updates to it. Below an enabled agent is its command for a new session, which is also where its settings are
 edited:
 
 - **YOLO mode**, at the top of the page, is on until you turn it off. While it is on, every new
   session gets the agent's argument that makes it act without asking: Claude Code's
   `--dangerously-skip-permissions`, Codex's `--dangerously-bypass-approvals-and-sandbox`, and
   OpenCode's `--auto`. While it is off, Hoot adds no permission argument, and the agent follows its
-  own configuration. A locked argument in the command shows it, and says when the extra arguments
-  decide permissions instead.
+  own configuration. A locked chip in the command shows the argument; when the extra arguments set
+  permissions, it is left out.
 - **Model** and **Effort** are chips in the command. Click the dashed **+ model** or **+ effort**
-  chip and pick **Default** or one of the values read from the agent's own configuration, including
-  the models of a third-party provider. Claude Code's choices come from its settings and
+  chip and pick **Default**, which names the model or level the agent's configuration sets, if it
+  sets one, or one of the values read from the agent's own configuration, including the models of
+  a third-party provider. Claude Code's choices come from its settings and
   environment: the four aliases, a custom model option, and `modelPicker` rows, filtered by
   `availableModels` and managed settings. Codex's come from `codex debug models`, or from its
   configured model alone when it uses a non-OpenAI provider without its own model catalog. OpenCode
   has no model or effort choice. When a chosen model is no longer in the configuration, the command
   keeps it and the chip says so.
 - **Extra arguments** are chips with an ×: type into the field at the end of the command and press
-  Enter to add them, one argument per word, and click × to remove one. They are added in order, and
-  before the arguments that send an issue. If they set permissions, a model or an effort level, Hoot
-  leaves its own argument for it out, and the corresponding chip says the extra arguments decide it.
-- **The copy button** puts the whole command, including the full `--settings` JSON of Hoot's hooks,
-  on the clipboard. The command changes at once as settings change.
+  Enter to add them, one argument per word or per quoted text, and click × to remove one, or press
+  Backspace in the empty field to remove the last. They are added in order, and before the arguments
+  that send an issue. If they set permissions, a model or an effort level, Hoot leaves its own
+  argument and chip for it out.
+- **The copy button** puts the command as shown on the clipboard. Hoot's own hooks, which Claude
+  Code also gets with `--settings`, are left out of both. The command changes at once as settings
+  change.
 
 The enable switch keeps an agent out of the new session menu while it is off; issue sessions still
 start Claude Code, whether it is enabled or not. Every setting is kept in `settings.json`, applies
@@ -226,10 +229,11 @@ from the agent's configuration. Hoot does not keep the results across a restart.
   sessions go on with the version they started with; sessions started afterwards run the new one.
   When two or more agents can be updated, **Update all** beside **Re-detect** updates them one after
   another; **Cancel** takes a waiting one off the queue.
-- **Progress and results**: while an install or update waits or runs, the row shows **Waiting…**,
-  **Installing…** or **Updating…** and **Cancel**, never the command's output. A failure shows
-  **Install failed** or **Update failed** in red: click it to see the command, its exit code and
-  all its output, copy them together, or run the same operation again. An installed agent whose
+- **Progress and results**: pointing at **Install** or **Update to** a version shows the command it
+  runs. While an install or update waits or runs, the row shows **Waiting…**, **Installing…** or
+  **Updating…** and **Cancel**, never the command's output. A failure shows **Install failed** or
+  **Update failed** in red: click it to see the command, its exit code, how long it ran and all its
+  output, copy them together, or run the same operation again. An installed agent whose
   version cannot be read shows **Doesn't run** in red; click it to see the command and what it
   wrote.
 - npm uses your npm configuration (such as the registry and the proxy in `~/.npmrc`); Hoot adds

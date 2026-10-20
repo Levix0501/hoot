@@ -33,7 +33,7 @@ import { resolveProjectRoot } from './projects/project-root'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
-import { claudeCodeHookSettings, resolveLaunch } from './session/launch'
+import { resolveLaunch } from './session/launch'
 import { SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
@@ -139,10 +139,9 @@ const agents = new AgentService({
       return readClaudeLaunchOptions({ home: os.homedir(), env })
     }
     const command = detection.state.tools.find((entry) => entry.id === 'codex')?.path
-    if (!command) return { models: [], defaultEfforts: [] }
+    if (!command) return { models: [], defaultEfforts: [], defaultModel: null, defaultEffort: null }
     return readCodexLaunchOptions({ command, env, home: os.homedir() })
   },
-  claudeHookSettings: claudeCodeHookSettings(path.join(hootCli.binDirectory, 'hoot')),
 })
 
 let mainWindow: BrowserWindow | null = null

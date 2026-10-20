@@ -43,6 +43,21 @@ describe('readClaudeLaunchOptions', () => {
       { value: 'haiku', label: 'haiku', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ])
     expect(options.defaultEfforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(options.defaultModel).toBeNull()
+    expect(options.defaultEffort).toBeNull()
+  })
+
+  it('names the default model and effort level the settings set, the managed ones first', async () => {
+    write(userSettings, { model: 'sonnet', effortLevel: 'xhigh' })
+    expect(await read()).toMatchObject({
+      defaultModel: { value: 'sonnet', source: 'settings.json' },
+      defaultEffort: { value: 'xhigh', source: 'settings.json' },
+    })
+    write(managedSettings, { effortLevel: 'low' })
+    expect(await read()).toMatchObject({
+      defaultModel: { value: 'sonnet', source: 'settings.json' },
+      defaultEffort: { value: 'low', source: 'managed settings' },
+    })
   })
 
   it("replaces an alias's model and name from the settings environment, with the capabilities it declares", async () => {

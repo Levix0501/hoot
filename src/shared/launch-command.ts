@@ -137,13 +137,7 @@ export function agentLaunchArguments(input: AgentLaunchArgumentsInput): string[]
 }
 
 /** A part of a command as the Agents page shows it. */
-export type CommandSegmentKind =
-  | 'program'
-  | 'permission'
-  | 'model'
-  | 'effort'
-  | 'argument'
-  | 'settings'
+export type CommandSegmentKind = 'program' | 'permission' | 'model' | 'effort' | 'argument'
 
 export interface CommandSegment {
   kind: CommandSegmentKind
@@ -151,11 +145,9 @@ export interface CommandSegment {
   args: string[]
   /** What the Agents page writes for it. */
   text: string
-  /** Whether its text stands for arguments below it, rather than being one. */
-  explanatory?: boolean
   /** Whether the user can remove it with the × beside it. */
   removable?: boolean
-  /** Whether it is decided by YOLO mode or an extra argument, not here. */
+  /** Whether it is decided by YOLO mode, not here. */
   locked?: boolean
   /** Why the segment is as it is, shown when it is pointed at. */
   note?: string
@@ -163,6 +155,16 @@ export interface CommandSegment {
   selectable?: boolean
   /** Where an extra argument is in the extra arguments, from 0. */
   extraIndex?: number
+}
+
+/**
+ * The arguments typed on the Agents page, split at spaces as a shell would,
+ * except that text in single or double quotes stays one argument.
+ */
+export function splitArguments(text: string): string[] {
+  return [...text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
+    (match) => match[1] ?? match[2] ?? match[3] ?? '',
+  )
 }
 
 /** A command as a user would run it: an argument with a space is quoted. */
@@ -177,52 +179,35 @@ export function displayCommand(segments: readonly CommandSegment[]): string {
 
 /**
  * A command as the Agents page shows it: the program, a locked segment for
- * YOLO mode, what extra arguments decide, the chosen model and effort, every
- * extra argument, and Claude Code's hooks.
+ * YOLO mode, the chosen model and effort, and every extra argument. Where the
+ * extra arguments set the permissions, the model or the effort, they alone
+ * show it: the segment that would is left out. Claude Code's hooks, which
+ * Hoot adds for itself, are not shown.
  */
 export function commandSegments(input: {
   tool: CodingToolId
   program: string
   yoloMode: boolean
   settings: AgentLaunchSettings
-  hookSettings: string | null
   modelEfforts: readonly string[]
   defaultEfforts: readonly string[]
 }): CommandSegment[] {
-  const { tool, program, yoloMode, settings, hookSettings } = input
+  const { tool, program, yoloMode, settings } = input
   const kinds = extraArgumentKinds(tool, settings.extraArgs)
   const segments: CommandSegment[] = [{ kind: 'program', args: [program], text: program }]
 
-  if (kinds.permission) {
-    segments.push({
-      kind: 'permission',
-      args: [],
-      text: 'Permissions set by extra arguments',
-      explanatory: true,
-      locked: true,
-      note: 'Permissions are decided by the extra arguments.',
-    })
-  } else if (yoloMode) {
+  if (yoloMode && !kinds.permission) {
     segments.push({
       kind: 'permission',
       args: [...YOLO_ARGUMENTS[tool]],
       text: YOLO_ARGUMENTS[tool].join(' '),
       locked: true,
-      note: 'Added by YOLO mode.',
+      note: 'Added by YOLO mode',
     })
   }
 
-  if (tool !== 'opencode') {
-    if (kinds.model) {
-      segments.push({
-        kind: 'model',
-        args: [],
-        text: 'Model set by extra arguments',
-        explanatory: true,
-        locked: true,
-        note: 'The model is decided by the extra arguments.',
-      })
-    } else if (settings.model === null) {
+  if (tool !== 'opencode' && !kinds.model) {
+    if (settings.model === null) {
       segments.push({
         kind: 'model',
         args: [],
@@ -243,16 +228,7 @@ export function commandSegments(input: {
 
   const efforts = settings.model === null ? input.defaultEfforts : input.modelEfforts
   const hasEffortChoice = efforts.length > 0 || settings.effort !== null
-  if (kinds.effort) {
-    segments.push({
-      kind: 'effort',
-      args: [],
-      text: 'Effort set by extra arguments',
-      explanatory: true,
-      locked: true,
-      note: 'The effort level is decided by the extra arguments.',
-    })
-  } else if (tool !== 'opencode' && hasEffortChoice) {
+  if (tool !== 'opencode' && !kinds.effort && hasEffortChoice) {
     if (settings.effort === null) {
       segments.push({
         kind: 'effort',
@@ -281,12 +257,5 @@ export function commandSegments(input: {
       extraIndex,
     })
   })
-
-  if (tool === 'claude' && hookSettings !== null) {
-    segments.push(
-      { kind: 'settings', args: ['--settings'], text: '--settings' },
-      { kind: 'settings', args: [hookSettings], text: hookSettings },
-    )
-  }
   return segments
 }

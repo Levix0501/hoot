@@ -1013,11 +1013,6 @@ export function orderedSessions(
   )
 }
 
-/** What the sidebar shows for a worktree: its branch, or its abbreviated commit. */
-export function worktreeDisplayName(state: Pick<AppState, 'knownWorktrees'>, path: string): string {
-  return state.knownWorktrees[path]?.displayName ?? path.split('/').filter(Boolean).at(-1) ?? path
-}
-
 function updateSession(
   sessions: UiSession[],
   id: string,

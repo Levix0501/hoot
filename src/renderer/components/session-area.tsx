@@ -1,7 +1,7 @@
 import { FolderPlusIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
 import { describeExit, sessionName } from '../../shared/session'
 import { sessionState, stateLabel } from '../lib/session-state'
-import { useAppStore, worktreeDisplayName, type UiSession } from '../store/app-store'
+import { useAppStore, type UiSession } from '../store/app-store'
 import { StateLight } from './state-light'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
@@ -17,10 +17,6 @@ import {
   EmptyTitle,
 } from './ui/empty'
 
-function projectName(root: string): string {
-  return root.split('/').filter(Boolean).at(-1) ?? root
-}
-
 /** The light of the session's state, and right of it the state's name or how the session ended. */
 function StatusBadge({ session }: { session: UiSession }) {
   const state = sessionState(session)
@@ -34,14 +30,6 @@ function StatusBadge({ session }: { session: UiSession }) {
 
 /** A session's page: its header in the window's top row, and its terminal. */
 export function SessionPane({ session }: { session: UiSession }) {
-  const project = useAppStore((state) =>
-    state.projects.find((candidate) => candidate.root === session.projectRoot),
-  )
-  // A session in a worktree also names the worktree.
-  const worktree = useAppStore((state) =>
-    session.worktreePath === null ? null : worktreeDisplayName(state, session.worktreePath),
-  )
-  const projectLabel = project?.name ?? projectName(session.projectRoot)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
   const inset = useTopRowInset()
@@ -56,7 +44,7 @@ export function SessionPane({ session }: { session: UiSession }) {
     >
       {/*
         The main area's part of the window's top row. Its blank parts drag the
-        window; the names, which show their full text on hover, and the close
+        window; the name, which shows its full text on hover, and the close
         button do not. While the sidebar slides, its left padding changes in
         step, keeping its content clear of the navigation. At its right end it
         leaves room for the window's buttons on Windows.
@@ -66,7 +54,7 @@ export function SessionPane({ session }: { session: UiSession }) {
         style={{ paddingLeft: inset }}
       >
         <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm">
+        <div className="flex min-w-0 flex-1 text-sm">
           <span
             className="min-w-0 truncate font-medium [app-region:no-drag]"
             title={sessionName(session)}
@@ -74,15 +62,6 @@ export function SessionPane({ session }: { session: UiSession }) {
             data-testid="session-name"
           >
             {sessionName(session)}
-          </span>
-          <span className="shrink-0 text-muted-foreground">in</span>
-          <span
-            className="max-w-[50%] shrink-0 truncate font-medium [app-region:no-drag]"
-            title={session.worktreePath ?? session.projectRoot}
-            data-path=""
-            data-testid="session-project"
-          >
-            {worktree === null ? projectLabel : `${projectLabel} · ${worktree}`}
           </span>
         </div>
         <StatusBadge session={session} />

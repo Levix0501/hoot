@@ -683,9 +683,8 @@ new worktree dialog says so.
   by commit for a detached HEAD. Linked worktrees elsewhere, such as those coding agents make, are
   not listed. Point at a worktree to see its folder and its nested repositories. Its `+` starts a
   session in it, and its `⋯` menu or context menu reveals it in Finder, copies its path or deletes
-  it. Sessions started in a worktree are listed below it, and the session header names the worktree
-  after the project. A worktree whose folder is gone shows as Missing and can only be removed from
-  Git's records; a locked worktree cannot be deleted.
+  it. Sessions started in a worktree are listed below it. A worktree whose folder is gone shows as
+  Missing and can only be removed from Git's records; a locked worktree cannot be deleted.
 - **Changes made outside Hoot**, by Git or by an agent, show when Hoot starts and when its window
   gets the focus; Hoot watches no files for them. Before starting a session in a worktree, deleting
   one or removing one, Hoot reads the worktrees again and goes ahead only if the worktree still

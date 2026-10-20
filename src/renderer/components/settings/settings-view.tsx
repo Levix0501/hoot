@@ -37,9 +37,16 @@ function focusInField(): boolean {
   )
 }
 
-/** Whether a dialog, such as the one asking whether to quit, or a menu is open in the window. */
+/**
+ * Whether a dialog, such as the one asking whether to quit, a menu or a
+ * select's list is open in the window.
+ */
 function overlayOpen(): boolean {
-  return document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]') !== null
+  return (
+    document.querySelector(
+      '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
+    ) !== null
+  )
 }
 
 /** Esc leaves the settings as going back does, unless a field or a dialog has a use for it. */

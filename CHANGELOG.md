@@ -1,5 +1,19 @@
 # hoot
 
+## 0.1.0-alpha.11
+
+### Minor Changes
+
+- [`ec7eccd`](https://github.com/Levix0501/hoot/commit/ec7eccd811e0ad5f0968190a9293730521849a34) - The Agents page now shows each agent's new-session command and lets you edit it in place: a global YOLO mode switch, model and effort choices read from each agent's own configuration, extra arguments, and a per-agent enable switch. Detection runs when the page opens, and updates and installs report failures in a dialog with the command, exit code and output.
+
+### Patch Changes
+
+- [`18a1186`](https://github.com/Levix0501/hoot/commit/18a1186a06f5a145df1f7cdb6b324a7d7d9dc007) - Every spinner now looks the same and turns once a second, and on a Retina screen it keeps turning smoothly while Hoot is busy.
+
+- [`ad1806c`](https://github.com/Levix0501/hoot/commit/ad1806c293354ba604da98c8b4426a0b386fbf68) - Pressing Esc to close a dropdown list in the settings no longer leaves the settings.
+
+- [`08e8265`](https://github.com/Levix0501/hoot/commit/08e82654ef36a03af005c2b5969914923f86020c) - Settings pages are wider: their content now spans up to 768 pixels.
+
 ## 0.1.0-alpha.10
 
 ### Patch Changes

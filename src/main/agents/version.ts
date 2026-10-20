@@ -65,6 +65,8 @@ export async function readVersion(
     version: null,
     output: output === '' ? ending : `${output}\n${ending}`,
     command: shown,
-    exitCode: result.code,
+    // Ended for taking too long, it exited with no code of its own, though on
+    // Windows, where taskkill ends it, with 1 (see `runCommand`).
+    exitCode: result.timedOut ? null : result.code,
   }
 }

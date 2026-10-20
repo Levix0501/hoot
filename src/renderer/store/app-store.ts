@@ -301,7 +301,7 @@ export interface AppState {
   createMore: boolean
   /** An issue the user asked to delete, while Hoot asks for confirmation. */
   issueDeletion: number | null
-  /** The session whose sidebar row shows the field for renaming it. */
+  /** The session the rename dialog is open for. */
   renamingSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
@@ -1044,8 +1044,7 @@ export function focusAfterOverlay(): HTMLElement | boolean {
 /**
  * Before the settings take the place of the sidebar and the main area, what
  * has the keyboard focus gives it up as when another page takes it, such as
- * a session's name being edited, which keeps what was typed. Taken out of the
- * window with the focus, the name field would lose it.
+ * an issue's description being edited, which saves what was typed.
  */
 function blurBeforeSettings(): void {
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur()

@@ -78,8 +78,8 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   only Working, Done and Idle. With macOS set to reduce motion, spinners stand still.
 - **Names**: a session is named after the title its program gives the terminal (without the ✳, ◐
   or ◑ that Claude Code puts first), or after its tool until there is one. Double-click a session,
-  or choose **Rename** from its context menu, to name it yourself: Enter saves, Esc cancels, and an
-  empty name brings back the default one. Names last until Hoot quits.
+  or choose **Rename…** from its context menu, to name it yourself in a dialog: Enter saves, Esc
+  cancels, and an empty name brings back the default one. Names last until Hoot quits.
 - **Closing**: close a session with the button that appears when you point at it, the button in
   the session header, **Close** in its context menu, or **File > Close Session** (⌘W). Closing a
   running session asks first, then ends its process. When a session's process exits with code 0

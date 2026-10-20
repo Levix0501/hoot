@@ -1,16 +1,14 @@
 import { PencilIcon, XIcon } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
 import { sessionName } from '../../shared/session'
 import {
   currentSessionId,
   focusAfterOverlay,
-  focusCurrentTerminal,
   useAppStore,
   type UiSession,
 } from '../store/app-store'
 import { sessionState, stateTooltip } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { StateLight, StateLightWithTooltip } from './state-light'
+import { StateLightWithTooltip } from './state-light'
 import { ToolIcon } from './tool-icon'
 import {
   ContextMenu,
@@ -19,69 +17,17 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
-import { Input } from './ui/input'
 import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
-
-/** The field that replaces a session's name, right of its light and icon, while the user renames it. */
-function RenameField({ session }: { session: UiSession }) {
-  const finishRenaming = useAppStore((state) => state.finishRenaming)
-  const [value, setValue] = useState(() => sessionName(session))
-  const inputRef = useRef<HTMLInputElement>(null)
-  const finished = useRef(false)
-
-  useLayoutEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
-  }, [])
-
-  const finish = (name: string | null, focusTerminal: boolean) => {
-    if (finished.current) return
-    finished.current = true
-    finishRenaming(session.id, name)
-    if (focusTerminal) focusCurrentTerminal()
-  }
-
-  return (
-    <div className="flex h-7 items-center gap-2 px-2">
-      <StateLight state={sessionState(session)} />
-      <ToolIcon toolId={session.toolId} className="size-4 shrink-0" />
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          // Keys that confirm or cancel an input method's composition are not ours.
-          if (event.nativeEvent.isComposing) return
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            // An empty name gives the session its default name again.
-            finish(value, true)
-          } else if (event.key === 'Escape') {
-            event.preventDefault()
-            event.stopPropagation()
-            finish(null, true)
-          }
-        }}
-        onBlur={() => finish(value, false)}
-        spellCheck={false}
-        aria-label="Session name"
-        className="h-6 rounded-md px-1.5 md:text-sm"
-        data-testid="session-rename-input"
-      />
-    </div>
-  )
-}
 
 /**
  * A session's row in the sidebar: the light of the session's state, which
  * names the state when pointed at, the tool's icon and the session's name.
  * Click it to show the session, double-click it or use its context menu to
- * rename it, and close it with the button that appears on hover or from the
- * context menu.
+ * rename it in a dialog, and close it with the button that appears on hover
+ * or from the context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
-  const renaming = useAppStore((state) => state.renamingSessionId === session.id)
   const selectSession = useAppStore((state) => state.selectSession)
   const startRenaming = useAppStore((state) => state.startRenaming)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
@@ -100,52 +46,46 @@ export function SessionItem({ session }: { session: UiSession }) {
         data-state={state}
         data-current={current}
       >
-        {renaming ? (
-          <RenameField session={session} />
-        ) : (
-          <SidebarMenuSubButton
-            render={<button type="button" />}
-            isActive={current}
-            // Room at its right end for the close button, which lies over it; highlighted also
-            // while the pointer is on that button.
-            className="w-full cursor-default pr-8.5 text-left group-hover/menu-sub-item:bg-sidebar-accent group-hover/menu-sub-item:text-sidebar-accent-foreground"
-            onClick={() => selectSession(session.id)}
-            onDoubleClick={() => startRenaming(session.id)}
-            data-testid="session-item-button"
+        <SidebarMenuSubButton
+          render={<button type="button" />}
+          isActive={current}
+          // Room at its right end for the close button, which lies over it; highlighted also
+          // while the pointer is on that button.
+          className="w-full cursor-default pr-8.5 text-left group-hover/menu-sub-item:bg-sidebar-accent group-hover/menu-sub-item:text-sidebar-accent-foreground"
+          onClick={() => selectSession(session.id)}
+          onDoubleClick={() => startRenaming(session.id)}
+          data-testid="session-item-button"
+        >
+          <StateLightWithTooltip
+            state={state}
+            tooltip={stateTooltip(state, session.exit)}
+            testId="session-light"
+          />
+          <ToolIcon toolId={session.toolId} />
+          <span
+            className="min-w-0 flex-1 truncate"
+            title={name}
+            data-session-name=""
+            data-testid="session-item-name"
           >
-            <StateLightWithTooltip
-              state={state}
-              tooltip={stateTooltip(state, session.exit)}
-              testId="session-light"
-            />
-            <ToolIcon toolId={session.toolId} />
-            <span
-              className="min-w-0 flex-1 truncate"
-              title={name}
-              data-session-name=""
-              data-testid="session-item-name"
-            >
-              {name}
-            </span>
-          </SidebarMenuSubButton>
-        )}
-        {!renaming && (
-          <button
-            type="button"
-            className="invisible absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden group-focus-within/menu-sub-item:visible group-hover/menu-sub-item:visible hover:bg-sidebar-foreground/10 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 [&>svg]:size-3.5"
-            disabled={session.closing}
-            onClick={() => requestCloseSession(session.id)}
-            aria-label="Close Session"
-            title="Close Session"
-            data-testid="session-item-close"
-          >
-            <XIcon />
-          </button>
-        )}
+            {name}
+          </span>
+        </SidebarMenuSubButton>
+        <button
+          type="button"
+          className="invisible absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden group-focus-within/menu-sub-item:visible group-hover/menu-sub-item:visible hover:bg-sidebar-foreground/10 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 [&>svg]:size-3.5"
+          disabled={session.closing}
+          onClick={() => requestCloseSession(session.id)}
+          aria-label="Close Session"
+          title="Close Session"
+          data-testid="session-item-close"
+        >
+          <XIcon />
+        </button>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-auto min-w-36"
-        // Renaming keeps the focus in its field; otherwise it returns to the terminal.
+        // The rename dialog takes the focus; otherwise it returns to the terminal.
         finalFocus={() =>
           useAppStore.getState().renamingSessionId === session.id ? false : focusAfterOverlay()
         }
@@ -155,7 +95,7 @@ export function SessionItem({ session }: { session: UiSession }) {
           data-testid="session-context-rename"
         >
           <PencilIcon />
-          Rename
+          Rename…
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem

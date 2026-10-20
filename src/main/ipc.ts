@@ -62,7 +62,7 @@ import type { SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
-import type { PermissionLevelStore } from './settings/permission-level-store'
+import type { LaunchSettingsStore } from './settings/launch-settings-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
 import type { UpdateService } from './updates/update-service'
@@ -78,7 +78,7 @@ export interface IpcDependencies {
   labels: LabelStore
   tools: ToolService
   agents: AgentService
-  permissionLevels: PermissionLevelStore
+  launchSettings: LaunchSettingsStore
   sidebar: SidebarStateStore
   appearance: AppearanceStore
   sessions: SessionManager
@@ -102,7 +102,6 @@ const startSessionRequest = z.object({
   issueId: rowId.nullable(),
   startedBy: z.enum(['user', 'agent']).optional(),
   prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
-  permissionLevel: z.string().min(1).max(100).optional(),
   cols: terminalDimension,
   rows: terminalDimension,
 }) satisfies z.ZodType<StartSessionRequest>
@@ -176,6 +175,12 @@ const sessionStartAnswer = z.union([
   z.strictObject({ ok: z.literal(false), message: z.string().max(100_000) }),
 ]) satisfies z.ZodType<SessionStartAnswer>
 const agentId = z.enum(CODING_TOOL_IDS)
+const agentLaunchSettingsChange = z.strictObject({
+  enabled: z.boolean().optional(),
+  model: z.string().min(1).max(1_000).nullable().optional(),
+  effort: z.string().min(1).max(100).nullable().optional(),
+  extraArgs: z.array(z.string().min(1).max(10_000)).max(1_000).optional(),
+})
 /**
  * Text put on the clipboard: what is selected in a session's terminal, up to
  * its whole scrollback, or what one of its programs puts there, which
@@ -355,6 +360,7 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.tools.on('changed', (state) => send(IpcChannel.toolsChanged, state))
 
   handle(IpcChannel.getAgents, () => deps.agents.getState())
+  on(IpcChannel.enterAgentsPage, () => deps.agents.openPage())
   on(IpcChannel.detectAgents, () => void deps.agents.detect())
   deps.agents.on('changed', (state) => send(IpcChannel.agentsChanged, state))
   on(IpcChannel.installAgent, (id) => {
@@ -365,15 +371,22 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = agentId.safeParse(id)
     if (parsed.success) deps.agents.update(parsed.data)
   })
+  on(IpcChannel.updateAllAgents, () => deps.agents.updateAll())
   on(IpcChannel.cancelAgentOperation, (id) => {
     const parsed = agentId.safeParse(id)
     if (parsed.success) deps.agents.cancel(parsed.data)
   })
 
-  handle(IpcChannel.getPermissionLevels, () => deps.permissionLevels.all())
-  deps.permissionLevels.on('changed', (settings) =>
-    send(IpcChannel.permissionLevelsChanged, settings),
-  )
+  handle(IpcChannel.getLaunchSettings, () => deps.launchSettings.all())
+  on(IpcChannel.setYoloMode, (value) => {
+    const parsed = z.boolean().safeParse(value)
+    if (parsed.success) deps.launchSettings.setYoloMode(parsed.data)
+  })
+  on(IpcChannel.setAgentLaunchSettings, (...args) => {
+    const parsed = z.tuple([agentId, agentLaunchSettingsChange]).safeParse(args)
+    if (parsed.success) deps.launchSettings.change(...parsed.data)
+  })
+  deps.launchSettings.on('changed', (settings) => send(IpcChannel.launchSettingsChanged, settings))
 
   handle(IpcChannel.getWindowState, (): WindowState => ({
     sidebarOpen: deps.sidebar.open,

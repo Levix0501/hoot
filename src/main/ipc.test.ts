@@ -38,12 +38,20 @@ const window = { isDestroyed: () => false, webContents } as unknown as BrowserWi
 const trusted = { sender: webContents }
 
 const emitter = () => new EventEmitter()
-const agentsState: AgentsState = { agents: [], installTarget: null }
+const agentsState: AgentsState = {
+  agents: [],
+  installTarget: null,
+  detecting: false,
+  detectedAt: null,
+  claudeHookSettings: '{}',
+}
 const agents = Object.assign(new EventEmitter(), {
   getState: vi.fn<() => AgentsState>(() => agentsState),
   detect: vi.fn<() => Promise<void>>(async () => {}),
+  openPage: vi.fn<() => void>(),
   install: vi.fn<(id: string) => void>(),
   update: vi.fn<(id: string) => void>(),
+  updateAll: vi.fn<() => void>(),
   cancel: vi.fn<(id: string) => void>(),
 })
 
@@ -91,6 +99,12 @@ const issues = Object.assign(new EventEmitter(), {
 })
 
 const workflows = new EventEmitter()
+const launchSettingsState = { yoloMode: true, agents: {} }
+const launchSettings = Object.assign(new EventEmitter(), {
+  all: vi.fn<() => unknown>(() => launchSettingsState),
+  setYoloMode: vi.fn<(on: boolean) => void>(),
+  change: vi.fn<(id: string, change: unknown) => void>(),
+})
 
 const snapshot: Labels = { version: 1, groups: [], labels: [], issueLabels: [] }
 const labels = Object.assign(new EventEmitter(), {
@@ -120,6 +134,7 @@ beforeEach(() => {
   electron.listeners.clear()
   vi.clearAllMocks()
   agents.removeAllListeners()
+  launchSettings.removeAllListeners()
   updates.removeAllListeners()
   workflows.removeAllListeners()
   labels.removeAllListeners()
@@ -130,7 +145,7 @@ beforeEach(() => {
     appInfo,
     tools: emitter(),
     agents,
-    permissionLevels: emitter(),
+    launchSettings,
     appearance: emitter(),
     sessions: emitter(),
     updates,
@@ -346,18 +361,22 @@ const send = (channel: string, ...args: unknown[]) =>
   electron.listeners.get(channel)?.(trusted, ...args)
 
 describe('the messages of the Agents page', () => {
-  it('give the agents, and look for them again', async () => {
+  it('give the agents, look for them when the page opens, and again when asked', async () => {
     expect(await electron.handlers.get(IpcChannel.getAgents)?.(trusted)).toBe(agentsState)
+    send(IpcChannel.enterAgentsPage)
+    expect(agents.openPage).toHaveBeenCalledOnce()
     send(IpcChannel.detectAgents)
     expect(agents.detect).toHaveBeenCalledOnce()
   })
 
-  it('install, update and cancel the agent named, and only an agent', () => {
+  it('install, update and cancel the agent named, update all, and only an agent', () => {
     send(IpcChannel.installAgent, 'opencode')
     send(IpcChannel.updateAgent, 'claude')
+    send(IpcChannel.updateAllAgents)
     send(IpcChannel.cancelAgentOperation, 'codex')
     expect(agents.install.mock.calls).toEqual([['opencode']])
     expect(agents.update.mock.calls).toEqual([['claude']])
+    expect(agents.updateAll).toHaveBeenCalledOnce()
     expect(agents.cancel.mock.calls).toEqual([['codex']])
     for (const id of ['shell', 'npm', '', 3, null]) {
       send(IpcChannel.installAgent, id)
@@ -371,7 +390,43 @@ describe('the messages of the Agents page', () => {
 
   it('come only from the window', () => {
     electron.listeners.get(IpcChannel.installAgent)?.({ sender: {} }, 'claude')
+    send(IpcChannel.enterAgentsPage)
+    electron.listeners.get(IpcChannel.enterAgentsPage)?.({ sender: {} })
     expect(agents.install).not.toHaveBeenCalled()
+    expect(agents.openPage).toHaveBeenCalledOnce()
+  })
+
+  it('give and change the launch settings, and pass on their changes', async () => {
+    expect(await electron.handlers.get(IpcChannel.getLaunchSettings)?.(trusted)).toBe(
+      launchSettingsState,
+    )
+    send(IpcChannel.setYoloMode, false)
+    send(IpcChannel.setYoloMode, 'yes')
+    expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])
+
+    send(IpcChannel.setAgentLaunchSettings, 'claude', {
+      model: 'opus',
+      effort: 'max',
+      extraArgs: ['--verbose'],
+    })
+    expect(launchSettings.change.mock.calls).toEqual([
+      ['claude', { model: 'opus', effort: 'max', extraArgs: ['--verbose'] }],
+    ])
+    for (const args of [
+      ['shell', { model: 'opus' }],
+      ['claude', { model: 4 }],
+      ['claude', { extraArgs: [3] }],
+      ['claude', { unknown: true }],
+    ]) {
+      send(IpcChannel.setAgentLaunchSettings, ...args)
+    }
+    expect(launchSettings.change).toHaveBeenCalledOnce()
+
+    launchSettings.emit('changed', launchSettingsState)
+    expect(webContents.send).toHaveBeenCalledWith(
+      IpcChannel.launchSettingsChanged,
+      launchSettingsState,
+    )
   })
 
   it('pass on every change of the agents to the window', () => {

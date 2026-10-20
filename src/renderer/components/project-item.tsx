@@ -67,7 +67,7 @@ export const contextComponents: ToolMenuComponents = {
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const tools = useAppStore((state) => state.tools)
-  const permissionLevels = useAppStore((state) => state.permissionLevels)
+  const launchSettings = useAppStore((state) => state.launchSettings)
   const newSession = useAppStore((state) => state.newSession)
   const removeProject = useAppStore((state) => state.removeProject)
   const redetectTools = useAppStore((state) => state.redetectTools)
@@ -174,7 +174,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             <ToolMenuEntries
               components={dropdownComponents}
               tools={tools}
-              permissionLevels={permissionLevels}
+              launchSettings={launchSettings}
               onSelect={startSession}
               onRedetect={redetect}
               onInstall={installInSettings}
@@ -229,7 +229,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             <ToolMenuEntries
               components={contextComponents}
               tools={tools}
-              permissionLevels={permissionLevels}
+              launchSettings={launchSettings}
               onSelect={startSession}
               onRedetect={redetect}
               onInstall={installInSettings}

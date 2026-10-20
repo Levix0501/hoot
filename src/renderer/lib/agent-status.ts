@@ -31,21 +31,21 @@ export type AgentRowStatus =
 
 /**
  * What an agent's row shows on its right: its operation while it waits or
- * runs; otherwise "Checking…" while the agent is being detected; otherwise,
- * by the first that applies, when it is not installed, Install, or why there
- * is none: that it needs Node.js and npm when the computer has no npm that
- * runs, write access to npm's global folder, or a newer Node.js than the one
- * here; then that it does not run, that its latest version could not be
- * read, that it is up to date, that it is to be updated the way it was
- * installed when Hoot cannot tell how, that its latest version is out where
- * updating it needs a newer Node.js or write access to npm's global folder,
- * or the button that updates it to its latest version.
+ * runs; otherwise "Checking…" while the agent is being detected for the
+ * first time; otherwise, by the first that applies, when it is not installed,
+ * Install, or why there is none: that it needs Node.js and npm when the
+ * computer has no npm that runs, write access to npm's global folder, or a
+ * newer Node.js than the one here; then that it does not run, that its latest
+ * version could not be read, that it is up to date, that it is to be updated
+ * the way it was installed when Hoot cannot tell how, that its latest version
+ * is out where updating it needs a newer Node.js or write access to npm's
+ * global folder, or the button that updates it to its latest version.
  */
 export function agentRowStatus(agent: AgentState, target: InstallTarget | null): AgentRowStatus {
   const operation = agent.operation
   if (operation?.status === 'waiting') return { kind: 'waiting' }
   if (operation?.status === 'running') return { kind: 'running', operation: operation.kind }
-  if (agent.checking) return { kind: 'checking' }
+  if (agent.checking && !agent.detected) return { kind: 'checking' }
   const installation = agent.installation
   if (installation === null) {
     switch (target?.kind) {
@@ -72,4 +72,14 @@ export function agentRowStatus(agent: AgentState, target: InstallTarget | null):
     }
   }
   return { kind: 'update', version: agent.latest }
+}
+
+/**
+ * Whether Update all includes an agent: its row offers Update, or its last
+ * update failed. Both need it installed and running.
+ */
+export function updateAllIncludes(agent: AgentState, target: InstallTarget | null): boolean {
+  if (agent.installation === null || agent.installation.version === null) return false
+  if (agent.operation?.kind === 'update' && agent.operation.status === 'failed') return true
+  return agentRowStatus(agent, target).kind === 'update'
 }

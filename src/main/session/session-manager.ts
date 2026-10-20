@@ -36,15 +36,13 @@ export interface SessionManagerOptions {
   host: PtyHost
   /**
    * Decides what a session runs in its working directory, given the issue it
-   * sends Claude Code, if any, the session's id, and the id of the permission
-   * level its tool starts at, if one was given.
+   * sends Claude Code, if any, and the session's id.
    */
   resolveLaunch(
     toolId: ToolId,
     cwd: string,
     issue: SentIssue | null,
     sessionId: string,
-    permissionLevel: string | null,
   ): Promise<SessionLaunch>
   /** Sends a signal to a process group; replaceable for tests. */
   signalProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
@@ -192,13 +190,7 @@ export class SessionManager extends EventEmitter<{
     // A session in a worktree runs in the worktree's root.
     const cwd = request.worktreePath ?? request.projectRoot
     try {
-      const launch = await this.options.resolveLaunch(
-        request.toolId,
-        cwd,
-        issue,
-        request.id,
-        request.permissionLevel ?? null,
-      )
+      const launch = await this.options.resolveLaunch(request.toolId, cwd, issue, request.id)
       record.cleanup = launch.cleanup ?? null
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {

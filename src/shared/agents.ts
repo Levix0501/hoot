@@ -24,6 +24,8 @@ export interface AgentInstallation {
    * `shownCommand`); `null` where Hoot cannot tell how it was installed.
    */
   updateCommand: string | null
+  /** The command that read its version, as the Agents page shows it. */
+  versionCommand: string
   /**
    * Whether updating it can write where it is: for an installation by npm,
    * whether the user can create files in its global folder, where npm puts
@@ -56,7 +58,7 @@ export type AgentOperationKind = 'install' | 'update'
  */
 export type AgentOperation =
   | { kind: AgentOperationKind; status: 'waiting' }
-  | { kind: AgentOperationKind; status: 'running'; lastLine: string; cancellable: boolean }
+  | { kind: AgentOperationKind; status: 'running'; cancellable: boolean }
   | { kind: AgentOperationKind; status: 'succeeded'; message: string }
   | {
       kind: AgentOperationKind
@@ -66,13 +68,36 @@ export type AgentOperation =
       tail: string[]
       /** Everything its command wrote, as a terminal would show it at the end. */
       output: string
+      /** The command that ran, as the Agents page shows it; `null` when none ran. */
+      command: string | null
+      /** Its exit code when it exited, otherwise `null`. */
+      exitCode: number | null
     }
   | { kind: AgentOperationKind; status: 'cancelled' }
 
+/** A model a session can start with, and the effort levels it supports. */
+export interface AgentModelOption {
+  /** The value the agent's model argument gets: an alias or a model ID. */
+  value: string
+  /** What the Agents page writes for the option. */
+  label: string
+  /** The effort levels the model supports, in the agent's order. */
+  efforts: string[]
+}
+
+/** The models, and Default's effort levels, that a detection read from an agent. */
+export interface AgentLaunchOptions {
+  models: AgentModelOption[]
+  /** The effort levels of the model a session uses when none is selected. */
+  defaultEfforts: string[]
+}
+
 export interface AgentState {
   id: CodingToolId
-  /** Whether its installation, its version or its latest version is being read. */
+  /** Whether its installation, version, latest version or launch options are being read. */
   checking: boolean
+  /** Whether its installation has been looked for at least once. */
+  detected: boolean
   /** `null` when it is not installed, or before it was first looked for. */
   installation: AgentInstallation | null
   /** The latest version on registry.npmjs.org, once read. */
@@ -94,6 +119,12 @@ export interface AgentState {
   nodeRequirement: UnmetNodeRequirement | null
   /** Its operation that waits, runs, or ended last since Hoot started. */
   operation: AgentOperation | null
+  /**
+   * The models, and Default's effort levels, that the last detection read
+   * from the agent's own configuration; `null` where Hoot offers no model
+   * choice, as for OpenCode.
+   */
+  launchOptions: AgentLaunchOptions | null
 }
 
 /**
@@ -111,6 +142,12 @@ export interface AgentsState {
   agents: AgentState[]
   /** Where Install puts an agent; `null` until it is known. */
   installTarget: InstallTarget | null
+  /** Whether a detection is running. */
+  detecting: boolean
+  /** When the last detection started, on Hoot's clock; `null` before the first. */
+  detectedAt: number | null
+  /** The settings Hoot gives Claude Code, as its `--settings` argument. */
+  claudeHookSettings: string
 }
 
 /** One operation that the quit confirmation tells about. */

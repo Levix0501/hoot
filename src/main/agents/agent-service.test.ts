@@ -246,9 +246,13 @@ function setup(
       return { version: latest ?? '2.0.0', node: (id && options.latestNode?.[id]) || null }
     },
     runningSessions: () => options.sessions?.() ?? [],
+    launchOptions: async () => ({ models: [], defaultEfforts: [] }),
+    claudeHookSettings: '{"hooks":{}}',
+    now: () => now,
     platform: options.platform,
   })
   const states: AgentsState[] = []
+  let now = Date.now()
   service.on('changed', (state) => states.push(state))
   const agent = (id: CodingToolId) => {
     const found = service.getState().agents.find((entry) => entry.id === id)
@@ -265,7 +269,17 @@ function setup(
       },
       { timeout: 10_000, interval: 20 },
     )
-  return { service, tools, states, agent, ended, latestCalls }
+  return {
+    service,
+    tools,
+    states,
+    agent,
+    ended,
+    latestCalls,
+    setNow: (value: number) => {
+      now = value
+    },
+  }
 }
 
 /**
@@ -458,6 +472,47 @@ describe('AgentService detection', () => {
   })
 })
 
+describe('AgentService detection times', () => {
+  it('detects when the page opens the first time, then only 20 hours after the last detection started', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    const { service, setNow } = setup()
+    const start = Date.now()
+    setNow(start)
+    expect(service.getState().detectedAt).toBeNull()
+    service.openPage()
+    await vi.waitFor(() => expect(service.getState().detecting).toBe(false), { timeout: 10_000 })
+    expect(service.getState().detectedAt).toBe(start)
+
+    // A page opened sooner shows the last results without checking again.
+    setNow(start + 20 * 60 * 60 * 1000 - 1)
+    service.openPage()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(service.getState().detectedAt).toBe(start)
+
+    setNow(start + 20 * 60 * 60 * 1000)
+    service.openPage()
+    await vi.waitFor(
+      () => expect(service.getState().detectedAt).toBe(start + 20 * 60 * 60 * 1000),
+      { timeout: 10_000 },
+    )
+    await vi.waitFor(() => expect(service.getState().detecting).toBe(false))
+  })
+
+  it('checks again when Re-detect asks, and counts the 20 hours from that detection', async () => {
+    const { service, setNow } = setup()
+    const start = Date.now()
+    setNow(start)
+    await service.detect()
+    expect(service.getState().detectedAt).toBe(start)
+    setNow(start + 1_000)
+    await service.detect()
+    expect(service.getState().detectedAt).toBe(start + 1_000)
+    service.openPage()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(service.getState().detectedAt).toBe(start + 1_000)
+  })
+})
+
 describe('AgentService installs', () => {
   it("installs with the computer's npm into its global folder", async () => {
     setLatest('claude', '2.1.0')
@@ -562,6 +617,8 @@ describe('AgentService installs', () => {
       message: '✕ Install failed: npm exited with code 1',
       tail: ['line 3', 'line 4', 'line 5', 'line 6', 'npm error code E404'],
       output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nnpm error code E404',
+      command: `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @opencode/cli@latest --loglevel=http`,
+      exitCode: 1,
     })
     expect(agent('opencode').installation).toBeNull()
   })
@@ -593,22 +650,23 @@ describe('AgentService installs', () => {
     })
   })
 
-  it('shows the last line of what the command writes while it runs', async () => {
+  it("reports an operation as running without showing its command's output", async () => {
     npmScript(`
-      npm.write('\\u001b[32mfetching\\u001b[0m ⠋')
-      npm.write('\\rfetching ⠙')
+      npm.say('fetching')
       await npm.sleep(1000)
     `)
     const { service, agent, ended } = setup()
     await service.detect()
     service.install('claude')
     await vi.waitFor(
-      () => expect(agent('claude').operation).toMatchObject({ lastLine: 'fetching ⠙' }),
-      {
-        timeout: 5_000,
-      },
+      () =>
+        expect(agent('claude').operation).toEqual({
+          kind: 'install',
+          status: 'running',
+          cancellable: true,
+        }),
+      { timeout: 5_000 },
     )
-    expect(agent('claude').operation?.status).toBe('running')
     await ended('claude')
   })
 })
@@ -649,6 +707,8 @@ describe('AgentService updates', () => {
       status: 'failed',
       message: '✕ Update failed: npm finished, but the version is still 1.0.0',
       output: 'up to date',
+      command: `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @opencode/cli@latest --loglevel=http`,
+      exitCode: 0,
     })
   })
 
@@ -874,6 +934,51 @@ function started(): string[] {
   const log = path.join(root, 'started.log')
   return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []
 }
+
+describe('AgentService Update all', () => {
+  it('updates every agent that can be updated, one after another, and lets one be cancelled', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    await installInto(prefix, 'codex', '1.0.0')
+    setLatest('claude', '2.0.0')
+    setLatest('codex', '2.0.0')
+    npmScript(SLOW_NPM)
+    const { service, agent, ended } = setup()
+    await service.detect()
+    service.updateAll()
+    await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
+    expect(agent('claude').operation?.status).toBe('running')
+    expect(agent('codex').operation).toEqual({ kind: 'update', status: 'waiting' })
+    service.cancel('codex')
+    expect(agent('codex').operation).toEqual({ kind: 'update', status: 'cancelled' })
+    fs.writeFileSync(path.join(root, 'go'), '')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
+    expect(started()).toEqual(['started @anthropic-ai/claude-code'])
+  })
+
+  it('leaves out agents with no newer version, no update command or a failed version read', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    await installInto(prefix, 'codex', '1.0.0')
+    await writeNodeCommand(
+      path.join(npmCommandsFolder(prefix), 'opencode'),
+      "require('node:fs').writeSync(1, '1.0.0\\n')\n",
+    )
+    setLatest('claude', '2.0.0')
+    setLatest('codex', '1.0.0')
+    setLatest('opencode', '2.0.0')
+    npmScript('return 0')
+    const { service, agent, ended } = setup({
+      latest: { claude: '2.0.0', codex: '1.0.0', opencode: '2.0.0' },
+    })
+    await service.detect()
+    // Codex is up to date; OpenCode was installed where Hoot cannot tell how.
+    service.updateAll()
+    await ended('claude')
+    expect(agent('claude').operation).not.toBeNull()
+    expect(agent('codex').operation).toBeNull()
+    expect(agent('opencode').operation).toBeNull()
+  })
+})
 
 describe('AgentService queue and cancelling', () => {
   it('runs one operation at a time, in the order they were asked for', async () => {

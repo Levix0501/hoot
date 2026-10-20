@@ -11,6 +11,7 @@ import {
   shownCommand,
   updatedMessage,
   type AgentInstallation,
+  type AgentLaunchOptions,
   type AgentOperation,
   type AgentOperationKind,
   type AgentOperationSummary,
@@ -38,8 +39,8 @@ import { readVersion } from './version'
 
 /** How many of the last lines of a failed operation's output its row shows. */
 const TAIL_LINES = 5
-/** How often, at most, a running operation's last line is passed on. */
-const PROGRESS_INTERVAL_MS = 100
+/** How long a detection's results are shown before the page checks again. */
+const DETECTION_INTERVAL_MS = 20 * 60 * 60 * 1000
 
 export interface AgentServiceOptions {
   /**
@@ -59,6 +60,16 @@ export interface AgentServiceOptions {
   latestRelease(npmPackage: string, command: string): Promise<LatestRelease | null>
   /** The ids of an agent's sessions that are starting or running. */
   runningSessions(id: CodingToolId): string[]
+  /**
+   * The models and Default effort levels an agent offers under its own
+   * configuration, from the detection that found it; `null` where Hoot offers
+   * no model choice.
+   */
+  launchOptions(tool: CodingToolId, detection: Detection): Promise<AgentLaunchOptions | null>
+  /** The settings Hoot gives Claude Code, as its `--settings` argument. */
+  claudeHookSettings: string
+  /** Hoot's clock, replaceable for tests. */
+  now?(): number
   /** The platform Hoot runs on: what its commands are, and where agents live. */
   platform?: NodeJS.Platform
 }
@@ -114,6 +125,8 @@ interface AgentRecord {
   latestReadings: number
   latestId: number
   operation: Operation | null
+  /** The models its configuration offers, and Default's effort levels, from the last detection. */
+  launchOptions: AgentLaunchOptions | null
 }
 
 /** The arguments npm installs an agent's latest version with, in a global folder. */
@@ -212,6 +225,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     latestReadings: 0,
     latestId: 0,
     operation: null,
+    launchOptions: null,
   }))
   private installTarget: InstallTarget | null = null
   /** The computer's npm as Install would run it, with `~` for the home folder, when Install can. */
@@ -221,6 +235,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   private readonly canonicalHome: Promise<string>
   private detecting: Promise<void> | null = null
   private queuedDetection: Promise<void> | null = null
+  /** When the last detection started, on Hoot's clock; `null` before the first. */
+  private lastDetectionStartedAt: number | null = null
   /** The operations waiting, in the order they were asked for. */
   private queue: AgentRecord[] = []
   private running: AgentRecord | null = null
@@ -230,13 +246,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    * since Hoot, which is quitting, would not wait for its command to end.
    */
   private quitting = false
-  private progressTimer: NodeJS.Timeout | null = null
   private readonly platform: NodeJS.Platform
+  private readonly now: () => number
 
   constructor(private readonly options: AgentServiceOptions) {
     super()
     this.canonicalHome = canonicalPath(options.home)
     this.platform = options.platform ?? process.platform
+    this.now = options.now ?? (() => Date.now())
   }
 
   getState(): AgentsState {
@@ -244,12 +261,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       agents: this.records.map((record) => ({
         id: record.tool.id,
         checking: !record.detected || record.readings > 0 || record.latestReadings > 0,
+        detected: record.detected,
         installation: record.installation && {
           path: record.installation.path,
           displayPath: record.installation.displayPath,
           method: record.installation.method,
           version: record.installation.version,
           versionOutput: record.installation.versionOutput,
+          versionCommand: record.installation.versionCommand,
           updateCommand: record.installation.updateCommand,
           writable: record.installation.writable,
         },
@@ -261,8 +280,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
             : shownCommand([this.installNpm, ...npmInstallArgs(record.tool)]),
         nodeRequirement: this.nodeRequirementOf(record),
         operation: record.operation?.state ?? null,
+        launchOptions: record.launchOptions,
       })),
       installTarget: this.installTarget,
+      detecting: this.detecting !== null,
+      detectedAt: this.lastDetectionStartedAt,
+      claudeHookSettings: this.options.claudeHookSettings,
     }
   }
 
@@ -284,6 +307,24 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     return this.queuedDetection
   }
 
+  /**
+   * Detects when the Agents page is opened: the first time since Hoot
+   * started, and once the last detection started 20 hours ago or more. A
+   * page opened sooner shows the last results as they are.
+   */
+  openPage(): void {
+    if (this.lastDetectionStartedAt === null) {
+      void this.detect()
+      return
+    }
+    if (
+      this.detecting === null &&
+      this.now() - this.lastDetectionStartedAt >= DETECTION_INTERVAL_MS
+    ) {
+      void this.detect()
+    }
+  }
+
   /** Installs an agent, now or after the operations before it. */
   install(id: CodingToolId): void {
     this.enqueue(id, 'install')
@@ -292,6 +333,30 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   /** Updates an agent's installation, now or after the operations before it. */
   update(id: CodingToolId): void {
     this.enqueue(id, 'update')
+  }
+
+  /**
+   * Updates every agent that can be updated, one after another: those whose
+   * latest version is newer, and those whose last update failed.
+   */
+  updateAll(): void {
+    for (const record of this.records) {
+      if (record.installation === null || record.installation.version === null) continue
+      if (isPending(record.operation)) continue
+      const failed =
+        record.operation?.state.status === 'failed' && record.operation.kind === 'update'
+      if (failed || this.canUpdate(record)) this.enqueue(record.tool.id, 'update')
+    }
+  }
+
+  /** Whether an agent's row offers Update: a newer version, and a method and folder Hoot can use. */
+  private canUpdate(record: AgentRecord): boolean {
+    const installation = record.installation
+    if (installation === null || installation.version === null) return false
+    if (record.latestFailed || record.latest === null) return false
+    if (!isNewerVersion(record.latest, installation.version)) return false
+    if (installation.method === 'unknown' || !installation.writable) return false
+    return installation.method !== 'npm' || this.nodeRequirementOf(record) === null
   }
 
   /**
@@ -386,27 +451,38 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     return unmetNodeRequirement(record.latestNode, this.nodeVersion)
   }
 
-  /** Passes on a running operation's last line soon, at most every so often. */
-  private changedSoon(): void {
-    if (this.progressTimer) return
-    this.progressTimer = setTimeout(() => {
-      this.progressTimer = null
-      this.changed()
-    }, PROGRESS_INTERVAL_MS)
-    this.progressTimer.unref()
-  }
-
   private startDetection(): Promise<void> {
+    this.lastDetectionStartedAt = this.now()
     const detecting = Promise.all([
       this.readInstallations(this.records),
       ...this.records.map((record) => this.readLatest(record)),
     ])
-      .then(() => {})
+      .then(async ([reading]) => {
+        if (reading !== null) await this.readLaunchOptions(reading.detection)
+      })
       .finally(() => {
         if (this.detecting === detecting) this.detecting = null
+        this.changed()
       })
     this.detecting = detecting
+    this.changed()
     return detecting
+  }
+
+  /**
+   * Reads every agent's launch options from the configuration the detection
+   * found, replacing those of the last detection once all are read.
+   */
+  private async readLaunchOptions(detection: Detection): Promise<void> {
+    const options = await Promise.all(
+      this.records.map((record) =>
+        this.options.launchOptions(record.tool.id, detection).catch(() => record.launchOptions),
+      ),
+    )
+    for (const [index, value] of options.entries()) {
+      const record = this.records[index]
+      if (record) record.launchOptions = value
+    }
   }
 
   /**
@@ -416,7 +492,9 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    * it found for each, also when a later reading has started since, whose
    * result then stands instead.
    */
-  private async readInstallations(records: AgentRecord[]): Promise<Array<Installation | null>> {
+  private async readInstallations(
+    records: AgentRecord[],
+  ): Promise<{ installations: Array<Installation | null>; detection: Detection }> {
     const ids = records.map((record) => {
       record.readings += 1
       record.readingId += 1
@@ -441,7 +519,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       this.installNpm =
         npm !== null && this.installTarget.kind === 'npm' ? await this.displayPath(npm.path) : null
       this.nodeVersion = nodeVersion
-      return await Promise.all(
+      const installations = await Promise.all(
         records.map(async (record, index) => {
           try {
             const installation = await this.describe(record.tool, detection, npm).catch(() => null)
@@ -455,6 +533,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           }
         }),
       )
+      return { installations, detection }
     } finally {
       for (const record of records) finish(record)
     }
@@ -526,6 +605,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       method: method.kind,
       version: version.version,
       versionOutput: version.output,
+      versionCommand: version.command,
       updateCommand:
         update === null
           ? null
@@ -578,7 +658,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   private async perform(record: AgentRecord, operation: Operation): Promise<void> {
     const { kind } = operation
-    operation.state = { kind, status: 'running', lastLine: '', cancellable: true }
+    operation.state = { kind, status: 'running', cancellable: true }
     this.changed()
     const before = record.installation
     const sessionsBefore = kind === 'update' ? this.options.runningSessions(record.tool.id) : []
@@ -590,11 +670,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       plan = await this.plan(record, kind, before)
       if (!operation.cancelled) {
         const process = startProcess(plan.command, (text) => {
-          void output.write(text).then(() => {
-            if (operation.state.status !== 'running') return
-            operation.state = { ...operation.state, lastLine: output.lastLine() }
-            this.changedSoon()
-          })
+          void output.write(text)
         })
         operation.process = process
         // Cancelled while it started.
@@ -613,20 +689,29 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       uncancellable(operation)
     }
 
+    const command = plan === null ? null : shownCommand([plan.command.file, ...plan.command.args])
     try {
       if (operation.stopped) {
         operation.state = { kind, status: 'cancelled' }
         return
       }
-      const [after] = await this.readInstallations([record])
+      const { installations } = await this.readInstallations([record])
+      const after = installations[0] ?? null
       if (operation.cancelled) {
         operation.state = { kind, status: 'cancelled' }
       } else if (failure !== null || plan === null || end === null) {
-        operation.state = this.failed(kind, failure ?? 'it did not run', output)
+        operation.state = this.failed(
+          kind,
+          failure ?? 'it did not run',
+          output,
+          command,
+          end?.code ?? null,
+        )
       } else {
-        operation.state = this.outcome(record.tool, kind, plan, end, before, after ?? null, {
+        operation.state = this.outcome(record.tool, kind, plan, end, before, after, {
           sessionsBefore,
           output,
+          command: command ?? '',
         })
       }
     } finally {
@@ -729,10 +814,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     end: ProcessEnd,
     before: Installation | null,
     after: Installation | null,
-    context: { sessionsBefore: string[]; output: TerminalText },
+    context: { sessionsBefore: string[]; output: TerminalText; command: string },
   ): AgentOperation {
     const { name } = plan
     const label = tool.label
+    const command = context.command
+    const exitCode = end.code
     let reason: string
     if (end.error) reason = `could not run ${name}: ${end.error.message}`
     else if (end.signal) reason = `${name} was ended by ${end.signal}`
@@ -760,10 +847,16 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         message: updatedMessage(after.version, stillRunning, before.version),
       }
     }
-    return this.failed(kind, reason, context.output)
+    return this.failed(kind, reason, context.output, command, exitCode)
   }
 
-  private failed(kind: AgentOperationKind, reason: string, output: TerminalText): AgentOperation {
+  private failed(
+    kind: AgentOperationKind,
+    reason: string,
+    output: TerminalText,
+    command: string | null,
+    exitCode: number | null,
+  ): AgentOperation {
     const lines = output.lines()
     return {
       kind,
@@ -771,6 +864,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       message: failedMessage(kind, reason),
       tail: lines.slice(-TAIL_LINES),
       output: lines.join('\n'),
+      command,
+      exitCode,
     }
   }
 }

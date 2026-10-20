@@ -42,7 +42,12 @@ import {
   type Labels,
   type NamedLabel,
 } from '../../shared/labels'
-import type { PermissionLevelSettings } from '../../shared/permission-levels'
+import {
+  withAgentLaunchSettingsChange,
+  withYoloMode,
+  type AgentLaunchSettingsChange,
+  type LaunchSettings,
+} from '../../shared/launch-settings'
 import {
   isNormalExit,
   type QuitReason,
@@ -111,11 +116,6 @@ export interface UiSession {
    * starts; `null` for any other session.
    */
   issueId: number | null
-  /**
-   * The id of the permission level its tool is to start at, as it was picked
-   * when the session was asked for; `null` for the one picked when it starts.
-   */
-  permissionLevel: string | null
   /**
    * `starting` covers the time until the process runs. A starting session
    * already counts as running.
@@ -228,8 +228,8 @@ export interface AppState {
   tools: ToolsState
   /** The agents of the Agents page and their operations; `null` until they are known. */
   agents: AgentsState | null
-  /** The permission level selected for each coding tool; `null` until it is known. */
-  permissionLevels: PermissionLevelSettings | null
+  /** The YOLO mode switch and each agent's launch settings; `null` until they are known. */
+  launchSettings: LaunchSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
   /**
@@ -366,13 +366,24 @@ export interface AppState {
   removeProject(root: string): Promise<void>
   redetectTools(): Promise<void>
   /**
+   * Tells Hoot that the Agents page opened: it detects the first time since
+   * Hoot started, and once the last detection started 20 hours ago or more.
+   */
+  enterAgentsPage(): void
+  /**
    * Reads the login shell environment again, looks for every agent's
    * installation and version, and reads every agent's latest version.
    */
   detectAgents(): void
   installAgent(id: CodingToolId): void
   updateAgent(id: CodingToolId): void
+  /** Updates every agent that can be updated, one after another. */
+  updateAllAgents(): void
   cancelAgentOperation(id: CodingToolId): void
+  /** Turns YOLO mode on or off for the sessions that start from now on. */
+  setYoloMode(on: boolean): void
+  /** Changes an agent's launch settings for the sessions that start from now on. */
+  changeAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
@@ -386,10 +397,10 @@ export interface AppState {
   /**
    * Opens another session for an issue, as its Start new session does,
    * unless work on it cannot be started now, when it says why: saves the
-   * changes to the issue made so far, then starts Claude Code, at the
-   * permission level picked now, in the issue's worktree in the project it
-   * belongs to, after creating one when it has none; the session is shown
-   * once it is added, whatever page is shown by then, and is sent the issue.
+   * changes to the issue made so far, then starts Claude Code, as the Agents
+   * page has it, in the issue's worktree in the project it belongs to, after
+   * creating one when it has none; the session is shown once it is added,
+   * whatever page is shown by then, and is sent the issue.
    */
   startNewSession(issueId: number): Promise<void>
   /**
@@ -728,7 +739,6 @@ export function isSessionRunning(session: UiSession): boolean {
 function fromInfo(info: SessionInfo): UiSession {
   return {
     ...info,
-    permissionLevel: null,
     title: '',
     workingSince: null,
     attention: null,
@@ -1411,7 +1421,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     toolId: ToolId,
     worktreePath: string | null,
     issueId: number | null = null,
-    permissionLevel: string | null = null,
     show = true,
   ): string => {
     const id = crypto.randomUUID()
@@ -1426,7 +1435,6 @@ export const useAppStore = create<AppState>()((set, get) => {
           worktreePath,
           toolId,
           issueId,
-          permissionLevel,
           status: 'starting',
           exit: null,
           title: '',
@@ -1556,10 +1564,10 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /**
    * Opens a session for an issue: saves the changes to the issue made so
-   * far, then starts Claude Code, at the permission level picked now, in the
-   * issue's worktree in the project it belongs to, after creating one when it
-   * has none. A session for the user is shown once it is added and started
-   * by its terminal view; one for an agent is started at once, without being
+   * far, then starts Claude Code, as the Agents page has it, in the issue's
+   * worktree in the project it belongs to, after creating one when it has
+   * none. A session for the user is shown once it is added and started by
+   * its terminal view; one for an agent is started at once, without being
    * shown, and nothing is said in the window of why it could not start.
    */
   const openIssueSession = (
@@ -1568,8 +1576,6 @@ export const useAppStore = create<AppState>()((set, get) => {
   ): Promise<SessionStartAnswer> => {
     const quiet = by === 'agent'
     const identifier = issueIdentifier(issueId)
-    // The session starts at the level picked now, also when that changes while its worktree is created.
-    const permissionLevel = get().permissionLevels?.claude ?? null
     return queuedForIssue(issueId, async () => {
       // The worktree is named after the issue as it is saved, which Claude Code is sent.
       for (const flush of issueEditorFlushes) flush()
@@ -1617,7 +1623,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           setStarting(issueId, false)
         }
       }
-      const id = addSession(project.root, 'claude', worktreePath, issueId, permissionLevel, show)
+      const id = addSession(project.root, 'claude', worktreePath, issueId, show)
       launchOptions.set(id, { by, prompt })
       if (show) return { ok: true, worktreePath }
       // Not shown, its terminal view does not start it: it starts with the terminal's size.
@@ -1636,7 +1642,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     worktreeDeletion: null,
     tools: { detecting: true, tools: [], error: null },
     agents: null,
-    permissionLevels: null,
+    launchSettings: null,
     sessions: [],
     startingIssues: [],
     issueStarts: [],
@@ -1755,7 +1761,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onAgentsChanged((agents) => set({ agents }))
       // Set as soon as it arrives: a change reported after it is newer.
       void api.getAgents().then((agents) => set((state) => ({ agents: state.agents ?? agents })))
-      api.onPermissionLevelsChanged((permissionLevels) => set({ permissionLevels }))
+      api.onLaunchSettingsChanged((launchSettings) => set({ launchSettings }))
       api.onSessionUpdated((info) => {
         if (!findSession(info.id)) return
         set((state) => ({
@@ -1803,13 +1809,13 @@ export const useAppStore = create<AppState>()((set, get) => {
         (error: unknown) => console.error('Could not list the worktrees:', error),
       )
 
-      const [projects, sessions, permissionLevels] = await Promise.all([
+      const [projects, sessions, launchSettings] = await Promise.all([
         api.listProjects(),
         api.listSessions(),
-        api.getPermissionLevels(),
+        api.getLaunchSettings(),
       ])
-      // A level selected while this was read is reported by the change event, which is newer.
-      set((state) => ({ permissionLevels: state.permissionLevels ?? permissionLevels }))
+      // A setting changed while this was read is reported by the change event, which is newer.
+      set((state) => ({ launchSettings: state.launchSettings ?? launchSettings }))
       applyProjects(projects)
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
@@ -1887,6 +1893,10 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ tools })
     },
 
+    enterAgentsPage() {
+      api.enterAgentsPage()
+    },
+
     detectAgents() {
       api.detectAgents()
     },
@@ -1899,8 +1909,24 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.updateAgent(id)
     },
 
+    updateAllAgents() {
+      api.updateAllAgents()
+    },
+
     cancelAgentOperation(id) {
       api.cancelAgentOperation(id)
+    },
+
+    setYoloMode(on) {
+      const launchSettings = withYoloMode(get().launchSettings, on)
+      if (launchSettings !== null) set({ launchSettings })
+      api.setYoloMode(on)
+    },
+
+    changeAgentLaunchSettings(id, change) {
+      const launchSettings = withAgentLaunchSettingsChange(get().launchSettings, id, change)
+      if (launchSettings !== null) set({ launchSettings })
+      api.setAgentLaunchSettings(id, change)
     },
 
     newSession(projectRoot, toolId, worktreePath = null) {
@@ -1962,7 +1988,6 @@ export const useAppStore = create<AppState>()((set, get) => {
         issueId: session.issueId,
         ...(options === undefined ? {} : { startedBy: options.by }),
         ...(options === undefined || options.prompt === null ? {} : { prompt: options.prompt }),
-        ...(session.permissionLevel === null ? {} : { permissionLevel: session.permissionLevel }),
         cols,
         rows,
       })

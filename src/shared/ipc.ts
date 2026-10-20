@@ -5,7 +5,7 @@ import type { Dependencies, Dependency } from './dependencies'
 import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
-import type { PermissionLevelSettings } from './permission-levels'
+import type { AgentLaunchSettingsChange, LaunchSettings } from './launch-settings'
 import type { QuitReason, SessionInfo } from './session'
 import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
@@ -81,12 +81,6 @@ export interface StartSessionRequest {
    * workflow.
    */
   prompt?: string
-  /**
-   * The id of the permission level the tool starts at, as it was picked when
-   * the session was asked for; without it, the level picked when the session
-   * starts.
-   */
-  permissionLevel?: string
   cols: number
   rows: number
 }
@@ -196,13 +190,17 @@ export const IpcChannel = {
   redetectTools: 'tools:redetect',
   toolsChanged: 'tools:changed',
   getAgents: 'agents:get',
+  enterAgentsPage: 'agents:enter-page',
   detectAgents: 'agents:detect',
   agentsChanged: 'agents:changed',
   installAgent: 'agents:install',
   updateAgent: 'agents:update',
+  updateAllAgents: 'agents:update-all',
   cancelAgentOperation: 'agents:cancel',
-  getPermissionLevels: 'permission-levels:get',
-  permissionLevelsChanged: 'permission-levels:changed',
+  getLaunchSettings: 'launch-settings:get',
+  setYoloMode: 'launch-settings:set-yolo-mode',
+  setAgentLaunchSettings: 'launch-settings:set-agent',
+  launchSettingsChanged: 'launch-settings:changed',
   listSessions: 'session:list',
   startSession: 'session:start',
   closeSession: 'session:close',
@@ -332,6 +330,11 @@ export interface HootApi {
   /** The agents of the Agents page, as last read, with their operations. */
   getAgents(): Promise<AgentsState>
   /**
+   * The Agents page was opened: detects if it is the first time since Hoot
+   * started, or the last detection started 20 hours ago or more.
+   */
+  enterAgentsPage(): void
+  /**
    * Reads the login shell environment again, looks for every agent's
    * installation and version, and reads every agent's latest version.
    */
@@ -341,11 +344,17 @@ export interface HootApi {
   installAgent(id: CodingToolId): void
   /** Updates an agent's installation, now or after the operations before it. */
   updateAgent(id: CodingToolId): void
+  /** Updates every agent that can be updated, one after another. */
+  updateAllAgents(): void
   /** Cancels an agent's operation, waiting or running. */
   cancelAgentOperation(id: CodingToolId): void
-  /** The permission level selected for each coding tool in the Agents menu. */
-  getPermissionLevels(): Promise<PermissionLevelSettings>
-  onPermissionLevelsChanged(listener: (settings: PermissionLevelSettings) => void): () => void
+  /** The YOLO mode switch and each agent's launch settings. */
+  getLaunchSettings(): Promise<LaunchSettings>
+  /** Turns YOLO mode on or off for the sessions that start from now on. */
+  setYoloMode(on: boolean): void
+  /** Changes an agent's launch settings for the sessions that start from now on. */
+  setAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
+  onLaunchSettingsChanged(listener: (settings: LaunchSettings) => void): () => void
   /** The sessions that have started, oldest first. */
   listSessions(): Promise<SessionInfo[]>
   startSession(request: StartSessionRequest): Promise<StartSessionResult>

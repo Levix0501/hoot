@@ -15,6 +15,8 @@ import {
   windowControlsFor,
 } from '../shared/window-controls'
 import { AgentService } from './agents/agent-service'
+import { readClaudeLaunchOptions } from './agents/claude-options'
+import { readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
@@ -31,11 +33,11 @@ import { resolveProjectRoot } from './projects/project-root'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
-import { resolveLaunch } from './session/launch'
+import { claudeCodeHookSettings, resolveLaunch } from './session/launch'
 import { SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
-import { PermissionLevelStore } from './settings/permission-level-store'
+import { LaunchSettingsStore } from './settings/launch-settings-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { defaultShell } from './tools/default-shell'
 import { findCommand } from './tools/find-command'
@@ -79,7 +81,7 @@ const windowControls = windowControlsFor(
 )
 
 const shell = defaultShell(baseEnv)
-const permissionLevels = new PermissionLevelStore(app.getPath('userData'))
+const launchSettings = new LaunchSettingsStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const appearance = new AppearanceStore(app.getPath('userData'))
 // The appearance picked in the settings, macOS's until one is picked. Applied
@@ -99,7 +101,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd, issue, sessionId, permissionLevel) =>
+  resolveLaunch: (toolId, cwd, issue, sessionId) =>
     resolveLaunch(
       {
         shell,
@@ -110,13 +112,15 @@ const sessions = new SessionManager({
             fallbackLang: fallbackUtf8Locale(),
           }),
         getLoginEnvironment: () => tools.getLoginEnvironment(),
-        permissionLevel: (tool) => permissionLevels.level(tool),
+        launchSettings: (tool) => ({
+          yoloMode: launchSettings.all().yoloMode,
+          agent: launchSettings.agent(tool),
+        }),
         hoot: { ...hootCli, sessionId },
       },
       toolId,
       cwd,
       issue,
-      permissionLevel,
     ),
 })
 
@@ -128,6 +132,17 @@ const agents = new AgentService({
   latestRelease: (npmPackage, command) =>
     fetchLatestRelease(npmPackage, command, (url, init) => net.fetch(url, init)),
   runningSessions: (id) => sessions.runningIdsOf(id),
+  launchOptions: async (tool, detection) => {
+    if (tool === 'opencode') return null
+    const { env } = detection.login
+    if (tool === 'claude') {
+      return readClaudeLaunchOptions({ home: os.homedir(), env })
+    }
+    const command = detection.state.tools.find((entry) => entry.id === 'codex')?.path
+    if (!command) return { models: [], defaultEfforts: [] }
+    return readCodexLaunchOptions({ command, env, home: os.homedir() })
+  },
+  claudeHookSettings: claudeCodeHookSettings(path.join(hootCli.binDirectory, 'hoot')),
 })
 
 let mainWindow: BrowserWindow | null = null
@@ -380,7 +395,7 @@ function startWithDatabase(database: DatabaseSync): void {
     labels,
     tools,
     agents,
-    permissionLevels,
+    launchSettings,
     sidebar,
     appearance,
     sessions,
@@ -455,8 +470,6 @@ function startWithDatabase(database: DatabaseSync): void {
         goForward: () => sendSessionCommand('forward'),
         sidebarOpen: sidebar.open,
         toggleSidebar: () => getWindow()?.webContents.send(IpcChannel.toggleSidebarRequested),
-        selected: permissionLevels.all(),
-        selectPermissionLevel: (tool, level) => permissionLevels.select(tool, level),
       }),
     )
 

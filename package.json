@@ -21,7 +21,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
-    "node-pty": "1.2.0-beta.15"
+    "node-pty": "1.2.0-beta.15",
+    "smol-toml": "^1.9.1"
   },
   "devDependencies": {
     "@base-ui/react": "^1.8.0",

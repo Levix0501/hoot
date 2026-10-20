@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Appearance } from '../../shared/appearance'
 import { AppearanceStore } from './appearance-store'
-import { PermissionLevelStore } from './permission-level-store'
+import { LaunchSettingsStore } from './launch-settings-store'
 import { SidebarStateStore } from './sidebar-state-store'
 
 let directory: string
@@ -55,19 +55,19 @@ describe('AppearanceStore', () => {
     expect(changes).toEqual(['light', 'dark'])
   })
 
-  it('shares settings.json with the permission levels and the sidebar without overwriting them', () => {
-    const levels = new PermissionLevelStore(directory)
+  it('shares settings.json with the launch settings and the sidebar without overwriting them', () => {
+    const launch = new LaunchSettingsStore(directory)
     const sidebar = new SidebarStateStore(directory)
     const appearance = new AppearanceStore(directory)
-    levels.select('claude', 'accept-edits')
+    launch.setYoloMode(false)
     appearance.select('dark')
     sidebar.setOpen(false)
-    expect(saved()).toEqual({
-      permissionLevels: { claude: 'accept-edits' },
+    expect(saved()).toMatchObject({
+      launchSettings: { yoloMode: false },
       appearance: 'dark',
       sidebarCollapsed: true,
     })
-    expect(new PermissionLevelStore(directory).level('claude').label).toBe('Accept edits')
+    expect(new LaunchSettingsStore(directory).all().yoloMode).toBe(false)
     expect(new SidebarStateStore(directory).open).toBe(false)
     expect(new AppearanceStore(directory).appearance).toBe('dark')
   })

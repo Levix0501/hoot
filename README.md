@@ -34,8 +34,7 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   default shell in the project root, from the project's `+` button or its context menu, or in one
   of the project's [worktrees](#worktrees) from the worktree's `+` button. Tools run
   directly in your login shell environment (on Windows, in the one Hoot started with, which
-  Windows gives every app), with only the arguments of their
-  [permission level](#permission-levels) (a Claude Code session
+  Windows gives every app), with the arguments of the [Agents page](#agents) (a Claude Code session
   [started from an issue](#issues) also gets the issue); the shell runs as an interactive login shell
   (on Windows, the shell is PowerShell: PowerShell 7 when it is on `Path`, or else the Windows
   PowerShell that comes with Windows). Claude Code also gets, with `--settings`, the hooks that
@@ -166,65 +165,73 @@ project, and ⌘W and ⌘B do nothing. Changes apply at once; there is nothing t
 
 ### Agents
 
-The **Agents** page lists Claude Code, Codex and OpenCode. Each row shows the agent's
-version, how it was installed (**npm**, **Homebrew** or **Official installer**) and its command's
-path (with `~` for your home folder, cut in the middle when it is long, and in full when you
-point at it); or **Not installed** and where **Install** would put it. On the right it says
-**Up to date**, offers **Install** or **Update to** the latest version, or says **Checking…**,
-**Couldn't check for updates**, **Update it the way you installed it**, or
-**Installed, but it doesn't run** (click it to see what the command wrote for `--version`). Where
-the computer has no npm that runs, it says **Install needs Node.js and npm** instead of
-**Install**: install Node.js, which comes with npm, and the page offers it. Where npm runs but
-you cannot create files in its global folder, such as one that belongs to root, it says
-**Install needs write access to npm's folder**, and the row names the folder. Where the agent's
-latest version runs on Node.js (its command is a JavaScript file, as Codex's is; Claude Code's and
-OpenCode's are programs of their own) and needs a newer Node.js than the first `node` on your login
-shell's `PATH`, the one its sessions would run it with, it says **Install needs Node.js** and the
-versions, such as **Install needs Node.js 22.19.0 or later**, and the row says which version yours
-is. Showing the page, and **Re-detect** at its top right, read your login shell environment again,
-look for each agent (the first on its `PATH`, the one sessions run), run it with `--version`, and
-read the latest version.
-The latest version is the one the `latest` tag names on registry.npmjs.org, whatever registry your
-npm uses, with the Node.js versions it needs (its package's `engines` field) and whether its command
-is a JavaScript file (its `bin` field); Hoot asks registry.npmjs.org only then, never in the
-background.
+The **Agents** page shows how each new session of Claude Code, Codex and OpenCode starts. Each
+installed agent has a row with its icon, name, version and an enable switch; click the version to
+see how it was installed (**npm**, **Homebrew** or **Official installer**) and its command's path
+(with `~` for your home folder, cut in the middle when it is long, and in full when you point at
+it). Below an enabled agent is its command for a new session, which is also where its settings are
+edited:
+
+- **YOLO mode**, at the top of the page, is on until you turn it off. While it is on, every new
+  session gets the agent's argument that makes it act without asking: Claude Code's
+  `--dangerously-skip-permissions`, Codex's `--dangerously-bypass-approvals-and-sandbox`, and
+  OpenCode's `--auto`. While it is off, Hoot adds no permission argument, and the agent follows its
+  own configuration. A locked argument in the command shows it, and says when the extra arguments
+  decide permissions instead.
+- **Model** and **Effort** are chips in the command. Point at the dashed **+ model** or **+ effort**
+  chip and pick **Default** or one of the values read from the agent's own configuration, including
+  the models of a third-party provider. Claude Code's choices come from its settings and
+  environment: the four aliases, a custom model option, and `modelPicker` rows, filtered by
+  `availableModels` and managed settings. Codex's come from `codex debug models`, or from its
+  configured model alone when it uses a non-OpenAI provider without its own model catalog. OpenCode
+  has no model or effort choice. When a chosen model is no longer in the configuration, the command
+  keeps it and the chip says so.
+- **Extra arguments** are chips with an ×: type into the field at the end of the command and press
+  Enter to add them, one argument per word, and click × to remove one. They are added in order, and
+  before the arguments that send an issue. If they set permissions, a model or an effort level, Hoot
+  leaves its own argument for it out, and the corresponding chip says the extra arguments decide it.
+- **The copy button** puts the whole command, including the full `--settings` JSON of Hoot's hooks,
+  on the clipboard. The command changes at once as settings change.
+
+The enable switch keeps an agent out of the new session menu while it is off; issue sessions still
+start Claude Code, whether it is enabled or not. Every setting is kept in `settings.json`, applies
+to sessions that start afterwards, and never to one already running. Settings saved by earlier
+versions as permission levels are ignored: YOLO mode is on when Hoot has no setting.
+
+The agents that are not installed are in a **Not installed** group at the bottom, folded until you
+open it, with their number in its title. Each row says where **Install** would put the agent, or
+why it cannot be installed, and offers **Install**.
+
+Opening the page detects the agents the first time since Hoot started, and later only when the last
+detection started 20 hours ago or more; until then it shows the last results. **Re-detect**, the
+icon at the top right, detects at once, and its icon turns while a detection runs. Detection reads
+your login shell environment, looks for each agent (the first on its `PATH`, the one sessions run),
+runs it with `--version`, and reads the latest version; it also reads the model and effort choices
+from the agent's configuration. Hoot does not keep the results across a restart.
 
 - **Install** installs the npm package's latest version (`@anthropic-ai/claude-code`,
   `@openai/codex`, `@opencode/cli`) with your npm, never with an agent's install script. When the
   first `npm` on your login shell's `PATH` runs and you can create files in its global folder's
   `lib/node_modules` and `bin` (on Windows, its `node_modules` and the global folder itself), Hoot
   runs `npm install -g <package>@latest` with it, as you would in a terminal, so the agent works in
-  your terminals too. Pointing at **Install** shows the command it runs, such as
-  `Runs ~/.nvm/versions/node/v24.15.0/bin/npm install -g @openai/codex@latest --loglevel=http`.
-  npm only warns about a Node.js that a package's `engines` field does not allow, so Hoot checks
-  it first, as above. Hoot comes with no npm or Node.js of its own, and changes none of your
-  shell's configuration files.
-- **Update to** updates the installation the row shows, in its place, the way it was
-  installed: `npm install -g <package>@latest` with the npm of its global folder,
-  `brew upgrade --cask` or `--formula` for the cask or formula it
-  comes from, or the agent's own update command for its official installer (`claude update`,
-  `codex update`, `opencode upgrade`). Hoot cannot update an agent installed any other way, and
-  says so. Pointing at **Update to** shows the command it runs. For an installation by npm, Hoot
-  first checks that you can create files in its global folder and, where the latest version runs
-  on Node.js, that it does on your `node`; where either does not hold, the row says the latest
-  version **is out** instead of offering **Update to**, and the line below the agent's name says
-  why: **npm's folder isn't writable**, such as one installed with `sudo npm`, or which Node.js the
-  version needs and which version yours is. It never uses `sudo` or changes the owner or
-  permissions of a file: an installation by Homebrew or an official installer that you are not
-  allowed to change fails with the command's own error message. Running sessions go on with the
-  version they started with, and the result says how many still do; sessions started afterwards
-  run the new version.
-- **Progress and results**: while it runs, the row shows **Installing…** or **Updating…** and the
-  last line the command wrote. Installs and updates run one at a time, in the order you clicked
-  them: the others say **Waiting…**. **Cancel** takes a waiting one off the list, or sends the
-  running command SIGTERM, once, and waits for it to end: npm first finishes the step under way,
-  such as a download, then puts back what it changed, leaving the agent as it was. The result
-  stays in the row until the agent's next install or update, or until Hoot quits: **✓ Installed**
-  or **✓ Updated to** and the version, **Cancelled**, or why it failed, with the last lines the
-  command wrote and **Show output** for all of them. Installing succeeds when the command exits
-  with 0 and the agent is found and runs afterwards; updating, when it also stays at the same path
-  with a newer version. Afterwards Hoot looks for the agent again, and the new session menu has it
-  at once, without restarting Hoot.
+  your terminals too. Pointing at **Install** shows the command it runs. Hoot comes with no npm or
+  Node.js of its own, and changes none of your shell's configuration files.
+- **Update** updates the installation the row shows, in its place, the way it was installed:
+  `npm install -g <package>@latest` with the npm of its global folder, `brew upgrade --cask` or
+  `--formula` for the cask or formula it comes from, or the agent's own update command for its
+  official installer (`claude update`, `codex update`, `opencode upgrade`). Hoot cannot update an
+  agent installed any other way, and says so. For an installation by npm, Hoot first checks that you
+  can create files in its global folder and, where the latest version runs on Node.js, that it does
+  on your `node`. It never uses `sudo` or changes the owner or permissions of a file. Running
+  sessions go on with the version they started with; sessions started afterwards run the new one.
+  When two or more agents can be updated, **Update all** beside **Re-detect** updates them one after
+  another; **Cancel** takes a waiting one off the queue.
+- **Progress and results**: while an install or update waits or runs, the row shows **Waiting…**,
+  **Installing…** or **Updating…** and **Cancel**, never the command's output. A failure shows
+  **Install failed** or **Update failed** in red: click it to see the command, its exit code and
+  all its output, copy them together, or run the same operation again. An installed agent whose
+  version cannot be read shows **Doesn't run** in red; click it to see the command and what it
+  wrote.
 - npm uses your npm configuration (such as the registry and the proxy in `~/.npmrc`); Hoot adds
   none of its own.
 
@@ -414,8 +421,8 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   **Start Triage with Claude Code in a new worktree**,
   **Start Design with Claude Code in this issue's worktree** or
   **Continue Triage with Claude Code in this issue's worktree**.
-  Clicking it saves what you typed in the issue, then starts Claude Code, at the permission level
-  picked in the Agents menu at the click, in the issue's worktree, and shows the session as soon as
+  Clicking it saves what you typed in the issue, then starts Claude Code, as the Agents page has it,
+  in the issue's worktree, and shows the session as soon as
   it appears, whatever page is shown then, with the keyboard focus in its terminal; going back shows
   the page shown before it. The issue's worktree is a worktree of the issue's project whose branch
   is `iss-12`, or starts with `iss-12-` (for `ISS-12`), and whose folder exists; of several, the
@@ -448,7 +455,7 @@ it later. Issues are kept on your Mac, in [Hoot's database](#architecture).
   step from `workflow.md` afterwards, or stop; for a step without outcomes, such as Design, it says
   to stop once the step is done. The message would do for any agent, and the issue
   stays out of it, where an agent could take some of its text for a command or a mention. Like any
-  other session, this one can change files as far as its permission level lets it. Once the session
+  other session, this one can change files as its agent's permissions allow. Once the session
   has started, an issue in the Backlog or Todo is In Progress. Hoot removes the session's folder
   once the session's process has ended, or when it could not start, and leaves `.hoot/tmp` with its
   `.gitignore`; if Hoot stops without quitting, the session's folder stays there too, out of Git's
@@ -589,8 +596,8 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
   hexadecimal digits, and changing or deleting a label of the workflow's group. Labels are found
   by their names, whatever their case; a label in a group by its name alone.
 - **`hoot session start <issue>`** starts a Claude Code session for an issue of the project, as its
-  start button opens one: in the issue's worktree, created first when it has none, at the
-  permission level picked in the Agents menu, giving an issue not started the first step's label,
+  start button opens one: in the issue's worktree, created first when it has none, as the Agents
+  page has it, giving an issue not started the first step's label,
   and one ready for a step the step's label (recorded as the agent's), and moving one in the Backlog
   or Todo to In Progress. The session shows in the sidebar, and the window goes on showing what it
   showed. With
@@ -630,10 +637,10 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
 - **Agents** are told about `hoot` only by the first message of a session started from an issue,
   and the `workflow.md` beside its issue when there is one, which ask them to change the issue's
   label with `hoot issue edit` when a step is done, and it is not allowed in advance: a
-  coding tool runs it like any other command, at its [permission level](#permission-levels), and
-  Hoot changes no tool's settings for it. At Codex's **Default** and **Read Only** levels, Codex's
-  sandbox may block `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside the
-  sandbox, as Codex offers to with your approval, or pick **Full Access**.
+  coding tool runs it like any other command, under the permissions its own configuration and the
+  Agents page give it, and Hoot changes no tool's settings for it. At Codex's sandboxed levels,
+  Codex's sandbox may block `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside
+  the sandbox, as Codex offers to with your approval, or use YOLO mode.
 
 Hoot listens for `hoot` on a Unix domain socket that only you can connect to, `hoot.sock` in its
 [user data folder](#architecture) (or in the system's folder for temporary files when that path is
@@ -698,31 +705,18 @@ new worktree dialog says so.
 - **Removing a project** from the list is not possible while a session runs in it or in any of its
   worktrees, and leaves its worktrees, their files and their branches as they are.
 
-## Permission levels
+## YOLO mode
 
-The **Agents** menu in the menu bar picks, for each coding tool, which of the tool's own permission
-modes its sessions start in. Until you pick another level, every tool starts at its highest level,
-so agents do not stop to ask for permission. The new session menu shows each tool's level next to
-its name.
+The **Agents** page has one YOLO mode switch for all coding tools. While it is on, which is how it
+starts, every new session gets the argument that makes its agent act without asking for approval:
+Claude Code's `--dangerously-skip-permissions`, Codex's
+`--dangerously-bypass-approvals-and-sandbox`, and OpenCode's `--auto`. While it is off, Hoot adds no
+permission argument, and each agent follows its own configuration. Extra arguments can set
+permissions too, such as Claude Code's `--permission-mode plan`; Hoot then leaves its YOLO argument
+out for that agent.
 
-| Tool        | Level                        | Arguments                                                 |
-| ----------- | ---------------------------- | --------------------------------------------------------- |
-| Claude Code | Bypass permissions (default) | `--dangerously-skip-permissions`                          |
-|             | Auto                         | `--permission-mode auto`                                  |
-|             | Accept edits                 | `--permission-mode acceptEdits`                           |
-|             | Plan                         | `--permission-mode plan`                                  |
-|             | Manual                       | `--permission-mode manual`                                |
-| Codex       | Full Access (default)        | `--dangerously-bypass-approvals-and-sandbox`              |
-|             | Default                      | `--sandbox workspace-write --ask-for-approval on-request` |
-|             | Read Only                    | `--sandbox read-only --ask-for-approval on-request`       |
-| OpenCode    | Auto-approve (default)       | `--auto`                                                  |
-|             | Standard                     | none                                                      |
-
-A level applies to the sessions that start after you pick it; running sessions are not affected.
-Hoot does not check whether the installed version of a tool accepts these arguments: a tool that
-rejects them exits with its own error message like any other process, and you can start a new
-session after picking another level or updating the tool. Even at the highest level, Claude Code
-and Codex still ask once whether you trust a folder they have not opened before.
+A change applies to the sessions that start after you change it; running sessions are not affected.
+Claude Code and Codex still ask once whether you trust a folder they have not opened before.
 
 ## Requirements
 
@@ -916,14 +910,14 @@ it does on Windows: it shows on a Mac whether anything in the row would be cover
 
 ## Architecture
 
-| Part     | Location       | Role                                                                                                                                                       |
-| -------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Main     | `src/main`     | Window, menu, database, projects, issues, permission levels, tool detection, installing and updating agents, session processes, quitting, answering `hoot` |
-| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                                                                                |
-| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                                                                         |
-| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                                                                        |
-| Shared   | `src/shared`   | Types and messages used by more than one process                                                                                                           |
-| hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`                                     |
+| Part     | Location       | Role                                                                                                                                                     |
+| -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Main     | `src/main`     | Window, menu, database, projects, issues, launch settings, tool detection, installing and updating agents, session processes, quitting, answering `hoot` |
+| Pty host | `src/pty-host` | Electron utility process; the only place node-pty is loaded                                                                                              |
+| Preload  | `src/preload`  | The `window.hoot` bridge between the renderer and the main process                                                                                       |
+| Renderer | `src/renderer` | React 19, zustand, Tailwind CSS 4 and shadcn/ui (Base UI), xterm.js                                                                                      |
+| Shared   | `src/shared`   | Types and messages used by more than one process                                                                                                         |
+| hoot     | `src/cli`      | The [`hoot` command](#the-hoot-command), which Hoot's executable runs as Node.js; its launchers are in `resources/bin`                                   |
 
 Everything is built by Vite 8 with `vite-plugin-electron`, which bundles every package except
 node-pty, the only runtime dependency. Hoot keeps its data in the app's user data folder: `~/Library/Application Support/Hoot` for the installed app, and
@@ -940,9 +934,9 @@ node-pty, the only runtime dependency. Hoot keeps its data in the app's user dat
   or created, was written by a newer Hoot, or cannot be upgraded), the window shows only why and
   where the file is, with **Show in Finder** (**Show in File Explorer** on Windows) and **Quit**,
   and Hoot leaves the file as it is.
-- The permission levels picked in the Agents menu, whether the sidebar is hidden and how wide it is,
-  which projects in it are collapsed, and the appearance picked in the settings are in
-  `settings.json`.
+- YOLO mode, each agent's enable switch, model, effort and extra arguments, whether the sidebar is
+  hidden and how wide it is, which projects in it are collapsed, and the appearance picked in the
+  settings are in `settings.json`.
 
 Worktrees are read from Git: a project's worktrees are the linked worktrees in its folder in
 `~/.hoot/worktrees`, whose `.hoot-project.json` records the project it belongs to.

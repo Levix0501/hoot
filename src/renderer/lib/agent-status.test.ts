@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentInstallation, AgentState, InstallTarget } from '../../shared/agents'
-import { agentRowStatus } from './agent-status'
+import { agentRowStatus, updateAllIncludes } from './agent-status'
 
 const installation: AgentInstallation = {
   path: '/usr/local/bin/claude',
@@ -8,6 +8,7 @@ const installation: AgentInstallation = {
   method: 'npm',
   version: '2.1.293',
   versionOutput: '',
+  versionCommand: '/usr/local/bin/claude --version',
   updateCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
   writable: true,
 }
@@ -25,12 +26,14 @@ const target: InstallTarget = {
 const agent = (overrides: Partial<AgentState>): AgentState => ({
   id: 'claude',
   checking: false,
+  detected: true,
   installation,
   latest: '2.1.299',
   latestFailed: false,
   installCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
   nodeRequirement: null,
   operation: null,
+  launchOptions: null,
   ...overrides,
 })
 
@@ -45,22 +48,21 @@ describe('agentRowStatus', () => {
     expect(
       agentRowStatus(
         agent({
-          operation: { kind: 'install', status: 'running', lastLine: '', cancellable: true },
+          operation: { kind: 'install', status: 'running', cancellable: true },
         }),
         target,
       ),
     ).toEqual({ kind: 'running', operation: 'install' })
   })
 
-  it('says it is checking while the agent is being detected', () => {
-    expect(agentRowStatus(agent({ checking: true }), target)).toEqual({ kind: 'checking' })
-    // An ended operation's result stays below; the right side shows the state.
-    expect(
-      agentRowStatus(
-        agent({ checking: true, operation: { kind: 'update', status: 'cancelled' } }),
-        target,
-      ),
-    ).toEqual({ kind: 'checking' })
+  it('says it is checking before the first detection, and keeps the last results while it checks again', () => {
+    expect(agentRowStatus(agent({ checking: true, detected: false }), target)).toEqual({
+      kind: 'checking',
+    })
+    expect(agentRowStatus(agent({ checking: true }), target)).toEqual({
+      kind: 'update',
+      version: '2.1.299',
+    })
   })
 
   it("offers Install where it is not installed, and says what Install needs where npm can't install it", () => {
@@ -160,5 +162,50 @@ describe('agentRowStatus', () => {
         target,
       ),
     ).toEqual({ kind: 'update-elsewhere' })
+  })
+})
+
+describe('updateAllIncludes', () => {
+  it('includes an agent with an Update button, or whose last update failed', () => {
+    expect(updateAllIncludes(agent({}), target)).toBe(true)
+    expect(updateAllIncludes(agent({ latest: '2.1.293' }), target)).toBe(false)
+    expect(
+      updateAllIncludes(
+        agent({
+          latest: '2.1.293',
+          operation: {
+            kind: 'update',
+            status: 'failed',
+            message: '✕ Update failed',
+            tail: [],
+            output: '',
+            command: 'npm install',
+            exitCode: 1,
+          },
+        }),
+        target,
+      ),
+    ).toBe(true)
+    // An install that failed has no Update row.
+    expect(
+      updateAllIncludes(
+        agent({
+          latest: '2.1.293',
+          operation: {
+            kind: 'install',
+            status: 'failed',
+            message: '✕ Install failed',
+            tail: [],
+            output: '',
+            command: 'npm install',
+            exitCode: 1,
+          },
+        }),
+        target,
+      ),
+    ).toBe(false)
+    expect(
+      updateAllIncludes(agent({ installation: { ...installation, version: null } }), target),
+    ).toBe(false)
   })
 })

@@ -19,8 +19,6 @@ function setup(options: { sidebarOpen?: boolean } = {}) {
     goForward: () => calls.push('goForward'),
     sidebarOpen: options.sidebarOpen ?? true,
     toggleSidebar: () => calls.push('toggleSidebar'),
-    selected: { claude: 'bypass-permissions', codex: 'full-access', opencode: 'auto-approve' },
-    selectPermissionLevel: () => {},
   })
   return { template, calls }
 }
@@ -125,6 +123,20 @@ describe('appMenuTemplate', () => {
       click(item)
       expect(calls).toEqual(['toggleSidebar'])
     }
+  })
+
+  it('has no Agents menu on any platform', () => {
+    const { template } = setup()
+    expect(template.map((item) => item.label ?? item.role)).not.toContain('Agents')
+    const labels: string[] = []
+    const visit = (items: MenuItemConstructorOptions[]) => {
+      for (const item of items) {
+        if (item.label) labels.push(item.label)
+        if (Array.isArray(item.submenu)) visit(item.submenu)
+      }
+    }
+    visit(template)
+    expect(labels.filter((label) => /permission|bypass|read only/i.test(label))).toEqual([])
   })
 
   it('has no menu items for Cmd+1 to Cmd+9', () => {

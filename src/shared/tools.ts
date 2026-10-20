@@ -1,4 +1,4 @@
-/** Tools that run an agent CLI; each has permission levels. */
+/** Tools that run an agent CLI. */
 export const CODING_TOOL_IDS = ['claude', 'codex', 'opencode'] as const
 
 export const TOOL_IDS = [...CODING_TOOL_IDS, 'shell'] as const

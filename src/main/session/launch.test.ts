@@ -3,10 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { quote } from 'shell-quote'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import {
-  permissionLevelOrDefault,
-  type PermissionLevelSettings,
-} from '../../shared/permission-levels'
+import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
@@ -70,10 +67,9 @@ function sentIssue(title: string, description: string, branch: string): SentIssu
   return { title, description, branch, workflowFile: null, firstMessage: messageAt(triage) }
 }
 
-const highest: PermissionLevelSettings = {
-  claude: 'bypass-permissions',
-  codex: 'full-access',
-  opencode: 'auto-approve',
+/** An agent's launch settings, with what the test changes. */
+function settings(overrides: Partial<AgentLaunchSettings> = {}): AgentLaunchSettings {
+  return { enabled: true, model: null, effort: null, extraArgs: [], ...overrides }
 }
 
 const hoot = {
@@ -86,14 +82,15 @@ const hoot = {
 
 function context(
   loginEnv: Record<string, string>,
-  levels: PermissionLevelSettings = highest,
+  agents: Partial<Record<'claude' | 'codex' | 'opencode', Partial<AgentLaunchSettings>>> = {},
+  yoloMode = true,
 ): LaunchContext {
   return {
     shell: { file: '/bin/zsh', args: ['-l'] },
     baseEnv: { HOME: '/home/me', PATH: onPath('/usr/bin', '/bin'), SHELL: '/bin/zsh' },
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
-    permissionLevel: (tool) => permissionLevelOrDefault(tool, levels[tool]),
+    launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     hoot,
   }
 }
@@ -122,7 +119,7 @@ describe('resolveLaunch', () => {
     expect(launch.env.TERM).toBe('xterm-256color')
   })
 
-  it('runs a tool command with its permission level arguments in the login shell environment', async () => {
+  it('runs a tool command with the YOLO arguments in the login shell environment', async () => {
     const loginEnv = {
       PATH: onPath(bin, '/usr/bin'),
       FROM_RC: 'yes',
@@ -143,65 +140,129 @@ describe('resolveLaunch', () => {
     expect(launch.env).not.toHaveProperty('_')
   })
 
-  it('uses the selected permission level of the tool, and none for the shell', async () => {
-    const levels = { claude: 'plan', codex: 'read-only', opencode: 'standard' }
+  it('runs Claude Code with the YOLO arguments and its hooks, and OpenCode with --auto', async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
-    expect((await resolveLaunch(context(loginEnv, levels), 'claude', project)).args).toEqual([
+    expect((await resolveLaunch(context(loginEnv), 'claude', project)).args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+      ...hookSettings,
+    ])
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    expect((await resolveLaunch(context(loginEnv), 'opencode', project)).args).toEqual([
+      ...program(bin, 'opencode').args,
+      '--auto',
+    ])
+    expect((await resolveLaunch(context(loginEnv), 'shell', project)).args).toEqual(['-l'])
+  })
+
+  it('adds no permission arguments while YOLO mode is off', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    expect((await resolveLaunch(context(loginEnv, {}, false), 'claude', project)).args).toEqual([
+      ...program(bin, 'claude').args,
+      ...hookSettings,
+    ])
+    expect((await resolveLaunch(context(loginEnv, {}, false), 'codex', project)).args).toEqual([
+      ...program(bin, 'codex').args,
+    ])
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    expect((await resolveLaunch(context(loginEnv, {}, false), 'opencode', project)).args).toEqual([
+      ...program(bin, 'opencode').args,
+    ])
+  })
+
+  it('adds the model, the effort and the extra arguments, in that order, before the hooks', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const claude = await resolveLaunch(
+      context(loginEnv, {
+        claude: { model: 'opus', effort: 'max', extraArgs: ['--verbose'] },
+      }),
+      'claude',
+      project,
+    )
+    expect(claude.args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+      '--model',
+      'opus',
+      '--effort',
+      'max',
+      '--verbose',
+      ...hookSettings,
+    ])
+    const codex = await resolveLaunch(
+      context(loginEnv, {
+        codex: { model: 'deepseek-v4-pro', effort: 'high', extraArgs: ['--foo'] },
+      }),
+      'codex',
+      project,
+    )
+    expect(codex.args).toEqual([
+      ...program(bin, 'codex').args,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--model',
+      'deepseek-v4-pro',
+      '-c',
+      'model_reasoning_effort=high',
+      '--foo',
+    ])
+  })
+
+  it('leaves out an argument that the extra arguments already decide', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const claude = await resolveLaunch(
+      context(loginEnv, {
+        claude: {
+          model: 'opus',
+          effort: 'max',
+          extraArgs: ['--permission-mode', 'plan', '--model', 'sonnet', '--effort', 'low'],
+        },
+      }),
+      'claude',
+      project,
+    )
+    expect(claude.args).toEqual([
       ...program(bin, 'claude').args,
       '--permission-mode',
       'plan',
+      '--model',
+      'sonnet',
+      '--effort',
+      'low',
       ...hookSettings,
     ])
-    expect((await resolveLaunch(context(loginEnv, levels), 'codex', project)).args).toEqual([
-      ...program(bin, 'codex').args,
-      '--sandbox',
-      'read-only',
-      '--ask-for-approval',
-      'on-request',
-    ])
-    expect((await resolveLaunch(context(loginEnv, levels), 'shell', project)).args).toEqual(['-l'])
-  })
-
-  it('starts a tool at the level given, unless it is none of its levels, and else at the one selected', async () => {
-    const levels = { claude: 'plan', codex: 'read-only', opencode: 'standard' }
-    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
-    const args = async (toolId: 'claude' | 'codex' | 'shell', level: string | null) =>
-      (await resolveLaunch(context(loginEnv, levels), toolId, project, null, level)).args
-    const claude = program(bin, 'claude').args
-    expect(await args('claude', 'accept-edits')).toEqual([
-      ...claude,
-      '--permission-mode',
-      'acceptEdits',
-      ...hookSettings,
-    ])
-    expect(await args('claude', 'manual')).toEqual([
-      ...claude,
-      '--permission-mode',
-      'manual',
-      ...hookSettings,
-    ])
-    expect(await args('claude', null)).toEqual([
-      ...claude,
-      '--permission-mode',
-      'plan',
-      ...hookSettings,
-    ])
-    // Codex has no level of that name; the shell has no levels at all.
-    expect(await args('claude', 'full-access')).toEqual([
-      ...claude,
-      '--permission-mode',
-      'plan',
-      ...hookSettings,
-    ])
-    expect(await args('codex', 'full-access')).toEqual([
+    const codex = await resolveLaunch(
+      context(loginEnv, {
+        codex: {
+          model: 'gpt-5.5',
+          effort: 'max',
+          extraArgs: ['-c', 'model_reasoning_effort=low', '-m', 'gpt-6'],
+        },
+      }),
+      'codex',
+      project,
+    )
+    expect(codex.args).toEqual([
       ...program(bin, 'codex').args,
       '--dangerously-bypass-approvals-and-sandbox',
+      '-c',
+      'model_reasoning_effort=low',
+      '-m',
+      'gpt-6',
     ])
-    expect(await args('shell', 'manual')).toEqual(['-l'])
+    // Another agent's extra arguments do not change this one's permission.
+    expect(
+      (
+        await resolveLaunch(
+          context(loginEnv, { claude: { extraArgs: ['--auto'] } }),
+          'codex',
+          project,
+        )
+      ).args,
+    ).toEqual([...program(bin, 'codex').args, '--dangerously-bypass-approvals-and-sandbox'])
   })
 
-  it('keeps the level selected when the session started while the login environment is read', async () => {
-    let selected: PermissionLevelSettings = highest
+  it('keeps the settings the session started with while the login environment is read', async () => {
+    let selected = settings({ model: 'opus' })
     let detecting = false
     const detection = Promise.withResolvers<LoginEnvironment>()
     const launching = resolveLaunch(
@@ -211,17 +272,22 @@ describe('resolveLaunch', () => {
           detecting = true
           return detection.promise
         },
-        permissionLevel: (tool) => permissionLevelOrDefault(tool, selected[tool]),
+        launchSettings: (tool) => ({
+          yoloMode: tool === 'claude',
+          agent: selected,
+        }),
       },
       'claude',
       project,
     )
     await expect.poll(() => detecting).toBe(true)
-    selected = { ...highest, claude: 'manual' }
+    selected = settings({ model: 'sonnet' })
     detection.resolve({ env: { PATH: bin }, error: null })
     expect((await launching).args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
+      '--model',
+      'opus',
       ...hookSettings,
     ])
   })
@@ -229,14 +295,14 @@ describe('resolveLaunch', () => {
   it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const claude = await resolveLaunch(context(loginEnv), 'claude', project)
-    const settings = claude.args[claude.args.indexOf('--settings') + 1]!
+    const hookSettingsValue = claude.args[claude.args.indexOf('--settings') + 1]!
     const hook = {
       type: 'command',
       // hoot's path, quoted for the shell that runs the hook.
       command: `${quote([path.join(hoot.binDirectory, 'hoot')])} hook`,
       async: true,
     }
-    expect(JSON.parse(settings)).toEqual({
+    expect(JSON.parse(hookSettingsValue)).toEqual({
       hooks: {
         PermissionRequest: [{ hooks: [hook] }],
         Elicitation: [{ hooks: [hook] }],
@@ -256,14 +322,14 @@ describe('resolveLaunch', () => {
     })
   })
 
-  it('sends Claude Code an issue after the arguments of its permission level', async () => {
-    const levels = { ...highest, claude: 'accept-edits' }
+  it('sends Claude Code an issue after its launch arguments, with the extra ones before the issue', async () => {
+    const agents = { claude: { model: 'opus', effort: 'max', extraArgs: ['--verbose'] } }
     const issue = sentIssue(
       'Fix the login bug',
       '  Steps\n\n/hoot:other\n$ARGUMENTS  ',
       'iss-1-fix-the-login-bug',
     )
-    const launch = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project, issue)
+    const launch = await resolveLaunch(context({ PATH: bin }, agents), 'claude', project, issue)
     // The issue is written in a folder of the session's own, in `.hoot/tmp` of the working
     // directory, beside the `.gitignore` that has Git ignore everything there.
     const [folder] = issueFolders(project)
@@ -280,8 +346,12 @@ describe('resolveLaunch', () => {
     expect(launch.file).toBe(claude.file)
     expect(launch.args).toEqual([
       ...claude.args,
-      '--permission-mode',
-      'acceptEdits',
+      '--dangerously-skip-permissions',
+      '--model',
+      'opus',
+      '--effort',
+      'max',
+      '--verbose',
       ...hookSettings,
       '--name=Fix the login bug',
       '--',
@@ -294,13 +364,16 @@ describe('resolveLaunch', () => {
     // The cleanup removes the session's folder and leaves the `.gitignore`.
     launch.cleanup?.()
     expect(fs.readdirSync(temporaryFolder(project))).toEqual(['.gitignore'])
-    // Any other session, Claude Code's included, has no arguments but its level's, after those
-    // that run its command.
-    const other = await resolveLaunch(context({ PATH: bin }, levels), 'claude', project)
+    // Any other session, Claude Code's included, has the same arguments but no issue.
+    const other = await resolveLaunch(context({ PATH: bin }, agents), 'claude', project)
     expect(other.args).toEqual([
       ...claude.args,
-      '--permission-mode',
-      'acceptEdits',
+      '--dangerously-skip-permissions',
+      '--model',
+      'opus',
+      '--effort',
+      'max',
+      '--verbose',
       ...hookSettings,
     ])
     expect(other.cleanup).toBeUndefined()

@@ -24,7 +24,12 @@ describe('readVersion', () => {
       'claude',
       'if (process.argv[2] === "--version") console.log("2.1.293 (Claude Code)")',
     )
-    expect(await readVersion(claude, {}, root)).toEqual({ version: '2.1.293', output: '' })
+    expect(await readVersion(claude, {}, root)).toEqual({
+      version: '2.1.293',
+      output: '',
+      command: `${claude} --version`,
+      exitCode: 0,
+    })
   })
 
   it('keeps what an agent that does not run wrote, and how it ended', async () => {
@@ -35,16 +40,22 @@ describe('readVersion', () => {
     expect(await readVersion(failing, {}, root)).toEqual({
       version: null,
       output: 'env: node: No such file or directory\nIt exited with code 127.',
+      command: `${failing} --version`,
+      exitCode: 127,
     })
     const silent = await script('silent', 'console.log("\\u001b[31mno version here\\u001b[0m")')
     expect(await readVersion(silent, {}, root)).toEqual({
       version: null,
       output: 'no version here\nIt reported no version.',
+      command: `${silent} --version`,
+      exitCode: 0,
     })
     const slow = await script('slow', 'setTimeout(() => {}, 5000)')
     expect(await readVersion(slow, {}, root, process.platform, 100)).toEqual({
       version: null,
       output: 'It did not finish within 0.1 seconds.',
+      command: `${slow} --version`,
+      exitCode: null,
     })
     // On Windows, where an agent's command is a program or a batch file, a program.
     const missing = path.join(root, process.platform === 'win32' ? 'missing.exe' : 'missing')

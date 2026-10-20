@@ -18,7 +18,7 @@ function isProjectId(value: unknown): value is number {
 /**
  * Whether the sidebar is expanded, how wide it is, and which of its projects
  * are collapsed, kept in `settings.json` in the user data directory, next to
- * the permission levels, so that Hoot opens with the sidebar as it was left.
+ * the launch settings, so that Hoot opens with the sidebar as it was left.
  * Conf reads the file before every change and writes all of it, so the
  * settings do not overwrite each other.
  */

@@ -1,10 +1,7 @@
 import { RefreshCwIcon } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 import type { ToolsState } from '../../shared/ipc'
-import {
-  permissionLevelOrDefault,
-  type PermissionLevelSettings,
-} from '../../shared/permission-levels'
+import { agentEnabled, type LaunchSettings } from '../../shared/launch-settings'
 import { TOOLS, type ToolId } from '../../shared/tools'
 import { toolStatus } from '../../shared/tool-status'
 import { ToolIcon } from './tool-icon'
@@ -29,8 +26,8 @@ export interface ToolMenuComponents {
 interface ToolMenuEntriesProps {
   components: ToolMenuComponents
   tools: ToolsState
-  /** The permission level selected for each coding tool, shown next to it once known. */
-  permissionLevels: PermissionLevelSettings | null
+  /** The agents turned off are left out; `null` until the settings are known, when all show. */
+  launchSettings: LaunchSettings | null
   onSelect: (toolId: ToolId) => void
   onRedetect: () => void
   /**
@@ -42,32 +39,31 @@ interface ToolMenuEntriesProps {
 }
 
 /**
- * The tool choices of a "new session" menu, with the permission level each
- * coding tool starts with, and availability: below a tool that is not
- * installed, "Install in Settings…", or where Hoot does not install tools,
- * its install command.
+ * The tool choices of a "new session" menu, without a permission level or a
+ * model beside them, and availability: below a tool that is not installed,
+ * "Install in Settings…", or where Hoot does not install tools, its install
+ * command.
  */
 export function ToolMenuEntries({
   components,
   tools,
-  permissionLevels,
+  launchSettings,
   onSelect,
   onRedetect,
   onInstall,
 }: ToolMenuEntriesProps) {
   const { Group, Item, Separator, Label } = components
+  const shown = TOOLS.filter(
+    (tool) => tool.command === null || agentEnabled(launchSettings, tool.id),
+  )
   return (
     <>
       <Group>
         <Label>Start a session with</Label>
-        {TOOLS.map((tool) => {
+        {shown.map((tool) => {
           const status = toolStatus(tools, tool)
           const available = status === 'available'
           const unknown = status === 'checking'
-          const level =
-            tool.command !== null && permissionLevels
-              ? permissionLevelOrDefault(tool.id, permissionLevels[tool.id])
-              : null
           return (
             <div key={tool.id} data-testid={`tool-entry-${tool.id}`} data-available={available}>
               <Item
@@ -78,16 +74,6 @@ export function ToolMenuEntries({
                 <ToolIcon toolId={tool.id} />
                 <span className="flex items-baseline gap-2">
                   <span data-testid={`tool-label-${tool.id}`}>{tool.label}</span>
-                  {level && (
-                    // Stays muted while the item is highlighted, so it always reads as
-                    // secondary to the tool name.
-                    <span
-                      className="text-xs text-muted-foreground!"
-                      data-testid={`tool-permission-level-${tool.id}`}
-                    >
-                      {level.label}
-                    </span>
-                  )}
                 </span>
                 {!available && (
                   <span className="ml-auto pl-4 text-xs text-muted-foreground">

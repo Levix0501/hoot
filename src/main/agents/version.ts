@@ -1,4 +1,4 @@
-import { parseVersion } from '../../shared/agents'
+import { parseVersion, shownCommand } from '../../shared/agents'
 import type { Env } from '../env/env'
 import { commandProgram, type CommandProgram } from '../tools/command-program'
 import { runCommand } from './processes'
@@ -13,6 +13,10 @@ export interface VersionReading {
   version: string | null
   /** What it wrote, and how it ended, kept when it does not run. */
   output: string
+  /** The command that ran, as the Agents page shows it. */
+  command: string
+  /** Its exit code when it exited, otherwise `null`. */
+  exitCode: number | null
 }
 
 /**
@@ -34,20 +38,33 @@ export async function readVersion(
     program = await commandProgram(command, env, platform)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    return { version: null, output: `It could not start: ${reason}` }
+    return {
+      version: null,
+      output: `It could not start: ${reason}`,
+      command: shownCommand([command, '--version']),
+      exitCode: null,
+    }
   }
+  const shown = shownCommand([program.file, ...program.args, '--version'])
   const result = await runCommand(
     { file: program.file, args: [...program.args, '--version'], env, cwd },
     timeoutMs,
   )
   const output = await terminalText(result.output)
   const version = parseVersion(output)
-  if (result.code === 0 && version !== null) return { version, output: '' }
+  if (result.code === 0 && version !== null) {
+    return { version, output: '', command: shown, exitCode: 0 }
+  }
   let ending: string
   if (result.error) ending = `It could not start: ${result.error.message}`
   else if (result.timedOut) ending = `It did not finish within ${timeoutMs / 1000} seconds.`
   else if (result.signal) ending = `It was ended by ${result.signal}.`
   else if (result.code !== 0) ending = `It exited with code ${result.code}.`
   else ending = 'It reported no version.'
-  return { version: null, output: output === '' ? ending : `${output}\n${ending}` }
+  return {
+    version: null,
+    output: output === '' ? ending : `${output}\n${ending}`,
+    command: shown,
+    exitCode: result.code,
+  }
 }

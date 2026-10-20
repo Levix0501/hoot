@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PermissionLevelStore } from './permission-level-store'
+import { LaunchSettingsStore } from './launch-settings-store'
 import { SidebarStateStore } from './sidebar-state-store'
 
 let directory: string
@@ -51,17 +51,17 @@ describe('SidebarStateStore', () => {
     expect(changes).toEqual([false, true])
   })
 
-  it('shares settings.json with the permission levels without overwriting them', () => {
-    const levels = new PermissionLevelStore(directory)
+  it('shares settings.json with the launch settings without overwriting them', () => {
+    const launch = new LaunchSettingsStore(directory)
     const sidebar = new SidebarStateStore(directory)
-    levels.select('claude', 'plan')
+    launch.setYoloMode(false)
     sidebar.setOpen(false)
-    levels.select('codex', 'read-only')
-    expect(saved()).toEqual({
-      permissionLevels: { claude: 'plan', codex: 'read-only' },
+    launch.change('claude', { model: 'opus' })
+    expect(saved()).toMatchObject({
+      launchSettings: { yoloMode: false, agents: { claude: { model: 'opus' } } },
       sidebarCollapsed: true,
     })
-    expect(new PermissionLevelStore(directory).level('claude').label).toBe('Plan')
+    expect(new LaunchSettingsStore(directory).agent('claude').model).toBe('opus')
     expect(new SidebarStateStore(directory).open).toBe(false)
   })
 
@@ -119,14 +119,14 @@ describe('SidebarStateStore: collapsed projects', () => {
     expect(saved()).toEqual({ collapsedProjects: [1, 3], marker: true })
   })
 
-  it('shares settings.json with the sidebar state and the permission levels', () => {
-    const levels = new PermissionLevelStore(directory)
+  it('shares settings.json with the sidebar state and the launch settings', () => {
+    const launch = new LaunchSettingsStore(directory)
     const sidebar = new SidebarStateStore(directory)
-    levels.select('claude', 'plan')
+    launch.setYoloMode(false)
     sidebar.setProjectCollapsed(5, true)
     sidebar.setOpen(false)
-    expect(saved()).toEqual({
-      permissionLevels: { claude: 'plan' },
+    expect(saved()).toMatchObject({
+      launchSettings: { yoloMode: false },
       collapsedProjects: [5],
       sidebarCollapsed: true,
     })

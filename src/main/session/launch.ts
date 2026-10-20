@@ -2,9 +2,10 @@ import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { quote } from 'shell-quote'
+import { agentLaunchArguments } from '../../shared/launch-command'
+import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
-import { findPermissionLevel, type PermissionLevel } from '../../shared/permission-levels'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
 import {
@@ -26,8 +27,11 @@ export interface LaunchContext {
   baseEnv: Env
   terminal(): TerminalEnvOptions
   getLoginEnvironment(): Promise<LoginEnvironment>
-  /** The permission level currently selected for a coding tool. */
-  permissionLevel(tool: CodingToolId): PermissionLevel
+  /** How coding tools start their new sessions, as the Agents page has them. */
+  launchSettings(tool: CodingToolId): {
+    yoloMode: boolean
+    agent: AgentLaunchSettings
+  }
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
 }
@@ -98,15 +102,15 @@ export function issueFileText(issue: Pick<Issue, 'title' | 'description'>): stri
 }
 
 /**
- * The arguments that send an issue to Claude Code, after those of its
- * permission level: the issue's title as the session's name, and the first
- * message, which points to the files and starts the step, without its NUL
- * characters. The folder of the files is in the session's working directory,
- * where Claude Code reads them at any permission level without asking. Each
- * option and its value are one argument, so that a title starting with `-`
- * is still the name, and `--` ends the options, so that a first message
- * starting with `-`, such as one from `hoot session start --prompt-file`
- * that starts with a list, is still the first message and no option.
+ * The arguments that send an issue to Claude Code, after its own: the issue's
+ * title as the session's name, and the first message, which points to the
+ * files and starts the step, without its NUL characters. The folder of the
+ * files is in the session's working directory, where Claude Code reads them
+ * at any permission level without asking. Each option and its value are one
+ * argument, so that a title starting with `-` is still the name, and `--` ends
+ * the options, so that a first message starting with `-`, such as one from
+ * `hoot session start --prompt-file` that starts with a list, is still the
+ * first message and no option.
  */
 export function sentIssueArgs(issueFolder: string, issue: SentIssue): string[] {
   return [
@@ -170,20 +174,18 @@ async function checkFolder(cwd: string): Promise<void> {
  * found on the login shell PATH: the installation the Agents page shows. On
  * Windows, where the command that npm or pnpm makes is a batch file, the tool
  * runs what that points to instead (see `commandProgram`). It runs with the
- * login shell environment and with the arguments of its permission level: the
- * one `permissionLevel` names, or else the one picked now. Claude Code also
- * gets the settings of the hooks that report what it is doing (see
- * `claudeCodeHookSettings`) and, when it is sent an issue, the arguments that
- * send it, once the issue's files are written; the launch's cleanup removes
- * their folder. Either environment also has what hoot needs to run in the
- * session.
+ * login shell environment and with the arguments the Agents page shows: the
+ * YOLO arguments while YOLO mode is on, the chosen model and effort, the
+ * extra arguments, and, for Claude Code, its hooks and, when it is sent an
+ * issue, the arguments that send it, once the issue's files are written; the
+ * launch's cleanup removes their folder. Either environment also has what
+ * hoot needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
   toolId: ToolId,
   cwd: string,
   issue: SentIssue | null = null,
-  permissionLevel: string | null = null,
 ): Promise<SessionLaunch> {
   const tool = getTool(toolId)
   if (issue !== null && tool.id !== 'claude') {
@@ -202,12 +204,9 @@ export async function resolveLaunch(
     }
   }
 
-  // Read when the session starts, unless it was given: selecting another
-  // level later does not change this session, even while it waits for the
-  // login shell environment.
-  const level =
-    (permissionLevel === null ? undefined : findPermissionLevel(tool.id, permissionLevel)) ??
-    context.permissionLevel(tool.id)
+  // Read when the session starts: changing a setting later does not change
+  // this session, even while it waits for the login shell environment.
+  const launch = context.launchSettings(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
   const found = await findCommand(tool.command, login.env)
@@ -226,10 +225,18 @@ export async function resolveLaunch(
     cwd,
     hoot: context.hoot,
   })
-  const args = [...program.args, ...level.args]
-  if (tool.id === 'claude') {
-    args.push('--settings', claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot')))
-  }
+  const args = [
+    ...program.args,
+    ...agentLaunchArguments({
+      tool: tool.id,
+      yoloMode: launch.yoloMode,
+      settings: launch.agent,
+      hookSettings:
+        tool.id === 'claude'
+          ? claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot'))
+          : null,
+    }),
+  ]
   if (issue === null) return { file: program.file, args, env }
   // Written last, so that a launch that fails leaves no folder of its own behind.
   const issueFolder = await writeIssueFolder(cwd, issue)

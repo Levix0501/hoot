@@ -9,7 +9,7 @@ interface StoredSettings {
 
 /**
  * The appearance picked on the settings' Appearance page, kept in
- * `settings.json` in the user data directory next to the permission levels
+ * `settings.json` in the user data directory next to the launch settings
  * and the sidebar's state, so that Hoot opens with it. Conf reads the file
  * before every change and writes all of it, so the settings do not overwrite
  * each other.

@@ -104,7 +104,7 @@ export function WorktreeItem({
   worktree: WorktreeRow
 }) {
   const tools = useAppStore((state) => state.tools)
-  const permissionLevels = useAppStore((state) => state.permissionLevels)
+  const launchSettings = useAppStore((state) => state.launchSettings)
   const newSession = useAppStore((state) => state.newSession)
   const redetectTools = useAppStore((state) => state.redetectTools)
   const showSettings = useAppStore((state) => state.showSettings)
@@ -207,7 +207,7 @@ export function WorktreeItem({
             <ToolMenuEntries
               components={dropdownComponents}
               tools={tools}
-              permissionLevels={permissionLevels}
+              launchSettings={launchSettings}
               onSelect={startSession}
               onRedetect={redetect}
               onInstall={installInSettings}
@@ -299,7 +299,7 @@ export function WorktreeItem({
                 <ToolMenuEntries
                   components={contextComponents}
                   tools={tools}
-                  permissionLevels={permissionLevels}
+                  launchSettings={launchSettings}
                   onSelect={startSession}
                   onRedetect={redetect}
                   onInstall={installInSettings}

@@ -1,7 +1,6 @@
 import { Menu, type MenuItemConstructorOptions } from 'electron'
-import { agentsMenuTemplate, type AgentsMenuOptions } from './agents-menu'
 
-export interface AppMenuActions extends AgentsMenuOptions {
+export interface AppMenuActions {
   /** Shows the settings' About page in the window. */
   showAbout(): void
   /** Shows the settings in the window. */
@@ -73,7 +72,6 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
         { role: 'togglefullscreen' },
       ],
     },
-    agentsMenuTemplate(actions),
     {
       role: 'windowMenu',
       submenu: [

@@ -614,6 +614,8 @@ describe('AgentService installs', () => {
   it('fails when npm fails, with the last lines of what it wrote and all of it', async () => {
     npmScript(`
       for (let i = 1; i <= 6; i++) npm.say('line ' + i)
+      // Its outputs are two pipes, which on Windows need not arrive in the order written.
+      await npm.sleep(200)
       npm.complain('npm error code E404')
       return 1
     `)

@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { writeNodeCommand } from '../tools/test-support'
+import { shownCommand } from '../../shared/agents'
+import { nodeCommandProgram, writeNodeCommand } from '../tools/test-support'
 import { readVersion } from './version'
 
 let root: string
@@ -10,6 +11,12 @@ let root: string
 /** A stand-in agent command, which runs `script` with Node.js. */
 function script(name: string, body: string): Promise<string> {
   return writeNodeCommand(path.join(root, name), body)
+}
+
+/** The command that reads the version of the stand-in `name`, as readVersion shows it. */
+function versionCommand(name: string): string {
+  const program = nodeCommandProgram(path.join(root, name))
+  return shownCommand([program.file, ...program.args, '--version'])
 }
 
 beforeAll(() => {
@@ -27,7 +34,7 @@ describe('readVersion', () => {
     expect(await readVersion(claude, {}, root)).toEqual({
       version: '2.1.293',
       output: '',
-      command: `${claude} --version`,
+      command: versionCommand('claude'),
       exitCode: 0,
     })
   })
@@ -40,21 +47,21 @@ describe('readVersion', () => {
     expect(await readVersion(failing, {}, root)).toEqual({
       version: null,
       output: 'env: node: No such file or directory\nIt exited with code 127.',
-      command: `${failing} --version`,
+      command: versionCommand('failing'),
       exitCode: 127,
     })
     const silent = await script('silent', 'console.log("\\u001b[31mno version here\\u001b[0m")')
     expect(await readVersion(silent, {}, root)).toEqual({
       version: null,
       output: 'no version here\nIt reported no version.',
-      command: `${silent} --version`,
+      command: versionCommand('silent'),
       exitCode: 0,
     })
     const slow = await script('slow', 'setTimeout(() => {}, 5000)')
     expect(await readVersion(slow, {}, root, process.platform, 100)).toEqual({
       version: null,
       output: 'It did not finish within 0.1 seconds.',
-      command: `${slow} --version`,
+      command: versionCommand('slow'),
       exitCode: null,
     })
     // On Windows, where an agent's command is a program or a batch file, a program.

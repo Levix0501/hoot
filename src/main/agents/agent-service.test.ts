@@ -4,9 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import which from 'which'
-import type { AgentsState } from '../../shared/agents'
+import { shownCommand, type AgentsState } from '../../shared/agents'
 import type { CodingToolId } from '../../shared/tools'
-import { writeNodeCommand, writeNodeScript } from '../tools/test-support'
+import { nodeCommandProgram, writeNodeCommand, writeNodeScript } from '../tools/test-support'
 import { ToolService } from '../tools/tool-service'
 import { AgentService } from './agent-service'
 import { linkCommand, npmCommandsFolder, npmPackagesFolder } from './test-support'
@@ -155,6 +155,12 @@ async function installInto(folder: string, id: CodingToolId, version: string): P
  */
 function commandIn(folder: string, command: string): string {
   return which.sync(path.join(folder, command))
+}
+
+/** The command an operation that runs the stand-in npm with `args` shows. */
+function npmCommand(...args: string[]): string {
+  const program = nodeCommandProgram(path.join(npmCommandsFolder(prefix), 'npm'))
+  return shownCommand([program.file, ...program.args, ...args])
 }
 
 function setLatest(id: CodingToolId, version: string): void {
@@ -622,7 +628,7 @@ describe('AgentService installs', () => {
       reason: 'npm exited with code 1',
       tail: ['line 3', 'line 4', 'line 5', 'line 6', 'npm error code E404'],
       output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nnpm error code E404',
-      command: `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @opencode/cli@latest --loglevel=http`,
+      command: npmCommand('install', '-g', '@opencode/cli@latest', '--loglevel=http'),
       exitCode: 1,
       // The test's clock stands still while npm runs.
       seconds: 0,
@@ -714,7 +720,7 @@ describe('AgentService updates', () => {
       status: 'failed',
       message: '✕ Update failed: npm finished, but the version is still 1.0.0',
       output: 'up to date',
-      command: `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @opencode/cli@latest --loglevel=http`,
+      command: npmCommand('install', '-g', '@opencode/cli@latest', '--loglevel=http'),
       exitCode: 0,
     })
   })

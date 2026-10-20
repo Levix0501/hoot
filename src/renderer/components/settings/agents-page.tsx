@@ -9,7 +9,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FOLDER_NOT_WRITABLE_MESSAGE,
   INSTALL_NEEDS_NODE_MESSAGE,
@@ -938,6 +938,9 @@ export function AgentsPage() {
   const [notInstalledOpen, setNotInstalledOpen] = useState(false)
   const [failure, setFailure] = useState<AgentFailure | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
+  // Whether the Update all run seen last has had an operation pending: it ends
+  // once none is, so that a later operation of one agent is not taken for it.
+  const updateAllRan = useRef(false)
   useEffect(() => {
     enterAgentsPage()
   }, [enterAgentsPage])
@@ -958,6 +961,13 @@ export function AgentsPage() {
   const pending = (agents?.agents ?? []).some(
     (agent) => agent.operation?.status === 'waiting' || agent.operation?.status === 'running',
   )
+  useEffect(() => {
+    if (pending) updateAllRan.current = true
+    else if (updateAllRan.current) {
+      updateAllRan.current = false
+      setUpdatingAll(false)
+    }
+  }, [pending])
   const updating = updatingAll && pending
   const showUpdateAll = updateAllCandidates.length >= 2 || updating
   const detecting = agents?.detecting ?? false

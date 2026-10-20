@@ -8,6 +8,7 @@ import {
 import { TOOLS, type ToolId } from '../../shared/tools'
 import { toolStatus } from '../../shared/tool-status'
 import { ToolIcon } from './tool-icon'
+import { Spinner } from './ui/spinner'
 
 interface ItemProps {
   children?: ReactNode
@@ -130,7 +131,7 @@ export function ToolMenuEntries({
         onClick={onRedetect}
         data-testid="redetect-tools"
       >
-        <RefreshCwIcon className={tools.detecting ? 'animate-spin' : undefined} />
+        {tools.detecting ? <Spinner /> : <RefreshCwIcon />}
         <span>{tools.detecting ? 'Detecting tools…' : 'Re-detect Tools'}</span>
       </Item>
     </>

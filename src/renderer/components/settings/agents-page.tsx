@@ -452,7 +452,7 @@ export function AgentsPage() {
               onClick={detectAgents}
               data-testid="agents-redetect"
             >
-              <RefreshCwIcon className={cn(checking && 'animate-spin')} />
+              {checking ? <Spinner /> : <RefreshCwIcon />}
               Re-detect
             </Button>
           </div>

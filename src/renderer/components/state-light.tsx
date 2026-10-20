@@ -1,41 +1,7 @@
-import { useState } from 'react'
 import type { SessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
+import { Spinner } from './ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
-
-/** How long a spinner takes to turn once, in milliseconds. */
-const TURN_MS = 2_000
-
-/**
- * A ring whose track is at 30% opacity, with an arc of 270° on it that turns
- * at a steady pace, in step with every other spinner; it stands still when
- * the system reduces motion.
- */
-function Spinner({ className }: { className?: string }) {
-  // As far into its turn as every spinner is, whenever it starts.
-  const [delay] = useState(() => -(performance.now() % TURN_MS))
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      className={cn('size-3 animate-spin motion-reduce:animate-none', className)}
-      style={{ animationDuration: `${TURN_MS}ms`, animationDelay: `${delay}ms` }}
-      aria-hidden
-    >
-      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" opacity={0.3} />
-      <circle
-        cx="8"
-        cy="8"
-        r="6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        pathLength={360}
-        strokeDasharray="270 360"
-      />
-    </svg>
-  )
-}
 
 /** A filled circle of a color. */
 function Dot({ className }: { className: string }) {
@@ -46,10 +12,10 @@ function Dot({ className }: { className: string }) {
 function Shape({ state }: { state: SessionState }) {
   switch (state) {
     case 'starting':
-      return <Spinner className="text-muted-foreground" />
+      return <Spinner className="size-3 text-muted-foreground" />
     case 'working':
       // 70% of the color of the text around it.
-      return <Spinner className="text-current/70" />
+      return <Spinner className="size-3 text-current/70" />
     case 'waiting':
       return <Dot className="bg-amber-500" />
     case 'done':

@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.10
+
+### Patch Changes
+
+- [`1f8cabb`](https://github.com/Levix0501/hoot/commit/1f8cabb33614df4c2a6402f673b2aa2e7d26b7fb) - A session's row in the sidebar no longer shows a close button when you point at it; close a session with **Close** in its context menu, the button in the session header, or **File > Close Session**.
+
+- [`033ee79`](https://github.com/Levix0501/hoot/commit/033ee79f69face1cac95593cf669298bf5dd1854) - Renaming a session, by double-clicking it or with **Rename…** in its context menu, now opens a dialog for the new name instead of a field in the sidebar.
+
+- [`8b14c03`](https://github.com/Levix0501/hoot/commit/8b14c03ecf7a133700921e76b584a2aa4239cf37) - A session's header now shows only the session's name, without the project and worktree it runs in, which the sidebar already shows.
+
 ## 0.1.0-alpha.9
 
 ### Minor Changes

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Dependencies } from '../../shared/dependencies'
 import { ISSUE_STATUSES, type NewIssue } from '../../shared/issues'
 import type { SubIssues } from '../../shared/sub-issues'
-import { databaseFile, openDatabase } from '../database/database'
+import { databaseFile } from '../database/database'
+import { openTestDatabase } from '../database/test-support'
 import { ProjectStore } from '../projects/project-store'
 import { DependencyError, IssueStore, SubIssueError, type IssueReference } from './issue-store'
 
@@ -17,7 +18,7 @@ const databases: DatabaseSync[] = []
 
 /** Opens the database the way Hoot does when it starts, with a clock the test sets. */
 function start(): { projects: ProjectStore; issues: IssueStore } {
-  const db = openDatabase(file)
+  const db = openTestDatabase(file)
   databases.push(db)
   return { projects: new ProjectStore(db), issues: new IssueStore(db, () => clock) }
 }

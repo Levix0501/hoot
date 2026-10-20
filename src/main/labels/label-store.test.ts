@@ -7,7 +7,8 @@ import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import type { Issue } from '../../shared/issues'
 import { labelText, type LabelEvent, type Labels } from '../../shared/labels'
 import { workflowLabels } from '../../shared/workflows'
-import { databaseFile, openDatabase, transaction } from '../database/database'
+import { databaseFile, transaction } from '../database/database'
+import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { ProjectStore } from '../projects/project-store'
 import { LabelError, LabelStore } from './label-store'
@@ -31,7 +32,7 @@ afterEach(() => {
  * built-in workflow's group in place, and what they say when they change.
  */
 function start() {
-  const db = openDatabase(databaseFile(directory))
+  const db = openTestDatabase(databaseFile(directory))
   databases.push(db)
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import type { Issue, IssueStatus } from '../../shared/issues'
 import type { WorkflowDefinition, WorkflowStep } from '../../shared/workflows'
-import { databaseFile, openDatabase } from '../database/database'
+import { databaseFile } from '../database/database'
+import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
@@ -54,7 +55,7 @@ const TWO_STEPS: WorkflowDefinition = {
  * issues it completes.
  */
 function start(workflow: WorkflowDefinition = BUILT_IN_WORKFLOW) {
-  const db = openDatabase(databaseFile(directory))
+  const db = openTestDatabase(databaseFile(directory))
   databases.push(db)
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)

@@ -10,7 +10,8 @@ import type { HookEventReport } from '../../shared/hoot-cli'
 import type { ToolsState } from '../../shared/ipc'
 import { issueIdentifier, type Issue } from '../../shared/issues'
 import { startBlockers } from '../../shared/start-blockers'
-import { databaseFile, openDatabase, transaction } from '../database/database'
+import { databaseFile, transaction } from '../database/database'
+import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
@@ -38,7 +39,7 @@ export const CLAUDE_FOUND: ToolsState = {
  */
 export async function startTestHoot() {
   const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-cli-')))
-  const db: DatabaseSync = openDatabase(databaseFile(directory))
+  const db: DatabaseSync = openTestDatabase(databaseFile(directory))
   let clock = Date.UTC(2026, 9, 12, 6, 3)
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)

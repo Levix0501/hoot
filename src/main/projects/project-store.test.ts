@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { databaseFile, openDatabase } from '../database/database'
+import { databaseFile } from '../database/database'
+import { openTestDatabase } from '../database/test-support'
 import { ProjectStore } from './project-store'
 
 let directory: string
@@ -12,7 +13,7 @@ const databases: DatabaseSync[] = []
 
 /** Opens the database the way Hoot does when it starts. */
 function start(): ProjectStore {
-  const db = openDatabase(file)
+  const db = openTestDatabase(file)
   databases.push(db)
   return new ProjectStore(db)
 }

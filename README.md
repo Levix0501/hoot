@@ -80,13 +80,12 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
   or ◑ that Claude Code puts first), or after its tool until there is one. Double-click a session,
   or choose **Rename…** from its context menu, to name it yourself in a dialog: Enter saves, Esc
   cancels, and an empty name brings back the default one. Names last until Hoot quits.
-- **Closing**: close a session with the button that appears when you point at it, the button in
-  the session header, **Close** in its context menu, or **File > Close Session** (⌘W). Closing a
-  running session asks first, then ends its process. When a session's process exits with code 0
-  the session closes by itself; when it fails, is killed by a signal, or the terminal host stops,
-  the session stays with its output and says how it ended, until you close it. When the shown
-  session closes, the next one in the sidebar is shown, or the previous one after the last; when
-  it was the only one, the page shown before it, if any.
+- **Closing**: close a session with **Close** in its context menu, the button in the session header,
+  or **File > Close Session** (⌘W). Closing a running session asks first, then ends its process.
+  When a session's process exits with code 0 the session closes by itself; when it fails, is killed
+  by a signal, or the terminal host stops, the session stays with its output and says how it ended,
+  until you close it. When the shown session closes, the next one in the sidebar is shown, or the
+  previous one after the last; when it was the only one, the page shown before it, if any.
 - **Back and forward**: like a browser among pages, Hoot goes back and forward among the pages it
   has shown, sessions, [Issues pages](#issues) and the [settings](#settings) alike, with the arrow
   buttons at the top left, ⌘[ and ⌘] (**Window > Back** and **Forward**). Showing a page another

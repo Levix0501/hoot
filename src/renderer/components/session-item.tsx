@@ -22,9 +22,8 @@ import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
 /**
  * A session's row in the sidebar: the light of the session's state, which
  * names the state when pointed at, the tool's icon and the session's name.
- * Click it to show the session, double-click it or use its context menu to
- * rename it in a dialog, and close it with the button that appears on hover
- * or from the context menu.
+ * Click it to show the session, and double-click it or use its context menu
+ * to rename it in a dialog; close it from its context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
@@ -49,9 +48,7 @@ export function SessionItem({ session }: { session: UiSession }) {
         <SidebarMenuSubButton
           render={<button type="button" />}
           isActive={current}
-          // Room at its right end for the close button, which lies over it; highlighted also
-          // while the pointer is on that button.
-          className="w-full cursor-default pr-8.5 text-left group-hover/menu-sub-item:bg-sidebar-accent group-hover/menu-sub-item:text-sidebar-accent-foreground"
+          className="w-full cursor-default text-left"
           onClick={() => selectSession(session.id)}
           onDoubleClick={() => startRenaming(session.id)}
           data-testid="session-item-button"
@@ -71,17 +68,6 @@ export function SessionItem({ session }: { session: UiSession }) {
             {name}
           </span>
         </SidebarMenuSubButton>
-        <button
-          type="button"
-          className="invisible absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 outline-hidden group-focus-within/menu-sub-item:visible group-hover/menu-sub-item:visible hover:bg-sidebar-foreground/10 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 [&>svg]:size-3.5"
-          disabled={session.closing}
-          onClick={() => requestCloseSession(session.id)}
-          aria-label="Close Session"
-          title="Close Session"
-          data-testid="session-item-close"
-        >
-          <XIcon />
-        </button>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-auto min-w-36"

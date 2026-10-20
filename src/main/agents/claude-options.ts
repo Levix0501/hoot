@@ -118,6 +118,15 @@ function capabilitiesVariable(prefix: string): string {
   return `${prefix}_SUPPORTED_CAPABILITIES`
 }
 
+/**
+ * The levels of a model that a settings variable names: those of a model
+ * Claude Code knows, or those its declared capabilities give.
+ */
+function effortsOfSpecifiedModel(model: string, capabilities: string | null): string[] {
+  const known = effortsOfKnownModel(model)
+  return known.length > 0 ? known : effortsOfCapabilities(capabilities)
+}
+
 function aliasModel(family: string, env: Env): string {
   return env[`ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`] ?? ALIAS_MODELS[family] ?? family
 }
@@ -217,18 +226,22 @@ export async function readClaudeLaunchOptions(options: {
   }))
 
   const builtIn: AgentModelOption[] = []
+  const aliasOptions = FAMILIES.map((family) => aliasOption(family, env))
+  const customModel = stringOf(env.ANTHROPIC_CUSTOM_MODEL_OPTION)
+  const customOption: AgentModelOption | null =
+    customModel === null
+      ? null
+      : {
+          value: customModel,
+          label: stringOf(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME) ?? customModel,
+          efforts: effortsOfSpecifiedModel(
+            customModel,
+            stringOf(env[capabilitiesVariable('ANTHROPIC_CUSTOM_MODEL_OPTION')]),
+          ),
+        }
   if (!replaceBuiltInOptions) {
-    for (const family of FAMILIES) builtIn.push(aliasOption(family, env))
-    const custom = stringOf(env.ANTHROPIC_CUSTOM_MODEL_OPTION)
-    if (custom !== null) {
-      builtIn.push({
-        value: custom,
-        label: stringOf(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME) ?? custom,
-        efforts: effortsOfCapabilities(
-          stringOf(env[capabilitiesVariable('ANTHROPIC_CUSTOM_MODEL_OPTION')]),
-        ),
-      })
-    }
+    builtIn.push(...aliasOptions)
+    if (customOption !== null) builtIn.push(customOption)
   }
 
   const pickerOptions: AgentModelOption[] = []
@@ -258,12 +271,20 @@ export async function readClaudeLaunchOptions(options: {
     stringOf(user?.model) ??
     stringOf(env.ANTHROPIC_DEFAULT_MODEL) ??
     'opus'
-  const defaultAlias = models.find((option) => option.value === configuredDefault)
-  const defaultPicker = pickerOptions.find((option) => option.value === configuredDefault)
+  const defaultOptions = [
+    ...aliasOptions,
+    ...(customOption === null ? [] : [customOption]),
+    ...pickerOptions,
+  ]
+  const defaultOption = defaultOptions.find(
+    (option) =>
+      normalizedModelId(option.value) === normalizedModelId(configuredDefault) ||
+      (FAMILIES.some((family) => family === option.value) &&
+        normalizedModelId(aliasModel(option.value, env)) === normalizedModelId(configuredDefault)),
+  )
   const defaultEfforts =
-    defaultAlias?.efforts ??
-    defaultPicker?.efforts ??
-    (defaultPicker === undefined && /^(fable|opus|sonnet|haiku)$/.test(configuredDefault)
+    defaultOption?.efforts ??
+    (/^(fable|opus|sonnet|haiku)$/.test(configuredDefault)
       ? aliasOption(configuredDefault, env).efforts
       : effortsOfKnownModel(configuredDefault))
 

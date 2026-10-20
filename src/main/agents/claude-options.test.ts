@@ -87,6 +87,47 @@ describe('readClaudeLaunchOptions', () => {
     expect(options.models.at(-1)).toEqual({ value: 'my-model', label: 'My model', efforts: [] })
   })
 
+  it("takes a known custom model's own levels, and the levels of a configured model that names it", async () => {
+    write(userSettings, {
+      env: {
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'claude-opus-5-5',
+        ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES: 'effort',
+      },
+    })
+    let options = await read()
+    expect(options.models.at(-1)).toEqual({
+      value: 'claude-opus-5-5',
+      label: 'claude-opus-5-5',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    })
+
+    write(userSettings, {
+      model: 'gw-opus-x',
+      env: {
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'gw-opus-x',
+        ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES: 'effort',
+      },
+    })
+    options = await read()
+    expect(options.models.find((option) => option.value === 'opus')?.efforts).toEqual([
+      'low',
+      'medium',
+      'high',
+    ])
+    expect(options.defaultEfforts).toEqual(['low', 'medium', 'high'])
+  })
+
+  it("takes an unknown custom model's levels from the capabilities it declares", async () => {
+    write(userSettings, {
+      env: {
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'my-model',
+        ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES: 'effort,xhigh_effort',
+      },
+    })
+    const options = await read()
+    expect(options.models.at(-1)?.efforts).toEqual(['low', 'medium', 'high', 'xhigh'])
+  })
+
   it('adds modelPicker rows, and keeps only them when replaceBuiltInOptions is true', async () => {
     write(userSettings, {
       modelPicker: {

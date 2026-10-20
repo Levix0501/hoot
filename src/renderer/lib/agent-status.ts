@@ -76,10 +76,12 @@ export function agentRowStatus(agent: AgentState, target: InstallTarget | null):
 
 /**
  * Whether Update all includes an agent: its row offers Update, or its last
- * update failed. Both need it installed and running.
+ * update failed. Both need it installed and running. A failed install leaves
+ * its row showing the failure, not Update, even when a newer version is out.
  */
 export function updateAllIncludes(agent: AgentState, target: InstallTarget | null): boolean {
   if (agent.installation === null || agent.installation.version === null) return false
+  if (agent.operation?.kind === 'install' && agent.operation.status === 'failed') return false
   if (agent.operation?.kind === 'update' && agent.operation.status === 'failed') return true
   return agentRowStatus(agent, target).kind === 'update'
 }

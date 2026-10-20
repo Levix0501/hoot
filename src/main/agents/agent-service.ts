@@ -342,10 +342,11 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   updateAll(): void {
     for (const record of this.records) {
       if (record.installation === null || record.installation.version === null) continue
+      const failed = record.operation?.state.status === 'failed' ? record.operation.kind : null
+      // An install that failed leaves its row showing the failure, not Update.
+      if (failed === 'install') continue
       if (isPending(record.operation)) continue
-      const failed =
-        record.operation?.state.status === 'failed' && record.operation.kind === 'update'
-      if (failed || this.canUpdate(record)) this.enqueue(record.tool.id, 'update')
+      if (failed === 'update' || this.canUpdate(record)) this.enqueue(record.tool.id, 'update')
     }
   }
 

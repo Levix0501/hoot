@@ -178,7 +178,7 @@ edited:
   OpenCode's `--auto`. While it is off, Hoot adds no permission argument, and the agent follows its
   own configuration. A locked argument in the command shows it, and says when the extra arguments
   decide permissions instead.
-- **Model** and **Effort** are chips in the command. Point at the dashed **+ model** or **+ effort**
+- **Model** and **Effort** are chips in the command. Click the dashed **+ model** or **+ effort**
   chip and pick **Default** or one of the values read from the agent's own configuration, including
   the models of a third-party provider. Claude Code's choices come from its settings and
   environment: the four aliases, a custom model option, and `modelPicker` rows, filtered by

@@ -186,7 +186,24 @@ describe('updateAllIncludes', () => {
         target,
       ),
     ).toBe(true)
-    // An install that failed has no Update row.
+    // An install that failed has no Update row, even when a newer version is out.
+    expect(
+      updateAllIncludes(
+        agent({
+          latest: '2.1.299',
+          operation: {
+            kind: 'install',
+            status: 'failed',
+            message: '✕ Install failed',
+            tail: [],
+            output: '',
+            command: 'npm install',
+            exitCode: 1,
+          },
+        }),
+        target,
+      ),
+    ).toBe(false)
     expect(
       updateAllIncludes(
         agent({

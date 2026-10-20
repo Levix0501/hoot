@@ -956,6 +956,21 @@ describe('AgentService Update all', () => {
     expect(started()).toEqual(['started @anthropic-ai/claude-code'])
   })
 
+  it('leaves out an agent whose install failed, even when a newer version is out', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    setLatest('claude', '2.0.0')
+    npmScript(
+      `if (npm.spec === '@anthropic-ai/claude-code') { npm.complain('install failed'); return 1 }`,
+    )
+    const { service, agent, ended } = setup({ latest: { claude: '2.0.0' } })
+    await service.detect()
+    service.install('claude')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({ kind: 'install', status: 'failed' })
+    service.updateAll()
+    expect(agent('claude').operation).toMatchObject({ kind: 'install', status: 'failed' })
+  })
+
   it('leaves out agents with no newer version, no update command or a failed version read', async () => {
     await installInto(prefix, 'claude', '1.0.0')
     await installInto(prefix, 'codex', '1.0.0')

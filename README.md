@@ -200,7 +200,7 @@ versions as permission levels are ignored: YOLO mode is on when Hoot has no sett
 
 The agents that are not installed are in a **Not installed** group at the bottom, folded until you
 open it, with their number in its title. Each row says where **Install** would put the agent, or
-why it cannot be installed, and offers **Install**.
+why it cannot be installed, and offers **Install** where it can.
 
 Opening the page detects the agents the first time since Hoot started, and later only when the last
 detection started 20 hours ago or more; until then it shows the last results. **Re-detect**, the
@@ -214,8 +214,8 @@ from the agent's configuration. Hoot does not keep the results across a restart.
   first `npm` on your login shell's `PATH` runs and you can create files in its global folder's
   `lib/node_modules` and `bin` (on Windows, its `node_modules` and the global folder itself), Hoot
   runs `npm install -g <package>@latest` with it, as you would in a terminal, so the agent works in
-  your terminals too. Pointing at **Install** shows the command it runs. Hoot comes with no npm or
-  Node.js of its own, and changes none of your shell's configuration files.
+  your terminals too. Hoot comes with no npm or Node.js of its own, and changes none of your shell's
+  configuration files.
 - **Update** updates the installation the row shows, in its place, the way it was installed:
   `npm install -g <package>@latest` with the npm of its global folder, `brew upgrade --cask` or
   `--formula` for the cask or formula it comes from, or the agent's own update command for its
@@ -638,7 +638,7 @@ hoot session start ISS-14                  # a session for ISS-14, as its start 
   and the `workflow.md` beside its issue when there is one, which ask them to change the issue's
   label with `hoot issue edit` when a step is done, and it is not allowed in advance: a
   coding tool runs it like any other command, under the permissions its own configuration and the
-  Agents page give it, and Hoot changes no tool's settings for it. At Codex's sandboxed levels,
+  Agents page give it, and Hoot changes no tool's settings for it. At Codex's sandboxed settings,
   Codex's sandbox may block `hoot`'s connection to Hoot, and `hoot` then says so: let it run outside
   the sandbox, as Codex offers to with your approval, or use YOLO mode.
 

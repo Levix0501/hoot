@@ -345,6 +345,20 @@ describe('resolveLaunch', () => {
     expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto', '-s', 'ses_one'])
   })
 
+  it('gives a resumed chat the agent’s extra arguments too', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const launch = await resolveLaunch(
+      context(loginEnv, { claude: { extraArgs: ['--verbose'] } }),
+      'claude',
+      project,
+      null,
+      { conversationId: 'claude-id', resume: true },
+    )
+    expect(launch.args).toContain('--verbose')
+    expect(launch.args).toContain('--resume')
+    expect(launch.args).toContain('claude-id')
+  })
+
   it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const claude = await resolveLaunch(context(loginEnv), 'claude', project)

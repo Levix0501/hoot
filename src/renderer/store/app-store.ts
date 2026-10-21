@@ -1131,7 +1131,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       const change = afterTitle(session, title, viewedSessionId(get()) === id, arrivedAt)
       set((state) => ({
         sessions: updateSession(state.sessions, id, { title, ...change }),
-        ...(session.chatId === null
+        ...(session.chatId === null || title === ''
           ? {}
           : {
               chats: state.chats.map((chat) =>
@@ -1139,8 +1139,8 @@ export const useAppStore = create<AppState>()((set, get) => {
               ),
             }),
       }))
-      // The name of a chat follows the title its agent sets, as a session's does.
-      if (session.chatId !== null) api.setChatTitle(session.chatId, title)
+      // The name of a chat follows the last title its agent set, as a session's does.
+      if (session.chatId !== null && title !== '') api.setChatTitle(session.chatId, title)
     })
     terminals.set(id, sessionTerminal)
     arrivals.set(id, [])

@@ -121,6 +121,13 @@ describe('ChatManager', () => {
     expect(again.list()[1]!.id).toBe(second.id)
   })
 
+  it('keeps the last title an agent set when its program clears it on exit', async () => {
+    const chat = await manager.create('claude')
+    manager.setTitle(chat.id, '✳ Fix the login')
+    manager.setTitle(chat.id, '')
+    expect(manager.get(chat.id)?.title).toBe('✳ Fix the login')
+  })
+
   it('makes a chat folder again when it was deleted, and starts its conversation anew or resumes it', async () => {
     const codex = await manager.create('codex')
     fs.rmSync(codex.folder, { recursive: true })
@@ -208,6 +215,19 @@ describe('ChatManager', () => {
     expect(chats[0]).toMatchObject({
       conversationId: chat.conversationId,
       title: '✳ Old conversation',
+      hasMessages: true,
+    })
+  })
+
+  it('does not split the conversation a Claude Code chat compacts', async () => {
+    const chat = await manager.create('claude')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    await manager.flush()
+    manager.noteHookEvent(chat.id, hook('SessionStart', chat.conversationId, 'compact'))
+    await manager.flush()
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.get(chat.id)).toMatchObject({
+      conversationId: chat.conversationId,
       hasMessages: true,
     })
   })

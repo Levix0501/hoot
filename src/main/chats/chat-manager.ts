@@ -181,6 +181,9 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
   setTitle(id: string, title: string): void {
     const chat = this.chats.get(id)
     if (!chat || chat.title === title) return
+    // A program clears its title when it ends; the last title it set stays,
+    // so that the chat's name does not change when it exits.
+    if (title === '') return
     this.previousTitles.set(id, chat.title)
     this.chats.update(id, { title })
     this.emitChanged()

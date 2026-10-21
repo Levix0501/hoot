@@ -38,10 +38,10 @@ describe('releaseNotes', () => {
   it('ends with how to install Hoot on a Mac and on Windows', () => {
     const notes = releaseNotes(CHANGELOG, '0.1.0-alpha.0')
     const installing = notes.slice(notes.indexOf('## Installing'))
-    expect(installing).toContain('`arm64` for Apple Silicon or `x64` for Intel')
+    expect(installing).toContain('`arm64` for Apple silicon or `x64` for Intel')
     expect(installing).toContain('Hoot for Windows is a preview')
-    expect(installing).toContain('adding projects works, with Git on `PATH`')
-    expect(installing).toContain('starting sessions does not yet')
+    expect(installing).toContain('It adds projects, with Git on `PATH`')
+    expect(installing).toContain('starts sessions, and installs and updates agents')
     expect(installing).toContain('SmartScreen may say "Windows protected your PC"')
     expect(installing).toContain('**More info**, then **Run anyway**')
     expect(installing).toContain('Smart App Control')

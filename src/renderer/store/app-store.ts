@@ -2074,8 +2074,12 @@ export const useAppStore = create<AppState>()((set, get) => {
       const ended = get().sessions.find((session) => session.chatId === chatId)
       if (ended) {
         void api.closeSession(ended.id)
+        // Its page goes with it, as a closed session's does, so that going
+        // back does not show the page of a session that is no longer there.
+        const endedPages = new Set([ended.id])
         set((state) => ({
           sessions: state.sessions.filter((session) => session.id !== ended.id),
+          history: forget(state.history, (page) => pageIn(page, endedPages, new Set<number>())),
         }))
         // Its terminal goes once the new page is in place.
         setTimeout(() => {

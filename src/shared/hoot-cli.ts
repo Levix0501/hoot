@@ -187,14 +187,18 @@ export interface SessionRequest {
 
 /**
  * The events of the hooks Hoot adds to every Claude Code session it starts,
- * which hoot reports to Hoot to show what the session is doing: Claude Code
- * asks the user to approve a tool call or a plan, or to answer a question
- * (`PermissionRequest`); an MCP server asks the user for input
- * (`Elicitation`); a turn starts, on a message of the user's or the
- * notification that a background agent is done (`UserPromptSubmit`); a turn
- * ends (`Stop`); and a turn stops on an API error (`StopFailure`).
+ * which hoot reports to Hoot to show what the session is doing: a session
+ * started or resumed, or a new conversation started in it (`SessionStart`);
+ * a session ended (`SessionEnd`); Claude Code asks the user to approve a tool
+ * call or a plan, or to answer a question (`PermissionRequest`); an MCP
+ * server asks the user for input (`Elicitation`); a turn starts, on a message
+ * of the user's or the notification that a background agent is done
+ * (`UserPromptSubmit`); a turn ends (`Stop`); and a turn stops on an API
+ * error (`StopFailure`).
  */
 export const HOOK_EVENTS = [
+  'SessionStart',
+  'SessionEnd',
   'PermissionRequest',
   'Elicitation',
   'UserPromptSubmit',
@@ -223,6 +227,15 @@ export interface HookEventReport {
    * hook's `prompt_id`); `null` when the hook's input has none.
    */
   turn: string | null
+  /**
+   * The conversation the event belongs to, by the id Claude Code gives it
+   * (the hook's `session_id`), which changes when `/clear` starts another.
+   */
+  conversationId?: string | null
+  /** Why a `SessionStart` happened: `startup`, `resume`, `clear`, `compact` or `fork`. */
+  source?: string | null
+  /** Why a `SessionEnd` happened, such as `clear` or `exit`. */
+  reason?: string | null
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */
@@ -240,4 +253,5 @@ export type LabelAnswer = HootAnswer<{ label: HootLabel }>
 export type DeletedLabelAnswer = HootAnswer<object>
 /** The session started: the root of the worktree it runs in. */
 export type SessionAnswer = HootAnswer<{ worktreePath: string }>
-export type HookEventAnswer = HootAnswer<object>
+/** Hoot took the event; it needs no project, as a chat has none. */
+export type HookEventAnswer = { ok: true } | { ok: false; message: string }

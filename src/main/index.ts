@@ -20,6 +20,8 @@ import { readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
+import { ChatManager } from './chats/chat-manager'
+import { localChatConversations } from './chats/conversations'
 import { databaseFile, openDatabase, transaction } from './database/database'
 import { captureBaseEnv } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
@@ -101,7 +103,7 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 let terminalOptions: TerminalEnvOptions | null = null
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd, issue, sessionId) =>
+  resolveLaunch: (toolId, cwd, issue, chat, sessionId) =>
     resolveLaunch(
       {
         shell,
@@ -121,6 +123,7 @@ const sessions = new SessionManager({
       toolId,
       cwd,
       issue,
+      chat,
     ),
 })
 
@@ -149,6 +152,9 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 
 /** Answers hoot in the sessions, once the database is open. */
 let hootServer: HootServer | null = null
+
+/** The chats, once the database is open. */
+let chatManager: ChatManager | null = null
 
 /**
  * Brings the window forward so the user can answer a question in it. In the
@@ -337,6 +343,8 @@ if (!app.requestSingleInstanceLock()) {
       // hoot then says that Hoot is not running.
       await hootServer?.stop()
       await sessions.endAll()
+      // What the agents recorded before they ended, such as a new conversation.
+      await chatManager?.flush()
       await ptyHost.stop()
     })()
     void Promise.race([shutdown, delay(SHUTDOWN_TIMEOUT_MS)]).finally(() => {
@@ -369,6 +377,14 @@ function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
   const labels = new LabelStore(database)
+  const chats = new ChatManager({
+    db: database,
+    conversations: localChatConversations({
+      home: os.homedir(),
+      getLoginEnvironment: () => tools.getLoginEnvironment(),
+    }),
+  })
+  chatManager = chats
   // Puts the workflow's group of labels in place, before anything reads the labels.
   const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW, labels)
   // hoot's sessions, which the window starts as an issue's start button does.
@@ -398,6 +414,7 @@ function startWithDatabase(database: DatabaseSync): void {
     sidebar,
     appearance,
     sessions,
+    chats,
     quitGuard,
     updates,
     worktrees,
@@ -410,8 +427,26 @@ function startWithDatabase(database: DatabaseSync): void {
     },
   })
 
+  // The chats follow the events of their agents' sessions: a new conversation
+  // in Claude Code, and what an ended process left in the agent's records.
+  sessions.on('hook-event', (id, report) => {
+    const chatId = sessions.chatIdOf(id)
+    if (chatId !== null) chats.noteHookEvent(chatId, report)
+  })
+  // `/new` and `/clear` of Codex and OpenCode start another conversation
+  // without a record of it until its first message.
+  sessions.on('input', (id, data) => {
+    const chatId = sessions.chatIdOf(id)
+    if (chatId !== null) chats.typed(chatId, id, data)
+  })
+  sessions.on('updated', (session) => chats.sessionEnded(session))
+  // What happened while Hoot was not running: conversations it has not seen
+  // yet, and chats whose conversation never got a message.
+  void chats.reconcileAll()
+
   hootServer = new HootServer({
     address: hootCli.socket,
+    hasSession: (sessionId) => sessions.projectRootOf(sessionId) !== null,
     sessionProject: (sessionId) => {
       const root = sessions.projectRootOf(sessionId)
       if (root === null) {
@@ -462,6 +497,7 @@ function startWithDatabase(database: DatabaseSync): void {
         showAbout: () => getWindow()?.webContents.send(IpcChannel.showAboutRequested),
         showSettings: () => getWindow()?.webContents.send(IpcChannel.showSettingsRequested),
         addProject: () => getWindow()?.webContents.send(IpcChannel.addProjectRequested),
+        newChat: () => sendSessionCommand('new-chat'),
         closeSession: () => sendSessionCommand('close-current'),
         selectNextSession: () => sendSessionCommand('select-next'),
         selectPreviousSession: () => sendSessionCommand('select-previous'),

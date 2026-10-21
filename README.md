@@ -32,6 +32,9 @@ Linear-style issues, and hand an issue to an agent in a Git worktree of its own 
 
 - **Every agent in one window.** Claude Code, Codex, OpenCode and your shell run in embedded
   terminals, as many sessions at a time as you like. Sessions you are not looking at keep running.
+- **Chats without a project.** Click **New chat** in the sidebar to talk to the default agent
+  without adding a project. Hoot keeps the chat, and resumes its conversation after the agent exits
+  or Hoot restarts.
 - **See which agent needs you.** A light beside each Claude Code session tells you whether it is
   working, waiting for your answer, stopped by an error, or done.
 - **Issues, Linear-style.** Note what to do as local issues with statuses, priorities, labels,
@@ -106,7 +109,7 @@ Run `hoot --help` for every command and option.
 
 - Your projects, issues and settings stay on your computer, in
   `~/Library/Application Support/Hoot` on macOS and `%APPDATA%\Hoot` on Windows. Worktrees go in
-  `~/.hoot/worktrees`.
+  `~/.hoot/worktrees`, and the folders chats run in, under `~/.hoot/chats`.
 - Hoot collects no telemetry. It goes online to look for new versions, of itself on GitHub and of
   your agents on the npm registry, and to download the updates and agents you ask for.
 - Hoot leaves your agents' configuration files alone: it passes its settings to each session on

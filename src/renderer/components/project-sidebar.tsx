@@ -7,6 +7,8 @@ import { sessionWorktrees, useAppStore } from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
 import { worktreeRows } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
+import { ChatItem } from './chat-item'
+import { NewChatItem } from './new-chat-item'
 import { ProjectItem } from './project-item'
 import { SessionItem } from './session-item'
 import { SidebarResizeHandle } from './sidebar-resize-handle'
@@ -179,6 +181,24 @@ function IssuesItem() {
 /** How far the project list was scrolled when the sidebar last left the window. */
 let listScrollTop = 0
 
+/** The sidebar's Chats group, below the projects: each chat, newest first. */
+function ChatsGroup() {
+  const chats = useAppStore((state) => state.chats)
+  if (chats.length === 0) return null
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>Chats</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu data-testid="chat-list">
+          {chats.map((chat) => (
+            <ChatItem key={chat.id} chat={chat} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
 export function ProjectSidebar() {
   const projects = useAppStore((state) => state.projects)
   const addProject = useAppStore((state) => state.addProject)
@@ -209,6 +229,9 @@ export function ProjectSidebar() {
       <SidebarContent ref={listRef}>
         <SidebarGroup className="pb-0">
           <IssuesItem />
+          <SidebarMenu>
+            <NewChatItem />
+          </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>
           <SidebarGroupLabel>Projects</SidebarGroupLabel>
@@ -234,6 +257,7 @@ export function ProjectSidebar() {
             )}
           </SidebarGroupContent>
         </SidebarGroup>
+        <ChatsGroup />
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>

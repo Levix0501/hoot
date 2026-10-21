@@ -8,7 +8,7 @@ import type { SessionExit, SessionInfo } from '../../shared/session'
 import { isWithin } from '../../shared/worktrees'
 import type { ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
-import type { SentIssue } from './launch'
+import type { ChatLaunch, SentIssue } from './launch'
 
 export interface SessionLaunch {
   file: string
@@ -42,6 +42,7 @@ export interface SessionManagerOptions {
     toolId: ToolId,
     cwd: string,
     issue: SentIssue | null,
+    chat: ChatLaunch | null,
     sessionId: string,
   ): Promise<SessionLaunch>
   /** Sends a signal to a process group; replaceable for tests. */
@@ -87,6 +88,7 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
  */
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
+  input: [id: string, data: string]
   updated: [session: SessionInfo]
   'hook-event': [id: string, report: HookEventReport]
 }> {
@@ -143,6 +145,11 @@ export class SessionManager extends EventEmitter<{
     return this.records.get(id)?.info.projectRoot ?? null
   }
 
+  /** The chat whose agent the session runs, if any. */
+  chatIdOf(id: string): string | null {
+    return this.records.get(id)?.info.chatId ?? null
+  }
+
   /** Whether a session of the project, in its main worktree or any other, is starting or running. */
   isRunningIn(projectRoot: string): boolean {
     return [...this.records.values()].some(
@@ -158,6 +165,7 @@ export class SessionManager extends EventEmitter<{
     return [...this.records.values()].some(
       (record) =>
         isRunning(record) &&
+        record.info.chatId === null &&
         isWithin(record.info.worktreePath ?? record.info.projectRoot, directory),
     )
   }
@@ -166,7 +174,11 @@ export class SessionManager extends EventEmitter<{
    * Starts a session; `issue` is what it sends Claude Code when it starts
    * from the start button of the issue the request names.
    */
-  async start(request: StartSessionRequest, issue: SentIssue | null = null): Promise<SessionInfo> {
+  async start(
+    request: StartSessionRequest,
+    issue: SentIssue | null = null,
+    chat: ChatLaunch | null = null,
+  ): Promise<SessionInfo> {
     if (this.records.has(request.id)) throw new SessionError('The session already exists.')
     const { promise: started, resolve: settle } = Promise.withResolvers<void>()
     const record: SessionRecord = {
@@ -174,6 +186,7 @@ export class SessionManager extends EventEmitter<{
         id: request.id,
         projectRoot: request.projectRoot,
         worktreePath: request.worktreePath,
+        chatId: request.chatId ?? null,
         toolId: request.toolId,
         issueId: request.issueId,
         status: 'running',
@@ -190,7 +203,7 @@ export class SessionManager extends EventEmitter<{
     // A session in a worktree runs in the worktree's root.
     const cwd = request.worktreePath ?? request.projectRoot
     try {
-      const launch = await this.options.resolveLaunch(request.toolId, cwd, issue, request.id)
+      const launch = await this.options.resolveLaunch(request.toolId, cwd, issue, chat, request.id)
       record.cleanup = launch.cleanup ?? null
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {
@@ -242,6 +255,9 @@ export class SessionManager extends EventEmitter<{
     const record = this.records.get(id)
     if (record && !record.starting && record.info.status === 'running') {
       this.options.host.write(id, data, binary)
+      // What the user types, for a chat whose agent starts another conversation
+      // with a command such as `/new`, which leaves no record before a message.
+      if (!binary && record.info.chatId !== null) this.emit('input', id, data)
     }
   }
 

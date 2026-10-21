@@ -1,6 +1,7 @@
 import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
+import type { ChatInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
 import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
@@ -59,9 +60,15 @@ export interface ToolsState {
 
 export interface StartSessionRequest {
   id: string
+  /** The project's root, or for a chat the folder its agent runs in. */
   projectRoot: string
   /** The root of one of the project's worktrees to run in, or `null` for the main worktree. */
   worktreePath: string | null
+  /**
+   * The chat whose agent the session runs, which has no project and runs in
+   * the chat's folder; `null` or left out for a session of a project.
+   */
+  chatId?: string | null
   toolId: ToolId
   /**
    * The issue the session is started from, a Claude Code session in one of
@@ -86,6 +93,9 @@ export interface StartSessionRequest {
 }
 
 export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: false; message: string }
+
+/** A chat Hoot made, or why it could not. */
+export type CreateChatResult = { ok: true; chat: ChatInfo } | { ok: false; message: string }
 
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
@@ -211,6 +221,11 @@ export const IpcChannel = {
   sessionUpdated: 'session:updated',
   sessionHookEvent: 'session:hook-event',
   sessionCommand: 'session:command',
+  listChats: 'chats:list',
+  createChat: 'chats:create',
+  renameChat: 'chats:rename',
+  setChatTitle: 'chats:set-title',
+  chatsChanged: 'chats:changed',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
@@ -281,6 +296,7 @@ export const IpcChannel = {
  * the settings.
  */
 export type SessionCommand =
+  | 'new-chat'
   | 'close-current'
   | 'select-next'
   | 'select-previous'
@@ -374,6 +390,16 @@ export interface HootApi {
   onSessionHookEvent(listener: (id: string, report: HookEventReport) => void): () => void
   /** The application menu chose a session command. */
   onSessionCommand(listener: (command: SessionCommand) => void): () => void
+  /** Every chat, in the order of the sidebar's Chats group. */
+  listChats(): Promise<ChatInfo[]>
+  /** Makes a chat of an agent, in a new folder of its own, and says which. */
+  createChat(toolId: CodingToolId): Promise<CreateChatResult>
+  /** Gives a chat another name; an empty name gives it its default name again. */
+  renameChat(id: string, name: string): void
+  /** Notes the terminal title the chat's agent set, which names the chat. */
+  setChatTitle(id: string, title: string): void
+  /** The chats changed: one was made, opened, renamed, split off or removed. */
+  onChatsChanged(listener: (chats: ChatInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
   setSidebarOpen(open: boolean): void

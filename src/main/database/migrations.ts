@@ -165,4 +165,31 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX label_events_by_issue ON label_events (issue_id, id);
   `,
+  // 6: chats, which belong to no project.
+  `
+  -- Every chat: a conversation with an agent that belongs to no project. A
+  -- chat keeps its row while Hoot runs; Hoot removes it when its conversation
+  -- never got a message.
+  CREATE TABLE chats (
+    -- A UUID that Hoot picks.
+    id TEXT PRIMARY KEY,
+    tool_id TEXT NOT NULL CHECK (tool_id IN ('claude', 'codex', 'opencode')),
+    -- The folder its agent runs in, which Hoot creates.
+    folder TEXT NOT NULL,
+    -- The agent's own id of the conversation; NULL until Hoot learns it.
+    conversation_id TEXT,
+    -- The last terminal title the agent set in the conversation; may be empty.
+    title TEXT NOT NULL DEFAULT '',
+    -- The name the user gave it; NULL while it has none.
+    custom_name TEXT,
+    -- Whether the conversation has been sent a message.
+    has_messages INTEGER NOT NULL DEFAULT 0 CHECK (has_messages IN (0, 1)),
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL,
+    -- When the chat was last opened, which orders the sidebar's Chats group.
+    opened_at INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE INDEX chats_by_opened ON chats (opened_at DESC, created_at DESC);
+  `,
 ]

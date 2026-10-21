@@ -37,6 +37,16 @@ export interface LaunchContext {
 }
 
 /**
+ * The conversation a chat's session continues: the id its agent knows it by,
+ * and whether it has a conversation to continue, rather than one to start.
+ * The id is `null` for a new Codex conversation, whose id Hoot learns later.
+ */
+export interface ChatLaunch {
+  conversationId: string | null
+  resume: boolean
+}
+
+/**
  * What a session started from an issue sends Claude Code: the issue's title
  * and description, the text of the file of its workflow, if the session has
  * one, and the first message, given the files once they are written and the
@@ -166,6 +176,29 @@ async function checkFolder(cwd: string): Promise<void> {
 }
 
 /**
+ * The arguments that continue a chat's conversation, or start the one its id
+ * names when it has none yet: Claude Code's `--session-id` or `--resume`,
+ * OpenCode's `-s` for either, and Codex's `resume` subcommand. A new Codex
+ * conversation starts as any other session does, and Hoot learns its id from
+ * Codex's records.
+ */
+export function chatLaunchArguments(
+  tool: CodingToolId,
+  chat: ChatLaunch | null,
+): { before: string[]; after: string[] } {
+  if (chat === null || chat.conversationId === null) return { before: [], after: [] }
+  const id = chat.conversationId
+  switch (tool) {
+    case 'claude':
+      return { before: [], after: [chat.resume ? '--resume' : '--session-id', id] }
+    case 'opencode':
+      return { before: [], after: ['-s', id] }
+    case 'codex':
+      return chat.resume ? { before: ['resume', id], after: [] } : { before: [], after: [] }
+  }
+}
+
+/**
  * Decides what a session runs in its working directory (the project root, or
  * the root of one of the project's worktrees). A Shell session runs the
  * default shell with its arguments, as a login shell outside Windows,
@@ -178,7 +211,8 @@ async function checkFolder(cwd: string): Promise<void> {
  * YOLO arguments while YOLO mode is on, the chosen model and effort, the
  * extra arguments, and, for Claude Code, its hooks and, when it is sent an
  * issue, the arguments that send it, once the issue's files are written; the
- * launch's cleanup removes their folder. Either environment also has what
+ * launch's cleanup removes their folder. A chat's session also gets the
+ * arguments that continue its conversation. Either environment also has what
  * hoot needs to run in the session.
  */
 export async function resolveLaunch(
@@ -186,6 +220,7 @@ export async function resolveLaunch(
   toolId: ToolId,
   cwd: string,
   issue: SentIssue | null = null,
+  chat: ChatLaunch | null = null,
 ): Promise<SessionLaunch> {
   const tool = getTool(toolId)
   if (issue !== null && tool.id !== 'claude') {
@@ -225,8 +260,10 @@ export async function resolveLaunch(
     cwd,
     hoot: context.hoot,
   })
+  const chatArguments = chatLaunchArguments(tool.id, chat)
   const args = [
     ...program.args,
+    ...chatArguments.before,
     ...agentLaunchArguments({
       tool: tool.id,
       yoloMode: launch.yoloMode,
@@ -236,6 +273,7 @@ export async function resolveLaunch(
           ? claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot'))
           : null,
     }),
+    ...chatArguments.after,
   ]
   if (issue === null) return { file: program.file, args, env }
   // Written last, so that a launch that fails leaves no folder of its own behind.

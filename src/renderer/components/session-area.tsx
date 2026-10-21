@@ -1,5 +1,5 @@
-import { FolderPlusIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
-import { describeExit, sessionName } from '../../shared/session'
+import { FolderPlusIcon, PlayIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
+import { describeExit, isNormalExit, sessionName } from '../../shared/session'
 import { sessionState, stateLabel } from '../lib/session-state'
 import { useAppStore, type UiSession } from '../store/app-store'
 import { StateLight } from './state-light'
@@ -32,7 +32,19 @@ function StatusBadge({ session }: { session: UiSession }) {
 export function SessionPane({ session }: { session: UiSession }) {
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
+  const resumeChat = useAppStore((state) => state.resumeChat)
+  const chatExists = useAppStore((state) =>
+    session.chatId === null ? false : state.chats.some((chat) => chat.id === session.chatId),
+  )
   const inset = useTopRowInset()
+  // A chat whose agent ended any other way than normally keeps its last output,
+  // and can be resumed; a session, and a chat closed by the user, close instead.
+  const resumable =
+    session.chatId !== null &&
+    chatExists &&
+    session.status === 'exited' &&
+    session.exit !== null &&
+    !isNormalExit(session.exit)
 
   return (
     <div
@@ -96,11 +108,15 @@ export function SessionPane({ session }: { session: UiSession }) {
             size="sm"
             variant="outline"
             disabled={session.closing}
-            onClick={() => void closeSession(session.id)}
-            data-testid="session-ended-close"
+            onClick={() =>
+              resumable && session.chatId !== null
+                ? resumeChat(session.chatId)
+                : void closeSession(session.id)
+            }
+            data-testid={resumable ? 'session-ended-resume' : 'session-ended-close'}
           >
-            <XIcon />
-            Close
+            {resumable ? <PlayIcon /> : <XIcon />}
+            {resumable ? 'Resume' : 'Close'}
           </Button>
         </div>
       )}

@@ -127,6 +127,9 @@ const hookEventReport = z.strictObject({
   startedAt: z.number().finite(),
   subagent: z.boolean(),
   turn: z.string().min(1).nullable(),
+  conversationId: z.string().min(1).nullable().optional(),
+  source: z.string().min(1).nullable().optional(),
+  reason: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<HookEventReport>
 
 /** The project a session runs for, or why there is none. */
@@ -139,6 +142,8 @@ export interface HootServerOptions {
   /** Where to listen: the path of a Unix domain socket, or on Windows of a named pipe. */
   address: string
   platform?: NodeJS.Platform
+  /** Whether this Hoot runs a session with this id, which a chat's session has without a project. */
+  hasSession(sessionId: string): boolean
   /** The project of the session with this id, which hoot runs in. */
   sessionProject(sessionId: string): SessionProject
   /** The projects in the list, which name the projects of the issues related to an issue. */
@@ -180,7 +185,7 @@ export interface HootServerOptions {
   hookEvent(sessionId: string, report: HookEventReport): void
 }
 
-type Reply = { status: number; answer: HootAnswer<object> }
+type Reply = { status: number; answer: HootAnswer<object> | HookEventAnswer }
 
 class RequestError extends Error {
   constructor(
@@ -416,11 +421,21 @@ export class HootServer {
     if (typeof sessionId !== 'string' || sessionId === '') {
       return failure(400, 'The request does not say which session it comes from.')
     }
+    const { pathname } = new URL(request.url ?? '/', 'http://hoot')
+    // A chat's session has no project, but its Claude Code's hooks still tell
+    // Hoot when it starts a new conversation.
+    if (pathname === '/hook-events' && request.method === 'POST') {
+      if (!this.options.hasSession(sessionId)) return failure(404, 'No such session.')
+      const parsed = hookEventReport.safeParse(await readJson(request))
+      if (!parsed.success) return failure(400, 'Invalid hook event.')
+      this.options.hookEvent(sessionId, parsed.data)
+      const answer: HookEventAnswer = { ok: true }
+      return { status: 200, answer }
+    }
     const found = this.options.sessionProject(sessionId)
     if (!found.ok) return failure(404, found.message)
     const { id: projectId, name } = found.project
     const project: HootProject = { id: projectId, name }
-    const { pathname } = new URL(request.url ?? '/', 'http://hoot')
 
     if (pathname === '/issues' && request.method === 'GET') {
       const answer: IssueListAnswer = {
@@ -531,7 +546,7 @@ export class HootServer {
       const parsed = hookEventReport.safeParse(await readJson(request))
       if (!parsed.success) return failure(400, 'Invalid hook event.')
       this.options.hookEvent(sessionId, parsed.data)
-      const answer: HookEventAnswer = { ok: true, project }
+      const answer: HookEventAnswer = { ok: true }
       return { status: 200, answer }
     }
 

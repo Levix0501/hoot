@@ -292,6 +292,59 @@ describe('resolveLaunch', () => {
     ])
   })
 
+  it('continues a chat’s conversation, or starts the one its id names', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const claudeNew = await resolveLaunch(context(loginEnv), 'claude', project, null, {
+      conversationId: 'claude-id',
+      resume: false,
+    })
+    expect(claudeNew.args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+      ...hookSettings,
+      '--session-id',
+      'claude-id',
+    ])
+    const claudeAgain = await resolveLaunch(context(loginEnv), 'claude', project, null, {
+      conversationId: 'claude-id',
+      resume: true,
+    })
+    expect(claudeAgain.args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+      ...hookSettings,
+      '--resume',
+      'claude-id',
+    ])
+
+    const codexAgain = await resolveLaunch(context(loginEnv), 'codex', project, null, {
+      conversationId: 'thread-id',
+      resume: true,
+    })
+    expect(codexAgain.args).toEqual([
+      ...program(bin, 'codex').args,
+      'resume',
+      'thread-id',
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
+    // A new Codex conversation has no id yet, and starts as any session does.
+    const codexNew = await resolveLaunch(context(loginEnv), 'codex', project, null, {
+      conversationId: null,
+      resume: false,
+    })
+    expect(codexNew.args).toEqual([
+      ...program(bin, 'codex').args,
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
+
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    const opencode = await resolveLaunch(context(loginEnv), 'opencode', project, null, {
+      conversationId: 'ses_one',
+      resume: true,
+    })
+    expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto', '-s', 'ses_one'])
+  })
+
   it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const claude = await resolveLaunch(context(loginEnv), 'claude', project)
@@ -304,6 +357,8 @@ describe('resolveLaunch', () => {
     }
     expect(JSON.parse(hookSettingsValue)).toEqual({
       hooks: {
+        SessionStart: [{ hooks: [hook] }],
+        SessionEnd: [{ hooks: [hook] }],
         PermissionRequest: [{ hooks: [hook] }],
         Elicitation: [{ hooks: [hook] }],
         UserPromptSubmit: [{ hooks: [hook] }],

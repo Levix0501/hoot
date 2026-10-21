@@ -15,8 +15,9 @@ export interface AgentLaunchSettings {
 /** What the Agents page keeps for every agent, the default agent and the YOLO mode switch. */
 export interface LaunchSettings {
   /**
-   * The agent picked for sessions started from an issue. Nothing reads it
-   * yet: those sessions still run Claude Code.
+   * The agent a new chat starts with while it can be used; `null` never. A
+   * new chat falls back to the first agent that can be used when this one
+   * cannot.
    */
   defaultAgent: CodingToolId
   /** Whether each agent gets the arguments that make it act without asking. */

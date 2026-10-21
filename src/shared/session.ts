@@ -15,9 +15,15 @@ export type SessionStatus = 'running' | 'exited'
 
 export interface SessionInfo {
   id: string
+  /** The project's root, or for a chat, the folder its agent runs in. */
   projectRoot: string
   /** The root of the project's worktree the session runs in, or `null` for the main worktree. */
   worktreePath: string | null
+  /**
+   * The chat whose agent the session runs, which has no project; `null` for
+   * a session of a project.
+   */
+  chatId: string | null
   toolId: ToolId
   /**
    * The issue whose start button started the session, which Claude Code was

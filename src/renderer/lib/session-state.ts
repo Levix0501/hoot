@@ -148,6 +148,9 @@ export function afterHookEvent(session: StateSource, report: HookEventReport): S
   const started =
     report.subagent || report.turn === null ? {} : afterTurnStarted(session, report.turn)
   switch (report.event) {
+    case 'SessionStart':
+    case 'SessionEnd':
+      return {}
     case 'PermissionRequest':
     case 'Elicitation':
       return { ...started, attention: report.subagent ? 'subagent-waiting' : 'waiting' }

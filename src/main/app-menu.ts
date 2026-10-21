@@ -6,6 +6,8 @@ export interface AppMenuActions {
   /** Shows the settings in the window. */
   showSettings(): void
   addProject(): void
+  /** Opens a new chat with the default agent, or the agent menu when none is usable. */
+  newChat(): void
   /** Closes the session shown in the window. */
   closeSession(): void
   selectNextSession(): void
@@ -53,6 +55,8 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
       label: 'File',
       submenu: [
         { label: 'Add Project…', accelerator: 'CmdOrCtrl+O', click: () => actions.addProject() },
+        { type: 'separator' },
+        { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => actions.newChat() },
         { type: 'separator' },
         // Replaces Close Window: the window's close button and Quit still quit Hoot.
         { label: 'Close Session', accelerator: 'CmdOrCtrl+W', click: () => actions.closeSession() },

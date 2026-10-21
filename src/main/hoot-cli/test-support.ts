@@ -68,6 +68,7 @@ export async function startTestHoot() {
   const socket = socketIn(directory, 'hoot.sock')
   const server = new HootServer({
     address: socket,
+    hasSession: (sessionId) => sessions.has(sessionId),
     sessionProject: (sessionId) => {
       const root = sessions.get(sessionId)
       const project = root === undefined ? undefined : projects.find(root)

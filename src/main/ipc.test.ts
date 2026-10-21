@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsState } from '../shared/agents'
 import type { AppInfo } from '../shared/app-info'
 import type { Dependencies } from '../shared/dependencies'
-import { IpcChannel } from '../shared/ipc'
+import { IpcChannel, type StartSessionRequest } from '../shared/ipc'
 import type { Issue, NewIssue } from '../shared/issues'
 import type { ParentChange, SubIssues } from '../shared/sub-issues'
 import type { Labels } from '../shared/labels'
+import type { ChatInfo } from '../shared/chats'
+import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
 
@@ -128,6 +130,46 @@ const labels = Object.assign(new EventEmitter(), {
 })
 
 const sessionStarts = { answer: vi.fn<(requestId: string, answer: unknown) => void>() }
+const chat: ChatInfo = {
+  id: 'chat-1',
+  toolId: 'claude',
+  folder: '/chats/claude-code',
+  conversationId: 'conversation-1',
+  title: '',
+  customName: null,
+  hasMessages: false,
+  createdAt: 1_000,
+  lastOpenedAt: 1_000,
+}
+const chats = Object.assign(emitter(), {
+  list: vi.fn<() => ChatInfo[]>(() => [chat]),
+  get: vi.fn<(id: string) => ChatInfo | undefined>((id) => (id === chat.id ? chat : undefined)),
+  create: vi.fn<(toolId: ChatInfo['toolId']) => Promise<ChatInfo>>(async () => chat),
+  prepareSession: vi.fn<
+    (id: string) => Promise<{
+      folder: string
+      launch: { conversationId: string | null; resume: boolean }
+    }>
+  >(async () => ({
+    folder: chat.folder,
+    launch: { conversationId: chat.conversationId, resume: false },
+  })),
+  opened: vi.fn<(id: string) => void>(),
+  rename: vi.fn<(id: string, name: string) => boolean>(() => true),
+  setTitle: vi.fn<(id: string, title: string) => void>(),
+})
+const sessionManager = Object.assign(emitter(), {
+  start: vi.fn<(request: StartSessionRequest) => Promise<SessionInfo>>(async (request) => ({
+    id: request.id,
+    projectRoot: request.projectRoot,
+    worktreePath: request.worktreePath,
+    chatId: request.chatId ?? null,
+    toolId: request.toolId,
+    issueId: request.issueId,
+    status: 'running' as const,
+    exit: null,
+  })),
+})
 
 beforeEach(() => {
   electron.handlers.clear()
@@ -139,6 +181,8 @@ beforeEach(() => {
   workflows.removeAllListeners()
   labels.removeAllListeners()
   issues.removeAllListeners()
+  chats.removeAllListeners()
+  sessionManager.removeAllListeners()
   registerIpc({
     issues,
     getWindow: () => window,
@@ -147,7 +191,8 @@ beforeEach(() => {
     agents,
     launchSettings,
     appearance: emitter(),
-    sessions: emitter(),
+    sessions: sessionManager,
+    chats,
     updates,
     worktrees: emitter(),
     workflows,
@@ -240,6 +285,61 @@ describe('the answers to the sessions hoot asks for', () => {
       ['r1', { ok: true, worktreePath: '/w' }],
       ['r2', { ok: false, message: 'No.' }],
     ])
+  })
+})
+
+describe('the messages of chats', () => {
+  it('give the chats, make a chat, and pass on every change of them to the window', async () => {
+    expect(await invoke(IpcChannel.listChats)).toEqual([chat])
+    expect(await invoke(IpcChannel.createChat, 'claude')).toEqual({ ok: true, chat })
+    expect(chats.create).toHaveBeenCalledWith('claude')
+    const changed = [{ ...chat, title: 'Fix the login' }]
+    chats.emit('changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.chatsChanged, changed)
+  })
+
+  it('gives a chat another name, and notes the title its agent sets', () => {
+    electron.listeners.get(IpcChannel.renameChat)!(trusted, chat.id, 'Login')
+    electron.listeners.get(IpcChannel.setChatTitle)!(trusted, chat.id, '✳ Fix the login')
+    electron.listeners.get(IpcChannel.renameChat)!(trusted, 7, 'Login')
+    expect(chats.rename.mock.calls).toEqual([[chat.id, 'Login']])
+    expect(chats.setTitle.mock.calls).toEqual([[chat.id, '✳ Fix the login']])
+  })
+
+  it('starts a chat in its folder, continuing its conversation, and moves it to the top', async () => {
+    const result = await invoke(IpcChannel.startSession, {
+      id: 's1',
+      projectRoot: chat.folder,
+      worktreePath: null,
+      chatId: chat.id,
+      toolId: 'claude',
+      issueId: null,
+      cols: 80,
+      rows: 24,
+    })
+    expect(result).toMatchObject({ ok: true, session: { chatId: chat.id } })
+    expect(chats.prepareSession).toHaveBeenCalledWith(chat.id)
+    expect(sessionManager.start).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's1', projectRoot: chat.folder, chatId: chat.id }),
+      null,
+      { conversationId: chat.conversationId, resume: false },
+    )
+    expect(chats.opened).toHaveBeenCalledWith(chat.id)
+  })
+
+  it('refuses a chat request that names a chat of another agent', async () => {
+    const result = await invoke(IpcChannel.startSession, {
+      id: 's1',
+      projectRoot: chat.folder,
+      worktreePath: null,
+      chatId: chat.id,
+      toolId: 'codex',
+      issueId: null,
+      cols: 80,
+      rows: 24,
+    })
+    expect(result).toEqual({ ok: false, message: 'Invalid session request.' })
+    expect(sessionManager.start).not.toHaveBeenCalled()
   })
 })
 

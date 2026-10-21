@@ -33,6 +33,26 @@ export function sidebarOrder<T extends { projectRoot: string; worktreePath: stri
 }
 
 /**
+ * The sessions of running chats, in the order of the Chats group, which comes
+ * after the projects in the sidebar and in the switch order. A session that
+ * is being closed counts too, at the place of its chat.
+ */
+export function orderedChatSessions<T extends { id: string; chatId: string | null }>(
+  chats: readonly { id: string }[],
+  sessions: readonly T[],
+  running: (session: T) => boolean,
+  closing: ReadonlySet<string> = new Set(),
+): T[] {
+  return chats.flatMap((chat) => {
+    const session = sessions.find(
+      (candidate) =>
+        candidate.chatId === chat.id && (running(candidate) || closing.has(candidate.id)),
+    )
+    return session === undefined ? [] : [session]
+  })
+}
+
+/**
  * The session shown once the sessions in `closing` are closed: the current one
  * if it stays, otherwise the first remaining session after it in sidebar order,
  * otherwise the last remaining one before it, otherwise none.

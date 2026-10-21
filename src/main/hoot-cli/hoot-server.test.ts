@@ -313,7 +313,7 @@ describe('HootServer', () => {
         await request('POST', '/hook-events', { body: JSON.stringify(report(event)) }),
       ).toEqual({
         status: 200,
-        answer: { ok: true, project: { id: hoot.gamma.id, name: 'gamma' } },
+        answer: { ok: true },
       })
     }
     expect(
@@ -349,6 +349,14 @@ describe('HootServer', () => {
         body: JSON.stringify(report('Stop')),
       }),
     ).toEqual({ status: 404, answer: { ok: false, message: 'No such session.' } })
+    // A chat's session has no project, but its hooks still reach Hoot.
+    hoot.sessions.set('chat-session', '/chats/claude-code')
+    expect(
+      await request('POST', '/hook-events', {
+        session: 'chat-session',
+        body: JSON.stringify(report('SessionStart', false, null)),
+      }),
+    ).toEqual({ status: 200, answer: { ok: true } })
     expect(await request('GET', '/hook-events')).toEqual({
       status: 404,
       answer: { ok: false, message: 'Hoot does not know this request.' },
@@ -361,6 +369,7 @@ describe('HootServer', () => {
       { sessionId: 'gamma-session', ...report('StopFailure') },
       { sessionId: 'hotel-session', ...report('PermissionRequest', true) },
       { sessionId: 'gamma-session', ...report('StopFailure', false, null) },
+      { sessionId: 'chat-session', ...report('SessionStart', false, null) },
     ])
   })
 
@@ -572,6 +581,7 @@ describe('HootServer', () => {
       expect(fs.statSync(socket).isSocket()).toBe(true)
       const server = new HootServer({
         address: socket,
+        hasSession: () => true,
         sessionProject: () => ({ ok: true, project: hoot.gamma }),
         listProjects: () => hoot.projects.list(),
         issues: hoot.issues,
@@ -604,6 +614,7 @@ describe('HootServer', () => {
     const socket = socketIn(hoot.directory, 'early.sock')
     const server = new HootServer({
       address: socket,
+      hasSession: () => false,
       sessionProject: () => ({ ok: false, message: 'none' }),
       listProjects: () => [],
       issues: hoot.issues,

@@ -10,7 +10,7 @@ import { MainArea } from './components/main-area'
 import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
 import { QuitDialog } from './components/quit-dialog'
-import { RenameSessionDialog } from './components/rename-session-dialog'
+import { RenameChatDialog, RenameSessionDialog } from './components/rename-session-dialog'
 import { SettingsView } from './components/settings/settings-view'
 import { sidebarWidthStyle } from './components/sidebar-resize-handle'
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar'
@@ -102,6 +102,7 @@ export function App() {
         )}
       </SidebarProvider>
       <RenameSessionDialog />
+      <RenameChatDialog />
       <CloseSessionDialog />
       <NewWorktreeDialog />
       <DeleteWorktreeDialog />

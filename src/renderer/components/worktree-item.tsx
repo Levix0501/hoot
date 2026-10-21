@@ -115,6 +115,7 @@ export function WorktreeItem({
     state.sessions.some(
       (session) =>
         isSessionRunning(session) &&
+        session.chatId === null &&
         isWithin(session.worktreePath ?? session.projectRoot, worktree.path),
     ),
   )

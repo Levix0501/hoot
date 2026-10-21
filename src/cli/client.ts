@@ -8,7 +8,6 @@ import {
   type EditedIssueAnswer,
   type HookEventAnswer,
   type HookEventReport,
-  type HootAnswer,
   type IssueAnswer,
   type IssueEdit,
   type IssueListAnswer,
@@ -136,7 +135,7 @@ export class HootClient {
   }
 
   /** Sends a request, and settles with Hoot's answer; rejects with a `CliError` when there is none. */
-  private ask<T extends HootAnswer<object>>(
+  private ask<T extends { ok: boolean }>(
     method: string,
     path: string,
     body?: unknown,

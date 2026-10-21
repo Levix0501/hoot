@@ -5,6 +5,7 @@ import { type AgentOperationSummary, type AgentsState } from '../../shared/agent
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
+import { chatAgent, type ChatInfo } from '../../shared/chats'
 import {
   blockedByIdsOf,
   blockingIdsOf,
@@ -93,7 +94,12 @@ import {
   type Page,
   type PageHistory,
 } from './page-history'
-import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
+import {
+  currentAfterClosing,
+  orderedChatSessions,
+  relativeSession,
+  sidebarOrder,
+} from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
 /** The pages of the settings: Agents where Hoot manages them, Appearance, Labels, and About. */
@@ -111,6 +117,8 @@ export interface UiSession {
   projectRoot: string
   /** The root of the worktree it runs in, or `null` for the project's main worktree. */
   worktreePath: string | null
+  /** The chat whose agent it runs, which belongs to no project; `null` for a session. */
+  chatId: string | null
   toolId: ToolId
   /**
    * The issue the session was opened from, which Claude Code is sent when it
@@ -236,6 +244,8 @@ export interface AppState {
   launchSettings: LaunchSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
+  /** Every chat, in the order of the sidebar's Chats group. */
+  chats: ChatInfo[]
   /**
    * The issues whose start button is creating a worktree for them, until
    * their session shows or creating it fails.
@@ -307,6 +317,8 @@ export interface AppState {
   issueDeletion: number | null
   /** The session the rename dialog is open for. */
   renamingSessionId: string | null
+  /** The chat the rename dialog is open for. */
+  renamingChatId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
   /**
@@ -392,6 +404,27 @@ export interface AppState {
   changeAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
   /** Starts a session in the project's main worktree, or in one of its worktrees. */
   newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
+  /**
+   * Opens a new chat with `toolId`, or with the default agent while it can be
+   * used, else the first agent that can: a chat of the agent, shown in the
+   * main area, and its agent's process started. Without an agent that can be
+   * used, opens the Agents page and says that one must be installed or turned
+   * on. Until the first detection of the agents finishes, nothing happens.
+   */
+  newChat(toolId?: CodingToolId): Promise<void>
+  /**
+   * Shows a chat's page and, when no process of it runs, starts its agent in
+   * the chat's folder, continuing its conversation; a chat that ended
+   * unexpectedly continues in a new session.
+   */
+  openChat(chatId: string): void
+  /** Continues a chat whose agent ended unexpectedly, as its Resume button does. */
+  resumeChat(chatId: string): void
+  /** Asks for confirmation before closing a running chat's agent, as closing a session does. */
+  closeChat(chatId: string): void
+  startRenamingChat(chatId: string): void
+  /** Ends renaming a chat; `null` keeps its name as it was. */
+  finishRenamingChat(chatId: string, name: string | null): void
   /**
    * Starts work on an open issue, as its start button does. While a session
    * opened from the issue is in the sidebar, shows the one opened last,
@@ -742,16 +775,16 @@ export function isSessionRunning(session: UiSession): boolean {
   return session.status !== 'exited'
 }
 
-function fromInfo(info: SessionInfo): UiSession {
+function fromInfo(info: SessionInfo, chat?: ChatInfo): UiSession {
   return {
     ...info,
-    title: '',
+    title: chat?.title ?? '',
     workingSince: null,
     attention: null,
     turns: [],
     failure: null,
     unread: false,
-    customName: null,
+    customName: chat?.customName ?? null,
     closing: false,
   }
 }
@@ -1020,13 +1053,23 @@ export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: st
   ]
 }
 
-/** Every session in sidebar order. */
+/**
+ * Every session in switch order: the sessions of the projects in sidebar
+ * order, then the running chats in the order of the Chats group, which is
+ * where chats come in the sidebar.
+ */
 export function orderedSessions(
-  state: Pick<AppState, 'projects' | 'worktrees' | 'knownWorktrees' | 'sessions'>,
+  state: Pick<AppState, 'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'chats'>,
+  /** Sessions that are being closed count too, at the place of their chat. */
+  closing: ReadonlySet<string> = new Set(),
 ): UiSession[] {
-  return sidebarOrder(state.projects, state.sessions, (root) =>
-    projectWorktreeRows(state, root).map((row) => row.path),
+  const sessions = sidebarOrder(
+    state.projects,
+    state.sessions.filter((session) => session.chatId === null),
+    (root) => projectWorktreeRows(state, root).map((row) => row.path),
   )
+  const chats = orderedChatSessions(state.chats, state.sessions, isSessionRunning, closing)
+  return [...sessions, ...chats]
 }
 
 function updateSession(
@@ -1086,7 +1129,18 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (!session || session.title === title) return
       const arrivedAt = arrivals.get(id)?.[0] ?? Date.now()
       const change = afterTitle(session, title, viewedSessionId(get()) === id, arrivedAt)
-      set((state) => ({ sessions: updateSession(state.sessions, id, { title, ...change }) }))
+      set((state) => ({
+        sessions: updateSession(state.sessions, id, { title, ...change }),
+        ...(session.chatId === null
+          ? {}
+          : {
+              chats: state.chats.map((chat) =>
+                chat.id === session.chatId ? { ...chat, title } : chat,
+              ),
+            }),
+      }))
+      // The name of a chat follows the title its agent sets, as a session's does.
+      if (session.chatId !== null) api.setChatTitle(session.chatId, title)
     })
     terminals.set(id, sessionTerminal)
     arrivals.set(id, [])
@@ -1155,7 +1209,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       let history = forget(state.history, gone)
       let currentPage = state.currentPage
       if (currentPage !== null && gone(currentPage)) {
-        const order = orderedSessions(state).map((session) => session.id)
+        const order = orderedSessions(state, ids).map((session) => session.id)
         const next =
           currentPage.kind === 'session'
             ? currentAfterClosing(order, currentPage.sessionId, ids)
@@ -1235,6 +1289,17 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /** Whether the issues have been read since Hoot started. */
   let issuesRead = false
+
+  /** Shows the chats as they are now, in the order the sidebar lists them. */
+  const applyChats = (chats: ChatInfo[]) => {
+    set((state) => ({
+      chats,
+      renamingChatId:
+        state.renamingChatId !== null && !chats.some((chat) => chat.id === state.renamingChatId)
+          ? null
+          : state.renamingChatId,
+    }))
+  }
 
   /**
    * Shows the labels as they are now, unless newer ones are shown already;
@@ -1350,7 +1415,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       state.projects.filter((project) => !ids.has(project.id)).map((project) => project.id),
     )
     const orphaned = state.sessions
-      .filter((session) => !roots.has(session.projectRoot))
+      .filter((session) => session.chatId === null && !roots.has(session.projectRoot))
       .map((session) => session.id)
     // Their processes have all ended: a project cannot be removed while one runs.
     if (orphaned.length > 0 || removed.size > 0) removePages(new Set(orphaned), removed, projects)
@@ -1428,6 +1493,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     worktreePath: string | null,
     issueId: number | null = null,
     show = true,
+    chat: ChatInfo | null = null,
   ): string => {
     const id = crypto.randomUUID()
     openTerminal(id)
@@ -1439,17 +1505,18 @@ export const useAppStore = create<AppState>()((set, get) => {
           id,
           projectRoot,
           worktreePath,
+          chatId: chat?.id ?? null,
           toolId,
           issueId,
           status: 'starting',
           exit: null,
-          title: '',
+          title: chat?.title ?? '',
           workingSince: null,
           attention: null,
           turns: [],
           failure: null,
           unread: false,
-          customName: null,
+          customName: chat?.customName ?? null,
           closing: false,
         },
       ],
@@ -1650,6 +1717,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     agents: null,
     launchSettings: null,
     sessions: [],
+    chats: [],
     startingIssues: [],
     issueStarts: [],
     currentPage: null,
@@ -1671,6 +1739,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     createMore: false,
     issueDeletion: null,
     renamingSessionId: null,
+    renamingChatId: null,
     closeConfirmation: null,
     quitConfirmation: null,
     update: { kind: 'none' },
@@ -1783,6 +1852,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (info.exit && isNormalExit(info.exit)) void get().closeSession(info.id)
       })
       api.onSessionCommand((command) => get().runMenuCommand(command))
+      let chatsRead = false
+      api.onChatsChanged((chats) => {
+        chatsRead = true
+        applyChats(chats)
+      })
       api.onShowSettingsRequested(() => get().showSettings())
       api.onShowAboutRequested(() => get().showSettings('about'))
       api.onConfirmQuit((runningSessions, reason, agentOperations) =>
@@ -1815,13 +1889,15 @@ export const useAppStore = create<AppState>()((set, get) => {
         (error: unknown) => console.error('Could not list the worktrees:', error),
       )
 
-      const [projects, sessions, launchSettings] = await Promise.all([
+      const [projects, sessions, launchSettings, chats] = await Promise.all([
         api.listProjects(),
         api.listSessions(),
         api.getLaunchSettings(),
+        api.listChats(),
       ])
       // A setting changed while this was read is reported by the change event, which is newer.
       set((state) => ({ launchSettings: state.launchSettings ?? launchSettings }))
+      if (!chatsRead) applyChats(chats)
       applyProjects(projects)
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
@@ -1830,7 +1906,17 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (reloaded.length > 0) {
         const shown = get().currentPage
         set((state) => {
-          const all = [...state.sessions, ...reloaded.map(fromInfo)]
+          const all = [
+            ...state.sessions,
+            ...reloaded.map((info) =>
+              fromInfo(
+                info,
+                info.chatId === null
+                  ? undefined
+                  : state.chats.find((chat) => chat.id === info.chatId),
+              ),
+            ),
+          ]
           const first = orderedSessions({ ...state, sessions: all })[0]
           const currentPage =
             state.currentPage ?? (first === undefined ? null : sessionPage(first.id))
@@ -1945,6 +2031,97 @@ export const useAppStore = create<AppState>()((set, get) => {
       addSession(projectRoot, toolId, worktreePath, null)
     },
 
+    async newChat(toolId) {
+      const { tools, launchSettings } = get()
+      // The first detection of the agents says which can start a chat; until
+      // it has finished, a click does nothing.
+      if (tools.detecting) return
+      const agent = chatAgent(tools, launchSettings, toolId ?? null)
+      if (agent === null) {
+        toast.error('Could not start a chat.', {
+          description: 'Install an agent or turn one on in the Agents page first.',
+        })
+        get().showSettings('agents')
+        return
+      }
+      const result = await api
+        .createChat(agent)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error('Could not start a chat.', { description: result.message })
+        return
+      }
+      set((state) => ({
+        chats: [result.chat, ...state.chats.filter((chat) => chat.id !== result.chat.id)],
+      }))
+      get().openChat(result.chat.id)
+    },
+
+    openChat(chatId) {
+      const chat = get().chats.find((candidate) => candidate.id === chatId)
+      if (!chat) return
+      const running = get().sessions.find(
+        (session) => session.chatId === chatId && isSessionRunning(session),
+      )
+      if (running) {
+        // A chat that is running only shows its page, without another process.
+        showPage(sessionPage(running.id))
+        return
+      }
+      // An agent that ended unexpectedly leaves its page with the last output
+      // and a Resume button; continuing it starts a new session.
+      const ended = get().sessions.find((session) => session.chatId === chatId)
+      if (ended) {
+        void api.closeSession(ended.id)
+        set((state) => ({
+          sessions: state.sessions.filter((session) => session.id !== ended.id),
+        }))
+        // Its terminal goes once the new page is in place.
+        setTimeout(() => {
+          terminals.get(ended.id)?.terminal.dispose()
+          terminals.delete(ended.id)
+          arrivals.delete(ended.id)
+        }, 0)
+      }
+      addSession(chat.folder, chat.toolId, null, null, true, chat)
+    },
+
+    resumeChat(chatId) {
+      get().openChat(chatId)
+    },
+
+    closeChat(chatId) {
+      const running = get().sessions.find(
+        (session) => session.chatId === chatId && isSessionRunning(session),
+      )
+      if (running) get().requestCloseSession(running.id)
+    },
+
+    startRenamingChat(chatId) {
+      if (get().chats.some((chat) => chat.id === chatId)) set({ renamingChatId: chatId })
+    },
+
+    finishRenamingChat(chatId, name) {
+      set((state) => ({
+        renamingChatId: state.renamingChatId === chatId ? null : state.renamingChatId,
+        chats:
+          name === null
+            ? state.chats
+            : state.chats.map((chat) =>
+                chat.id === chatId ? { ...chat, customName: name === '' ? null : name } : chat,
+              ),
+        sessions:
+          name === null
+            ? state.sessions
+            : state.sessions.map((session) =>
+                session.chatId === chatId
+                  ? { ...session, customName: name === '' ? null : name }
+                  : session,
+              ),
+      }))
+      if (name !== null) api.renameChat(chatId, name)
+    },
+
     async startIssue(issueId) {
       const latest = latestIssueSession(get(), issueId)
       if (latest) {
@@ -1996,6 +2173,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         id,
         projectRoot: session.projectRoot,
         worktreePath: session.worktreePath,
+        ...(session.chatId === null ? {} : { chatId: session.chatId }),
         toolId: session.toolId,
         issueId: session.issueId,
         ...(options === undefined ? {} : { startedBy: options.by }),
@@ -2074,6 +2252,9 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     runMenuCommand(command) {
       switch (command) {
+        case 'new-chat':
+          void get().newChat()
+          break
         case 'close-current':
           closeCurrent()
           break

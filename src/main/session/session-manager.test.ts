@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
-import type { SentIssue } from './launch'
+import type { ChatLaunch, SentIssue } from './launch'
 import {
   SessionError,
   SessionManager,
@@ -47,6 +47,7 @@ function setup(
       toolId: string,
       cwd: string,
       issue: SentIssue | null,
+      chat: ChatLaunch | null,
       sessionId: string,
     ) => Promise<SessionLaunch>
   } = {},
@@ -141,6 +142,7 @@ describe('SessionManager', () => {
       id: 's1',
       projectRoot: '/work/project',
       worktreePath: null,
+      chatId: null,
       toolId: 'claude',
       issueId: null,
       status: 'running',
@@ -229,10 +231,23 @@ describe('SessionManager', () => {
     ])
   })
 
+  it('passes on what is typed in a chat, to split the conversation it starts anew', async () => {
+    const { manager, host } = setup()
+    const inputs: Array<[string, string]> = []
+    manager.on('input', (id, data) => inputs.push([id, data]))
+    await manager.start({ ...request('c1', 'claude'), chatId: 'chat-1' })
+    manager.write('c1', 'hello\r', false)
+    manager.write('c1', 'pasted', true)
+    manager.write('c2', 'not a chat', false)
+    host.emit('exit', 'c1', 0, 0)
+    manager.write('c1', 'after exit', false)
+    expect(inputs).toEqual([['c1', 'hello\r']])
+  })
+
   it('passes on the events of the hooks of a running Claude Code session, in order with its output', async () => {
     const { promise: launched, resolve: release } = Promise.withResolvers<void>()
     const { manager, host } = setup({
-      resolveLaunch: async (toolId, _cwd, _issue, sessionId) => {
+      resolveLaunch: async (toolId, _cwd, _issue, _chat, sessionId) => {
         if (sessionId === 'c3') await launched
         return { file: toolId, args: [], env: {} }
       },
@@ -359,7 +374,7 @@ describe('SessionManager', () => {
     const launched: string[] = []
     const launch = pendingLaunch()
     const { manager, host } = setup({
-      resolveLaunch: async (toolId, _cwd, _issue, sessionId) => {
+      resolveLaunch: async (toolId, _cwd, _issue, _chat, sessionId) => {
         launched.push(sessionId)
         return launch.resolveLaunch(toolId)
       },

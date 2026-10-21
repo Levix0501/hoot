@@ -1747,13 +1747,15 @@ describe('hoot session start', () => {
 /** The id Claude Code gives the turn of the hooks in these tests. */
 const TURN = '1586a9b7-c200-4274-9799-b0abf09a7d2c'
 
+const SESSION = 'b2b7c1f0-0000-4000-8000-000000000000'
+
 /**
  * The input Claude Code gives a hook on standard input, for an event in the
  * turn `turn` (none if `null`), met by a subagent if `agent` names one.
  */
 const hookInput = (event: string, agent?: string, turn: string | null = TURN) =>
   JSON.stringify({
-    session_id: 'b2b7c1f0-0000-4000-8000-000000000000',
+    session_id: SESSION,
     transcript_path: '/tmp/transcript.jsonl',
     cwd: '/work/gamma',
     ...(turn === null ? {} : { prompt_id: turn }),
@@ -1773,6 +1775,9 @@ const reported = (
   startedAt: STARTED_AT,
   subagent,
   turn,
+  conversationId: SESSION,
+  source: null,
+  reason: null,
 })
 
 describe('hoot hook', () => {
@@ -1826,20 +1831,36 @@ describe('hoot hook', () => {
       event: 'StopFailure',
       subagent: false,
       turn: TURN,
+      conversationId: SESSION,
+      source: null,
+      reason: null,
     })
     expect(hookEventOf(Buffer.from(hookInput('Elicitation', 'a1')))).toEqual({
       event: 'Elicitation',
       subagent: true,
       turn: TURN,
+      conversationId: SESSION,
+      source: null,
+      reason: null,
     })
     expect(hookEventOf(Buffer.from(hookInput('Stop', '', '')))).toEqual({
       event: 'Stop',
       subagent: false,
       turn: null,
+      conversationId: SESSION,
+      source: null,
+      reason: null,
     })
     expect(
       hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 'Stop', prompt_id: 7 }))),
-    ).toEqual({ event: 'Stop', subagent: false, turn: null })
+    ).toEqual({
+      event: 'Stop',
+      subagent: false,
+      turn: null,
+      conversationId: null,
+      source: null,
+      reason: null,
+    })
     expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
   })
 

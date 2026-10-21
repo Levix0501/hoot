@@ -12,6 +12,7 @@ function setup(options: { sidebarOpen?: boolean } = {}) {
     showAbout: () => calls.push('showAbout'),
     showSettings: () => calls.push('showSettings'),
     addProject: () => calls.push('addProject'),
+    newChat: () => calls.push('newChat'),
     closeSession: () => calls.push('closeSession'),
     selectNextSession: () => calls.push('selectNextSession'),
     selectPreviousSession: () => calls.push('selectPreviousSession'),
@@ -71,17 +72,20 @@ describe('appMenuTemplate', () => {
     expect(calls).toEqual(['showAbout'])
   })
 
-  it('puts Close Session, with Cmd+W, in place of Close Window in the File menu', () => {
+  it('puts New Chat and Close Session, with Cmd+N and Cmd+W, in place of Close Window in the File menu', () => {
     const { template, calls } = setup()
     const file = submenu(template.find((item) => item.label === 'File'))
     expect(file.map((item) => [item.label ?? item.type, item.accelerator ?? null])).toEqual([
       ['Add Project…', 'CmdOrCtrl+O'],
       ['separator', null],
+      ['New Chat', 'CmdOrCtrl+N'],
+      ['separator', null],
       ['Close Session', 'CmdOrCtrl+W'],
     ])
     expect(file.some((item) => item.role === 'close')).toBe(false)
+    click(file.find((item) => item.label === 'New Chat'))
     click(file.find((item) => item.label === 'Close Session'))
-    expect(calls).toEqual(['closeSession'])
+    expect(calls).toEqual(['newChat', 'closeSession'])
   })
 
   it('selects the next and previous sessions from the Window menu', () => {

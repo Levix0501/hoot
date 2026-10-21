@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { defaultSessionName, sessionName } from '../../shared/session'
-import { focusAfterOverlay, useAppStore, type UiSession } from '../store/app-store'
+import { chatName, type ChatInfo } from '../../shared/chats'
+import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import { Button } from './ui/button'
 import {
   Dialog,
@@ -12,15 +13,23 @@ import {
 } from './ui/dialog'
 import { Input } from './ui/input'
 
-/** The name field and buttons of the rename dialog, which start from the session's name. */
-function RenameSessionForm({
-  session,
+/** The name field and buttons of a rename dialog, which start from the name something has. */
+function RenameForm({
+  title,
+  name: initialName,
+  placeholder,
+  ariaLabel,
+  testId,
   onRename,
 }: {
-  session: UiSession
+  title: string
+  name: string
+  placeholder: string
+  ariaLabel: string
+  testId: string
   onRename: (name: string) => void
 }) {
-  const [name, setName] = useState(() => sessionName(session))
+  const [name, setName] = useState(initialName)
 
   return (
     <form
@@ -31,7 +40,7 @@ function RenameSessionForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>Rename Session</DialogTitle>
+        <DialogTitle>{title}</DialogTitle>
       </DialogHeader>
       <Input
         value={name}
@@ -41,16 +50,16 @@ function RenameSessionForm({
         autoFocus
         spellCheck={false}
         autoComplete="off"
-        // The name an empty one gives the session.
-        placeholder={defaultSessionName(session.toolId, session.title)}
-        aria-label="Session name"
-        data-testid="session-rename-input"
+        // The name an empty one gives it.
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        data-testid={testId}
       />
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />} data-testid="session-rename-cancel">
+        <DialogClose render={<Button variant="outline" />} data-testid={`${testId}-cancel`}>
           Cancel
         </DialogClose>
-        <Button type="submit" data-testid="session-rename-confirm">
+        <Button type="submit" data-testid={`${testId}-confirm`}>
           Rename
         </Button>
       </DialogFooter>
@@ -84,10 +93,51 @@ export function RenameSessionDialog() {
         data-testid="rename-session-dialog"
       >
         {shown && (
-          <RenameSessionForm
+          <RenameForm
             key={shown.id}
-            session={shown}
+            title="Rename Session"
+            name={sessionName(shown)}
+            placeholder={defaultSessionName(shown.toolId, shown.title)}
+            ariaLabel="Session name"
+            testId="session-rename-input"
             onRename={(name) => finishRenaming(shown.id, name)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Renames a chat, as a session's rename dialog renames a session. */
+export function RenameChatDialog() {
+  const chat = useAppStore((state) =>
+    state.chats.find((candidate) => candidate.id === state.renamingChatId),
+  )
+  const finishRenamingChat = useAppStore((state) => state.finishRenamingChat)
+  const [shown, setShown] = useState<ChatInfo | undefined>(chat)
+  if (chat && chat !== shown) setShown(chat)
+
+  return (
+    <Dialog
+      open={chat !== undefined}
+      onOpenChange={(open) => {
+        if (!open && chat) finishRenamingChat(chat.id, null)
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        finalFocus={focusAfterOverlay}
+        data-testid="rename-chat-dialog"
+      >
+        {shown && (
+          <RenameForm
+            key={shown.id}
+            title="Rename Chat"
+            name={chatName(shown)}
+            placeholder={defaultSessionName(shown.toolId, shown.title)}
+            ariaLabel="Chat name"
+            testId="chat-rename-input"
+            onRename={(name) => finishRenamingChat(shown.id, name)}
           />
         )}
       </DialogContent>

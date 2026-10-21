@@ -1177,9 +1177,7 @@ export function AgentsPage() {
                 <span className="text-sm font-medium" id="default-agent-label">
                   Default agent
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  Sessions started from an issue use it.
-                </span>
+                <span className="text-xs text-muted-foreground">New chats use it.</span>
               </span>
               <DefaultAgentPicker value={defaultAgent} disabled={launchSettings === null} />
             </div>

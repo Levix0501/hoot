@@ -16,6 +16,7 @@ import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
   type AddProjectResult,
+  type CreateChatResult,
   type CreateLabelGroupResult,
   type CreateLabelResult,
   type DependencyChangeResult,
@@ -52,6 +53,7 @@ import type {
   RemoveWorktreeResult,
 } from '../shared/worktrees'
 import type { AgentService } from './agents/agent-service'
+import type { ChatManager } from './chats/chat-manager'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
@@ -82,6 +84,8 @@ export interface IpcDependencies {
   sidebar: SidebarStateStore
   appearance: AppearanceStore
   sessions: SessionManager
+  /** The chats, which belong to no project. */
+  chats: ChatManager
   quitGuard: QuitGuard
   updates: UpdateService
   worktrees: WorktreeService
@@ -98,6 +102,7 @@ const startSessionRequest = z.object({
   id: sessionId,
   projectRoot: z.string().min(1),
   worktreePath: z.string().min(1).nullable(),
+  chatId: z.string().min(1).max(100).nullable().optional(),
   toolId: z.enum(TOOL_IDS),
   issueId: rowId.nullable(),
   startedBy: z.enum(['user', 'agent']).optional(),
@@ -425,10 +430,65 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.listSessions, () => deps.sessions.list())
 
+  handle(IpcChannel.listChats, () => deps.chats.list())
+
+  handle(IpcChannel.createChat, async (_event, value): Promise<CreateChatResult> => {
+    const parsed = agentId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid agent.' }
+    try {
+      return { ok: true, chat: await deps.chats.create(parsed.data) }
+    } catch (error) {
+      return { ok: false, message: `Could not make the chat's folder: ${errorMessage(error)}` }
+    }
+  })
+
+  on(IpcChannel.renameChat, (...args) => {
+    const parsed = z.tuple([sessionId, z.string().max(10_000)]).safeParse(args)
+    if (parsed.success) deps.chats.rename(...parsed.data)
+  })
+
+  on(IpcChannel.setChatTitle, (...args) => {
+    const parsed = z.tuple([sessionId, z.string().max(10_000)]).safeParse(args)
+    if (parsed.success) deps.chats.setTitle(...parsed.data)
+  })
+
+  deps.chats.on('changed', (chats) => send(IpcChannel.chatsChanged, chats))
+
   handle(IpcChannel.startSession, async (_event, value): Promise<StartSessionResult> => {
     const parsed = startSessionRequest.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid session request.' }
     const request = parsed.data
+    if (request.chatId !== undefined && request.chatId !== null) {
+      const chat = deps.chats.get(request.chatId)
+      if (
+        !chat ||
+        chat.toolId !== request.toolId ||
+        request.worktreePath !== null ||
+        request.issueId !== null
+      ) {
+        return { ok: false, message: 'Invalid session request.' }
+      }
+      let prepared
+      try {
+        prepared = await deps.chats.prepareSession(chat.id)
+      } catch (error) {
+        return { ok: false, message: `Could not make the chat's folder: ${errorMessage(error)}` }
+      }
+      if (!prepared) return { ok: false, message: 'The chat no longer exists.' }
+      try {
+        const session = await deps.sessions.start(
+          { ...request, projectRoot: prepared.folder },
+          null,
+          prepared.launch,
+        )
+        // The chat was opened: it goes to the top of Chats.
+        deps.chats.opened(chat.id)
+        return { ok: true, session }
+      } catch (error) {
+        if (error instanceof SessionError) return { ok: false, message: error.message }
+        throw error
+      }
+    }
     const project = deps.projects.find(request.projectRoot)
     if (!project) {
       return { ok: false, message: 'The project is not in the list.' }

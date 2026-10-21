@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
+import {
+  currentAfterClosing,
+  orderedChatSessions,
+  relativeSession,
+  sidebarOrder,
+} from './session-order'
 
 const project = (root: string) => ({ id: root.charCodeAt(1), root, name: root.slice(1) })
 
@@ -67,6 +72,27 @@ describe('currentAfterClosing', () => {
     expect(currentAfterClosing(['s0', 's1', 's2', 's3'], 's1', new Set(['s1', 's2']))).toBe('s3')
     expect(currentAfterClosing(['s0', 's1', 's2'], 's1', new Set(['s1', 's2']))).toBe('s0')
     expect(currentAfterClosing(order, 's1', new Set(order))).toBeNull()
+  })
+})
+
+describe('orderedChatSessions', () => {
+  it('puts the running chats in the order of the Chats group, and a closing one at its place', () => {
+    const chats = [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }]
+    const sessions = [
+      { id: 's1', chatId: 'c3' },
+      { id: 's2', chatId: 'c1' },
+      { id: 's3', chatId: 'c2' },
+    ]
+    expect(
+      orderedChatSessions(chats, sessions, (session) => session.id !== 's3').map(
+        (session) => session.id,
+      ),
+    ).toEqual(['s2', 's1'])
+    expect(
+      orderedChatSessions(chats, sessions, () => false, new Set(['s3'])).map(
+        (session) => session.id,
+      ),
+    ).toEqual(['s3'])
   })
 })
 

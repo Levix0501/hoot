@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.12
+
+### Patch Changes
+
+- [`0556f68`](https://github.com/Levix0501/hoot/commit/0556f6808b0de405a698c8368b251bf7ff6d33e9) - Agents now comes first in the list of the settings' pages, above Appearance.
+
 ## 0.1.0-alpha.11
 
 ### Minor Changes

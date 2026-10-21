@@ -1,4 +1,5 @@
 import { FolderPlusIcon, PlayIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
+import { chatName } from '../../shared/chats'
 import { describeExit, isNormalExit, sessionName } from '../../shared/session'
 import { sessionState, stateLabel } from '../lib/session-state'
 import { useAppStore, type UiSession } from '../store/app-store'
@@ -33,18 +34,22 @@ export function SessionPane({ session }: { session: UiSession }) {
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
   const resumeChat = useAppStore((state) => state.resumeChat)
-  const chatExists = useAppStore((state) =>
-    session.chatId === null ? false : state.chats.some((chat) => chat.id === session.chatId),
+  const chat = useAppStore((state) =>
+    session.chatId === null
+      ? undefined
+      : state.chats.find((candidate) => candidate.id === session.chatId),
   )
   const inset = useTopRowInset()
   // A chat whose agent ended any other way than normally keeps its last output,
   // and can be resumed; a session, and a chat closed by the user, close instead.
   const resumable =
-    session.chatId !== null &&
-    chatExists &&
+    chat !== undefined &&
     session.status === 'exited' &&
     session.exit !== null &&
     !isNormalExit(session.exit)
+  // A chat's page shows the chat's name, which keeps the last title its agent
+  // set when the agent clears the terminal title, as its row does.
+  const name = chat === undefined ? sessionName(session) : chatName(chat)
 
   return (
     <div
@@ -69,11 +74,11 @@ export function SessionPane({ session }: { session: UiSession }) {
         <div className="flex min-w-0 flex-1 text-sm">
           <span
             className="min-w-0 truncate font-medium [app-region:no-drag]"
-            title={sessionName(session)}
+            title={name}
             data-session-name=""
             data-testid="session-name"
           >
-            {sessionName(session)}
+            {name}
           </span>
         </div>
         <StatusBadge session={session} />

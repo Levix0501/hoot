@@ -95,8 +95,8 @@ import {
 import { currentAfterClosing, relativeSession, sidebarOrder } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
-/** The pages of the settings: Appearance, on macOS Agents, Labels, and About. */
-export type SettingsSection = 'appearance' | 'agents' | 'labels' | 'about'
+/** The pages of the settings: Agents where Hoot manages them, Appearance, Labels, and About. */
+export type SettingsSection = 'agents' | 'appearance' | 'labels' | 'about'
 
 /**
  * How the issue list's Label filter matches the labels checked in it: issues

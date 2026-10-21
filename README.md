@@ -128,7 +128,7 @@ and updates [agents](#agents) with the npm of the computer's Node.js.
 
 **Settings** at the bottom of the sidebar, **Hoot > Settings…** or ⌘, shows the settings in place
 of the sidebar and the shown page: their list on the left, as wide as the sidebar, and their page
-on the right: **Appearance**, **Agents**, **Labels** and **About**. Click one to show it; the settings show
+on the right: **Agents**, **Appearance**, **Labels** and **About**. Click one to show it; the settings show
 the page shown last whenever they are shown again (Appearance, after Hoot starts), and
 **Install in Settings…** in the new session menu always shows Agents. Switching between their
 pages is not a step for going back and forward. The sidebar button and Back and Forward are not at

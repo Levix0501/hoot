@@ -16,14 +16,17 @@ import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
 import { LabelsPage } from './labels-page'
 
-/** The pages of the settings, in the order of their list: Agents where Hoot manages them, About last. */
+/**
+ * The pages of the settings, in the order of their list: Agents first where Hoot manages them,
+ * About last.
+ */
 const SECTIONS: ReadonlyArray<{
   id: SettingsSection
   label: string
   icon: ComponentType
 }> = [
-  { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
   ...(api.manageAgents ? [{ id: 'agents' as const, label: 'Agents', icon: BotIcon }] : []),
+  { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
   { id: 'labels', label: 'Labels', icon: TagIcon },
   { id: 'about', label: 'About', icon: InfoIcon },
 ]

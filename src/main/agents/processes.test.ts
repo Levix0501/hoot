@@ -157,7 +157,10 @@ describe('runCommand', () => {
 
   // As the npm package of Codex starts codex.exe with Node.js: a console
   // window of its own would flash on the screen. PowerShell says which
-  // window its console has.
+  // window its console has, through .NET alone: Add-Type, the usual way,
+  // took longer than the test allows on GitHub's Windows runners, as a
+  // cmdlet that PowerShell looks for among the modules installed there, and
+  // that compiles C#.
   it.runIf(process.platform === 'win32')(
     'gives what a command starts on Windows a console without a window',
     async () => {
@@ -169,10 +172,13 @@ describe('runCommand', () => {
         'v1.0',
         'powershell.exe',
       )
-      const consoleWindow =
-        'Add-Type -Namespace Hoot -Name Console -MemberDefinition ' +
-        `'[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();'; ` +
-        '[Hoot.Console]::GetConsoleWindow()'
+      const consoleWindow = [
+        "$type = [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly([Reflection.AssemblyName]::new('Hoot'), 'Run').DefineDynamicModule('Hoot').DefineType('Console')",
+        "$method = $type.DefinePInvokeMethod('GetConsoleWindow', 'kernel32.dll', 'Public, Static, PinvokeImpl', 'Standard', [IntPtr], [Type[]]@(), 'Winapi', 'Auto')",
+        // Without it, what the function returns is lost, and the call returns 0.
+        "$method.SetImplementationFlags('PreserveSig')",
+        '$type.CreateType()::GetConsoleWindow()',
+      ].join('; ')
       const args = ['-NoProfile', '-NonInteractive', '-Command', consoleWindow]
       const result = await runCommand(
         {
@@ -184,8 +190,13 @@ describe('runCommand', () => {
         },
         20_000,
       )
-      expect(result).toMatchObject({ code: 0, timedOut: false })
-      expect(result.stdout.trim()).toBe('0')
+      // With what it wrote, which says why when PowerShell fails.
+      const { code, timedOut, output } = result
+      expect({ code, timedOut, output: output.trim() }).toEqual({
+        code: 0,
+        timedOut: false,
+        output: '0',
+      })
     },
   )
 

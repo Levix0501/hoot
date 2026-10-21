@@ -67,6 +67,8 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
   private readonly typing = new Map<string, string>()
   /** The title a Claude Code chat had when `/clear` was typed, for the chat its conversation leaves. */
   private readonly clearTitles = new Map<string, string>()
+  /** The title each chat had before the last one its agent set. */
+  private readonly previousTitles = new Map<string, string>()
   /** When the conversation a Claude Code chat is in started, by the hook that told of it. */
   private readonly conversationStartedAt = new Map<string, number>()
 
@@ -179,6 +181,7 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
   setTitle(id: string, title: string): void {
     const chat = this.chats.get(id)
     if (!chat || chat.title === title) return
+    this.previousTitles.set(id, chat.title)
     this.chats.update(id, { title })
     this.emitChanged()
   }
@@ -214,8 +217,10 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
         const before = this.clearTitles.get(chatId)
         if (chat.conversationId !== null && chat.hasMessages) {
           // The title the conversation had when `/clear` was typed, before
-          // Claude Code set the next one, if the title came in meanwhile.
-          const title = before ?? chat.title
+          // Claude Code set the next one, if the title came in meanwhile; or
+          // the title before the latest one.
+          const previous = this.previousTitles.get(chatId)
+          const title = before ?? (previous ? previous : chat.title)
           this.insertSplit(chat, {
             id: chat.conversationId,
             title: title === '' ? null : title,
@@ -399,7 +404,7 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
     const after = conversations
       .slice(current + 1)
       .filter((conversation) => !claimed.has(conversation.id))
-    if (after.length > 0) {
+    if (after.length > 0 && this.isActiveChat(chat)) {
       // The chat left its conversation for the newest one no other chat has,
       // as when the agent started another; the conversation it left stays as
       // a chat of its own, and so does any between them.
@@ -414,6 +419,22 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
       this.chats.update(chatId, { hasMessages: true })
       this.emitChanged()
     }
+  }
+
+  /**
+   * Whether this chat is the one opened last among those in its folder: the
+   * one a conversation an agent started belongs to, when the chat that
+   * started it does not say so itself.
+   */
+  private isActiveChat(chat: ChatInfo): boolean {
+    const siblings = this.chats.inFolder(chat.folder)
+    const active = siblings.reduce((best, candidate) => {
+      if (candidate.lastOpenedAt !== best.lastOpenedAt) {
+        return candidate.lastOpenedAt > best.lastOpenedAt ? candidate : best
+      }
+      return candidate.createdAt > best.createdAt ? candidate : best
+    })
+    return active.id === chat.id
   }
 
   /** Adds a chat for a conversation the agent started and left, unless one has it already. */
@@ -450,6 +471,7 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
     this.chats.delete(chat.id)
     this.clearTitles.delete(chat.id)
     this.conversationStartedAt.delete(chat.id)
+    this.previousTitles.delete(chat.id)
     await this.removeFolderIfOwned(chat)
     this.emitChanged()
   }

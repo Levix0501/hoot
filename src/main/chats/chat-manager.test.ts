@@ -297,6 +297,30 @@ describe('ChatManager', () => {
     expect(fs.statSync(claude.folder).isDirectory()).toBe(true)
   })
 
+  it('lets only the chat opened last take a conversation no chat has', async () => {
+    const chat = await manager.create('opencode')
+    const first = chat.conversationId!
+    conversations.opencode = [
+      { id: first, title: 'First', createdAt: 1 },
+      { id: 'ses_second', title: 'Second', createdAt: 2 },
+    ]
+    await manager.reconcileAll()
+    const split = manager.list().find((entry) => entry.id !== chat.id)!
+
+    // A third conversation no chat has, as a /new whose chat did not say so.
+    conversations.opencode = [
+      { id: first, title: 'First', createdAt: 1 },
+      { id: 'ses_second', title: 'Second', createdAt: 2 },
+      { id: 'ses_third', title: 'Third', createdAt: 3 },
+    ]
+    await manager.reconcileAll()
+
+    expect(manager.list()).toHaveLength(3)
+    expect(manager.get(chat.id)?.conversationId).toBe('ses_third')
+    expect(manager.get(split.id)?.conversationId).toBe(first)
+    expect(manager.list().filter((entry) => entry.conversationId === 'ses_third')).toHaveLength(1)
+  })
+
   it('reads what happened while Hoot was not running when it starts', async () => {
     const chat = await manager.create('opencode')
     const folder = chat.folder

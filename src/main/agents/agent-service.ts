@@ -100,7 +100,7 @@ interface Operation {
   terminated: boolean
   /**
    * Set once its command's process has ended, or it is known to start none:
-   * cancelling it then changes nothing, and its result stands.
+   * stopping it then changes nothing, and its result stands.
    */
   commandDone: boolean
   /** Settles once it has ended, with its result. */
@@ -178,10 +178,11 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Sends a cancelled operation's command SIGTERM, once its process has
- * started, and only once: npm puts back what it changed when it gets SIGTERM,
- * once the step under way has ended (a download, for example), but a second
- * SIGTERM ends it at once, before it has, leaving the agent half replaced.
+ * Sends the command of an operation stopped for quitting SIGTERM, once its
+ * process has started, and only once: npm puts back what it changed when it
+ * gets SIGTERM, once the step under way has ended (a download, for example),
+ * but a second SIGTERM ends it at once, before it has, leaving the agent half
+ * replaced.
  */
 function terminate(operation: Operation): void {
   if (operation.terminated || !operation.process) return
@@ -190,25 +191,15 @@ function terminate(operation: Operation): void {
 }
 
 /**
- * A running operation's state, once Cancel can no longer stop it: it was
- * cancelled and waits for its command to end, or its command has ended.
- */
-function uncancellable(operation: Operation): void {
-  if (operation.state.status === 'running' && operation.state.cancellable) {
-    operation.state = { ...operation.state, cancellable: false }
-  }
-}
-
-/**
  * The agents of the Agents page: where each is installed, how, which version
  * it is and which is the latest; and the installs and updates started from
  * the page, one at a time in the order they were asked for, each of which can
- * be cancelled. An install uses the computer's npm, when the user can install
- * into its global folder. An update runs what the installation's method
- * updates it with, in its place; for npm, when the user can write to its
- * global folder. Where npm installs an agent whose command runs on Node.js,
- * the node that sessions would run it with must be one its latest version
- * needs.
+ * be cancelled until it starts. An install uses the computer's npm, when the
+ * user can install into its global folder. An update runs what the
+ * installation's method updates it with, in its place; for npm, when the user
+ * can write to its global folder. Where npm installs an agent whose command
+ * runs on Node.js, the node that sessions would run it with must be one its
+ * latest version needs.
  */
 export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   private readonly records: AgentRecord[] = CODING_TOOLS.map((tool) => ({
@@ -358,30 +349,21 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   }
 
   /**
-   * Cancels an agent's operation: one that waits leaves the queue and runs
-   * nothing; the command of one that runs is sent SIGTERM, once, and the
-   * operation ends once its process has. Once its command has ended, it is
-   * too late: the operation ends with the command's result.
+   * Cancels an agent's operation while it waits: it leaves the queue and runs
+   * nothing. One that runs goes on to its end, as stopping it would gain
+   * nothing: npm, sent SIGTERM, still ends the step under way first (its
+   * download, for example), and then puts back the version before.
    */
   cancel(id: CodingToolId): void {
     const record = this.record(id)
     const operation = record.operation
-    if (!operation) return
-    if (operation.state.status === 'waiting') {
-      this.queue = this.queue.filter((queued) => queued !== record)
-      operation.cancelled = true
-      operation.state = { kind: operation.kind, status: 'cancelled' }
-      operation.ended.resolve()
-      this.changed()
-      void this.readInstallations([record])
-      return
-    }
-    if (operation.state.status === 'running' && !operation.cancelled && !operation.commandDone) {
-      operation.cancelled = true
-      uncancellable(operation)
-      terminate(operation)
-      this.changed()
-    }
+    if (operation?.state.status !== 'waiting') return
+    this.queue = this.queue.filter((queued) => queued !== record)
+    operation.cancelled = true
+    operation.state = { kind: operation.kind, status: 'cancelled' }
+    operation.ended.resolve()
+    this.changed()
+    void this.readInstallations([record])
   }
 
   /** The operations running or waiting, the running one first, for the quit confirmation. */
@@ -414,7 +396,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     if (operation && !operation.commandDone) {
       operation.cancelled = true
       operation.stopped = true
-      uncancellable(operation)
       terminate(operation)
     }
     this.changed()
@@ -656,7 +637,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   private async perform(record: AgentRecord, operation: Operation): Promise<void> {
     const { kind } = operation
-    operation.state = { kind, status: 'running', cancellable: true }
+    operation.state = { kind, status: 'running' }
     this.changed()
     const before = record.installation
     const sessionsBefore = kind === 'update' ? this.options.runningSessions(record.tool.id) : []
@@ -673,7 +654,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           void output.write(text)
         })
         operation.process = process
-        // Cancelled while it started.
+        // Stopped for quitting while it started.
         if (operation.cancelled) terminate(operation)
         end = await process.ended
         seconds = Math.round((this.now() - startedAt) / 1000)
@@ -687,7 +668,6 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           : `Hoot could not run it: ${errorMessage(error)}`
     } finally {
       operation.commandDone = true
-      uncancellable(operation)
     }
 
     const command = plan === null ? null : shownCommand([plan.command.file, ...plan.command.args])
@@ -698,9 +678,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       }
       const { installations } = await this.readInstallations([record])
       const after = installations[0] ?? null
-      if (operation.cancelled) {
-        operation.state = { kind, status: 'cancelled' }
-      } else if (failure !== null || plan === null || end === null) {
+      if (failure !== null || plan === null || end === null) {
         operation.state = this.failed(kind, failure ?? 'it did not run', output, {
           command,
           exitCode: end?.code ?? null,

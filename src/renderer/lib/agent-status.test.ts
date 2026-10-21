@@ -48,7 +48,7 @@ describe('agentRowStatus', () => {
     expect(
       agentRowStatus(
         agent({
-          operation: { kind: 'install', status: 'running', cancellable: true },
+          operation: { kind: 'install', status: 'running' },
         }),
         target,
       ),

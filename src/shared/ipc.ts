@@ -346,7 +346,7 @@ export interface HootApi {
   updateAgent(id: CodingToolId): void
   /** Updates every agent that can be updated, one after another. */
   updateAllAgents(): void
-  /** Cancels an agent's operation, waiting or running. */
+  /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
   /** The YOLO mode switch and each agent's launch settings. */
   getLaunchSettings(): Promise<LaunchSettings>

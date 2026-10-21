@@ -674,12 +674,7 @@ describe('AgentService installs', () => {
     await service.detect()
     service.install('claude')
     await vi.waitFor(
-      () =>
-        expect(agent('claude').operation).toEqual({
-          kind: 'install',
-          status: 'running',
-          cancellable: true,
-        }),
+      () => expect(agent('claude').operation).toEqual({ kind: 'install', status: 'running' }),
       { timeout: 5_000 },
     )
     await ended('claude')
@@ -1052,7 +1047,7 @@ describe('AgentService queue and cancelling', () => {
     expect(started()).toEqual(['started @anthropic-ai/claude-code'])
   })
 
-  it('cancels a running operation with SIGTERM, and starts the next one', async () => {
+  it('lets a running operation go on to its end when it is cancelled, then starts the next one', async () => {
     npmScript(SLOW_NPM)
     await installInto(prefix, 'claude', '1.0.0')
     setLatest('claude', '2.0.0')
@@ -1062,18 +1057,18 @@ describe('AgentService queue and cancelling', () => {
     service.install('codex')
     await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
     service.cancel('claude')
-    await ended('claude')
-    expect(agent('claude').operation).toEqual({ kind: 'update', status: 'cancelled' })
-    // Read again afterwards: the version is still the one before.
-    expect(agent('claude').installation?.version).toBe('1.0.0')
-    await vi.waitFor(() => expect(started()).toHaveLength(2), { timeout: 10_000 })
+    expect(agent('claude').operation).toEqual({ kind: 'update', status: 'running' })
     fs.writeFileSync(path.join(root, 'go'), '')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
+    expect(agent('claude').installation?.version).toBe('2.0.0')
     await ended('codex')
+    expect(started()).toEqual(['started @anthropic-ai/claude-code', 'started @openai/codex'])
   })
 
   // On Windows SIGTERM ends a process at once: no npm there ends its step first.
   it.skipIf(windows)(
-    'sends SIGTERM only once, however often it is cancelled, also when Hoot quits then',
+    'sends SIGTERM only once, however often Hoot stops it for quitting',
     async () => {
       // Like npm, which ends only once the step under way has, after SIGTERM.
       npmScript(`
@@ -1090,10 +1085,8 @@ describe('AgentService queue and cancelling', () => {
       await service.detect()
       service.install('claude')
       await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
-      service.cancel('claude')
-      expect(agent('claude').operation).toMatchObject({ status: 'running', cancellable: false })
-      service.cancel('claude')
-      const stopped = service.stopAll()
+      // Stopped by the quit confirmation, then again as Hoot quits.
+      const stopped = Promise.all([service.stopAll(), service.stopAll()])
       await vi.waitFor(() => expect(fs.existsSync(path.join(root, 'signals.log'))).toBe(true))
       // Still running: it has not ended its step.
       expect(agent('claude').operation?.status).toBe('running')
@@ -1143,25 +1136,6 @@ describe('AgentService queue and cancelling', () => {
     service.install('codex')
     await ended('codex')
     expect(agent('codex').operation).toEqual({
-      kind: 'install',
-      status: 'succeeded',
-      message: '✓ Installed 2.0.0',
-    })
-  })
-
-  it('keeps the result of a command that has ended, cancelled while the agent is read again', async () => {
-    const { service, agent, ended, reads, hold, release } = heldSetup()
-    await service.detect()
-    hold()
-    const before = reads()
-    service.install('claude')
-    // Once npm has ended, the agent is read again, which waits.
-    await vi.waitFor(() => expect(reads()).toBe(before + 1), { timeout: 10_000 })
-    expect(agent('claude').operation).toMatchObject({ status: 'running', cancellable: false })
-    service.cancel('claude')
-    release()
-    await ended('claude')
-    expect(agent('claude').operation).toEqual({
       kind: 'install',
       status: 'succeeded',
       message: '✓ Installed 2.0.0',

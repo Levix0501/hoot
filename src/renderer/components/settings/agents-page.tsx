@@ -684,10 +684,10 @@ function FailureButton({
 }
 
 /**
- * What an agent's installation is doing, or what can be done with it: a
- * spinner and Cancel while it runs, a red link to the details once it has
- * failed, Install or Update, or why there is neither; nothing when it is up
- * to date.
+ * What an agent's installation is doing, or what can be done with it: Cancel
+ * while it waits its turn, a spinner while it runs, a red link to the details
+ * once it has failed, Install or Update, or why there is neither; nothing
+ * when it is up to date.
  */
 function AgentActions({
   agent,
@@ -702,17 +702,6 @@ function AgentActions({
   const updateAgent = useAppStore((state) => state.updateAgent)
   const cancel = useAppStore((state) => state.cancelAgentOperation)
   const id = agent.id
-  const cancelButton = (
-    <Button
-      variant="ghost"
-      size="xs"
-      onClick={() => cancel(id)}
-      disabled={agent.operation?.status === 'running' && !agent.operation.cancellable}
-      data-testid={`agent-cancel-${id}`}
-    >
-      Cancel
-    </Button>
-  )
   const failed = agent.operation?.status === 'failed' ? agent.operation : null
   if (failed !== null) {
     return (
@@ -734,7 +723,14 @@ function AgentActions({
           >
             Waiting…
           </span>
-          {cancelButton}
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => cancel(id)}
+            data-testid={`agent-cancel-${id}`}
+          >
+            Cancel
+          </Button>
         </span>
       )
     case 'running':
@@ -747,7 +743,6 @@ function AgentActions({
           >
             {status.operation === 'install' ? 'Installing…' : 'Updating…'}
           </span>
-          {cancelButton}
         </span>
       )
     case 'checking':

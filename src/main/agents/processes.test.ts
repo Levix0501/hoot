@@ -155,6 +155,40 @@ describe('runCommand', () => {
     },
   )
 
+  // As the npm package of Codex starts codex.exe with Node.js: a console
+  // window of its own would flash on the screen. PowerShell says which
+  // window its console has.
+  it.runIf(process.platform === 'win32')(
+    'gives what a command starts on Windows a console without a window',
+    async () => {
+      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+      const powershell = path.join(
+        systemRoot,
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe',
+      )
+      const consoleWindow =
+        'Add-Type -Namespace Hoot -Name Console -MemberDefinition ' +
+        `'[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();'; ` +
+        '[Hoot.Console]::GetConsoleWindow()'
+      const args = ['-NoProfile', '-NonInteractive', '-Command', consoleWindow]
+      const result = await runCommand(
+        {
+          ...node(
+            `require("node:child_process").spawnSync(${JSON.stringify(powershell)}, ` +
+              `${JSON.stringify(args)}, { stdio: "inherit" })`,
+          ),
+          env: { SystemRoot: systemRoot },
+        },
+        20_000,
+      )
+      expect(result).toMatchObject({ code: 0, timedOut: false })
+      expect(result.stdout.trim()).toBe('0')
+    },
+  )
+
   it('says why a command could not start', async () => {
     const result = await runCommand({ ...node(''), file: path.join(directory, 'missing') }, 5_000)
     expect(result.error?.message).toContain('ENOENT')

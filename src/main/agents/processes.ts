@@ -122,8 +122,13 @@ export async function runCommand(spec: CommandSpec, timeoutMs: number): Promise<
       cwd: spec.cwd,
       env: spec.env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // In a process group of its own, which a timeout ends.
-      detached: true,
+      // In a process group of its own, which a timeout ends. Not on Windows,
+      // where taskkill ends it instead: a detached process has no console
+      // there, so a console program it starts, as the npm package of Codex
+      // starts codex.exe with Node.js, would open a console window of its
+      // own. It gets a console without a window, which such programs share.
+      detached: process.platform !== 'win32',
+      windowsHide: true,
     })
   } catch (error) {
     const reason = error instanceof Error ? error : new Error(String(error))

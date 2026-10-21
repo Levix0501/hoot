@@ -281,6 +281,31 @@ describe('ChatManager', () => {
     expect(manager.list()[0]).toMatchObject({ conversationId: old, title: 'First' })
   })
 
+  it('does not keep a chat whose agent ignored `/new` and stayed in the conversation', async () => {
+    const chat = await manager.create('opencode')
+    const old = chat.conversationId!
+    manager.typed(chat.id, 'session-1', 'first question\r')
+    await manager.flush()
+    manager.typed(chat.id, 'session-1', '/new\r')
+    await manager.flush()
+    manager.typed(chat.id, 'session-1', 'second question\r')
+    await manager.flush()
+    expect(manager.list()).toHaveLength(2)
+
+    // The agent ignored `/new`: its records hold the first conversation only,
+    // which the split chat keeps; the chat that went on is the leftover.
+    conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
+    const again = new ChatManager({ db, conversations, home: path.join(root, 'home') })
+    await again.reconcileAll()
+    const chats = again.list()
+    expect(chats).toHaveLength(1)
+    expect(chats[0]).toMatchObject({
+      conversationId: old,
+      title: 'First',
+      hasMessages: true,
+    })
+  })
+
   it('keeps a chat whose agent only ran other slash commands without a message', async () => {
     const chat = await manager.create('codex')
     manager.typed(chat.id, 'session-1', '/model\r')

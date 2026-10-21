@@ -387,8 +387,12 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
       const newest = unclaimed.at(-1)
       if (!newest) {
         // It never got a message, as after `/clear` and none; a message the
-        // agent did not record keeps the chat.
-        if (!chat.hasMessages) {
+        // agent did not record keeps the chat. A chat in a folder where
+        // another chat holds a conversation is the one a command such as
+        // `/new` left, whose agent stayed in that conversation or started one
+        // that left no record: the conversation it had is the other chat's,
+        // so it goes rather than becoming a chat with none.
+        if (!chat.hasMessages || this.hasConversationSibling(chat)) {
           for (const conversation of conversations) this.insertSplit(chat, conversation)
           await this.removeChat(chat)
         }
@@ -427,6 +431,18 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
       this.chats.update(chatId, { hasMessages: true })
       this.emitChanged()
     }
+  }
+
+  /**
+   * Whether another chat in the folder holds a conversation. A chat with no
+   * conversation of its own and a message the agent did not record is then
+   * what a command such as `/new` left when the agent stayed in its
+   * conversation, which that other chat already keeps.
+   */
+  private hasConversationSibling(chat: ChatInfo): boolean {
+    return this.chats
+      .inFolder(chat.folder)
+      .some((other) => other.id !== chat.id && other.conversationId !== null)
   }
 
   /**

@@ -346,7 +346,9 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
       chat = this.chats.get(chatId)
       if (!chat) return
       if (!exists) {
-        await this.removeChat(chat)
+        // A message the agent did not record, as when it failed, still keeps
+        // the chat; one never sent removes it.
+        if (!chat.hasMessages) await this.removeChat(chat)
         return
       }
       if (!chat.hasMessages) {
@@ -381,10 +383,12 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
       const unclaimed = conversations.filter((conversation) => !claimed.has(conversation.id))
       const newest = unclaimed.at(-1)
       if (!newest) {
-        // It never got a message, as after `/clear` and none. What the agent
-        // recorded of the conversations it left names their chats.
-        for (const conversation of conversations) this.insertSplit(chat, conversation)
-        await this.removeChat(chat)
+        // It never got a message, as after `/clear` and none; a message the
+        // agent did not record keeps the chat.
+        if (!chat.hasMessages) {
+          for (const conversation of conversations) this.insertSplit(chat, conversation)
+          await this.removeChat(chat)
+        }
         return
       }
       // Any conversations before it came from conversations the agent started and left.
@@ -397,8 +401,9 @@ export class ChatManager extends EventEmitter<{ changed: [chats: ChatInfo[]] }> 
     }
     const current = conversations.findIndex((conversation) => conversation.id === conversationId)
     if (current === -1) {
-      // The conversation never got a message, as when `/clear` was followed by none.
-      await this.removeChat(chat)
+      // The conversation never got a message, as when `/clear` was followed by
+      // none; one whose message the agent did not record keeps the chat.
+      if (!chat.hasMessages) await this.removeChat(chat)
       return
     }
     const after = conversations

@@ -271,6 +271,18 @@ describe('ChatManager', () => {
     await manager.flush()
     expect(manager.list()).toEqual([])
   })
+  it('keeps a chat whose message the agent did not record, as when a request failed', async () => {
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-1', 'Reply with the single word: ok\r')
+    await manager.flush()
+    conversations.codex = []
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+
+    expect(manager.get(chat.id)).toMatchObject({ hasMessages: true, conversationId: null })
+    expect(manager.list()).toHaveLength(1)
+  })
+
   it('removes a chat whose conversation never got a message, and its empty folder', async () => {
     const chat = await manager.create('opencode')
     conversations.opencode = []

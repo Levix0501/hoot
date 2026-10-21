@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Hoot does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a bug! Please check that it has not been reported already and that it still happens in the latest release.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what happened, and what you expected to happen instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a project
+        2. Start a Claude Code session
+        3. ...
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Agents
+      description: The agents the bug involves, if any.
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: In Hoot, open **Settings › About**, click **Copy** next to **Environment** and paste it here. If Hoot does not start, give your Hoot version and system instead.
+      render: text
+      placeholder: |
+        Hoot 0.1.0-alpha.11
+        macOS 26.3.1 (arm64)
+        Electron 44.7.0
+    validations:
+      required: true

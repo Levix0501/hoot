@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an idea or an improvement for Hoot.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would it help you do?
+      description: The problem or the way of working behind the request.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should Hoot do?
+      description: How you imagine it working. Sketches and examples from other tools are welcome.
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do now?
+      description: Workarounds or other tools you use for it today, if any.

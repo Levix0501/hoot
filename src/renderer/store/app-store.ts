@@ -44,6 +44,7 @@ import {
 } from '../../shared/labels'
 import {
   withAgentLaunchSettingsChange,
+  withDefaultAgent,
   withYoloMode,
   type AgentLaunchSettingsChange,
   type LaunchSettings,
@@ -228,7 +229,10 @@ export interface AppState {
   tools: ToolsState
   /** The agents of the Agents page and their operations; `null` until they are known. */
   agents: AgentsState | null
-  /** The YOLO mode switch and each agent's launch settings; `null` until they are known. */
+  /**
+   * The default agent, the YOLO mode switch and each agent's launch settings;
+   * `null` until they are known.
+   */
   launchSettings: LaunchSettings | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
@@ -380,6 +384,8 @@ export interface AppState {
   /** Updates every agent that can be updated, one after another. */
   updateAllAgents(): void
   cancelAgentOperation(id: CodingToolId): void
+  /** Makes an agent the default agent. */
+  setDefaultAgent(id: CodingToolId): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
   /** Changes an agent's launch settings for the sessions that start from now on. */
@@ -1915,6 +1921,12 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     cancelAgentOperation(id) {
       api.cancelAgentOperation(id)
+    },
+
+    setDefaultAgent(id) {
+      const launchSettings = withDefaultAgent(get().launchSettings, id)
+      if (launchSettings !== null) set({ launchSettings })
+      api.setDefaultAgent(id)
     },
 
     setYoloMode(on) {

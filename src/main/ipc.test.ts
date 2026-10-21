@@ -98,9 +98,10 @@ const issues = Object.assign(new EventEmitter(), {
 })
 
 const workflows = new EventEmitter()
-const launchSettingsState = { yoloMode: true, agents: {} }
+const launchSettingsState = { defaultAgent: 'claude', yoloMode: true, agents: {} }
 const launchSettings = Object.assign(new EventEmitter(), {
   all: vi.fn<() => unknown>(() => launchSettingsState),
+  setDefaultAgent: vi.fn<(id: string) => void>(),
   setYoloMode: vi.fn<(on: boolean) => void>(),
   change: vi.fn<(id: string, change: unknown) => void>(),
 })
@@ -399,6 +400,10 @@ describe('the messages of the Agents page', () => {
     expect(await electron.handlers.get(IpcChannel.getLaunchSettings)?.(trusted)).toBe(
       launchSettingsState,
     )
+    send(IpcChannel.setDefaultAgent, 'codex')
+    send(IpcChannel.setDefaultAgent, 'shell')
+    send(IpcChannel.setDefaultAgent, null)
+    expect(launchSettings.setDefaultAgent.mock.calls).toEqual([['codex']])
     send(IpcChannel.setYoloMode, false)
     send(IpcChannel.setYoloMode, 'yes')
     expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])

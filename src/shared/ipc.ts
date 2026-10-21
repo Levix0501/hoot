@@ -198,6 +198,7 @@ export const IpcChannel = {
   updateAllAgents: 'agents:update-all',
   cancelAgentOperation: 'agents:cancel',
   getLaunchSettings: 'launch-settings:get',
+  setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
   setAgentLaunchSettings: 'launch-settings:set-agent',
   launchSettingsChanged: 'launch-settings:changed',
@@ -348,8 +349,10 @@ export interface HootApi {
   updateAllAgents(): void
   /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
-  /** The YOLO mode switch and each agent's launch settings. */
+  /** The default agent, the YOLO mode switch and each agent's launch settings. */
   getLaunchSettings(): Promise<LaunchSettings>
+  /** Makes an agent the default agent. */
+  setDefaultAgent(id: CodingToolId): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
   /** Changes an agent's launch settings for the sessions that start from now on. */

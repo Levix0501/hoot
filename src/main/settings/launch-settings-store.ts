@@ -23,6 +23,10 @@ function textOf(value: unknown, fallback: string | null): string | null {
   return typeof value === 'string' && value !== '' ? value : value === null ? null : fallback
 }
 
+function agentOf(value: unknown, fallback: CodingToolId): CodingToolId {
+  return CODING_TOOL_IDS.find((id) => id === value) ?? fallback
+}
+
 function argumentsOf(value: unknown): string[] | null {
   if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) return null
   return value
@@ -49,6 +53,7 @@ function readSettings(value: unknown): LaunchSettings {
   const agentSettings =
     typeof agents === 'object' && agents !== null ? (agents as Record<string, unknown>) : {}
   return {
+    defaultAgent: agentOf(stored.defaultAgent, fallback.defaultAgent),
     yoloMode: booleanOf(stored.yoloMode, fallback.yoloMode),
     agents: Object.fromEntries(
       CODING_TOOL_IDS.map((id) => [id, readAgent(agentSettings[id])]),
@@ -57,10 +62,10 @@ function readSettings(value: unknown): LaunchSettings {
 }
 
 /**
- * The YOLO mode switch and the launch settings of each agent, kept in
- * `settings.json` in the user data directory. Sessions read them when they
- * start, so a change applies to the next session and never to a running one.
- * Permission levels saved by earlier versions are ignored.
+ * The default agent, the YOLO mode switch and the launch settings of each
+ * agent, kept in `settings.json` in the user data directory. Sessions read
+ * them when they start, so a change applies to the next session and never to
+ * a running one. Permission levels saved by earlier versions are ignored.
  */
 export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings] }> {
   private readonly config: Conf<StoredSettings>
@@ -82,6 +87,13 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
 
   agent(id: CodingToolId): AgentLaunchSettings {
     return this.settings.agents[id]
+  }
+
+  /** Makes an agent the default agent. */
+  setDefaultAgent(id: CodingToolId): void {
+    if (this.settings.defaultAgent === id) return
+    this.settings = { ...this.settings, defaultAgent: id }
+    this.save()
   }
 
   /** Turns YOLO mode on or off, for the sessions that start from now on. */

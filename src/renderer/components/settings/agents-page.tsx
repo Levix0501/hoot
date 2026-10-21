@@ -32,11 +32,12 @@ import type {
   AgentLaunchSettings,
   AgentLaunchSettingsChange,
 } from '../../../shared/launch-settings'
-import { CODING_TOOLS, type CodingToolDefinition } from '../../../shared/tools'
+import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { agentRowStatus, updateAllIncludes, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
+import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 import {
@@ -54,6 +55,7 @@ import {
   SelectItem,
   SelectLabel,
   SelectTrigger,
+  SelectValue,
 } from '../ui/select'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
@@ -839,12 +841,22 @@ function InstallationDetails({ agent }: { agent: AgentState }) {
   )
 }
 
+/** The mark beside the name of the default agent. */
+function DefaultBadge({ id }: { id: CodingToolId }) {
+  return (
+    <Badge variant="secondary" data-testid={`agent-default-${id}`}>
+      Default
+    </Badge>
+  )
+}
+
 /** An installed agent's row, with its command editor below it while it is enabled. */
 function AgentRow({
   tool,
   agent,
   target,
   launchSettings,
+  isDefault,
   yoloMode,
   onFailure,
 }: {
@@ -852,6 +864,7 @@ function AgentRow({
   agent: AgentState
   target: InstallTarget | null
   launchSettings: AgentLaunchSettings
+  isDefault: boolean
   yoloMode: boolean
   onFailure: (failure: AgentFailure) => void
 }) {
@@ -880,6 +893,7 @@ function AgentRow({
           >
             {tool.label}
           </span>
+          {isDefault && <DefaultBadge id={id} />}
           {!enabled && (
             <span className="text-xs text-muted-foreground" data-testid={`agent-disabled-${id}`}>
               Off
@@ -941,11 +955,13 @@ function NotInstalledGroup({
   tools,
   states,
   target,
+  defaultAgent,
   onFailure,
 }: {
   tools: CodingToolDefinition[]
   states: Map<string, AgentState>
   target: InstallTarget | null
+  defaultAgent: CodingToolId
   onFailure: (failure: AgentFailure) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -977,8 +993,11 @@ function NotInstalledGroup({
               >
                 <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
-                    {tool.label}
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
+                      {tool.label}
+                    </span>
+                    {tool.id === defaultAgent && <DefaultBadge id={tool.id} />}
                   </span>
                   <span
                     className="text-xs text-muted-foreground"
@@ -1001,10 +1020,57 @@ function NotInstalledGroup({
   )
 }
 
+/** The agents as the default agent picker lists them, each with its icon. */
+const AGENT_CHOICES = CODING_TOOLS.map((tool) => ({
+  value: tool.id,
+  // A row of its own, which keeps the icon centered on the name in the list too.
+  label: (
+    <span className="flex items-center gap-2">
+      <ToolIcon toolId={tool.id} className="size-4" />
+      {tool.label}
+    </span>
+  ),
+}))
+
+/** The picker of the default agent, which marks the agent's row Default. */
+function DefaultAgentPicker({ value, disabled }: { value: CodingToolId; disabled: boolean }) {
+  const setDefaultAgent = useAppStore((state) => state.setDefaultAgent)
+  return (
+    <Select
+      items={AGENT_CHOICES}
+      value={value}
+      onValueChange={(id) => {
+        if (id !== null) setDefaultAgent(id)
+      }}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        className="min-w-40"
+        aria-labelledby="default-agent-label"
+        data-testid="default-agent"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} align="end">
+        {AGENT_CHOICES.map((choice) => (
+          <SelectItem
+            key={choice.value}
+            value={choice.value}
+            data-testid={`default-agent-option-${choice.value}`}
+          >
+            {choice.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 /**
- * The settings' Agents page: the YOLO mode switch, the installed agents with
- * the command each new session runs and the settings in it, Update all and
- * Re-detect, and below a group of the agents that are not installed.
+ * The settings' Agents page: the default agent and the YOLO mode switch, the
+ * installed agents with the command each new session runs and the settings in
+ * it, Update all and Re-detect, and below a group of the agents that are not
+ * installed.
  */
 export function AgentsPage() {
   const agents = useAppStore((state) => state.agents)
@@ -1048,6 +1114,7 @@ export function AgentsPage() {
   const updating = updatingAll && pending
   const showUpdateAll = updateAllCandidates.length >= 2 || updating
   const detecting = agents?.detecting ?? false
+  const defaultAgent = launchSettings?.defaultAgent ?? 'claude'
   const yoloMode = launchSettings?.yoloMode ?? true
   const updateAllButton = (
     <Button
@@ -1104,23 +1171,36 @@ export function AgentsPage() {
             </div>
           </div>
 
-          <label className="flex items-center gap-4 rounded-xl border px-4 py-3">
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-sm font-medium" id="yolo-mode-label">
-                YOLO mode
+          <div className="flex flex-col divide-y rounded-xl border">
+            <div className="flex items-center gap-4 px-4 py-3">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm font-medium" id="default-agent-label">
+                  Default agent
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Sessions started from an issue use it.
+                </span>
               </span>
-              <span className="text-xs text-muted-foreground">
-                Agents act without asking for your approval.
+              <DefaultAgentPicker value={defaultAgent} disabled={launchSettings === null} />
+            </div>
+            <label className="flex items-center gap-4 px-4 py-3">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm font-medium" id="yolo-mode-label">
+                  YOLO mode
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Agents act without asking for your approval.
+                </span>
               </span>
-            </span>
-            <Switch
-              checked={yoloMode}
-              onCheckedChange={setYoloMode}
-              disabled={launchSettings === null}
-              aria-labelledby="yolo-mode-label"
-              data-testid="yolo-mode"
-            />
-          </label>
+              <Switch
+                checked={yoloMode}
+                onCheckedChange={setYoloMode}
+                disabled={launchSettings === null}
+                aria-labelledby="yolo-mode-label"
+                data-testid="yolo-mode"
+              />
+            </label>
+          </div>
 
           <div className="flex flex-col divide-y rounded-xl border" data-testid="agents-list">
             {installed.map((tool) => {
@@ -1147,6 +1227,7 @@ export function AgentsPage() {
                   agent={agent}
                   target={target}
                   launchSettings={settings}
+                  isDefault={tool.id === defaultAgent}
                   yoloMode={yoloMode}
                   onFailure={setFailure}
                 />
@@ -1156,6 +1237,7 @@ export function AgentsPage() {
               tools={notInstalled}
               states={states}
               target={target}
+              defaultAgent={defaultAgent}
               onFailure={setFailure}
             />
           </div>

@@ -12,8 +12,13 @@ export interface AgentLaunchSettings {
   extraArgs: string[]
 }
 
-/** What the Agents page keeps for every agent, and the YOLO mode switch. */
+/** What the Agents page keeps for every agent, the default agent and the YOLO mode switch. */
 export interface LaunchSettings {
+  /**
+   * The agent picked for sessions started from an issue. Nothing reads it
+   * yet: those sessions still run Claude Code.
+   */
+  defaultAgent: CodingToolId
   /** Whether each agent gets the arguments that make it act without asking. */
   yoloMode: boolean
   agents: Readonly<Record<CodingToolId, AgentLaunchSettings>>
@@ -24,9 +29,13 @@ export function defaultAgentLaunchSettings(): AgentLaunchSettings {
   return { enabled: true, model: null, effort: null, extraArgs: [] }
 }
 
-/** The settings Hoot starts with: YOLO mode on, every agent enabled and unchanged. */
+/**
+ * The settings Hoot starts with: Claude Code the default agent, YOLO mode on,
+ * every agent enabled and unchanged.
+ */
 export function defaultLaunchSettings(): LaunchSettings {
   return {
+    defaultAgent: 'claude',
     yoloMode: true,
     agents: Object.fromEntries(
       CODING_TOOL_IDS.map((id) => [id, defaultAgentLaunchSettings()]),
@@ -58,6 +67,14 @@ export function withLaunchSettingsChange(
 /** Whether a coding tool is enabled, as the settings say; unknown ones are. */
 export function agentEnabled(settings: LaunchSettings | null, id: CodingToolId): boolean {
   return settings === null || settings.agents[id]?.enabled !== false
+}
+
+/** The settings with another default agent, or `null` while the settings are not known. */
+export function withDefaultAgent(
+  settings: LaunchSettings | null,
+  id: CodingToolId,
+): LaunchSettings | null {
+  return settings === null ? null : { ...settings, defaultAgent: id }
 }
 
 /** The settings with YOLO mode on or off, or `null` while the settings are not known. */

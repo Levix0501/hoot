@@ -33,8 +33,9 @@ describe('LaunchSettingsStore', () => {
     expect(fs.existsSync(file)).toBe(false)
   })
 
-  it('saves YOLO mode and each agent setting, and keeps them across instances', () => {
+  it('saves the default agent, YOLO mode and agent settings for later instances', () => {
     const store = new LaunchSettingsStore(directory)
+    store.setDefaultAgent('codex')
     store.setYoloMode(false)
     store.change('claude', {
       enabled: false,
@@ -44,6 +45,7 @@ describe('LaunchSettingsStore', () => {
     })
     store.change('codex', { model: 'deepseek-v4-pro' })
     expect(store.all()).toEqual({
+      defaultAgent: 'codex',
       yoloMode: false,
       agents: {
         claude: {
@@ -56,7 +58,7 @@ describe('LaunchSettingsStore', () => {
         opencode: defaultAgentLaunchSettings(),
       },
     })
-    expect(saved()).toMatchObject({ launchSettings: { yoloMode: false } })
+    expect(saved()).toMatchObject({ launchSettings: { defaultAgent: 'codex', yoloMode: false } })
 
     const reopened = new LaunchSettingsStore(directory)
     expect(reopened.all()).toEqual(store.all())
@@ -76,6 +78,7 @@ describe('LaunchSettingsStore', () => {
   it('replaces saved values that are not what a setting can be with the defaults', () => {
     writeSettings({
       launchSettings: {
+        defaultAgent: 'shell',
         yoloMode: 'yes',
         agents: {
           claude: { enabled: 'yes', model: 4, effort: null, extraArgs: ['--verbose', 3] },
@@ -84,6 +87,7 @@ describe('LaunchSettingsStore', () => {
       },
     })
     const settings: LaunchSettings = new LaunchSettingsStore(directory).all()
+    expect(settings.defaultAgent).toBe('claude')
     expect(settings.yoloMode).toBe(true)
     expect(settings.agents.claude).toEqual(defaultAgentLaunchSettings())
     expect(settings.agents.codex).toEqual({
@@ -100,12 +104,16 @@ describe('LaunchSettingsStore', () => {
     const changes: LaunchSettings[] = []
     store.on('changed', (settings) => changes.push(settings))
     store.setYoloMode(true)
+    store.setDefaultAgent('claude')
     store.change('claude', { model: null })
     store.change('claude', { model: 'opus' })
     store.change('claude', { model: 'opus' })
     store.setYoloMode(false)
-    expect(changes).toHaveLength(2)
+    store.setDefaultAgent('opencode')
+    store.setDefaultAgent('opencode')
+    expect(changes).toHaveLength(3)
     expect(changes[0]?.agents.claude.model).toBe('opus')
     expect(changes[1]?.yoloMode).toBe(false)
+    expect(changes[2]?.defaultAgent).toBe('opencode')
   })
 })

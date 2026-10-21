@@ -44,6 +44,7 @@ const api: HootApi = {
   updateAllAgents: () => ipcRenderer.send(IpcChannel.updateAllAgents),
   cancelAgentOperation: (id) => ipcRenderer.send(IpcChannel.cancelAgentOperation, id),
   getLaunchSettings: () => ipcRenderer.invoke(IpcChannel.getLaunchSettings),
+  setDefaultAgent: (id) => ipcRenderer.send(IpcChannel.setDefaultAgent, id),
   setYoloMode: (on) => ipcRenderer.send(IpcChannel.setYoloMode, on),
   setAgentLaunchSettings: (id, change) =>
     ipcRenderer.send(IpcChannel.setAgentLaunchSettings, id, change),

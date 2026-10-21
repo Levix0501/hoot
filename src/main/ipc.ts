@@ -378,6 +378,10 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle(IpcChannel.getLaunchSettings, () => deps.launchSettings.all())
+  on(IpcChannel.setDefaultAgent, (id) => {
+    const parsed = agentId.safeParse(id)
+    if (parsed.success) deps.launchSettings.setDefaultAgent(parsed.data)
+  })
   on(IpcChannel.setYoloMode, (value) => {
     const parsed = z.boolean().safeParse(value)
     if (parsed.success) deps.launchSettings.setYoloMode(parsed.data)

@@ -51,6 +51,15 @@ export function usableChatAgents(
 }
 
 /**
+ * Whether the agents are still being found for the first time since Hoot
+ * started. A later detection leaves the last one's results in place, which
+ * New chat and its menu use meanwhile.
+ */
+export function firstDetectionRunning(tools: ToolsState): boolean {
+  return tools.detecting && tools.tools.length === 0
+}
+
+/**
  * The agent a new chat uses: the one asked for when it is among the usable
  * ones, else the default agent while it is usable, else the first usable
  * agent in the order of `usableChatAgents`; `null` when no agent is usable.

@@ -5,7 +5,13 @@ import {
   withAgentLaunchSettingsChange,
   withDefaultAgent,
 } from './launch-settings'
-import { chatAgent, chatName, defaultAgentUsable, usableChatAgents } from './chats'
+import {
+  chatAgent,
+  chatName,
+  defaultAgentUsable,
+  firstDetectionRunning,
+  usableChatAgents,
+} from './chats'
 
 function tools(available: ReadonlyArray<'claude' | 'codex' | 'opencode'>): ToolsState {
   return {
@@ -63,5 +69,13 @@ describe('chats', () => {
     expect(defaultAgentUsable(tools(['claude']), settings)).toBe(true)
     expect(defaultAgentUsable(tools(['codex']), settings)).toBe(false)
     expect(defaultAgentUsable(tools(['codex']), withDefaultAgent(settings, 'codex'))).toBe(true)
+  })
+
+  it('waits for the first detection alone, while a later one leaves the last results', () => {
+    expect(firstDetectionRunning({ detecting: true, tools: [], error: null })).toBe(true)
+    const found = tools(['codex'])
+    expect(firstDetectionRunning({ ...found, detecting: true })).toBe(false)
+    expect(firstDetectionRunning(found)).toBe(false)
+    expect(firstDetectionRunning({ detecting: false, tools: [], error: null })).toBe(false)
   })
 })

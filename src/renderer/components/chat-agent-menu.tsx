@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import { toast } from 'sonner'
-import { defaultAgentUsable, usableChatAgents } from '../../shared/chats'
+import { defaultAgentUsable, firstDetectionRunning, usableChatAgents } from '../../shared/chats'
 import { CODING_TOOL_IDS, getTool, type CodingToolId } from '../../shared/tools'
 import { useAppStore } from '../store/app-store'
 import { ToolIcon } from './tool-icon'
@@ -38,7 +38,7 @@ export function ChatAgentMenuEntries({
   const showSettings = useAppStore((state) => state.showSettings)
   const { Item } = components
 
-  if (tools.detecting) {
+  if (firstDetectionRunning(tools)) {
     return (
       <Item disabled data-testid="chat-agents-checking">
         Checking…

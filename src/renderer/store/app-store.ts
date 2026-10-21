@@ -5,7 +5,7 @@ import { type AgentOperationSummary, type AgentsState } from '../../shared/agent
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
-import { chatAgent, type ChatInfo } from '../../shared/chats'
+import { chatAgent, firstDetectionRunning, type ChatInfo } from '../../shared/chats'
 import {
   blockedByIdsOf,
   blockingIdsOf,
@@ -2034,8 +2034,9 @@ export const useAppStore = create<AppState>()((set, get) => {
     async newChat(toolId) {
       const { tools, launchSettings } = get()
       // The first detection of the agents says which can start a chat; until
-      // it has finished, a click does nothing.
-      if (tools.detecting) return
+      // it has finished, a click does nothing. A later detection leaves the
+      // last one's agents usable meanwhile.
+      if (firstDetectionRunning(tools)) return
       const agent = chatAgent(tools, launchSettings, toolId ?? null)
       if (agent === null) {
         toast.error('Could not start a chat.', {

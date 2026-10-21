@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.13
+
+### Patch Changes
+
+- [`c8c6a07`](https://github.com/Levix0501/hoot/commit/c8c6a07a6a5bf95fbd440cdeb55e0ac4721697ff) - On Windows, the Agents page no longer flashes console windows while it checks the agents, as it did twice for a Codex installed with npm.
+
 ## 0.1.0-alpha.12
 
 ### Patch Changes

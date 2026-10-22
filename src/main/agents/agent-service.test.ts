@@ -199,10 +199,13 @@ beforeEach(async () => {
   for (const id of ['claude', 'codex', 'opencode'] as const) setLatest(id, '2.0.0')
 })
 
-afterEach(() => {
+afterEach(async () => {
   fs.chmodSync(npmPackagesFolder(prefix), 0o755)
   fs.chmodSync(npmCommandsFolder(prefix), 0o755)
-  fs.rmSync(root, { recursive: true, force: true })
+  // On Windows the folder can stay in use for a moment after the commands a
+  // test ran have ended, and removing it fails with Permission denied. fs.rm
+  // tries again then, while rmSync gives up on that error at once.
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 function setup(

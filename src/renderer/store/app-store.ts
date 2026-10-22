@@ -366,10 +366,11 @@ export interface AppState {
   appearance: Appearance
   /**
    * The page of the settings shown last since Hoot started, which they show
-   * again when they are shown: Appearance until another is shown. Showing
-   * another is not recorded in the history.
+   * again when they are shown; `null` until one is chosen, while they show
+   * the first page of their list. Showing another is not recorded in the
+   * history.
    */
-  settingsSection: SettingsSection
+  settingsSection: SettingsSection | null
 
   /**
    * Reads the window's state and the appearance picked, and follows their
@@ -460,7 +461,8 @@ export interface AppState {
   goForward(): void
   /**
    * Shows the settings in place of the sidebar and the main area, at a page
-   * of theirs; without one, at the page they showed last.
+   * of theirs; without one, at the page they showed last, the first of their
+   * list to begin with.
    */
   showSettings(section?: SettingsSection): void
   /** Shows another page of the settings, without recording it in the history. */
@@ -1753,7 +1755,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     fullScreen: false,
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
-    settingsSection: 'appearance',
+    settingsSection: null,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))

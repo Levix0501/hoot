@@ -31,6 +31,14 @@ const SECTIONS: ReadonlyArray<{
   { id: 'about', label: 'About', icon: InfoIcon },
 ]
 
+/**
+ * The page of the settings to show: the one chosen last since Hoot started,
+ * the first in their list to begin with.
+ */
+function useShownSection(): SettingsSection {
+  return useAppStore((state) => state.settingsSection) ?? SECTIONS[0].id
+}
+
 /** Whether the keyboard focus is where text is typed, where Esc is the field's. */
 function focusInField(): boolean {
   const focused = document.activeElement
@@ -74,7 +82,7 @@ function useEscapeLeavesSettings(): void {
 /** The list of the settings' pages, in the sidebar's place and as wide. */
 function SettingsNavigation() {
   const leaveSettings = useAppStore((state) => state.leaveSettings)
-  const section = useAppStore((state) => state.settingsSection)
+  const section = useShownSection()
   const selectSection = useAppStore((state) => state.selectSettingsSection)
   return (
     <Sidebar
@@ -129,11 +137,11 @@ function SettingsNavigation() {
 /**
  * What the window shows in place of the sidebar and the main area while the
  * settings are the current page: the list of their pages, and the page of
- * theirs shown last since Hoot started, Appearance at first.
+ * theirs shown last since Hoot started, the first in their list to begin with.
  */
 export function SettingsView() {
   useEscapeLeavesSettings()
-  const section = useAppStore((state) => state.settingsSection)
+  const section = useShownSection()
   return (
     <>
       <SettingsNavigation />

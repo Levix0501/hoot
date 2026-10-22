@@ -1,5 +1,19 @@
 # hoot
 
+## 0.1.0-alpha.14
+
+### Minor Changes
+
+- [`7159434`](https://github.com/Levix0501/hoot/commit/715943492af58ffbd7ef8f812de4646c41a58bd2) - The Agents page has a Default agent picker above YOLO mode, and marks the agent it picks Default in the list.
+
+- [`bc16d08`](https://github.com/Levix0501/hoot/commit/bc16d08ff5c1999b50eb701689124e820da3e2e5) - New chats in the sidebar start an agent without adding a project, keep the conversation across restarts, and continue it where it left off.
+
+### Patch Changes
+
+- [`195280c`](https://github.com/Levix0501/hoot/commit/195280c523a4ba84513652bd0021290ba9e84ba8) - Installs and updates on the Agents page no longer offer Cancel once they have started, since it only took effect after the download had finished; one still waiting its turn can be cancelled as before.
+
+- [`da0db96`](https://github.com/Levix0501/hoot/commit/da0db9610cad7bd0093e4ca2b30d13f98f2291e2) - After Hoot starts, the settings now open on Agents, the first page in their list, instead of Appearance.
+
 ## 0.1.0-alpha.13
 
 ### Patch Changes

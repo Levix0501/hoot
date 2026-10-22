@@ -162,19 +162,17 @@ function IssuesItem() {
   const openIssues = useAppStore((state) => state.issues.filter(isIssueOpen).length)
   const selected = useAppStore((state) => isIssuesPage(state.currentPage))
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          isActive={selected}
-          onClick={() => showIssueList()}
-          data-testid="sidebar-issues"
-        >
-          <CircleDotIcon className="text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-medium">Issues</span>
-          <OpenIssueCount count={openIssues} testId="sidebar-open-issues" />
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={selected}
+        onClick={() => showIssueList()}
+        data-testid="sidebar-issues"
+      >
+        <CircleDotIcon />
+        <span className="min-w-0 flex-1 truncate">Issues</span>
+        <OpenIssueCount count={openIssues} testId="sidebar-open-issues" />
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   )
 }
 
@@ -184,16 +182,21 @@ let listScrollTop = 0
 /** The sidebar's Chats group, below the projects: each chat, newest first. */
 function ChatsGroup() {
   const chats = useAppStore((state) => state.chats)
-  if (chats.length === 0) return null
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Chats</SidebarGroupLabel>
       <SidebarGroupContent>
-        <SidebarMenu data-testid="chat-list">
-          {chats.map((chat) => (
-            <ChatItem key={chat.id} chat={chat} />
-          ))}
-        </SidebarMenu>
+        {chats.length === 0 ? (
+          <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-chats">
+            No chats
+          </p>
+        ) : (
+          <SidebarMenu data-testid="chat-list">
+            {chats.map((chat) => (
+              <ChatItem key={chat.id} chat={chat} />
+            ))}
+          </SidebarMenu>
+        )}
       </SidebarGroupContent>
     </SidebarGroup>
   )
@@ -228,8 +231,8 @@ export function ProjectSidebar() {
       <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
       <SidebarContent ref={listRef}>
         <SidebarGroup className="pb-0">
-          <IssuesItem />
-          <SidebarMenu>
+          <SidebarMenu className="gap-px">
+            <IssuesItem />
             <NewChatItem />
           </SidebarMenu>
         </SidebarGroup>

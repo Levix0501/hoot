@@ -1,5 +1,4 @@
 import {
-  CircleDotIcon,
   FolderIcon,
   FolderOpenIcon,
   GitBranchPlusIcon,
@@ -61,8 +60,7 @@ export const contextComponents: ToolMenuComponents = {
  * name, the light of the state of its sessions that needs the user most, if
  * any does, which counts them when pointed at; and how many of its issues
  * are open. Pointing at it, or moving the keyboard focus into it, shows its
- * buttons: Issues shows the issue list with only the project checked in its
- * Project filter, and `+`, `⋯` and its context menu start sessions, create
+ * `+` and `⋯` buttons and its context menu, which start sessions, create
  * worktrees and remove the project.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
@@ -73,7 +71,6 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
   const redetectTools = useAppStore((state) => state.redetectTools)
   const showSettings = useAppStore((state) => state.showSettings)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
-  const showProjectIssues = useAppStore((state) => state.showProjectIssues)
   const openIssues = useAppStore(
     (state) =>
       state.issues.filter((issue) => issue.projectId === project.id && isIssueOpen(issue)).length,
@@ -119,9 +116,9 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             />
           }
         >
-          <Folder className="text-muted-foreground" data-testid="project-folder-icon" />
+          <Folder data-testid="project-folder-icon" />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 truncate font-medium" data-testid="project-name">
+            <span className="min-w-0 truncate" data-testid="project-name">
               {project.name}
             </span>
             {summary && (
@@ -135,29 +132,17 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           <OpenIssueCount count={openIssues} testId="project-open-issues" />
           {/* Room for the row's buttons while they show, right of the open issue count. */}
           <span
-            className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-18 group-has-focus-visible/menu-item:w-18 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-18"
+            className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12"
             aria-hidden
           />
         </CollapsibleTrigger>
-
-        {/* The button pointed at stands out on the highlighted row. */}
-        <SidebarMenuAction
-          showOnHover
-          className="right-13 hover:bg-sidebar-foreground/10"
-          onClick={() => showProjectIssues(project.id)}
-          aria-label={`Issues of ${project.name}`}
-          title="Issues"
-          data-testid="project-issues-button"
-        >
-          <CircleDotIcon />
-        </SidebarMenuAction>
 
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <SidebarMenuAction
                 showOnHover
-                className="right-7 hover:bg-sidebar-foreground/10"
+                className="right-1 hover:bg-sidebar-foreground/10"
                 aria-label={`New session in ${project.name}`}
                 title="New Session"
                 data-testid="new-session-button"
@@ -192,7 +177,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
             render={
               <SidebarMenuAction
                 showOnHover
-                className="hover:bg-sidebar-foreground/10"
+                className="right-7 hover:bg-sidebar-foreground/10"
                 aria-label={`More actions for ${project.name}`}
                 title="More Actions"
                 data-testid="project-actions-button"

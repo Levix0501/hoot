@@ -25,8 +25,8 @@ export function NewChatItem() {
             data-testid="new-chat-button"
             className="group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-8"
           >
-            <MessageSquarePlusIcon className="text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate font-medium">New chat</span>
+            <MessageSquarePlusIcon />
+            <span className="min-w-0 flex-1 truncate">New chat</span>
           </SidebarMenuButton>
           <DropdownMenuTrigger
             render={

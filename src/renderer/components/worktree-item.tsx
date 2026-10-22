@@ -163,7 +163,7 @@ export function WorktreeItem({
               />
             }
           >
-            <GitBranchIcon className="text-muted-foreground" />
+            <GitBranchIcon />
             <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
               {worktree.displayName}
             </span>

@@ -7,7 +7,6 @@ export function OpenIssueCount({ count, testId }: { count: number; testId: strin
   return (
     <span
       className="shrink-0 rounded-full bg-sidebar-foreground/10 px-1.5 text-xs font-medium tabular-nums"
-      title={count === 1 ? '1 open issue' : `${count} open issues`}
       data-testid={testId}
     >
       {count}

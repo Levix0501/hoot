@@ -59,9 +59,13 @@ describe('WorktreeService', () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     service.dispose()
-    fs.rmSync(root, { recursive: true, force: true })
+    // On Windows a test's folders can stay in use for a moment after the git
+    // commands it ran have ended, and removing them fails with Permission
+    // denied. fs.rm tries again then, while rmSync gives up on that error at
+    // once.
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   })
 
   /** Starts on the project and waits until its inner repositories have been found. */

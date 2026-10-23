@@ -3,6 +3,7 @@ import {
   currentAfterClosing,
   orderedChatSessions,
   relativeSession,
+  sessionsInSwitchOrder,
   sidebarOrder,
 } from './session-order'
 
@@ -72,6 +73,21 @@ describe('currentAfterClosing', () => {
     expect(currentAfterClosing(['s0', 's1', 's2', 's3'], 's1', new Set(['s1', 's2']))).toBe('s3')
     expect(currentAfterClosing(['s0', 's1', 's2'], 's1', new Set(['s1', 's2']))).toBe('s0')
     expect(currentAfterClosing(order, 's1', new Set(order))).toBeNull()
+  })
+})
+
+describe('sessionsInSwitchOrder', () => {
+  it('leaves out a saved session that is not running, and keeps the others', () => {
+    const sessions = [
+      { id: 'plain-ended', savedSessionId: null },
+      { id: 'saved-running', savedSessionId: 'a' },
+      { id: 'saved-ended', savedSessionId: 'b' },
+    ]
+    const running = (session: (typeof sessions)[number]) => session.id === 'saved-running'
+    expect(sessionsInSwitchOrder(sessions, running).map((session) => session.id)).toEqual([
+      'plain-ended',
+      'saved-running',
+    ])
   })
 })
 

@@ -106,6 +106,7 @@ import {
   currentAfterClosing,
   orderedChatSessions,
   relativeSession,
+  sessionsInSwitchOrder,
   sidebarOrder,
 } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
@@ -1111,7 +1112,8 @@ export function sessionWorktrees(
 /**
  * Every session in switch order: the sessions of the projects in sidebar
  * order, then the running chats in the order of the Chats group, which is
- * where chats come in the sidebar.
+ * where chats come in the sidebar. A saved session that is not running is
+ * left out, as its page may stay after an unexpected end; its row opens it.
  */
 export function orderedSessions(
   state: Pick<
@@ -1123,7 +1125,10 @@ export function orderedSessions(
 ): UiSession[] {
   const sessions = sidebarOrder(
     state.projects,
-    state.sessions.filter((session) => session.chatId === null),
+    sessionsInSwitchOrder(
+      state.sessions.filter((session) => session.chatId === null),
+      isSessionRunning,
+    ),
     (root) => projectWorktreeRows(state, root).map((row) => row.path),
   )
   const chats = orderedChatSessions(state.chats, state.sessions, isSessionRunning, closing)

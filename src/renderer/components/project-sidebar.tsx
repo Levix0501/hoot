@@ -102,8 +102,8 @@ function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: st
 }
 
 /**
- * A project's worktrees, after the sessions of its main worktree, by display
- * name; each with its sessions below it.
+ * A project's worktrees, after the sessions of its main worktree, newest
+ * first by when they were made; each with its sessions below it.
  */
 function ProjectWorktrees({ project }: { project: Project }) {
   const listed = useAppStore((state) => state.worktrees[project.root])

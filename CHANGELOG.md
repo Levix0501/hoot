@@ -1,5 +1,21 @@
 # hoot
 
+## 0.1.0-alpha.15
+
+### Minor Changes
+
+- [`aec4c65`](https://github.com/Levix0501/hoot/commit/aec4c653768b0ba9b1743fb56485a70ced60e8bc) - Adding a folder that is in no Git repository, or in one without a commit, asks before Hoot initializes it and commits its files.
+
+- [`aec4c65`](https://github.com/Levix0501/hoot/commit/aec4c653768b0ba9b1743fb56485a70ced60e8bc) - The `+` on a project opens a New Worktree dialog that names the worktree, picks its agent and sets its base branches under Advanced, and the sessions you start in a worktree are kept to continue after the agent exits or Hoot restarts.
+
+### Patch Changes
+
+- [`9a48163`](https://github.com/Levix0501/hoot/commit/9a4816367e8382ce1609bedbdd60cfc4123a186c) - A working chat's spinner in the sidebar is the size of a session's light and turns in place, instead of growing to the size of a menu icon and wobbling as it turned.
+
+- [`42c582c`](https://github.com/Levix0501/hoot/commit/42c582cdef2b40f43ad7927137365e66cba796f0) - A collapsed project in the sidebar shows a closed folder, and **New chat** shows a pencil with sparkles.
+
+- [`f9eafc2`](https://github.com/Levix0501/hoot/commit/f9eafc25fbb623121ad5fb44b9a180468bc7a18f) - The sidebar's rows are 30px tall with 10px rounded corners, regular-weight labels and icons in the row's text color; Issues and New chat sit 1px apart, a project's hover buttons no longer include Issues and put **New Session** at the right with **More Actions** beside it, and an empty Chats group says **No chats**.
+
 ## 0.1.0-alpha.14
 
 ### Minor Changes

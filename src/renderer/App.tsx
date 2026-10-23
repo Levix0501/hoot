@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 import { useEffect } from 'react'
+import { AddProjectDialog } from './components/add-project-dialog'
 import { CloseSessionDialog } from './components/close-session-dialog'
 import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
 import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
@@ -10,7 +11,11 @@ import { MainArea } from './components/main-area'
 import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
 import { QuitDialog } from './components/quit-dialog'
-import { RenameChatDialog, RenameSessionDialog } from './components/rename-session-dialog'
+import {
+  RenameChatDialog,
+  RenameSavedSessionDialog,
+  RenameSessionDialog,
+} from './components/rename-session-dialog'
 import { SettingsView } from './components/settings/settings-view'
 import { sidebarWidthStyle } from './components/sidebar-resize-handle'
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar'
@@ -103,6 +108,7 @@ export function App() {
       </SidebarProvider>
       <RenameSessionDialog />
       <RenameChatDialog />
+      <RenameSavedSessionDialog />
       <CloseSessionDialog />
       <NewWorktreeDialog />
       <DeleteWorktreeDialog />
@@ -110,6 +116,7 @@ export function App() {
       <DeleteIssueDialog />
       <IssuePickerDialog />
       <DependentIssueDialogView />
+      <AddProjectDialog />
       <QuitDialog />
       {/* Below the main area's top row, clear of its buttons and of the ended-session bar. */}
       <Toaster position="top-right" offset={{ top: 60, right: 16 }} />

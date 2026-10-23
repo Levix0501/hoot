@@ -1,11 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { ChatInfo } from '../../shared/chats'
+import type { ChatInfo, SavedSessionInfo } from '../../shared/chats'
 import type { CodingToolId } from '../../shared/tools'
 
 interface ChatRow {
   id: string
   tool_id: CodingToolId
   folder: string
+  project_root: string | null
+  worktree_path: string | null
   conversation_id: string | null
   title: string
   custom_name: string | null
@@ -14,11 +16,16 @@ interface ChatRow {
   opened_at: number
 }
 
+const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
+                 custom_name, has_messages, created_at, opened_at`
+
 function chatFromRow(row: ChatRow): ChatInfo {
   return {
     id: row.id,
     toolId: row.tool_id,
     folder: row.folder,
+    projectRoot: row.project_root,
+    worktreePath: row.worktree_path,
     conversationId: row.conversation_id,
     title: row.title,
     customName: row.custom_name,
@@ -26,6 +33,14 @@ function chatFromRow(row: ChatRow): ChatInfo {
     createdAt: row.created_at,
     lastOpenedAt: row.opened_at,
   }
+}
+
+function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
+  const chat = chatFromRow(row)
+  if (chat.projectRoot === null || chat.worktreePath === null) {
+    throw new Error(`The saved session ${chat.id} has no worktree.`)
+  }
+  return { ...chat, projectRoot: chat.projectRoot, worktreePath: chat.worktreePath }
 }
 
 /** What can change about a chat; what is left out stays as it is. */
@@ -38,8 +53,10 @@ export interface ChatChanges {
 }
 
 /**
- * The chats, kept in the database: every chat, in the order of the sidebar's
- * Chats group, by when it was last opened, newest first.
+ * The chats and saved sessions, kept in the database. The chats come in the
+ * order of the sidebar's Chats group, by when they were last opened, newest
+ * first; the saved sessions come by when they were made or split off, oldest
+ * first, as they show below their worktree.
  */
 export class ChatStore {
   private readonly statements
@@ -47,24 +64,24 @@ export class ChatStore {
   constructor(db: DatabaseSync) {
     this.statements = {
       chats: db.prepare(
-        `SELECT id, tool_id, folder, conversation_id, title, custom_name, has_messages,
-                created_at, opened_at
-         FROM chats ORDER BY opened_at DESC, created_at DESC, id`,
+        `SELECT ${COLUMNS}
+         FROM chats WHERE worktree_path IS NULL
+         ORDER BY opened_at DESC, created_at DESC, id`,
       ),
-      chat: db.prepare(
-        `SELECT id, tool_id, folder, conversation_id, title, custom_name, has_messages,
-                created_at, opened_at
-         FROM chats WHERE id = ?`,
+      savedSessions: db.prepare(
+        `SELECT ${COLUMNS}
+         FROM chats WHERE worktree_path IS NOT NULL
+         ORDER BY created_at, id`,
       ),
+      chat: db.prepare(`SELECT ${COLUMNS} FROM chats WHERE id = ?`),
       inFolder: db.prepare(
-        `SELECT id, tool_id, folder, conversation_id, title, custom_name, has_messages,
-                created_at, opened_at
+        `SELECT ${COLUMNS}
          FROM chats WHERE folder = ? ORDER BY opened_at DESC, created_at DESC, id`,
       ),
       insert: db.prepare(
-        `INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
-                            created_at, opened_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chats (id, tool_id, folder, project_root, worktree_path, conversation_id,
+                            title, custom_name, has_messages, created_at, opened_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
       update: db.prepare(
         `UPDATE chats
@@ -72,6 +89,7 @@ export class ChatStore {
          WHERE id = ?`,
       ),
       delete: db.prepare('DELETE FROM chats WHERE id = ?'),
+      deleteForWorktree: db.prepare('DELETE FROM chats WHERE worktree_path = ?'),
     }
   }
 
@@ -80,13 +98,18 @@ export class ChatStore {
     return (this.statements.chats.all() as unknown as ChatRow[]).map(chatFromRow)
   }
 
-  /** The chat with this id, if any. */
+  /** Every saved session, oldest first. */
+  listSavedSessions(): SavedSessionInfo[] {
+    return (this.statements.savedSessions.all() as unknown as ChatRow[]).map(savedSessionFromRow)
+  }
+
+  /** The chat or saved session with this id, if any. */
   get(id: string): ChatInfo | undefined {
     const row = this.statements.chat.get(id) as ChatRow | undefined
     return row ? chatFromRow(row) : undefined
   }
 
-  /** The chats whose agent runs in this folder. */
+  /** The chats and saved sessions whose agent runs in this folder. */
   inFolder(folder: string): ChatInfo[] {
     return (this.statements.inFolder.all(folder) as unknown as ChatRow[]).map(chatFromRow)
   }
@@ -96,6 +119,8 @@ export class ChatStore {
       chat.id,
       chat.toolId,
       chat.folder,
+      chat.projectRoot,
+      chat.worktreePath,
       chat.conversationId,
       chat.title,
       chat.customName,
@@ -122,5 +147,10 @@ export class ChatStore {
 
   delete(id: string): void {
     this.statements.delete.run(id)
+  }
+
+  /** Deletes the saved sessions of a worktree, whose folder is gone or was deleted. */
+  deleteForWorktree(worktreePath: string): number {
+    return Number(this.statements.deleteForWorktree.run(worktreePath).changes)
   }
 }

@@ -30,8 +30,8 @@ Linear-style issues, and hand an issue to an agent in a Git worktree of its own 
 
 ## Features
 
-- **Every agent in one window.** Claude Code, Codex, OpenCode and your shell run in embedded
-  terminals, as many sessions at a time as you like. Sessions you are not looking at keep running.
+- **Every agent in one window.** Claude Code, Codex and OpenCode run in embedded terminals, as many
+  sessions at a time as you like. Sessions you are not looking at keep running.
 - **Chats without a project.** Click **New chat** in the sidebar to talk to the default agent
   without adding a project. Hoot keeps the chat, and resumes its conversation after the agent exits
   or Hoot restarts.
@@ -41,8 +41,10 @@ Linear-style issues, and hand an issue to an agent in a Git worktree of its own 
   sub-issues and dependencies, and work through them from the keyboard.
 - **From issue to agent in one click.** Start an issue, and Hoot creates a worktree for it and hands
   it to Claude Code, which takes it through a built-in spec-driven workflow: triage, then design.
-- **A worktree for every task.** Agents work in parallel, each on a branch and in a folder of its
-  own. Before deleting a worktree, Hoot checks it for work that would be lost.
+- **A worktree for every task.** Point at a project, click `+`, and give the worktree a name or
+  leave it blank for a random one. Agents work in parallel, each on a branch and in a folder of its
+  own, and the sessions you start in a worktree are kept to continue after the agent exits or Hoot
+  restarts. Before deleting a worktree, Hoot checks it for work that would be lost.
 - **Agents, managed.** Detect, install and update agents, and set each one's model, reasoning
   effort and extra arguments.
 - **`hoot` for agents.** In every session, agents can read and update the project's issues with
@@ -72,8 +74,9 @@ at the bottom of the sidebar. To build Hoot from source, see [CONTRIBUTING.md](C
 1. **Add a project.** Click the button next to **Projects** in the sidebar, or choose
    **File › Add Project…** (⌘O), and pick a folder. A folder inside a Git repository adds the whole
    repository.
-2. **Start a session.** Point at the project, click `+` and pick an agent or your shell. An agent
-   that is not installed yet can be installed from **Settings › Agents** with npm.
+2. **Start a session.** Point at the project and click `+`: name the new worktree, or leave the name
+   blank for a random one, pick an agent, and Hoot creates the worktree and starts a session in it.
+   An agent that is not installed yet can be installed from **Settings › Agents** with npm.
 3. **Note the work as issues.** Click **Issues** at the top of the sidebar, then **New issue** (or
    press C).
 4. **Hand an issue to an agent.** Click the paper plane at the end of an issue's row: Hoot creates a
@@ -92,8 +95,7 @@ On macOS, ⌘1 to ⌘9 switch between sessions, and ⌘[ and ⌘] go back and fo
 ## The `hoot` command
 
 Every session Hoot starts can run `hoot`, which reads and changes the issues of the session's
-project. Agents use it to report their progress on an issue, and you can use it in any shell
-session:
+project. Agents use it to report their progress on an issue, and you can run it in a terminal:
 
 ```sh
 hoot issue list                                   # open issues of this project

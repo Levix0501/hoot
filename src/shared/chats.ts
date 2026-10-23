@@ -11,8 +11,15 @@ import { CODING_TOOL_IDS, getTool, type CodingToolId, type ToolId } from './tool
 export interface ChatInfo {
   id: string
   toolId: CodingToolId
-  /** The folder the agent runs in, which Hoot creates and keeps. */
+  /**
+   * The folder the agent runs in: the chat's own folder under `~/.hoot/chats`,
+   * or the root of a saved session's worktree.
+   */
   folder: string
+  /** The root of the project of a saved session's worktree; `null` for a chat. */
+  projectRoot: string | null
+  /** The root of the worktree a saved session runs in; `null` for a chat. */
+  worktreePath: string | null
   /** The agent's own id of the conversation the chat is in; `null` until it is known. */
   conversationId: string | null
   /** The terminal title the agent last set in the conversation; empty until it sets one. */
@@ -25,6 +32,21 @@ export interface ChatInfo {
   createdAt: number
   /** Milliseconds since the Unix epoch, when the chat was last opened. */
   lastOpenedAt: number
+}
+
+/**
+ * A saved session: an agent session Hoot keeps and lists below its worktree,
+ * which it continues when the user opens it again. It is a chat of a worktree
+ * instead of a folder of its own.
+ */
+export interface SavedSessionInfo extends ChatInfo {
+  projectRoot: string
+  worktreePath: string
+}
+
+/** Whether a chat is a saved session, whose worktree Hoot opened it in. */
+export function isSavedSession(chat: ChatInfo): chat is SavedSessionInfo {
+  return chat.worktreePath !== null
 }
 
 /** The name Hoot shows for a chat: the one the user gave it, else the agent's title, else the agent's name. */

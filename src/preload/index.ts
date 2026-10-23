@@ -20,6 +20,7 @@ const api: HootApi = {
   testHooks: process.argv.includes('--hoot-test-hooks'),
   windowControls: windowControlsFromArguments(process.argv),
   windowsClipboardKeys: process.platform === 'win32',
+  windows: process.platform === 'win32',
   fileManager: fileManagerName(process.platform),
   manageAgents: managesAgents(process.platform),
   windowsPty: windowsPtyFor(process.platform, process.getSystemVersion()),
@@ -29,6 +30,8 @@ const api: HootApi = {
   quit: () => ipcRenderer.send(IpcChannel.quit),
   listProjects: () => ipcRenderer.invoke(IpcChannel.listProjects),
   addProject: () => ipcRenderer.invoke(IpcChannel.addProject),
+  addProjectConfirmed: (confirmation) =>
+    ipcRenderer.invoke(IpcChannel.addProjectConfirmed, confirmation),
   removeProject: (root) => ipcRenderer.invoke(IpcChannel.removeProject, root),
   onProjectsChanged: (listener) => subscribe(IpcChannel.projectsChanged, listener),
   onAddProjectRequested: (listener) => subscribe(IpcChannel.addProjectRequested, listener),
@@ -64,6 +67,12 @@ const api: HootApi = {
   renameChat: (id, name) => ipcRenderer.send(IpcChannel.renameChat, id, name),
   setChatTitle: (id, title) => ipcRenderer.send(IpcChannel.setChatTitle, id, title),
   onChatsChanged: (listener) => subscribe(IpcChannel.chatsChanged, listener),
+  listSavedSessions: () => ipcRenderer.invoke(IpcChannel.listSavedSessions),
+  createSavedSession: (projectRoot, worktreePath, toolId) =>
+    ipcRenderer.invoke(IpcChannel.createSavedSession, projectRoot, worktreePath, toolId),
+  renameSavedSession: (id, name) => ipcRenderer.send(IpcChannel.renameSavedSession, id, name),
+  setSavedSessionTitle: (id, title) => ipcRenderer.send(IpcChannel.setSavedSessionTitle, id, title),
+  onSavedSessionsChanged: (listener) => subscribe(IpcChannel.savedSessionsChanged, listener),
   getWindowState: () => ipcRenderer.invoke(IpcChannel.getWindowState),
   setSidebarOpen: (open) => ipcRenderer.send(IpcChannel.setSidebarOpen, open),
   setSidebarWidth: (width) => ipcRenderer.send(IpcChannel.setSidebarWidth, width),
@@ -90,9 +99,6 @@ const api: HootApi = {
   onWorktreesChanged: (listener) => subscribe(IpcChannel.worktreesChanged, listener),
   getNewWorktreeOptions: (projectRoot) =>
     ipcRenderer.invoke(IpcChannel.newWorktreeOptions, projectRoot),
-  checkBranchName: (name) => ipcRenderer.invoke(IpcChannel.checkBranchName, name),
-  previewWorktreePath: (projectRoot, branch) =>
-    ipcRenderer.invoke(IpcChannel.previewWorktreePath, projectRoot, branch),
   getWorktreeSubmodules: (projectRoot, participants) =>
     ipcRenderer.invoke(IpcChannel.worktreeSubmodules, projectRoot, participants),
   createWorktree: (request) => ipcRenderer.invoke(IpcChannel.createWorktree, request),

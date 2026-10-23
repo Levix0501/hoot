@@ -7,13 +7,14 @@ import {
   Trash2Icon,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { ToolId } from '../../shared/tools'
+import type { CodingToolId } from '../../shared/tools'
 import { isWithin } from '../../shared/worktrees'
 import { api } from '../lib/api'
+import { cn } from '../lib/utils'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
+import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { contextComponents, dropdownComponents } from './project-item'
-import { ToolMenuEntries } from './tool-menu-entries'
 import { Badge } from './ui/badge'
 import {
   ContextMenu,
@@ -89,12 +90,14 @@ function WorktreeTooltip({ worktree }: { worktree: WorktreeRow }) {
 }
 
 /**
- * A worktree's row in the sidebar, below its project's sessions. It shows the
- * worktree's branch (or abbreviated commit) and whether it is missing or
- * locked; pointing at it shows its root's path and its inner members. Its
- * `+` starts a session in the worktree; its `⋯` menu and its context menu
- * reveal it in Finder (File Explorer on Windows), copy its path or delete it,
- * or for a missing worktree remove it. Clicking the row itself does nothing.
+ * A worktree's row in the sidebar, below its project's sessions: its name over
+ * its branch (or abbreviated commit) when Hoot made it with the New Worktree
+ * dialog, otherwise the branch alone, and whether it is missing or locked.
+ * Pointing at it shows its root's path and its inner members. Its `+` opens
+ * the agents to start a session with in the worktree; its `⋯` menu and its
+ * context menu reveal it in Finder (File Explorer on Windows), copy its path
+ * or delete it, or for a missing worktree remove it. Clicking the row itself
+ * does nothing.
  */
 export function WorktreeItem({
   projectRoot,
@@ -103,11 +106,7 @@ export function WorktreeItem({
   projectRoot: string
   worktree: WorktreeRow
 }) {
-  const tools = useAppStore((state) => state.tools)
-  const launchSettings = useAppStore((state) => state.launchSettings)
-  const newSession = useAppStore((state) => state.newSession)
-  const redetectTools = useAppStore((state) => state.redetectTools)
-  const showSettings = useAppStore((state) => state.showSettings)
+  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
   const removeMissingWorktree = useAppStore((state) => state.removeMissingWorktree)
   // A worktree cannot be deleted while a session runs in it (or in a worktree inside it).
@@ -120,10 +119,8 @@ export function WorktreeItem({
     ),
   )
 
-  const startSession = (toolId: ToolId) => newSession(projectRoot, toolId, worktree.path)
-  const redetect = () => void redetectTools()
-  // On macOS, a tool that is not installed is installed on the Agents page.
-  const installInSettings = api.manageAgents ? () => showSettings('agents') : undefined
+  const startSession = (toolId: CodingToolId) =>
+    void newWorktreeSession(projectRoot, toolId, worktree.path)
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
@@ -158,24 +155,62 @@ export function WorktreeItem({
               <SidebarMenuButton
                 render={<div />}
                 // Highlighted also while the pointer is on one of the buttons over it.
-                className="cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-14"
+                className={cn(
+                  'cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-14',
+                  // A named worktree shows its name above its branch.
+                  worktree.name !== null && 'h-auto min-h-7.5 py-1',
+                )}
                 data-testid="worktree-row"
               />
             }
           >
-            <GitBranchIcon />
-            <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
-              {worktree.displayName}
-            </span>
-            {worktree.missing && (
-              <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
-                Missing
-              </Badge>
-            )}
-            {worktree.locked && (
-              <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
-                Locked
-              </Badge>
+            {worktree.name === null ? (
+              <>
+                <GitBranchIcon />
+                <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
+                  {worktree.displayName}
+                </span>
+                {worktree.missing && (
+                  <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
+                    Missing
+                  </Badge>
+                )}
+                {worktree.locked && (
+                  <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
+                    Locked
+                  </Badge>
+                )}
+              </>
+            ) : (
+              // A named worktree: its name above the branch, which shows in
+              // the monospace font, or the abbreviated commit when detached.
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
+                    {worktree.name}
+                  </span>
+                  {worktree.missing && (
+                    <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
+                      Missing
+                    </Badge>
+                  )}
+                  {worktree.locked && (
+                    <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
+                      Locked
+                    </Badge>
+                  )}
+                </span>
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <GitBranchIcon className="size-3.5 shrink-0" />
+                  <span
+                    className="min-w-0 truncate font-mono text-foreground"
+                    data-user-text=""
+                    data-testid="worktree-branch"
+                  >
+                    {worktree.displayName}
+                  </span>
+                </span>
+              </span>
             )}
           </TooltipTrigger>
           <TooltipContent side="right" align="start" className="max-w-80">
@@ -205,13 +240,11 @@ export function WorktreeItem({
             className="w-auto min-w-56"
             finalFocus={focusAfterOverlay}
           >
-            <ToolMenuEntries
+            <ChatAgentMenuEntries
               components={dropdownComponents}
-              tools={tools}
-              launchSettings={launchSettings}
               onSelect={startSession}
-              onRedetect={redetect}
-              onInstall={installInSettings}
+              testId="worktree-agent"
+              failure="Could not start a session."
             />
           </DropdownMenuContent>
         </DropdownMenu>
@@ -297,13 +330,11 @@ export function WorktreeItem({
                 New Session
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-auto min-w-56">
-                <ToolMenuEntries
+                <ChatAgentMenuEntries
                   components={contextComponents}
-                  tools={tools}
-                  launchSettings={launchSettings}
                   onSelect={startSession}
-                  onRedetect={redetect}
-                  onInstall={installInSettings}
+                  testId="worktree-agent"
+                  failure="Could not start a session."
                 />
               </ContextMenuSubContent>
             </ContextMenuSub>

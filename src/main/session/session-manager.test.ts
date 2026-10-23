@@ -143,6 +143,7 @@ describe('SessionManager', () => {
       projectRoot: '/work/project',
       worktreePath: null,
       chatId: null,
+      savedSessionId: null,
       toolId: 'claude',
       issueId: null,
       status: 'running',

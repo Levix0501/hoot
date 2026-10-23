@@ -192,4 +192,31 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX chats_by_opened ON chats (opened_at DESC, created_at DESC);
   `,
+  // 7: worktrees made by the New Worktree dialog, with their names, and the
+  // saved sessions listed below them, which are chats of a worktree.
+  `
+  -- Every worktree Hoot made while asking for a name, kept by its root: the
+  -- name the dialog gave it, which its row shows above the branch, and when
+  -- it was made, which orders the rows. Worktrees Hoot did not make that way
+  -- have no row, and show their branch alone.
+  CREATE TABLE worktrees (
+    -- The root directory, as Git records it.
+    path TEXT PRIMARY KEY,
+    -- The root of the project whose repository the worktree belongs to.
+    project_root TEXT NOT NULL,
+    name TEXT NOT NULL CHECK (name <> ''),
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE INDEX worktrees_by_project ON worktrees (project_root, created_at);
+
+  -- A chat with a worktree is a saved session of that worktree, listed below
+  -- its row, instead of a chat in the Chats group: its folder is the
+  -- worktree's root, and it stays as long as it has a message.
+  ALTER TABLE chats ADD COLUMN project_root TEXT;
+  ALTER TABLE chats ADD COLUMN worktree_path TEXT;
+
+  CREATE INDEX chats_by_worktree ON chats (worktree_path, created_at);
+  `,
 ]

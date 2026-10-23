@@ -10,6 +10,7 @@ import { OpenIssueCount } from './open-issue-count'
 import { ChatItem } from './chat-item'
 import { NewChatItem } from './new-chat-item'
 import { ProjectItem } from './project-item'
+import { SavedSessionItem } from './saved-session-item'
 import { SessionItem } from './session-item'
 import { SidebarResizeHandle } from './sidebar-resize-handle'
 import { UpdateButton } from './update-button'
@@ -54,7 +55,11 @@ function ProjectSessions({ project }: { project: Project }) {
   )
 }
 
-/** The sessions in a worktree, below its row, in the order they were started. */
+/**
+ * A worktree's sessions, below its row, in the order they were made or split
+ * off: its saved sessions, and the sessions started in it that Hoot does not
+ * keep, such as those of an issue.
+ */
 function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: string }) {
   const sessions = useAppStore(
     useShallow((state) =>
@@ -63,12 +68,33 @@ function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: st
       ),
     ),
   )
-  if (sessions.length === 0) return null
+  const savedSessions = useAppStore(
+    useShallow((state) =>
+      state.savedSessions.filter(
+        (saved) => saved.projectRoot === projectRoot && saved.worktreePath === path,
+      ),
+    ),
+  )
+  const rows = [
+    ...savedSessions.map((saved) => ({
+      at: saved.createdAt,
+      key: `saved-${saved.id}`,
+      row: <SavedSessionItem saved={saved} />,
+    })),
+    ...sessions
+      .filter((session) => session.savedSessionId === null)
+      .map((session) => ({
+        at: session.createdAt,
+        key: session.id,
+        row: <SessionItem session={session} />,
+      })),
+  ].toSorted((a, b) => a.at - b.at)
+  if (rows.length === 0) return null
   return (
     <SidebarMenuItem data-testid="worktree-session-list" data-worktree-path={path}>
       <SidebarMenuSub className="mr-0 ml-7 pr-0">
-        {sessions.map((session) => (
-          <SessionItem key={session.id} session={session} />
+        {rows.map((entry) => (
+          <Fragment key={entry.key}>{entry.row}</Fragment>
         ))}
       </SidebarMenuSub>
     </SidebarMenuItem>
@@ -83,7 +109,7 @@ function ProjectWorktrees({ project }: { project: Project }) {
   const listed = useAppStore((state) => state.worktrees[project.root])
   const known = useAppStore((state) => state.knownWorktrees)
   const withSessions = useAppStore(
-    useShallow((state) => sessionWorktrees(state.sessions, project.root)),
+    useShallow((state) => sessionWorktrees(state.sessions, project.root, state.savedSessions)),
   )
   const rows = useMemo(
     () => worktreeRows(listed, withSessions, known),
@@ -110,7 +136,8 @@ function ProjectEntry({ project }: { project: Project }) {
   const empty = useAppStore(
     (state) =>
       state.worktrees[project.root]?.length === 0 &&
-      !state.sessions.some((session) => session.projectRoot === project.root),
+      !state.sessions.some((session) => session.projectRoot === project.root) &&
+      !state.savedSessions.some((saved) => saved.projectRoot === project.root),
   )
   return (
     <Collapsible

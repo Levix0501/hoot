@@ -5,7 +5,13 @@ import { type AgentOperationSummary, type AgentsState } from '../../shared/agent
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
-import { chatAgent, firstDetectionRunning, type ChatInfo } from '../../shared/chats'
+import {
+  chatAgent,
+  firstDetectionRunning,
+  usableChatAgents,
+  type ChatInfo,
+  type SavedSessionInfo,
+} from '../../shared/chats'
 import {
   blockedByIdsOf,
   blockingIdsOf,
@@ -16,6 +22,8 @@ import {
   type WaitCounts,
 } from '../../shared/dependencies'
 import type {
+  AddProjectConfirmation,
+  AddProjectResult,
   LabelChangeRequest,
   NewLabelRequest,
   Project,
@@ -119,6 +127,8 @@ export interface UiSession {
   worktreePath: string | null
   /** The chat whose agent it runs, which belongs to no project; `null` for a session. */
   chatId: string | null
+  /** The saved session whose agent it runs, in the worktree; `null` for every other session. */
+  savedSessionId: string | null
   toolId: ToolId
   /**
    * The issue the session was opened from, which Claude Code is sent when it
@@ -157,6 +167,8 @@ export interface UiSession {
   unread: boolean
   /** The name the user gave the session, if any. */
   customName: string | null
+  /** Milliseconds since the Unix epoch, when the session was made, as its row orders it. */
+  createdAt: number
   /** Set once the session is being closed, until it is gone. */
   closing: boolean
 }
@@ -246,6 +258,18 @@ export interface AppState {
   sessions: UiSession[]
   /** Every chat, in the order of the sidebar's Chats group. */
   chats: ChatInfo[]
+  /** Every saved session, oldest first, as they show below their worktrees. */
+  savedSessions: SavedSessionInfo[]
+  /**
+   * A folder the user picked to add as a project, while Hoot asks whether to
+   * run `git init` there or make its first commit.
+   */
+  addProjectConfirmation:
+    | (AddProjectConfirmation & {
+        fileCount: number
+        hasGitignore: boolean
+      })
+    | null
   /**
    * The issues whose start button is creating a worktree for them, until
    * their session shows or creating it fails.
@@ -319,6 +343,8 @@ export interface AppState {
   renamingSessionId: string | null
   /** The chat the rename dialog is open for. */
   renamingChatId: string | null
+  /** The saved session the rename dialog is open for. */
+  renamingSavedSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
   /**
@@ -419,6 +445,25 @@ export interface AppState {
    * unexpectedly continues in a new session.
    */
   openChat(chatId: string): void
+  /**
+   * Opens a saved session's page: when its agent does not run, starts it in
+   * the worktree with the session's agent, continuing its conversation — or,
+   * for a worktree whose folder is gone, says so instead and starts nothing.
+   */
+  openSavedSession(id: string): void
+  /** Continues a saved session whose agent ended unexpectedly, as its Resume button does. */
+  resumeSavedSession(id: string): void
+  /** Makes a saved session of an agent in a worktree, and opens it. */
+  newWorktreeSession(projectRoot: string, toolId: CodingToolId, worktreePath: string): Promise<void>
+  /** Opens a saved session the New Worktree dialog made, showing its page. */
+  openCreatedSession(session: SavedSessionInfo): void
+  /** Asks for confirmation before closing a running saved session's agent. */
+  closeSavedSession(id: string): void
+  startRenamingSavedSession(id: string): void
+  /** Ends renaming a saved session; `null` keeps its name as it was. */
+  finishRenamingSavedSession(id: string, name: string | null): void
+  /** Confirms or cancels adding a folder that needs `git init` or its first commit. */
+  answerAddProject(confirmed: boolean): Promise<void>
   /** Continues a chat whose agent ended unexpectedly, as its Resume button does. */
   resumeChat(chatId: string): void
   /** Asks for confirmation before closing a running chat's agent, as closing a session does. */
@@ -777,16 +822,17 @@ export function isSessionRunning(session: UiSession): boolean {
   return session.status !== 'exited'
 }
 
-function fromInfo(info: SessionInfo, chat?: ChatInfo): UiSession {
+function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
   return {
     ...info,
-    title: chat?.title ?? '',
+    title: record?.title ?? '',
     workingSince: null,
     attention: null,
     turns: [],
     failure: null,
     unread: false,
-    customName: chat?.customName ?? null,
+    customName: record?.customName ?? null,
+    createdAt: record?.createdAt ?? Date.now(),
     closing: false,
   }
 }
@@ -1032,26 +1078,33 @@ export function warnAboutWorktree(warning: string): void {
   })
 }
 
-/** The worktree rows of a project: its worktrees, and those its sessions run in. */
+/** The worktree rows of a project: its worktrees, and those its sessions and saved sessions are in. */
 export function projectWorktreeRows(
-  state: Pick<AppState, 'worktrees' | 'knownWorktrees' | 'sessions'>,
+  state: Pick<AppState, 'worktrees' | 'knownWorktrees' | 'sessions' | 'savedSessions'>,
   projectRoot: string,
 ): WorktreeRow[] {
   return worktreeRows(
     state.worktrees[projectRoot],
-    sessionWorktrees(state.sessions, projectRoot),
+    sessionWorktrees(state.sessions, projectRoot, state.savedSessions),
     state.knownWorktrees,
   )
 }
 
-/** The worktrees a project's sessions run in, without duplicates. */
-export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: string): string[] {
+/** The worktrees a project's sessions run in and its saved sessions belong to, without duplicates. */
+export function sessionWorktrees(
+  sessions: readonly UiSession[],
+  projectRoot: string,
+  savedSessions: readonly SavedSessionInfo[] = [],
+): string[] {
   return [
-    ...new Set(
-      sessions
+    ...new Set([
+      ...sessions
         .filter((session) => session.projectRoot === projectRoot && session.worktreePath !== null)
         .map((session) => session.worktreePath!),
-    ),
+      ...savedSessions
+        .filter((saved) => saved.projectRoot === projectRoot)
+        .map((saved) => saved.worktreePath),
+    ]),
   ]
 }
 
@@ -1061,7 +1114,10 @@ export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: st
  * where chats come in the sidebar.
  */
 export function orderedSessions(
-  state: Pick<AppState, 'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'chats'>,
+  state: Pick<
+    AppState,
+    'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'savedSessions' | 'chats'
+  >,
   /** Sessions that are being closed count too, at the place of their chat. */
   closing: ReadonlySet<string> = new Set(),
 ): UiSession[] {
@@ -1140,9 +1196,20 @@ export const useAppStore = create<AppState>()((set, get) => {
                 chat.id === session.chatId ? { ...chat, title } : chat,
               ),
             }),
+        ...(session.savedSessionId === null || title === ''
+          ? {}
+          : {
+              savedSessions: state.savedSessions.map((saved) =>
+                saved.id === session.savedSessionId ? { ...saved, title } : saved,
+              ),
+            }),
       }))
-      // The name of a chat follows the last title its agent set, as a session's does.
+      // The name of a chat or saved session follows the last title its agent
+      // set, as a session's does.
       if (session.chatId !== null && title !== '') api.setChatTitle(session.chatId, title)
+      if (session.savedSessionId !== null && title !== '') {
+        api.setSavedSessionTitle(session.savedSessionId, title)
+      }
     })
     terminals.set(id, sessionTerminal)
     arrivals.set(id, [])
@@ -1303,6 +1370,23 @@ export const useAppStore = create<AppState>()((set, get) => {
     }))
   }
 
+  /** Shows the saved sessions as they are now, with the names of those running. */
+  const applySavedSessions = (savedSessions: SavedSessionInfo[]) => {
+    set((state) => ({
+      savedSessions,
+      renamingSavedSessionId:
+        state.renamingSavedSessionId !== null &&
+        !savedSessions.some((saved) => saved.id === state.renamingSavedSessionId)
+          ? null
+          : state.renamingSavedSessionId,
+      sessions: state.sessions.map((session) => {
+        if (session.savedSessionId === null) return session
+        const saved = savedSessions.find((candidate) => candidate.id === session.savedSessionId)
+        return saved === undefined ? session : { ...session, customName: saved.customName }
+      }),
+    }))
+  }
+
   /**
    * Shows the labels as they are now, unless newer ones are shown already;
    * the Label filter forgets the labels deleted.
@@ -1438,6 +1522,61 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (!issuesRead || projects.some((project) => !known.has(project.id))) loadIssues()
   }
 
+  /** Says what adding a folder as a project came to, or asks before Hoot makes its first commit. */
+  const applyAddProjectResult = (result: AddProjectResult) => {
+    switch (result.kind) {
+      case 'added': {
+        const { projects } = get()
+        if (!projects.some((project) => project.id === result.project.id)) {
+          applyProjects([...projects, result.project])
+        }
+        toast.success('Project added.', { description: pathText(result.project.root) })
+        break
+      }
+      case 'duplicate':
+        toast.info('This project is already in the list.', {
+          description: pathText(result.project.root),
+        })
+        break
+      case 'bare':
+        toast.error('Bare repositories are not supported yet.', {
+          description: pathText(result.path),
+        })
+        break
+      case 'unknown-main-worktree':
+        toast.error(
+          'The main worktree of this repository cannot be determined, so it is not supported yet.',
+          { description: pathText(result.path) },
+        )
+        break
+      case 'error':
+        toast.error('Could not add the project.', { description: result.message })
+        break
+      case 'cancelled':
+        break
+      case 'needs-init':
+        set({
+          addProjectConfirmation: {
+            folder: result.folder,
+            mode: 'init',
+            fileCount: result.fileCount,
+            hasGitignore: result.hasGitignore,
+          },
+        })
+        break
+      case 'needs-first-commit':
+        set({
+          addProjectConfirmation: {
+            folder: result.folder,
+            mode: 'first-commit',
+            fileCount: result.fileCount,
+            hasGitignore: result.hasGitignore,
+          },
+        })
+        break
+    }
+  }
+
   /** Applies a project's worktrees as Git lists them now. */
   const applyWorktrees = (projectRoot: string, worktrees: WorktreeInfo[]) => {
     set((state) => ({
@@ -1496,6 +1635,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     issueId: number | null = null,
     show = true,
     chat: ChatInfo | null = null,
+    saved: SavedSessionInfo | null = null,
   ): string => {
     const id = crypto.randomUUID()
     openTerminal(id)
@@ -1508,17 +1648,19 @@ export const useAppStore = create<AppState>()((set, get) => {
           projectRoot,
           worktreePath,
           chatId: chat?.id ?? null,
+          savedSessionId: saved?.id ?? null,
           toolId,
           issueId,
           status: 'starting',
           exit: null,
-          title: chat?.title ?? '',
+          title: saved?.title ?? chat?.title ?? '',
           workingSince: null,
           attention: null,
           turns: [],
           failure: null,
           unread: false,
-          customName: chat?.customName ?? null,
+          customName: saved?.customName ?? chat?.customName ?? null,
+          createdAt: saved?.createdAt ?? Date.now(),
           closing: false,
         },
       ],
@@ -1720,6 +1862,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     launchSettings: null,
     sessions: [],
     chats: [],
+    savedSessions: [],
+    addProjectConfirmation: null,
     startingIssues: [],
     issueStarts: [],
     currentPage: null,
@@ -1742,6 +1886,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     issueDeletion: null,
     renamingSessionId: null,
     renamingChatId: null,
+    renamingSavedSessionId: null,
     closeConfirmation: null,
     quitConfirmation: null,
     update: { kind: 'none' },
@@ -1859,6 +2004,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         chatsRead = true
         applyChats(chats)
       })
+      let savedSessionsRead = false
+      api.onSavedSessionsChanged((sessions) => {
+        savedSessionsRead = true
+        applySavedSessions(sessions)
+      })
       api.onShowSettingsRequested(() => get().showSettings())
       api.onShowAboutRequested(() => get().showSettings('about'))
       api.onConfirmQuit((runningSessions, reason, agentOperations) =>
@@ -1891,15 +2041,17 @@ export const useAppStore = create<AppState>()((set, get) => {
         (error: unknown) => console.error('Could not list the worktrees:', error),
       )
 
-      const [projects, sessions, launchSettings, chats] = await Promise.all([
+      const [projects, sessions, launchSettings, chats, savedSessions] = await Promise.all([
         api.listProjects(),
         api.listSessions(),
         api.getLaunchSettings(),
         api.listChats(),
+        api.listSavedSessions(),
       ])
       // A setting changed while this was read is reported by the change event, which is newer.
       set((state) => ({ launchSettings: state.launchSettings ?? launchSettings }))
       if (!chatsRead) applyChats(chats)
+      if (!savedSessionsRead) applySavedSessions(savedSessions)
       applyProjects(projects)
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
@@ -1913,9 +2065,11 @@ export const useAppStore = create<AppState>()((set, get) => {
             ...reloaded.map((info) =>
               fromInfo(
                 info,
-                info.chatId === null
-                  ? undefined
-                  : state.chats.find((chat) => chat.id === info.chatId),
+                info.chatId !== null
+                  ? state.chats.find((chat) => chat.id === info.chatId)
+                  : info.savedSessionId !== null
+                    ? state.savedSessions.find((saved) => saved.id === info.savedSessionId)
+                    : undefined,
               ),
             ),
           ]
@@ -1938,38 +2092,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     async addProject() {
-      const result = await api.addProject()
-      switch (result.kind) {
-        case 'added': {
-          const { projects } = get()
-          if (!projects.some((project) => project.id === result.project.id)) {
-            applyProjects([...projects, result.project])
-          }
-          toast.success('Project added.', { description: pathText(result.project.root) })
-          break
-        }
-        case 'duplicate':
-          toast.info('This project is already in the list.', {
-            description: pathText(result.project.root),
-          })
-          break
-        case 'bare':
-          toast.error('Bare repositories are not supported yet.', {
-            description: pathText(result.path),
-          })
-          break
-        case 'unknown-main-worktree':
-          toast.error(
-            'The main worktree of this repository cannot be determined, so it is not supported yet.',
-            { description: pathText(result.path) },
-          )
-          break
-        case 'error':
-          toast.error('Could not add the project.', { description: result.message })
-          break
-        case 'cancelled':
-          break
-      }
+      applyAddProjectResult(await api.addProject())
+    },
+
+    async answerAddProject(confirmed) {
+      const confirmation = get().addProjectConfirmation
+      if (confirmation === null) return
+      set({ addProjectConfirmation: null })
+      if (!confirmed) return
+      const result = await api
+        .addProjectConfirmed({ folder: confirmation.folder, mode: confirmation.mode })
+        .catch((error: unknown) => ({ kind: 'error' as const, message: errorMessage(error) }))
+      applyAddProjectResult(result)
     },
 
     async removeProject(root) {
@@ -2097,6 +2231,123 @@ export const useAppStore = create<AppState>()((set, get) => {
       get().openChat(chatId)
     },
 
+    openSavedSession(id) {
+      const saved = get().savedSessions.find((candidate) => candidate.id === id)
+      if (!saved) return
+      const running = get().sessions.find(
+        (session) => session.savedSessionId === id && isSessionRunning(session),
+      )
+      if (running) {
+        // A session that is running only shows its page, without another process.
+        showPage(sessionPage(running.id))
+        return
+      }
+      // Hoot starts nothing in a worktree whose folder is gone, and says why;
+      // the session stays below its row.
+      const worktree = projectWorktreeRows(get(), saved.projectRoot).find(
+        (row) => row.path === saved.worktreePath,
+      )
+      if (worktree?.missing === true) {
+        toast.error('Could not open the session.', {
+          description: `The folder of the worktree is missing: ${saved.worktreePath}`,
+        })
+        return
+      }
+      // An agent that ended unexpectedly leaves its page with the last output
+      // and a Resume button; continuing it starts a new session.
+      const ended = get().sessions.find((session) => session.savedSessionId === id)
+      if (ended) {
+        void api.closeSession(ended.id)
+        // Its page goes with it, as a closed session's does, so that going
+        // back does not show the page of a session that is no longer there.
+        const endedPages = new Set([ended.id])
+        set((state) => ({
+          sessions: state.sessions.filter((session) => session.id !== ended.id),
+          history: forget(state.history, (page) => pageIn(page, endedPages, new Set<number>())),
+        }))
+        setTimeout(() => {
+          terminals.get(ended.id)?.terminal.dispose()
+          terminals.delete(ended.id)
+          arrivals.delete(ended.id)
+        }, 0)
+      }
+      addSession(saved.projectRoot, saved.toolId, saved.worktreePath, null, true, null, saved)
+    },
+
+    resumeSavedSession(id) {
+      get().openSavedSession(id)
+    },
+
+    async newWorktreeSession(projectRoot, toolId, worktreePath) {
+      const { tools, launchSettings } = get()
+      if (firstDetectionRunning(tools)) return
+      if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
+        toast.error('Could not start a session.', {
+          description: 'Install an agent or turn one on in the Agents page first.',
+        })
+        get().showSettings('agents')
+        return
+      }
+      const result = await api
+        .createSavedSession(projectRoot, worktreePath, toolId)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error('Could not start a session.', { description: result.message })
+        return
+      }
+      // The change event may have shown it already.
+      set((state) => ({
+        savedSessions: state.savedSessions.some((saved) => saved.id === result.session.id)
+          ? state.savedSessions
+          : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
+      }))
+      get().openSavedSession(result.session.id)
+    },
+
+    openCreatedSession(session) {
+      set((state) => ({
+        savedSessions: state.savedSessions.some((saved) => saved.id === session.id)
+          ? state.savedSessions
+          : [...state.savedSessions, session].toSorted((a, b) => a.createdAt - b.createdAt),
+      }))
+      get().openSavedSession(session.id)
+    },
+
+    closeSavedSession(id) {
+      const running = get().sessions.find(
+        (session) => session.savedSessionId === id && isSessionRunning(session),
+      )
+      if (running) get().requestCloseSession(running.id)
+    },
+
+    startRenamingSavedSession(id) {
+      if (get().savedSessions.some((saved) => saved.id === id)) {
+        set({ renamingSavedSessionId: id })
+      }
+    },
+
+    finishRenamingSavedSession(id, name) {
+      set((state) => ({
+        renamingSavedSessionId:
+          state.renamingSavedSessionId === id ? null : state.renamingSavedSessionId,
+        savedSessions:
+          name === null
+            ? state.savedSessions
+            : state.savedSessions.map((saved) =>
+                saved.id === id ? { ...saved, customName: name === '' ? null : name } : saved,
+              ),
+        sessions:
+          name === null
+            ? state.sessions
+            : state.sessions.map((session) =>
+                session.savedSessionId === id
+                  ? { ...session, customName: name === '' ? null : name }
+                  : session,
+              ),
+      }))
+      if (name !== null) api.renameSavedSession(id, name)
+    },
+
     closeChat(chatId) {
       const running = get().sessions.find(
         (session) => session.chatId === chatId && isSessionRunning(session),
@@ -2181,6 +2432,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         projectRoot: session.projectRoot,
         worktreePath: session.worktreePath,
         ...(session.chatId === null ? {} : { chatId: session.chatId }),
+        ...(session.savedSessionId === null ? {} : { savedSessionId: session.savedSessionId }),
         toolId: session.toolId,
         issueId: session.issueId,
         ...(options === undefined ? {} : { startedBy: options.by }),
@@ -2750,9 +3002,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     openNewWorktreeDialog(projectRoot) {
-      if (get().projects.some((project) => project.root === projectRoot)) {
-        set({ newWorktreeProject: projectRoot })
+      if (!get().projects.some((project) => project.root === projectRoot)) return
+      const { tools, launchSettings } = get()
+      // Until the first detection has finished, nothing happens.
+      if (firstDetectionRunning(tools)) return
+      if (usableChatAgents(tools, launchSettings).length === 0) {
+        toast.error('Could not create a worktree.', {
+          description: 'Install an agent or turn one on in the Agents page first.',
+        })
+        get().showSettings('agents')
+        return
       }
+      set({ newWorktreeProject: projectRoot })
     },
 
     closeNewWorktreeDialog() {

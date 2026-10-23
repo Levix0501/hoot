@@ -31,7 +31,7 @@ import { hootCliSetup } from './hoot-cli/setup'
 import { registerDatabaseErrorIpc, registerIpc } from './ipc'
 import { IssueStore } from './issues/issue-store'
 import { LabelStore } from './labels/label-store'
-import { resolveProjectRoot } from './projects/project-root'
+import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-project'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
@@ -49,6 +49,7 @@ import { WorkflowExecutor } from './workflows/workflow-executor'
 import { titleBarOverlay, windowBackground } from './window-colors'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
+import { WorktreeStore } from './worktrees/worktree-store'
 
 // Captured before anything else can change it: sessions inherit this environment.
 const baseEnv = captureBaseEnv()
@@ -226,16 +227,15 @@ async function gitExecutable(): Promise<string | null> {
   )
 }
 
-// Worktrees live in the home directory, not in the user data directory, so
-// that an installed Hoot and one run from its repository share them.
-const worktrees = new WorktreeService({
-  layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
-  gitContext: async () => {
-    const git = await gitExecutable()
-    if (git === null) throw new Error(GIT_NOT_FOUND)
-    return { git, env: gitEnvironment((await tools.getLoginEnvironment()).env) }
-  },
-})
+/** The worktrees of the projects in the list; started with the database, which keeps their names. */
+let worktrees: WorktreeService | null = null
+
+/** How to run git for the projects: where it is, and the login shell environment it gets. */
+async function projectGit(): Promise<{ git: string; env: ReturnType<typeof gitEnvironment> }> {
+  const git = await gitExecutable()
+  if (git === null) throw new Error(GIT_NOT_FOUND)
+  return { git, env: gitEnvironment((await tools.getLoginEnvironment()).env) }
+}
 
 /** Opens the main window; `reveal` shows it once its first paint is ready. */
 function createMainWindow(options: { reveal: boolean }): BrowserWindow {
@@ -277,7 +277,7 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   })
   // Nothing is watched: what changed outside Hoot, such as a worktree's
   // folder deleted, shows when the window gets the focus.
-  window.on('focus', () => worktrees.refreshAll())
+  window.on('focus', () => worktrees?.refreshAll())
   // A session shown while the window is the active one counts as seen.
   window.on('focus', () => window.webContents.send(IpcChannel.windowFocusChanged, true))
   window.on('blur', () => window.webContents.send(IpcChannel.windowFocusChanged, false))
@@ -336,7 +336,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', (event) => {
     if (shutDown) return
     event.preventDefault()
-    worktrees.dispose()
+    worktrees?.dispose()
     const shutdown = (async () => {
       // Also when Hoot quits without asking, as on SIGTERM.
       await agents.stopAll()
@@ -377,6 +377,15 @@ function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
   const labels = new LabelStore(database)
+  // Worktrees live in the home directory, not in the user data directory, so
+  // that an installed Hoot and one run from its repository share them; their
+  // names come from the database.
+  const worktreeService = new WorktreeService({
+    layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
+    records: new WorktreeStore(database),
+    gitContext: projectGit,
+  })
+  worktrees = worktreeService
   const chats = new ChatManager({
     db: database,
     conversations: localChatConversations({
@@ -417,26 +426,41 @@ function startWithDatabase(database: DatabaseSync): void {
     chats,
     quitGuard,
     updates,
-    worktrees,
+    worktrees: worktreeService,
     workflows,
     sessionStarts,
-    resolveProjectRoot: async (directory) => {
-      const git = await gitExecutable()
-      if (git === null) return { kind: 'error', message: GIT_NOT_FOUND }
-      return resolveProjectRoot(directory, { git, env: (await tools.getLoginEnvironment()).env })
+    inspectProjectFolder: async (directory) => {
+      try {
+        return await inspectAddProject(directory, await projectGit())
+      } catch (error) {
+        return {
+          kind: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+    },
+    initializeProject: async (folder, mode) => {
+      try {
+        return await addProjectWithFirstCommit(folder, mode, await projectGit())
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
     },
   })
 
   // The chats follow the events of their agents' sessions: a new conversation
   // in Claude Code, and what an ended process left in the agent's records.
   sessions.on('hook-event', (id, report) => {
-    const chatId = sessions.chatIdOf(id)
+    const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)
   })
   // `/new` and `/clear` of Codex and OpenCode start another conversation
   // without a record of it until its first message.
   sessions.on('input', (id, data) => {
-    const chatId = sessions.chatIdOf(id)
+    const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.typed(chatId, id, data)
   })
   sessions.on('updated', (session) => chats.sessionEnded(session))
@@ -515,7 +539,7 @@ function startWithDatabase(database: DatabaseSync): void {
     // Clicking the Dock icon shows the window, also after a background start.
     app.on('activate', showMainWindow)
     void tools.detect()
-    worktrees.setProjects(projects.list().map((project) => project.root))
+    worktreeService.setProjects(projects.list().map((project) => project.root))
     updates.start()
   })
 }

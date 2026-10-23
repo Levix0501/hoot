@@ -15,10 +15,12 @@ import type { AppInfo } from '../shared/app-info'
 import { APPEARANCES } from '../shared/appearance'
 import {
   IpcChannel,
+  type AddProjectConfirmation,
   type AddProjectResult,
   type CreateChatResult,
   type CreateLabelGroupResult,
   type CreateLabelResult,
+  type CreateSavedSessionResult,
   type DependencyChangeResult,
   type IssueLabelsRequest,
   type LabelChangeRequest,
@@ -48,6 +50,7 @@ import type { WorkflowStep } from '../shared/workflows'
 import type {
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
+  CreateWorktreeResult,
   DeleteWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
@@ -57,7 +60,7 @@ import type { ChatManager } from './chats/chat-manager'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
-import type { ProjectRootResult } from './projects/project-root'
+import type { AddProjectInspection } from './projects/add-project'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import type { SentIssue } from './session/launch'
@@ -92,7 +95,13 @@ export interface IpcDependencies {
   workflows: WorkflowExecutor
   /** The sessions hoot asked for, which the window answers. */
   sessionStarts: SessionStartRequests
-  resolveProjectRoot(directory: string): Promise<ProjectRootResult>
+  /** What adding a folder as a project takes: nothing, or a first commit after a confirmation. */
+  inspectProjectFolder(directory: string): Promise<AddProjectInspection>
+  /** Runs `git init` in a folder, or makes the first commit of a repository without one. */
+  initializeProject(
+    folder: string,
+    mode: 'init' | 'first-commit',
+  ): Promise<{ ok: true; root: string } | { ok: false; message: string }>
 }
 
 const sessionId = z.string().min(1).max(100)
@@ -103,6 +112,7 @@ const startSessionRequest = z.object({
   projectRoot: z.string().min(1),
   worktreePath: z.string().min(1).nullable(),
   chatId: z.string().min(1).max(100).nullable().optional(),
+  savedSessionId: z.string().min(1).max(100).nullable().optional(),
   toolId: z.enum(TOOL_IDS),
   issueId: rowId.nullable(),
   startedBy: z.enum(['user', 'agent']).optional(),
@@ -112,15 +122,20 @@ const startSessionRequest = z.object({
 }) satisfies z.ZodType<StartSessionRequest>
 const projectRoot = z.string().min(1)
 const worktreeArguments = z.tuple([projectRoot, z.string().min(1)])
-const branchName = z.string().max(1_000)
 const createWorktreeRequest = z.object({
   projectRoot,
-  branch: branchName.min(1),
+  name: z.string().max(10_000),
+  toolId: z.enum(CODING_TOOL_IDS),
   base: z.string().min(1),
   nested: z
     .array(z.object({ relativePath: z.string().min(1), base: z.string().min(1) }))
     .max(1_000),
 }) satisfies z.ZodType<CreateWorktreeRequest>
+const addProjectConfirmation = z.object({
+  folder: z.string().min(1),
+  mode: z.enum(['init', 'first-commit']),
+}) satisfies z.ZodType<AddProjectConfirmation>
+const savedSessionArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -307,6 +322,44 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.listProjects, () => deps.projects.list())
 
+  /** Adds a folder that is ready to be a project: to the list, and its worktrees. */
+  const addProjectRoot = (root: string): AddProjectResult => {
+    const { added, project } = deps.projects.add(root)
+    if (!added) return { kind: 'duplicate', project }
+    deps.worktrees.addProject(project.root)
+    send(IpcChannel.projectsChanged, deps.projects.list())
+    return { kind: 'added', project }
+  }
+
+  /** What adding a folder comes to: added, or what the confirmation must say first. */
+  const inspectProjectFolder = async (directory: string): Promise<AddProjectResult> => {
+    const inspection = await deps.inspectProjectFolder(directory)
+    switch (inspection.kind) {
+      case 'ready':
+        return addProjectRoot(inspection.root)
+      case 'needs-init':
+        return {
+          kind: 'needs-init',
+          folder: inspection.folder,
+          fileCount: inspection.fileCount,
+          hasGitignore: inspection.hasGitignore,
+        }
+      case 'needs-first-commit':
+        return {
+          kind: 'needs-first-commit',
+          folder: inspection.folder,
+          fileCount: inspection.fileCount,
+          hasGitignore: inspection.hasGitignore,
+        }
+      case 'bare':
+        return { kind: 'bare', path: directory }
+      case 'unknown-main-worktree':
+        return { kind: 'unknown-main-worktree', path: directory }
+      case 'error':
+        return { kind: 'error', message: inspection.message }
+    }
+  }
+
   handle(IpcChannel.addProject, async (): Promise<AddProjectResult> => {
     const window = deps.getWindow()
     const options: Electron.OpenDialogOptions = {
@@ -319,23 +372,28 @@ export function registerIpc(deps: IpcDependencies): void {
       : await dialog.showOpenDialog(options)
     const directory = selection.filePaths[0]
     if (selection.canceled || !directory) return { kind: 'cancelled' }
+    return inspectProjectFolder(directory)
+  })
 
-    const resolved = await deps.resolveProjectRoot(directory)
-    switch (resolved.kind) {
-      case 'bare':
-        return { kind: 'bare', path: directory }
-      case 'unknown-main-worktree':
-        return { kind: 'unknown-main-worktree', path: directory }
-      case 'error':
-        return { kind: 'error', message: resolved.message }
-      case 'ok': {
-        const { added, project } = deps.projects.add(resolved.root)
-        if (!added) return { kind: 'duplicate', project }
-        deps.worktrees.addProject(project.root)
-        send(IpcChannel.projectsChanged, deps.projects.list())
-        return { kind: 'added', project }
+  handle(IpcChannel.addProjectConfirmed, async (_event, value): Promise<AddProjectResult> => {
+    const parsed = addProjectConfirmation.safeParse(value)
+    if (!parsed.success) return { kind: 'error', message: 'Invalid request.' }
+    const { folder, mode } = parsed.data
+    // What was confirmed may have changed since, as by a commit made meanwhile.
+    const inspection = await deps.inspectProjectFolder(folder)
+    const expected = mode === 'init' ? 'needs-init' : 'needs-first-commit'
+    if (inspection.kind !== expected) {
+      return {
+        kind: 'error',
+        message:
+          inspection.kind === 'error'
+            ? inspection.message
+            : 'The folder changed since Hoot asked; add it again.',
       }
     }
+    const result = await deps.initializeProject(folder, mode)
+    if (!result.ok) return { kind: 'error', message: result.message }
+    return addProjectRoot(result.root)
   })
 
   handle(IpcChannel.removeProject, (_event, value) => {
@@ -454,6 +512,40 @@ export function registerIpc(deps: IpcDependencies): void {
 
   deps.chats.on('changed', (chats) => send(IpcChannel.chatsChanged, chats))
 
+  handle(IpcChannel.listSavedSessions, () => deps.chats.listSavedSessions())
+
+  handle(
+    IpcChannel.createSavedSession,
+    async (_event, ...args): Promise<CreateSavedSessionResult> => {
+      const parsed = savedSessionArguments.safeParse(args)
+      if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+      const [root, worktreePath, toolId] = parsed.data
+      if (!deps.projects.find(root))
+        return { ok: false, message: 'The project is not in the list.' }
+      // As it is now: a worktree deleted or missing since its row showed cannot start a session.
+      const worktree = await deps.worktrees.currentWorktree(root, worktreePath)
+      if (!worktree) {
+        return { ok: false, message: `The worktree no longer exists: ${worktreePath}` }
+      }
+      if (worktree.missing) {
+        return { ok: false, message: `The folder of the worktree is missing: ${worktreePath}` }
+      }
+      return { ok: true, session: deps.chats.createSavedSession(root, worktreePath, toolId) }
+    },
+  )
+
+  on(IpcChannel.renameSavedSession, (...args) => {
+    const parsed = z.tuple([sessionId, z.string().max(10_000)]).safeParse(args)
+    if (parsed.success) deps.chats.rename(...parsed.data)
+  })
+
+  on(IpcChannel.setSavedSessionTitle, (...args) => {
+    const parsed = z.tuple([sessionId, z.string().max(10_000)]).safeParse(args)
+    if (parsed.success) deps.chats.setTitle(...parsed.data)
+  })
+
+  deps.chats.on('saved-changed', (sessions) => send(IpcChannel.savedSessionsChanged, sessions))
+
   handle(IpcChannel.startSession, async (_event, value): Promise<StartSessionResult> => {
     const parsed = startSessionRequest.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid session request.' }
@@ -462,9 +554,11 @@ export function registerIpc(deps: IpcDependencies): void {
       const chat = deps.chats.get(request.chatId)
       if (
         !chat ||
+        chat.worktreePath !== null ||
         chat.toolId !== request.toolId ||
         request.worktreePath !== null ||
-        request.issueId !== null
+        request.issueId !== null ||
+        (request.savedSessionId !== undefined && request.savedSessionId !== null)
       ) {
         return { ok: false, message: 'Invalid session request.' }
       }
@@ -483,6 +577,53 @@ export function registerIpc(deps: IpcDependencies): void {
         )
         // The chat was opened: it goes to the top of Chats.
         deps.chats.opened(chat.id)
+        return { ok: true, session }
+      } catch (error) {
+        if (error instanceof SessionError) return { ok: false, message: error.message }
+        throw error
+      }
+    }
+    if (request.savedSessionId !== undefined && request.savedSessionId !== null) {
+      const saved = deps.chats.get(request.savedSessionId)
+      if (
+        !saved ||
+        saved.projectRoot === null ||
+        saved.worktreePath === null ||
+        saved.projectRoot !== request.projectRoot ||
+        saved.worktreePath !== request.worktreePath ||
+        saved.toolId !== request.toolId ||
+        request.issueId !== null ||
+        (request.chatId !== undefined && request.chatId !== null)
+      ) {
+        return { ok: false, message: 'Invalid session request.' }
+      }
+      if (!deps.projects.find(request.projectRoot)) {
+        return { ok: false, message: 'The project is not in the list.' }
+      }
+      // A session whose worktree is gone, or was deleted outside Hoot, stays
+      // but does not start; Hoot says why.
+      const worktree = await deps.worktrees.currentWorktree(saved.projectRoot, saved.worktreePath)
+      if (!worktree) {
+        return { ok: false, message: `The worktree no longer exists: ${saved.worktreePath}` }
+      }
+      if (worktree.missing) {
+        return {
+          ok: false,
+          message: `The folder of the worktree is missing: ${saved.worktreePath}`,
+        }
+      }
+      let prepared
+      try {
+        prepared = await deps.chats.prepareSession(saved.id)
+      } catch (error) {
+        return { ok: false, message: `Could not open the worktree: ${errorMessage(error)}` }
+      }
+      if (!prepared) return { ok: false, message: 'The saved session no longer exists.' }
+      try {
+        const session = await deps.sessions.start(request, null, prepared.launch)
+        // It goes to the end of its worktree's sessions when split off; opening
+        // it again does not move its row.
+        deps.chats.opened(saved.id)
         return { ok: true, session }
       } catch (error) {
         if (error instanceof SessionError) return { ok: false, message: error.message }
@@ -618,25 +759,37 @@ export function registerIpc(deps: IpcDependencies): void {
       : Promise.resolve({ ok: false, message: 'Invalid project.' })
   })
 
-  handle(IpcChannel.checkBranchName, (_event, value) => {
-    const parsed = branchName.safeParse(value)
-    return parsed.success ? deps.worktrees.isValidBranchName(parsed.data) : false
-  })
-
-  handle(IpcChannel.previewWorktreePath, (_event, ...args) => {
-    const parsed = z.tuple([projectRoot, branchName]).safeParse(args)
-    return parsed.success ? deps.worktrees.previewPath(...parsed.data) : null
-  })
-
   handle(IpcChannel.worktreeSubmodules, (_event, ...args) => {
     const parsed = submoduleArguments.safeParse(args)
     return parsed.success ? deps.worktrees.submodules(...parsed.data) : []
   })
 
-  handle(IpcChannel.createWorktree, (_event, value) => {
+  handle(IpcChannel.createWorktree, async (_event, value): Promise<CreateWorktreeResult> => {
     const parsed = createWorktreeRequest.safeParse(value)
     if (!parsed.success) return { ok: false, reason: 'invalid', message: 'Invalid request.' }
-    return deps.worktrees.create(parsed.data)
+    const request = parsed.data
+    if (!deps.projects.find(request.projectRoot)) {
+      return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
+    }
+    const created = await deps.worktrees.createNamed(request)
+    if (!created.ok) return { ok: false, reason: created.reason, message: created.message }
+    try {
+      const session = deps.chats.createSavedSession(
+        request.projectRoot,
+        created.path,
+        request.toolId,
+      )
+      return {
+        ok: true,
+        path: created.path,
+        branch: created.branch,
+        name: created.name,
+        session,
+        warning: created.warning,
+      }
+    } catch (error) {
+      return { ok: false, reason: 'failed', message: errorMessage(error) }
+    }
   })
 
   handle(
@@ -681,8 +834,11 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     const result = await deps.worktrees.delete(root, worktreePath, discard, running)
-    // Its sessions, which have all ended, close with it.
-    if (result.ok) deps.sessions.forgetWorktree(worktreePath)
+    // Its sessions, which have all ended, close with it, and so do its saved sessions.
+    if (result.ok) {
+      deps.sessions.forgetWorktree(worktreePath)
+      deps.chats.removeForWorktree(worktreePath)
+    }
     return result
   })
 
@@ -690,7 +846,10 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = worktreeArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
     const result = await deps.worktrees.removeMissing(...parsed.data)
-    if (result.ok) deps.sessions.forgetWorktree(parsed.data[1])
+    if (result.ok) {
+      deps.sessions.forgetWorktree(parsed.data[1])
+      deps.chats.removeForWorktree(parsed.data[1])
+    }
     return result
   })
 

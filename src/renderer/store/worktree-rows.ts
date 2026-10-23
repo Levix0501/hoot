@@ -14,6 +14,8 @@ function fallbackInfo(path: string): WorktreeInfo {
     path,
     branch: null,
     displayName: path.split('/').filter(Boolean).at(-1) ?? path,
+    name: null,
+    createdAt: 0,
     missing: true,
     locked: false,
     lockReason: null,

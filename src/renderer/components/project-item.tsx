@@ -60,8 +60,9 @@ export const contextComponents: ToolMenuComponents = {
  * name, the light of the state of its sessions that needs the user most, if
  * any does, which counts them when pointed at; and how many of its issues
  * are open. Pointing at it, or moving the keyboard focus into it, shows its
- * `+` and `⋯` buttons and its context menu, which start sessions, create
- * worktrees and remove the project.
+ * `+` and `⋯` buttons and its context menu: `+` and New Worktree… open the
+ * New Worktree dialog, and the context menu removes the project, starting a
+ * session in its folder only on Windows.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const tools = useAppStore((state) => state.tools)
@@ -137,40 +138,16 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
           />
         </CollapsibleTrigger>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuAction
-                showOnHover
-                className="right-1 hover:bg-sidebar-foreground/10"
-                aria-label={`New session in ${project.name}`}
-                title="New Session"
-                data-testid="new-session-button"
-              />
-            }
-          >
-            <PlusIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="w-auto min-w-56"
-            finalFocus={focusAfterOverlay}
-          >
-            <ToolMenuEntries
-              components={dropdownComponents}
-              tools={tools}
-              launchSettings={launchSettings}
-              onSelect={startSession}
-              onRedetect={redetect}
-              onInstall={installInSettings}
-            />
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={newWorktree} data-testid="new-worktree">
-              <GitBranchPlusIcon />
-              New Worktree…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <SidebarMenuAction
+          showOnHover
+          className="right-1 hover:bg-sidebar-foreground/10"
+          aria-label={`New worktree in ${project.name}`}
+          title="New Worktree"
+          onClick={newWorktree}
+          data-testid="new-worktree-button"
+        >
+          <PlusIcon />
+        </SidebarMenuAction>
 
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -205,22 +182,25 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger data-testid="context-new-session">
-            <PlusIcon />
-            New Session
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-auto min-w-56">
-            <ToolMenuEntries
-              components={contextComponents}
-              tools={tools}
-              launchSettings={launchSettings}
-              onSelect={startSession}
-              onRedetect={redetect}
-              onInstall={installInSettings}
-            />
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+        {/* Only on Windows can a session start in a project's own folder. */}
+        {api.windows && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger data-testid="context-new-session">
+              <PlusIcon />
+              New Session
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-auto min-w-56">
+              <ToolMenuEntries
+                components={contextComponents}
+                tools={tools}
+                launchSettings={launchSettings}
+                onSelect={startSession}
+                onRedetect={redetect}
+                onInstall={installInSettings}
+              />
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
         <ContextMenuItem onClick={newWorktree} data-testid="context-new-worktree">
           <GitBranchPlusIcon />
           New Worktree…

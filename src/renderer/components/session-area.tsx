@@ -34,22 +34,30 @@ export function SessionPane({ session }: { session: UiSession }) {
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
   const resumeChat = useAppStore((state) => state.resumeChat)
+  const resumeSavedSession = useAppStore((state) => state.resumeSavedSession)
   const chat = useAppStore((state) =>
     session.chatId === null
       ? undefined
       : state.chats.find((candidate) => candidate.id === session.chatId),
   )
+  const saved = useAppStore((state) =>
+    session.savedSessionId === null
+      ? undefined
+      : state.savedSessions.find((candidate) => candidate.id === session.savedSessionId),
+  )
   const inset = useTopRowInset()
-  // A chat whose agent ended any other way than normally keeps its last output,
-  // and can be resumed; a session, and a chat closed by the user, close instead.
+  // A chat or saved session whose agent ended any other way than normally
+  // keeps its last output, and can be resumed; a session, and one closed by
+  // the user, close instead.
+  const record = chat ?? saved
   const resumable =
-    chat !== undefined &&
+    record !== undefined &&
     session.status === 'exited' &&
     session.exit !== null &&
     !isNormalExit(session.exit)
-  // A chat's page shows the chat's name, which keeps the last title its agent
-  // set when the agent clears the terminal title, as its row does.
-  const name = chat === undefined ? sessionName(session) : chatName(chat)
+  // The page shows the name of the chat or saved session, which keeps the
+  // last title its agent set when the agent clears the terminal title.
+  const name = record === undefined ? sessionName(session) : chatName(record)
 
   return (
     <div
@@ -113,11 +121,12 @@ export function SessionPane({ session }: { session: UiSession }) {
             size="sm"
             variant="outline"
             disabled={session.closing}
-            onClick={() =>
-              resumable && session.chatId !== null
-                ? resumeChat(session.chatId)
-                : void closeSession(session.id)
-            }
+            onClick={() => {
+              if (resumable && session.chatId !== null) resumeChat(session.chatId)
+              else if (resumable && session.savedSessionId !== null) {
+                resumeSavedSession(session.savedSessionId)
+              } else void closeSession(session.id)
+            }}
             data-testid={resumable ? 'session-ended-resume' : 'session-ended-close'}
           >
             {resumable ? <PlayIcon /> : <XIcon />}

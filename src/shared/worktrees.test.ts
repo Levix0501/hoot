@@ -21,19 +21,19 @@ describe('defaultNestedBase', () => {
   })
 })
 
-const named = (path: string, displayName: string) => ({ path, displayName }) as WorktreeInfo
+const made = (path: string, createdAt: number) => ({ path, createdAt }) as WorktreeInfo
 
 describe('compareWorktrees', () => {
-  it('orders by display name, then by path', () => {
+  it('orders by creation time, newest first, then by path', () => {
     const sorted = [
-      named('/c', 'zeta'),
-      named('/b', 'alpha'),
-      named('/a', 'alpha'),
-      named('/d', 'beta'),
+      made('/old', 100),
+      made('/new-b', 300),
+      made('/new-a', 300),
+      made('/middle', 200),
     ]
       .toSorted(compareWorktrees)
       .map((worktree) => worktree.path)
-    expect(sorted).toEqual(['/a', '/b', '/d', '/c'])
+    expect(sorted).toEqual(['/new-a', '/new-b', '/middle', '/old'])
   })
 })
 

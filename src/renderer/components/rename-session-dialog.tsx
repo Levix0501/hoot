@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { defaultSessionName, sessionName } from '../../shared/session'
-import { chatName, type ChatInfo } from '../../shared/chats'
+import { chatName, type ChatInfo, type SavedSessionInfo } from '../../shared/chats'
 import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import { Button } from './ui/button'
 import {
@@ -100,6 +100,43 @@ export function RenameSessionDialog() {
             placeholder={defaultSessionName(shown.toolId, shown.title)}
             ariaLabel="Session name"
             testId="session-rename-input"
+            onRename={(name) => finishRenaming(shown.id, name)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Renames a saved session, as a chat's rename dialog renames a chat. */
+export function RenameSavedSessionDialog() {
+  const saved = useAppStore((state) =>
+    state.savedSessions.find((candidate) => candidate.id === state.renamingSavedSessionId),
+  )
+  const finishRenaming = useAppStore((state) => state.finishRenamingSavedSession)
+  const [shown, setShown] = useState<SavedSessionInfo | undefined>(saved)
+  if (saved && saved !== shown) setShown(saved)
+
+  return (
+    <Dialog
+      open={saved !== undefined}
+      onOpenChange={(open) => {
+        if (!open && saved) finishRenaming(saved.id, null)
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        finalFocus={focusAfterOverlay}
+        data-testid="rename-saved-session-dialog"
+      >
+        {shown && (
+          <RenameForm
+            key={shown.id}
+            title="Rename Session"
+            name={chatName(shown)}
+            placeholder={defaultSessionName(shown.toolId, shown.title)}
+            ariaLabel="Session name"
+            testId="saved-session-rename-input"
             onRename={(name) => finishRenaming(shown.id, name)}
           />
         )}

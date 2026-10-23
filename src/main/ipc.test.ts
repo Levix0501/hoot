@@ -8,7 +8,7 @@ import { IpcChannel, type StartSessionRequest } from '../shared/ipc'
 import type { Issue, NewIssue } from '../shared/issues'
 import type { ParentChange, SubIssues } from '../shared/sub-issues'
 import type { Labels } from '../shared/labels'
-import type { ChatInfo } from '../shared/chats'
+import type { ChatInfo, SavedSessionInfo } from '../shared/chats'
 import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
@@ -134,6 +134,8 @@ const chat: ChatInfo = {
   id: 'chat-1',
   toolId: 'claude',
   folder: '/chats/claude-code',
+  projectRoot: null,
+  worktreePath: null,
   conversationId: 'conversation-1',
   title: '',
   customName: null,
@@ -141,22 +143,65 @@ const chat: ChatInfo = {
   createdAt: 1_000,
   lastOpenedAt: 1_000,
 }
+const saved: SavedSessionInfo = {
+  id: 'saved-1',
+  toolId: 'claude',
+  folder: '/work/project/fix-login-bug',
+  projectRoot: '/work/project',
+  worktreePath: '/work/project/fix-login-bug',
+  conversationId: 'conversation-2',
+  title: '',
+  customName: null,
+  hasMessages: true,
+  createdAt: 2_000,
+  lastOpenedAt: 2_000,
+}
 const chats = Object.assign(emitter(), {
   list: vi.fn<() => ChatInfo[]>(() => [chat]),
-  get: vi.fn<(id: string) => ChatInfo | undefined>((id) => (id === chat.id ? chat : undefined)),
+  listSavedSessions: vi.fn<() => SavedSessionInfo[]>(() => [saved]),
+  createSavedSession: vi.fn<() => SavedSessionInfo>(() => saved),
+  removeForWorktree: vi.fn<(path: string) => void>(),
+  get: vi.fn<(id: string) => ChatInfo | undefined>((id) =>
+    id === chat.id ? chat : id === saved.id ? saved : undefined,
+  ),
   create: vi.fn<(toolId: ChatInfo['toolId']) => Promise<ChatInfo>>(async () => chat),
   prepareSession: vi.fn<
     (id: string) => Promise<{
       folder: string
       launch: { conversationId: string | null; resume: boolean }
     }>
-  >(async () => ({
-    folder: chat.folder,
-    launch: { conversationId: chat.conversationId, resume: false },
-  })),
+  >(async (id: string) => {
+    const record = id === saved.id ? saved : chat
+    return {
+      folder: record.folder,
+      launch: { conversationId: record.conversationId, resume: record.hasMessages },
+    }
+  }),
   opened: vi.fn<(id: string) => void>(),
   rename: vi.fn<(id: string, name: string) => boolean>(() => true),
   setTitle: vi.fn<(id: string, title: string) => void>(),
+})
+const project = { id: 1, root: '/work/project', name: 'project' }
+const projects = {
+  list: vi.fn<() => (typeof project)[]>(() => [project]),
+  find: vi.fn<(root: string) => typeof project | undefined>((root) =>
+    root === project.root ? project : undefined,
+  ),
+}
+const worktreeAt = {
+  path: saved.worktreePath,
+  branch: 'fix-login-bug',
+  displayName: 'fix-login-bug',
+  name: 'Fix login bug',
+  createdAt: 2_000,
+  missing: false,
+  locked: false,
+  lockReason: null,
+  innerMembers: [],
+}
+const worktrees = Object.assign(emitter(), {
+  currentWorktree: vi.fn<() => Promise<typeof worktreeAt | null>>(async () => worktreeAt),
+  createNamed: vi.fn<(request: unknown) => Promise<unknown>>(),
 })
 const sessionManager = Object.assign(emitter(), {
   start: vi.fn<(request: StartSessionRequest) => Promise<SessionInfo>>(async (request) => ({
@@ -164,6 +209,7 @@ const sessionManager = Object.assign(emitter(), {
     projectRoot: request.projectRoot,
     worktreePath: request.worktreePath,
     chatId: request.chatId ?? null,
+    savedSessionId: request.savedSessionId ?? null,
     toolId: request.toolId,
     issueId: request.issueId,
     status: 'running' as const,
@@ -182,9 +228,13 @@ beforeEach(() => {
   labels.removeAllListeners()
   issues.removeAllListeners()
   chats.removeAllListeners()
+  worktrees.removeAllListeners()
   sessionManager.removeAllListeners()
+  worktrees.currentWorktree.mockReset()
+  worktrees.currentWorktree.mockImplementation(async () => worktreeAt)
   registerIpc({
     issues,
+    projects,
     getWindow: () => window,
     appInfo,
     tools: emitter(),
@@ -194,7 +244,7 @@ beforeEach(() => {
     sessions: sessionManager,
     chats,
     updates,
-    worktrees: emitter(),
+    worktrees,
     workflows,
     labels,
     sessionStarts,
@@ -325,6 +375,134 @@ describe('the messages of chats', () => {
       { conversationId: chat.conversationId, resume: false },
     )
     expect(chats.opened).toHaveBeenCalledWith(chat.id)
+  })
+
+  it('gives the saved sessions, makes one in a worktree, and passes on every change of them', async () => {
+    expect(await invoke(IpcChannel.listSavedSessions)).toEqual([saved])
+    expect(
+      await invoke(IpcChannel.createSavedSession, project.root, saved.worktreePath, 'claude'),
+    ).toEqual({
+      ok: true,
+      session: saved,
+    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(
+      project.root,
+      saved.worktreePath,
+      'claude',
+    )
+    electron.listeners.get(IpcChannel.renameSavedSession)!(trusted, saved.id, 'Login')
+    electron.listeners.get(IpcChannel.setSavedSessionTitle)!(trusted, saved.id, '✳ Fix the login')
+    expect(chats.rename.mock.calls).toEqual([[saved.id, 'Login']])
+    expect(chats.setTitle.mock.calls).toEqual([[saved.id, '✳ Fix the login']])
+    const changed = [{ ...saved, title: 'Fix the login' }]
+    chats.emit('saved-changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.savedSessionsChanged, changed)
+  })
+
+  it('creates a named worktree and the session it opens', async () => {
+    worktrees.createNamed.mockResolvedValue({
+      ok: true,
+      path: saved.worktreePath,
+      branch: 'fix-login-bug',
+      name: 'Fix login bug',
+      warning: null,
+    })
+    const request = {
+      projectRoot: project.root,
+      name: 'Fix login bug',
+      toolId: 'claude',
+      base: 'main',
+      nested: [],
+    }
+    expect(await invoke(IpcChannel.createWorktree, request)).toEqual({
+      ok: true,
+      path: saved.worktreePath,
+      branch: 'fix-login-bug',
+      name: 'Fix login bug',
+      session: saved,
+      warning: null,
+    })
+    expect(worktrees.createNamed).toHaveBeenCalledWith(request)
+    expect(chats.createSavedSession).toHaveBeenCalledWith(
+      project.root,
+      saved.worktreePath,
+      'claude',
+    )
+  })
+
+  it('starts a saved session in its worktree, continuing its conversation', async () => {
+    const result = await invoke(IpcChannel.startSession, {
+      id: 's1',
+      projectRoot: saved.projectRoot,
+      worktreePath: saved.worktreePath,
+      savedSessionId: saved.id,
+      toolId: 'claude',
+      issueId: null,
+      cols: 80,
+      rows: 24,
+    })
+    expect(result).toMatchObject({ ok: true, session: { savedSessionId: saved.id } })
+    expect(chats.prepareSession).toHaveBeenCalledWith(saved.id)
+    expect(sessionManager.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 's1',
+        projectRoot: saved.projectRoot,
+        worktreePath: saved.worktreePath,
+        savedSessionId: saved.id,
+      }),
+      null,
+      { conversationId: saved.conversationId, resume: true },
+    )
+    expect(chats.opened).toHaveBeenCalledWith(saved.id)
+  })
+
+  it('starts nothing for a saved session whose worktree is gone', async () => {
+    worktrees.currentWorktree.mockResolvedValue(null)
+    expect(
+      await invoke(IpcChannel.startSession, {
+        id: 's1',
+        projectRoot: saved.projectRoot,
+        worktreePath: saved.worktreePath,
+        savedSessionId: saved.id,
+        toolId: 'claude',
+        issueId: null,
+        cols: 80,
+        rows: 24,
+      }),
+    ).toEqual({ ok: false, message: `The worktree no longer exists: ${saved.worktreePath}` })
+    worktrees.currentWorktree.mockResolvedValue({ ...worktreeAt, missing: true })
+    expect(
+      await invoke(IpcChannel.startSession, {
+        id: 's1',
+        projectRoot: saved.projectRoot,
+        worktreePath: saved.worktreePath,
+        savedSessionId: saved.id,
+        toolId: 'claude',
+        issueId: null,
+        cols: 80,
+        rows: 24,
+      }),
+    ).toEqual({
+      ok: false,
+      message: `The folder of the worktree is missing: ${saved.worktreePath}`,
+    })
+    expect(sessionManager.start).not.toHaveBeenCalled()
+  })
+
+  it('refuses a saved session request for another agent', async () => {
+    expect(
+      await invoke(IpcChannel.startSession, {
+        id: 's1',
+        projectRoot: saved.projectRoot,
+        worktreePath: saved.worktreePath,
+        savedSessionId: saved.id,
+        toolId: 'codex',
+        issueId: null,
+        cols: 80,
+        rows: 24,
+      }),
+    ).toEqual({ ok: false, message: 'Invalid session request.' })
+    expect(sessionManager.start).not.toHaveBeenCalled()
   })
 
   it('refuses a chat request that names a chat of another agent', async () => {

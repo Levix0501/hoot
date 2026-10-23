@@ -150,6 +150,11 @@ export class SessionManager extends EventEmitter<{
     return this.records.get(id)?.info.chatId ?? null
   }
 
+  /** The saved session whose agent the session runs, if any. */
+  savedSessionIdOf(id: string): string | null {
+    return this.records.get(id)?.info.savedSessionId ?? null
+  }
+
   /** Whether a session of the project, in its main worktree or any other, is starting or running. */
   isRunningIn(projectRoot: string): boolean {
     return [...this.records.values()].some(
@@ -187,6 +192,7 @@ export class SessionManager extends EventEmitter<{
         projectRoot: request.projectRoot,
         worktreePath: request.worktreePath,
         chatId: request.chatId ?? null,
+        savedSessionId: request.savedSessionId ?? null,
         toolId: request.toolId,
         issueId: request.issueId,
         status: 'running',
@@ -255,9 +261,12 @@ export class SessionManager extends EventEmitter<{
     const record = this.records.get(id)
     if (record && !record.starting && record.info.status === 'running') {
       this.options.host.write(id, data, binary)
-      // What the user types, for a chat whose agent starts another conversation
-      // with a command such as `/new`, which leaves no record before a message.
-      if (!binary && record.info.chatId !== null) this.emit('input', id, data)
+      // What the user types, for a chat or saved session whose agent starts
+      // another conversation with a command such as `/new`, which leaves no
+      // record before a message.
+      if (!binary && (record.info.chatId !== null || record.info.savedSessionId !== null)) {
+        this.emit('input', id, data)
+      }
     }
   }
 

@@ -29,9 +29,15 @@ export interface ChatMenuComponents {
 export function ChatAgentMenuEntries({
   components,
   onSelect,
+  /** The prefix of the items' test ids, which tells a chat's menu from a worktree's. */
+  testId = 'chat-agent',
+  /** What the menu says when no agent can start a session. */
+  failure = 'Could not start a chat.',
 }: {
   components: ChatMenuComponents
   onSelect: (toolId: CodingToolId) => void
+  testId?: string
+  failure?: string
 }) {
   const tools = useAppStore((state) => state.tools)
   const launchSettings = useAppStore((state) => state.launchSettings)
@@ -40,7 +46,7 @@ export function ChatAgentMenuEntries({
 
   if (firstDetectionRunning(tools)) {
     return (
-      <Item disabled data-testid="chat-agents-checking">
+      <Item disabled data-testid={`${testId}s-checking`}>
         Checking…
       </Item>
     )
@@ -51,12 +57,12 @@ export function ChatAgentMenuEntries({
     return (
       <Item
         onClick={() => {
-          toast.error('Could not start a chat.', {
+          toast.error(failure, {
             description: 'Install an agent or turn one on in the Agents page first.',
           })
           showSettings('agents')
         }}
-        data-testid="chat-agents-setup"
+        data-testid={`${testId}s-setup`}
       >
         Set up an Agent…
       </Item>
@@ -67,11 +73,11 @@ export function ChatAgentMenuEntries({
   return (
     <>
       {CODING_TOOL_IDS.filter((id) => usable.includes(id)).map((id) => (
-        <Item key={id} onClick={() => onSelect(id)} data-testid={`chat-agent-${id}`}>
+        <Item key={id} onClick={() => onSelect(id)} data-testid={`${testId}-${id}`}>
           <ToolIcon toolId={id} />
           <span>{getTool(id).label}</span>
           {marked && (launchSettings?.defaultAgent ?? 'claude') === id && (
-            <Badge variant="secondary" className="ml-auto" data-testid={`chat-agent-default-${id}`}>
+            <Badge variant="secondary" className="ml-auto" data-testid={`${testId}-default-${id}`}>
               Default
             </Badge>
           )}

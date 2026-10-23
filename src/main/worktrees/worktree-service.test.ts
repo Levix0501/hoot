@@ -13,7 +13,9 @@ import {
   makeRepository,
   makeSandbox,
 } from './test-support'
+import { openDatabase } from '../database/database'
 import { WorktreeService, deepestFirst } from './worktree-service'
+import { WorktreeStore } from './worktree-store'
 
 describe('deepestFirst', () => {
   it('orders members by depth, deepest first', () => {
@@ -38,9 +40,13 @@ describe('WorktreeService', () => {
   let inner: string
   let deep: string
   let W: string
+  let db: ReturnType<typeof openDatabase>
+  let records: WorktreeStore
 
   beforeEach(() => {
     ;({ root, home, context } = makeSandbox('hoot-worktrees-'))
+    db = openDatabase(path.join(root, 'data', 'hoot.db'))
+    records = new WorktreeStore(db)
     W = path.join(home, '.hoot', 'worktrees')
     project = makeRepository(path.join(root, 'project'))
     fs.writeFileSync(path.join(project, '.gitignore'), '/inner/\n')
@@ -55,12 +61,14 @@ describe('WorktreeService', () => {
     deep = makeRepository(path.join(inner, 'deep'))
     service = new WorktreeService({
       layout: new WorktreeLayout(W, home),
+      records,
       gitContext: async () => context,
     })
   })
 
   afterEach(async () => {
     service.dispose()
+    db.close()
     // On Windows a test's folders can stay in use for a moment after the git
     // commands it ran have ended, and removing them fails with Permission
     // denied. fs.rm tries again then, while rmSync gives up on that error at
@@ -100,14 +108,19 @@ describe('WorktreeService', () => {
 
     const short = git(path.join(folder, 'd'), 'rev-parse', '--short', 'HEAD')
     const worktrees = await listed()
-    expect(worktrees.map((worktree) => worktree.displayName)).toEqual(
-      ['alpha', 'beta', 'zeta', short].toSorted((a, b) => a.localeCompare(b)),
+    expect(
+      worktrees.map((worktree) => worktree.displayName).toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(['alpha', 'beta', 'zeta', short].toSorted((a, b) => a.localeCompare(b)))
+    // Newest first: their folders' creation times, which the rows show.
+    expect(worktrees.map((worktree) => worktree.createdAt)).toEqual(
+      worktrees.map((worktree) => worktree.createdAt).toSorted((a, b) => b - a),
     )
     const byName = Object.fromEntries(worktrees.map((worktree) => [worktree.displayName, worktree]))
-    expect(byName.alpha).toEqual({
+    expect(byName.alpha).toMatchObject({
       path: path.join(folder, 'a'),
       branch: 'alpha',
       displayName: 'alpha',
+      name: null,
       missing: false,
       locked: true,
       lockReason: 'on usb',
@@ -350,6 +363,79 @@ describe('WorktreeService', () => {
     expect(branches(project)).toEqual(['develop', 'main'])
   })
 
+  it('names a worktree after the name typed, with a branch from it, and records both', async () => {
+    await start()
+    const request = {
+      projectRoot: project,
+      name: 'Fix login bug',
+      toolId: 'claude' as const,
+      base: 'main',
+      nested: [],
+    }
+    const created = await service.createNamed(request)
+    const first = path.join(W, 'project', 'fix-login-bug')
+    expect(created).toEqual({
+      ok: true,
+      path: first,
+      branch: 'fix-login-bug',
+      name: 'Fix login bug',
+      warning: null,
+    })
+    const record = records.forProject(project).get(first)
+    expect(record).toMatchObject({ name: 'Fix login bug' })
+    expect(record!.createdAt).toBeGreaterThan(0)
+    expect((await listed()).find((worktree) => worktree.path === first)).toMatchObject({
+      name: 'Fix login bug',
+      branch: 'fix-login-bug',
+      createdAt: record!.createdAt,
+    })
+
+    // A branch of the name exists already: the next attempt gets -2.
+    const again = await service.createNamed(request)
+    expect(again).toMatchObject({ ok: true, branch: 'fix-login-bug-2', name: 'Fix login bug' })
+  })
+
+  it('gives a blank or untransliterable name a random branch, and keeps the name typed', async () => {
+    await start()
+    const blank = await service.createNamed({
+      projectRoot: project,
+      name: '   ',
+      toolId: 'codex',
+      base: 'main',
+      nested: [],
+    })
+    expect(blank.ok).toBe(true)
+    if (!blank.ok) return
+    expect(blank.branch).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/)
+    // Both lines of a worktree made without a name show the random name.
+    expect(blank.name).toBe(blank.branch)
+
+    const typed = await service.createNamed({
+      projectRoot: project,
+      name: '修复登录 bug',
+      toolId: 'claude',
+      base: 'main',
+      nested: [],
+    })
+    expect(typed.ok).toBe(true)
+    if (!typed.ok) return
+    expect(typed.name).toBe('修复登录 bug')
+    expect(typed.branch).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/)
+  })
+
+  it('tells a branch already in an included inner repository, and adds -2', async () => {
+    git(inner, 'branch', 'same')
+    await start()
+    const created = await service.createNamed({
+      projectRoot: project,
+      name: 'same',
+      toolId: 'claude',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    expect(created).toMatchObject({ ok: true, branch: 'same-2' })
+  })
+
   it('undoes what it created when a member cannot be created', async () => {
     // `feat` blocks the creation of `feat/z` in inner/deep only.
     git(deep, 'branch', 'feat')
@@ -461,7 +547,7 @@ describe('WorktreeService', () => {
     const detached = await service.createForIssue(project, { id: 1, title: 'Detached' })
     expect(detached).toMatchObject({ ok: false, reason: 'no-base' })
     expect(detached.ok === false && detached.message).toMatch(/no branch checked out.*detached/)
-    expect(detached.ok === false && detached.message).toContain('New Worktree…')
+    expect(detached.ok === false && detached.message).toContain("project's + button")
 
     git(project, 'checkout', '-q', 'main')
     // inner/deep has no branch named main, and none checked out.
@@ -472,7 +558,7 @@ describe('WorktreeService', () => {
       ok: false,
       reason: 'no-base',
       message:
-        "Hoot cannot tell which branch to start inner/deep from: it has no branch named main, and no branch checked out. Create the worktree with New Worktree… from the project's + menu instead, and pick the base branches there.",
+        "Hoot cannot tell which branch to start inner/deep from: it has no branch named main, and no branch checked out. Open the New Worktree dialog with the project's + button instead, and pick the base branches under Advanced.",
     })
 
     expect(fs.existsSync(W)).toBe(false)
@@ -707,6 +793,7 @@ describe('WorktreeService', () => {
     service.dispose()
     service = new WorktreeService({
       layout: new WorktreeLayout(W, home),
+      records,
       gitContext: async () => context,
     })
     service.addProject(project)
@@ -758,6 +845,7 @@ describe('WorktreeService', () => {
     service.dispose()
     service = new WorktreeService({
       layout: new WorktreeLayout(W, home),
+      records,
       gitContext: async () => context,
     })
     service.addProject(project)
@@ -810,6 +898,7 @@ describe('WorktreeService', () => {
     expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
     service = new WorktreeService({
       layout: new WorktreeLayout(W, home),
+      records,
       gitContext: async () => context,
     })
     await start()
@@ -861,6 +950,7 @@ describe('WorktreeService', () => {
     expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
     service = new WorktreeService({
       layout: new WorktreeLayout(W, home),
+      records,
       gitContext: async () => context,
     })
     await start()

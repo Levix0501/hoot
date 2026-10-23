@@ -24,6 +24,11 @@ export interface SessionInfo {
    * a session of a project.
    */
   chatId: string | null
+  /**
+   * The saved session whose agent the session runs, in one of the project's
+   * worktrees; `null` for every other session.
+   */
+  savedSessionId: string | null
   toolId: ToolId
   /**
    * The issue whose start button started the session, which Claude Code was

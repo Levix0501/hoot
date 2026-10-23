@@ -341,7 +341,7 @@ describe('the upgrade to labels', () => {
     const before = tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
     db.close()
     db = openDatabase(file)
-    expect(userVersion(db)).toBe(6)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(
       before,
     )

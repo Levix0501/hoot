@@ -46,6 +46,7 @@ const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): Session
   projectRoot: `/chats/${chatId}`,
   worktreePath: null,
   chatId,
+  savedSessionId: null,
   toolId,
   issueId: null,
   status: 'exited',
@@ -406,6 +407,112 @@ describe('ChatManager', () => {
     expect(manager.list()).toHaveLength(2)
     expect(manager.get(chat.id)?.conversationId).toBe('ses_second')
     expect(manager.list().find((entry) => entry.id !== chat.id)?.conversationId).toBe(first)
+  })
+
+  it('keeps a saved session of a worktree apart from the chats, with its folder as it is', () => {
+    const worktree = path.join(root, 'worktrees', 'fix-login-bug')
+    fs.mkdirSync(worktree, { recursive: true })
+
+    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
+    const later = manager.createSavedSession('/work/project', worktree, 'codex')
+
+    expect(saved).toMatchObject({
+      folder: worktree,
+      projectRoot: '/work/project',
+      worktreePath: worktree,
+      hasMessages: false,
+    })
+    expect(saved.conversationId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([saved.id, later.id])
+    expect(manager.list().map((entry) => entry.id)).toEqual([])
+    // It starts in the worktree, and Hoot makes nothing in it.
+    expect(fs.readdirSync(worktree)).toEqual([])
+  })
+
+  it('removes the saved sessions of a worktree that is deleted, and no others', () => {
+    const first = path.join(root, 'worktrees', 'first')
+    const second = path.join(root, 'worktrees', 'second')
+    const kept = manager.createSavedSession('/work/project', second, 'claude')
+    manager.createSavedSession('/work/project', first, 'claude')
+    manager.createSavedSession('/work/project', first, 'codex')
+
+    manager.removeForWorktree(first)
+
+    expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([kept.id])
+  })
+
+  it('removes a saved session that never got a message when its agent ends, keeping the worktree', async () => {
+    const worktree = path.join(root, 'worktrees', 'fix-login-bug')
+    fs.mkdirSync(worktree, { recursive: true })
+    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
+    conversations.claude = false
+
+    manager.sessionEnded({
+      id: 'session-1',
+      projectRoot: '/work/project',
+      worktreePath: worktree,
+      chatId: null,
+      savedSessionId: saved.id,
+      toolId: 'claude',
+      issueId: null,
+      status: 'exited',
+      exit: { code: 0, signal: null, abnormal: false },
+    })
+    await manager.flush()
+
+    expect(manager.get(saved.id)).toBeUndefined()
+    expect(fs.statSync(worktree).isDirectory()).toBe(true)
+  })
+
+  it('keeps a saved session that got a message, and opens it again on its conversation', async () => {
+    const worktree = path.join(root, 'worktrees', 'fix-login-bug')
+    fs.mkdirSync(worktree, { recursive: true })
+    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', saved.conversationId))
+    await manager.flush()
+
+    expect(manager.get(saved.id)).toMatchObject({ hasMessages: true })
+    const prepared = await manager.prepareSession(saved.id)
+    expect(prepared).toEqual({
+      folder: worktree,
+      launch: { conversationId: saved.conversationId, resume: true },
+    })
+  })
+
+  it('splits a saved session’s conversation off below the same worktree, after it', async () => {
+    const worktree = path.join(root, 'worktrees', 'fix-login-bug')
+    fs.mkdirSync(worktree, { recursive: true })
+    const saved = manager.createSavedSession('/work/project', worktree, 'codex')
+    conversations.codex = [
+      { id: 'first', title: 'First', createdAt: 1 },
+      { id: 'second', title: 'Second', createdAt: 2 },
+    ]
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', null, null))
+    manager.typed(saved.id, 'session-1', '/new\r')
+    manager.sessionEnded({
+      id: 'session-1',
+      projectRoot: '/work/project',
+      worktreePath: worktree,
+      chatId: null,
+      savedSessionId: saved.id,
+      toolId: 'codex',
+      issueId: null,
+      status: 'exited',
+      exit: { code: 0, signal: null, abnormal: false },
+    })
+    await manager.flush()
+
+    const split = manager.listSavedSessions()
+    expect(split).toHaveLength(2)
+    expect(split[0]!.id).toBe(saved.id)
+    expect(split[1]).toMatchObject({
+      folder: worktree,
+      projectRoot: '/work/project',
+      worktreePath: worktree,
+      toolId: 'codex',
+      conversationId: 'first',
+    })
+    expect(manager.get(saved.id)?.conversationId).toBe('second')
   })
 })
 

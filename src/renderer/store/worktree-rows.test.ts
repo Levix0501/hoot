@@ -6,6 +6,8 @@ const worktree = (path: string, displayName: string, changes: Partial<WorktreeIn
   path,
   branch: displayName,
   displayName,
+  name: null,
+  createdAt: 0,
   missing: false,
   locked: false,
   lockReason: null,

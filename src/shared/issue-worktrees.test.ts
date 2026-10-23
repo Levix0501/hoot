@@ -16,6 +16,8 @@ function worktree(branch: string | null, changes: Partial<WorktreeInfo> = {}): W
     path: `/home/.hoot/worktrees/gamma/${name}`,
     branch,
     displayName: name,
+    name: null,
+    createdAt: 0,
     missing: false,
     locked: false,
     lockReason: null,

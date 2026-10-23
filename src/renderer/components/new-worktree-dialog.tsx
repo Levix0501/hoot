@@ -1,26 +1,53 @@
+import { ChevronDownIcon, FolderIcon, XIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  defaultAgentUsable,
+  chatAgent,
+  usableChatAgents,
+  type SavedSessionInfo,
+} from '../../shared/chats'
+import type { Project } from '../../shared/ipc'
+import { getTool, type CodingToolId } from '../../shared/tools'
 import {
   defaultNestedBase,
   type NestedRepositoryOption,
   type NewWorktreeOptions,
   type NewWorktreeOptionsResult,
 } from '../../shared/worktrees'
+import { worktreeBranchName } from '../../shared/worktree-names'
 import { api } from '../lib/api'
+import { cn } from '../lib/utils'
 import { errorMessage, focusAfterOverlay, useAppStore, warnAboutWorktree } from '../store/app-store'
+import { Spinner } from './ui/spinner'
+import { ToolIcon } from './tool-icon'
+import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from './ui/combobox'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from './ui/dialog'
 import { Input } from './ui/input'
+import { Kbd } from './ui/kbd'
 import { Label } from './ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Spinner } from './ui/spinner'
+
+/** The small rounded buttons of the dialog's agent and Advanced choices. */
+const CHIP = 'rounded-full'
 
 /** What the user chose for an inner repository. */
 interface NestedChoice {
@@ -37,6 +64,7 @@ function BranchSelect({
   disabled,
   label,
   testId,
+  missing = false,
 }: {
   branches: readonly string[]
   value: string | null
@@ -44,10 +72,17 @@ function BranchSelect({
   disabled: boolean
   label: string
   testId: string
+  /** No branch is chosen yet, which Hoot marks. */
+  missing?: boolean
 }) {
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger className="w-full min-w-0" aria-label={label} data-testid={testId}>
+      <SelectTrigger
+        className={cn('w-full min-w-0', missing && 'border-destructive')}
+        aria-label={label}
+        aria-invalid={missing}
+        data-testid={testId}
+      >
         <SelectValue placeholder="Choose a branch" data-user-text="" />
       </SelectTrigger>
       <SelectContent data-testid={`${testId}-options`}>
@@ -58,6 +93,143 @@ function BranchSelect({
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+/** The agent choices of the dialog: the usable agents, with the default one marked. */
+function AgentPicker({
+  value,
+  onChange,
+}: {
+  value: CodingToolId
+  onChange: (toolId: CodingToolId) => void
+}) {
+  const tools = useAppStore((state) => state.tools)
+  const launchSettings = useAppStore((state) => state.launchSettings)
+  const usable = usableChatAgents(tools, launchSettings)
+  const marked = defaultAgentUsable(tools, launchSettings)
+  const defaultAgent = launchSettings?.defaultAgent ?? 'claude'
+  const selected = usable.includes(value) ? value : (usable[0] ?? value)
+
+  return (
+    <Combobox
+      items={usable as CodingToolId[]}
+      value={selected}
+      onValueChange={(toolId: CodingToolId | null) => {
+        if (toolId !== null) onChange(toolId)
+      }}
+      autoHighlight
+    >
+      <ComboboxTrigger
+        render={
+          <Button
+            variant="outline"
+            size="xs"
+            className={CHIP}
+            aria-label={`Agent: ${getTool(selected).label}`}
+            data-testid="worktree-agent-button"
+            data-tool={selected}
+          />
+        }
+      >
+        <ToolIcon toolId={selected} />
+        <span>{getTool(selected).label}</span>
+      </ComboboxTrigger>
+      <ComboboxContent className="w-56" finalFocus={focusAfterOverlay}>
+        <ComboboxInput
+          showTrigger={false}
+          placeholder="Search agents…"
+          aria-label="Agent"
+          data-testid="worktree-agent-search"
+        />
+        <ComboboxEmpty>No matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(toolId: CodingToolId) => (
+            <ComboboxItem
+              key={toolId}
+              value={toolId}
+              data-testid={`worktree-dialog-agent-${toolId}`}
+            >
+              <ToolIcon toolId={toolId} />
+              <span className="min-w-0 flex-1 truncate">{getTool(toolId).label}</span>
+              {marked && defaultAgent === toolId && (
+                <Badge
+                  variant="secondary"
+                  className="ml-auto"
+                  data-testid={`worktree-dialog-agent-default-${toolId}`}
+                >
+                  Default
+                </Badge>
+              )}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  )
+}
+
+/** The projects the dialog can make a worktree in, in the sidebar's order. */
+function ProjectPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Project
+  onChange: (project: Project) => void
+  disabled: boolean
+}) {
+  const projects = useAppStore((state) => state.projects)
+  return (
+    <Combobox
+      items={projects as Project[]}
+      value={value}
+      onValueChange={(project: Project | null) => {
+        if (project !== null) onChange(project)
+      }}
+      autoHighlight
+    >
+      <ComboboxTrigger
+        render={
+          <Button
+            variant="outline"
+            size="xs"
+            className={cn(CHIP, 'max-w-56')}
+            aria-label={`Project: ${value.name}`}
+            disabled={disabled}
+            data-testid="worktree-project-button"
+          />
+        }
+      >
+        <FolderIcon className="text-muted-foreground" />
+        <span className="min-w-0 truncate" data-path="">
+          {value.name}
+        </span>
+      </ComboboxTrigger>
+      <ComboboxContent className="w-64" finalFocus={focusAfterOverlay}>
+        <ComboboxInput
+          showTrigger={false}
+          placeholder="Search projects…"
+          aria-label="Project"
+          data-testid="worktree-project-search"
+        />
+        <ComboboxEmpty>No matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(project: Project) => (
+            <ComboboxItem
+              key={project.id}
+              value={project}
+              data-testid={`worktree-dialog-project-${project.id}`}
+            >
+              <FolderIcon className="text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate" data-path="">
+                {project.name}
+              </span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }
 
@@ -100,6 +272,7 @@ function NestedRepositoryRow({
           disabled={disabled || !choice.included}
           label={`Base branch of ${repository.relativePath}`}
           testId="worktree-nested-base-select"
+          missing={choice.included && choice.base === null}
         />
       ) : (
         <span className="text-xs text-muted-foreground" data-testid="worktree-nested-reason">
@@ -113,18 +286,25 @@ function NestedRepositoryRow({
 /** The form of the new worktree dialog for a project, from its options. */
 function NewWorktreeForm({
   projectRoot,
+  project,
+  name,
+  onNameChange,
+  agent,
+  onAgentChange,
   options,
   onCreatingChange,
   onDone,
 }: {
   projectRoot: string
+  project: Project
+  name: string
+  onNameChange: (name: string) => void
+  agent: CodingToolId
+  onAgentChange: (agent: CodingToolId) => void
   options: NewWorktreeOptions
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
 }) {
-  const [branch, setBranch] = useState('')
-  const [validity, setValidity] = useState<{ name: string; valid: boolean } | null>(null)
-  const [location, setLocation] = useState<{ name: string; displayPath: string } | null>(null)
   const [base, setBase] = useState<string | null>(options.current)
   const [nested, setNested] = useState<Record<string, NestedChoice>>(() =>
     Object.fromEntries(
@@ -141,28 +321,15 @@ function NewWorktreeForm({
   const [submodules, setSubmodules] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const projectId = useAppStore(
-    (state) => state.projects.find((project) => project.root === projectRoot)?.id,
-  )
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
-
-  useEffect(() => {
-    if (branch === '') return
-    let current = true
-    void Promise.all([
-      api.checkBranchName(branch).catch(() => false),
-      api.previewWorktreePath(projectRoot, branch).catch(() => null),
-    ]).then(([valid, preview]) => {
-      if (!current) return
-      setValidity({ name: branch, valid })
-      setLocation(preview ? { name: branch, displayPath: preview.displayPath } : null)
-    })
-    return () => {
-      current = false
-    }
-  }, [branch, projectRoot])
+  const openCreatedSession = useAppStore((state) => state.openCreatedSession)
 
   const included = options.nested.filter((repository) => nested[repository.relativePath]?.included)
+  const undecided =
+    base === null || included.some((repository) => nested[repository.relativePath]!.base === null)
+  // Advanced opens by itself while a base branch cannot be told, to be picked.
+  const [advancedOpen, setAdvancedOpen] = useState(undecided)
+
   const participants = useMemo(
     () => [
       ...(base === null ? [] : [{ relativePath: '', base }]),
@@ -188,11 +355,14 @@ function NewWorktreeForm({
     }
   }, [participants, projectRoot])
 
-  const checked = validity !== null && validity.name === branch
-  const nameValid = branch !== '' && checked && validity.valid
-  const nameInvalid = branch !== '' && checked && !validity.valid
-  const nestedReady = included.every((repository) => nested[repository.relativePath]?.base != null)
-  const canCreate = nameValid && base !== null && nestedReady && !creating
+  const branch = worktreeBranchName(name)
+  const canCreate = !creating && base !== null && !undecided
+  const summary = [
+    base ?? 'No base branch',
+    ...included.map((repository) => repository.relativePath),
+  ]
+    .filter(Boolean)
+    .join(', ')
 
   const changeBase = (value: string | null) => {
     setBase(value)
@@ -212,24 +382,15 @@ function NewWorktreeForm({
 
   const create = async (event?: { preventDefault(): void }) => {
     event?.preventDefault()
-    if (creating || branch === '' || base === null || !nestedReady || nameInvalid) return
+    if (!canCreate || base === null) return
     setCreating(true)
     onCreatingChange(true)
     setError(null)
-    // Enter may be pressed before the name has been checked.
-    if (!nameValid) {
-      const valid = await api.checkBranchName(branch).catch(() => false)
-      setValidity({ name: branch, valid })
-      if (!valid) {
-        setCreating(false)
-        onCreatingChange(false)
-        return
-      }
-    }
     const result = await api
       .createWorktree({
         projectRoot,
-        branch,
+        name,
+        toolId: agent,
         base,
         nested: included.map((repository) => ({
           relativePath: repository.relativePath,
@@ -244,124 +405,145 @@ function NewWorktreeForm({
       return
     }
     // The new worktree's row shows below the project, also when it was collapsed.
-    if (projectId !== undefined) setProjectExpanded(projectId, true)
+    setProjectExpanded(project.id, true)
     if (result.warning) warnAboutWorktree(result.warning)
+    const session: SavedSessionInfo = result.session
+    openCreatedSession(session)
     onDone()
   }
 
   return (
-    <form className="flex min-h-0 flex-col gap-4" onSubmit={(event) => void create(event)}>
-      {/* The fields scroll; the title and the buttons stay. Its padding keeps focus rings in. */}
+    <form className="flex min-h-0 flex-col gap-3" onSubmit={(event) => void create(event)}>
       <div
-        className="-mx-4 -my-1 grid min-h-0 gap-4 overflow-y-auto px-4 py-1"
+        className="-mx-4 grid min-h-0 gap-3 overflow-y-auto px-4 py-1"
         data-testid="new-worktree-fields"
       >
         <div className="grid gap-2">
-          <Label htmlFor="worktree-branch">Branch name</Label>
           <Input
-            id="worktree-branch"
-            value={branch}
+            value={name}
             onChange={(event) => {
-              setBranch(event.target.value)
+              onNameChange(event.target.value)
               setError(null)
             }}
             onKeyDown={(event) => {
-              // Also before the name has been checked, while Create is still disabled.
+              // Enter creates, also while the name is blank, which takes a random one.
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) void create(event)
             }}
             disabled={creating}
             autoFocus
             spellCheck={false}
             autoComplete="off"
-            placeholder="feat/new-idea"
-            aria-invalid={nameInvalid}
-            data-testid="worktree-branch-input"
+            placeholder="Name (optional)"
+            aria-label="Worktree name"
+            data-testid="worktree-name-input"
           />
-          {nameInvalid && (
-            <p
-              className="text-xs text-destructive"
-              role="alert"
-              data-testid="worktree-branch-error"
-            >
-              This is not a valid branch name.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground" data-testid="worktree-branch-hint">
+            {branch === null ? (
+              'The branch will get a random name when the worktree is created.'
+            ) : (
+              <>
+                Branch: <span className="font-mono text-foreground">{branch}</span>
+              </>
+            )}
+          </p>
         </div>
 
-        <div className="grid gap-2">
-          <Label>Base branch</Label>
-          <BranchSelect
-            branches={options.branches}
-            value={base}
-            onChange={changeBase}
-            disabled={creating}
-            label="Base branch"
-            testId="worktree-base-select"
-          />
-        </div>
-
-        {options.nested.length > 0 && (
-          <div className="grid gap-2">
-            <Label>Nested repositories</Label>
-            <p className="text-xs text-muted-foreground">
-              Each one gets the same branch, at the same path inside the new worktree.
-            </p>
-            <ul
-              className="-mx-1 grid max-h-64 gap-2 overflow-y-auto px-1 py-0.5"
-              data-testid="worktree-nested-list"
-            >
-              {options.nested.map((repository) => (
-                <NestedRepositoryRow
-                  key={repository.relativePath}
-                  repository={repository}
-                  choice={nested[repository.relativePath]!}
-                  disabled={creating}
-                  onChange={(change) =>
-                    setNested((choices) => ({
-                      ...choices,
-                      [repository.relativePath]: {
-                        ...choices[repository.relativePath]!,
-                        ...change,
-                      },
-                    }))
-                  }
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AgentPicker value={agent} onChange={onAgentChange} />
+          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+            <CollapsibleTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className={cn(CHIP, 'max-w-72', undecided && 'border-destructive')}
+                  aria-expanded={advancedOpen}
+                  data-testid="worktree-advanced-button"
                 />
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {submodules.length > 0 && (
-          <div
-            className="grid gap-1 text-xs text-muted-foreground"
-            data-testid="worktree-submodules"
-          >
-            <span>These submodules will not be populated; their folders stay empty:</span>
-            <ul className="grid max-h-40 gap-0.5 overflow-y-auto">
-              {submodules.map((submodule) => (
-                <li
-                  key={submodule}
-                  className="font-mono text-foreground"
-                  data-path=""
-                  data-testid="worktree-submodule"
-                >
-                  {submodule}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="grid gap-1">
-          <span className="text-sm font-medium">Location</span>
-          <span
-            className="font-mono text-xs break-all text-muted-foreground"
-            data-path=""
-            data-testid="worktree-location"
-          >
-            {branch !== '' && location?.name === branch ? location.displayPath : '—'}
-          </span>
+              }
+            >
+              <span>Advanced</span>
+              <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
+              <ChevronDownIcon
+                className={cn(
+                  'text-muted-foreground transition-transform',
+                  advancedOpen && 'rotate-180',
+                )}
+              />
+            </CollapsibleTrigger>
+          </Collapsible>
         </div>
+
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <CollapsibleContent>
+            <div className="grid gap-3 rounded-lg border p-3" data-testid="worktree-advanced">
+              <div className="grid gap-2">
+                <Label>Base branch</Label>
+                <BranchSelect
+                  branches={options.branches}
+                  value={base}
+                  onChange={changeBase}
+                  disabled={creating}
+                  label="Base branch"
+                  testId="worktree-base-select"
+                  missing={base === null}
+                />
+              </div>
+
+              {options.nested.length > 0 && (
+                <div className="grid gap-2">
+                  <Label>Inner repositories</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Each one gets the same branch, at the same path inside the new worktree.
+                  </p>
+                  <ul
+                    className="-mx-1 grid max-h-64 gap-2 overflow-y-auto px-1 py-0.5"
+                    data-testid="worktree-nested-list"
+                  >
+                    {options.nested.map((repository) => (
+                      <NestedRepositoryRow
+                        key={repository.relativePath}
+                        repository={repository}
+                        choice={nested[repository.relativePath]!}
+                        disabled={creating}
+                        onChange={(change) =>
+                          setNested((choices) => ({
+                            ...choices,
+                            [repository.relativePath]: {
+                              ...choices[repository.relativePath]!,
+                              ...change,
+                            },
+                          }))
+                        }
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {submodules.length > 0 && (
+                <div
+                  className="grid gap-1 text-xs text-muted-foreground"
+                  data-testid="worktree-submodules"
+                >
+                  <span>These submodules will not be populated; their folders stay empty:</span>
+                  <ul className="grid max-h-40 gap-0.5 overflow-y-auto">
+                    {submodules.map((submodule) => (
+                      <li
+                        key={submodule}
+                        className="font-mono text-foreground"
+                        data-path=""
+                        data-testid="worktree-submodule"
+                      >
+                        {submodule}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {error !== null && (
           <p
@@ -376,18 +558,12 @@ function NewWorktreeForm({
       </div>
 
       <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={creating}
-          onClick={onDone}
-          data-testid="worktree-cancel"
-        >
-          Cancel
-        </Button>
+        <span className="mr-auto text-xs text-muted-foreground">
+          Press <Kbd>Enter</Kbd> to create
+        </span>
         <Button type="submit" disabled={!canCreate} data-testid="worktree-create">
           {creating && <Spinner />}
-          {creating ? 'Creating…' : 'Create'}
+          {creating ? 'Creating…' : 'Create worktree'}
         </Button>
       </DialogFooter>
     </form>
@@ -396,76 +572,82 @@ function NewWorktreeForm({
 
 /** Loads the options of a project's new worktree dialog, then shows its form. */
 function NewWorktreeContent({
-  projectRoot,
+  initialProject,
   onCreatingChange,
   onDone,
 }: {
-  projectRoot: string
+  initialProject: Project
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
 }) {
-  const projectName = useAppStore(
-    (state) => state.projects.find((project) => project.root === projectRoot)?.name,
+  const projects = useAppStore((state) => state.projects)
+  const tools = useAppStore((state) => state.tools)
+  const launchSettings = useAppStore((state) => state.launchSettings)
+  const [chosen, setChosen] = useState(initialProject)
+  // A picked project that leaves the list gives way to the first one.
+  const project = projects.find((candidate) => candidate.id === chosen.id) ?? projects[0]
+  // Kept when another project is picked, as the agent the user picked is.
+  const [name, setName] = useState('')
+  const [agent, setAgent] = useState<CodingToolId>(
+    () => chatAgent(tools, launchSettings) ?? 'claude',
   )
-  const [options, setOptions] = useState<NewWorktreeOptionsResult | undefined>(undefined)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<
+    { root: string; options: NewWorktreeOptionsResult } | { root: string; error: string } | null
+  >(null)
+  const root = project?.root ?? null
   useEffect(() => {
+    if (root === null) return
     let current = true
-    void api.getNewWorktreeOptions(projectRoot).then(
-      (loaded) => {
-        if (current) setOptions(loaded)
+    void api.getNewWorktreeOptions(root).then(
+      (options) => {
+        if (current) setLoaded({ root, options })
       },
       (error: unknown) => {
-        if (current) setLoadError(errorMessage(error))
+        if (current) setLoaded({ root, error: errorMessage(error) })
       },
     )
     return () => {
       current = false
     }
-  }, [projectRoot])
+  }, [root])
+  const result = loaded !== null && loaded.root === root ? loaded : null
 
+  if (project === undefined) return null
   return (
     <>
-      <DialogHeader>
-        <DialogTitle data-testid="new-worktree-title">
-          New Worktree in <span data-path="">{projectName}</span>
-        </DialogTitle>
-        <DialogDescription>
-          Creates a new branch and checks it out in a folder of its own.
-        </DialogDescription>
+      <DialogHeader className="flex-row items-center gap-2 pr-8">
+        <ProjectPicker value={project} onChange={setChosen} disabled={false} />
+        <span className="text-sm text-muted-foreground" aria-hidden>
+          ›
+        </span>
+        <DialogTitle data-testid="new-worktree-title">New worktree</DialogTitle>
       </DialogHeader>
-      {loadError !== null ? (
-        <>
-          <p className="text-sm text-destructive" data-path="">
-            {loadError}
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={onDone}>
-              Close
-            </Button>
-          </DialogFooter>
-        </>
-      ) : options === undefined ? (
+      {result === null ? (
         <p
           className="flex items-center gap-2 text-sm text-muted-foreground"
           data-testid="new-worktree-loading"
         >
           <Spinner />
-          Looking for branches and nested repositories…
+          Looking for branches and inner repositories…
         </p>
-      ) : !options.ok ? (
-        <>
-          <p className="text-sm text-destructive">{options.message}</p>
-          <DialogFooter>
-            <Button variant="outline" onClick={onDone}>
-              Close
-            </Button>
-          </DialogFooter>
-        </>
+      ) : 'error' in result ? (
+        <p className="text-sm text-destructive" data-path="">
+          {result.error}
+        </p>
+      ) : !result.options.ok ? (
+        <p className="text-sm text-destructive" data-testid="new-worktree-unavailable">
+          {result.options.message}
+        </p>
       ) : (
         <NewWorktreeForm
-          projectRoot={projectRoot}
-          options={options.options}
+          key={project.root}
+          projectRoot={project.root}
+          project={project}
+          name={name}
+          onNameChange={setName}
+          agent={agent}
+          onAgentChange={setAgent}
+          options={result.options.options}
           onCreatingChange={onCreatingChange}
           onDone={onDone}
         />
@@ -475,19 +657,21 @@ function NewWorktreeContent({
 }
 
 /**
- * The new worktree dialog: the name of the new branch, the base branch, the
- * inner repositories to include with their base branches, the submodules that
- * stay empty, and where the worktree will be. While the worktree is being
- * created, the dialog says so and stays open.
+ * The New Worktree dialog: the project, a name that may be blank, the agent to
+ * open a session with, and under Advanced the base branches and the inner
+ * repositories to bring along. While the worktree is being created, the
+ * dialog says so, stays open, and closes only once it is made.
  */
 export function NewWorktreeDialog() {
   const projectRoot = useAppStore((state) => state.newWorktreeProject)
+  const projects = useAppStore((state) => state.projects)
   const close = useAppStore((state) => state.closeNewWorktreeDialog)
   // Kept while the dialog fades out after it closes.
   const [shownRoot, setShownRoot] = useState<string | null>(null)
   if (projectRoot !== null && projectRoot !== shownRoot) setShownRoot(projectRoot)
   const creating = useRef(false)
   const [busy, setBusy] = useState(false)
+  const project = projects.find((candidate) => candidate.root === shownRoot)
 
   return (
     <Dialog
@@ -498,17 +682,30 @@ export function NewWorktreeDialog() {
     >
       <DialogContent
         showCloseButton={false}
-        // Below the window's top row, whose blank parts drag the window, however many
-        // nested repositories and submodules there are.
-        className="flex max-h-[calc(100dvh-7rem)] flex-col sm:max-w-lg"
+        // Below the window's top row, whose blank parts drag the window.
+        className="flex max-h-[calc(100dvh-7rem)] flex-col gap-4 sm:max-w-md"
         finalFocus={focusAfterOverlay}
         data-testid="new-worktree-dialog"
         data-creating={busy}
       >
-        {shownRoot !== null && (
+        <DialogClose
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="absolute top-2 right-2"
+              aria-label="Close"
+              disabled={busy}
+              data-testid="worktree-close"
+            />
+          }
+        >
+          <XIcon />
+        </DialogClose>
+        {project !== undefined && (
           <NewWorktreeContent
-            key={shownRoot}
-            projectRoot={shownRoot}
+            key={project.root}
+            initialProject={project}
             onCreatingChange={(value) => {
               creating.current = value
               setBusy(value)

@@ -1,3 +1,6 @@
+import type { SavedSessionInfo } from './chats'
+import type { CodingToolId } from './tools'
+
 /**
  * A worktree of a project: a linked worktree of the project's repository (its
  * outer member, whose directory is the worktree's root), together with the
@@ -11,6 +14,17 @@ export interface WorktreeInfo {
   branch: string | null
   /** The branch, or on a detached HEAD the abbreviated commit. */
   displayName: string
+  /**
+   * The name the New Worktree dialog gave the worktree, which its row shows
+   * above the branch; `null` for a worktree Hoot did not make that way.
+   */
+  name: string | null
+  /**
+   * When the worktree was created, in milliseconds since the Unix epoch: when
+   * Hoot made it for a named worktree, otherwise its folder's creation time.
+   * `0` when it cannot be told, as for a folder that is gone.
+   */
+  createdAt: number
   /** The root directory no longer exists. */
   missing: boolean
   /** The outer member is locked with `git worktree lock`. */
@@ -21,11 +35,9 @@ export interface WorktreeInfo {
   innerMembers: string[]
 }
 
-/** The order of worktrees in the sidebar: by display name, alphabetically. */
+/** The order of worktrees in the sidebar: newest first, by creation time. */
 export function compareWorktrees(a: WorktreeInfo, b: WorktreeInfo): number {
-  return (
-    a.displayName.localeCompare(b.displayName) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
-  )
+  return b.createdAt - a.createdAt || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 }
 
 /** An inner repository as the new worktree dialog offers it. */
@@ -79,18 +91,46 @@ export type NewWorktreeOptionsResult =
 
 export interface CreateWorktreeRequest {
   projectRoot: string
-  /** The name of the new branch, and of the worktree. */
-  branch: string
+  /** The name typed for the worktree; blank, or only spaces, for a random one. */
+  name: string
+  /** The agent to open a saved session with in the new worktree. */
+  toolId: CodingToolId
   /** The local branch of the project repository to start from. */
   base: string
   /** The inner repositories to include, each with the local branch to start from. */
   nested: Array<{ relativePath: string; base: string }>
 }
 
+/** What creating the members of a worktree in their repositories came to. */
+export type CreateWorktreeMembersResult =
+  | {
+      ok: true
+      path: string
+      /** Set when Git reported a problem (such as a failing hook) for a member it created. */
+      warning: string | null
+    }
+  | {
+      ok: false
+      /**
+       * `branch-exists`: a repository already has the branch, and nothing was
+       * created. `failed`: Git could not create a member, and what was created
+       * was undone.
+       */
+      reason: 'invalid' | 'branch-exists' | 'failed'
+      message: string
+    }
+
+/** What the New Worktree dialog's create came to: the worktree, its branch and name, and its session. */
 export type CreateWorktreeResult =
   | {
       ok: true
       path: string
+      /** The branch of the new worktree. */
+      branch: string
+      /** The name of the new worktree: the one typed, or the random one when it was blank. */
+      name: string
+      /** The saved session opened in the new worktree. */
+      session: SavedSessionInfo
       /** Set when Git reported a problem (such as a failing hook) for a member it created. */
       warning: string | null
     }

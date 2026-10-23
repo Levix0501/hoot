@@ -1,7 +1,7 @@
 import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
-import type { ChatInfo } from './chats'
+import type { ChatInfo, SavedSessionInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
 import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
@@ -43,6 +43,31 @@ export type AddProjectResult =
   | { kind: 'bare'; path: string }
   | { kind: 'unknown-main-worktree'; path: string }
   | { kind: 'error'; message: string }
+  | {
+      /**
+       * The folder is in no Git repository: with the user's confirmation,
+       * Hoot runs `git init` there and commits its files, then adds it.
+       */
+      kind: 'needs-init'
+      folder: string
+      /** How many files the first commit would hold. */
+      fileCount: number
+      /** The folder has a `.gitignore`, which leaves files out of the commit. */
+      hasGitignore: boolean
+    }
+  | {
+      /** The folder's Git repository has no commit yet: Hoot would make its first commit, then add it. */
+      kind: 'needs-first-commit'
+      folder: string
+      fileCount: number
+      hasGitignore: boolean
+    }
+
+/** A folder the user confirmed Hoot may initialize or commit, and how. */
+export interface AddProjectConfirmation {
+  folder: string
+  mode: 'init' | 'first-commit'
+}
 
 export interface ToolAvailability {
   id: ToolId
@@ -69,6 +94,11 @@ export interface StartSessionRequest {
    * the chat's folder; `null` or left out for a session of a project.
    */
   chatId?: string | null
+  /**
+   * The saved session whose agent the session runs, in the worktree the
+   * request names; `null` or left out for every other session.
+   */
+  savedSessionId?: string | null
   toolId: ToolId
   /**
    * The issue the session is started from, a Claude Code session in one of
@@ -96,6 +126,11 @@ export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: fals
 
 /** A chat Hoot made, or why it could not. */
 export type CreateChatResult = { ok: true; chat: ChatInfo } | { ok: false; message: string }
+
+/** A saved session Hoot made, or why it could not. */
+export type CreateSavedSessionResult =
+  | { ok: true; session: SavedSessionInfo }
+  | { ok: false; message: string }
 
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
@@ -193,6 +228,7 @@ export const IpcChannel = {
   quit: 'app:quit',
   listProjects: 'projects:list',
   addProject: 'projects:add',
+  addProjectConfirmed: 'projects:add-confirmed',
   removeProject: 'projects:remove',
   projectsChanged: 'projects:changed',
   addProjectRequested: 'projects:add-requested',
@@ -226,6 +262,11 @@ export const IpcChannel = {
   renameChat: 'chats:rename',
   setChatTitle: 'chats:set-title',
   chatsChanged: 'chats:changed',
+  listSavedSessions: 'saved-sessions:list',
+  createSavedSession: 'saved-sessions:create',
+  renameSavedSession: 'saved-sessions:rename',
+  setSavedSessionTitle: 'saved-sessions:set-title',
+  savedSessionsChanged: 'saved-sessions:changed',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
@@ -249,8 +290,6 @@ export const IpcChannel = {
   currentWorktree: 'worktrees:current',
   worktreesChanged: 'worktrees:changed',
   newWorktreeOptions: 'worktrees:new-options',
-  checkBranchName: 'worktrees:check-branch-name',
-  previewWorktreePath: 'worktrees:preview-path',
   worktreeSubmodules: 'worktrees:submodules',
   createWorktree: 'worktrees:create',
   createIssueWorktree: 'worktrees:create-for-issue',
@@ -314,6 +353,8 @@ export interface HootApi {
    * do, through the Edit menu.
    */
   windowsClipboardKeys: boolean
+  /** Whether Hoot runs on Windows, where the project's context menu can start a session. */
+  windows: boolean
   /** The app that shows files and folders: Finder, or File Explorer on Windows. */
   fileManager: string
   /**
@@ -336,7 +377,10 @@ export interface HootApi {
   revealDatabase(): void
   quit(): void
   listProjects(): Promise<Project[]>
+  /** Asks for a folder to add; one that needs a first commit says so, with what it would hold. */
   addProject(): Promise<AddProjectResult>
+  /** Adds a folder the user confirmed Hoot may initialize, or make its first commit in. */
+  addProjectConfirmed(confirmation: AddProjectConfirmation): Promise<AddProjectResult>
   removeProject(root: string): Promise<{ ok: boolean; message?: string }>
   onProjectsChanged(listener: (projects: Project[]) => void): () => void
   /** The application menu asked to add a project. */
@@ -400,6 +444,20 @@ export interface HootApi {
   setChatTitle(id: string, title: string): void
   /** The chats changed: one was made, opened, renamed, split off or removed. */
   onChatsChanged(listener: (chats: ChatInfo[]) => void): () => void
+  /** Every saved session, oldest first, as they show below their worktrees. */
+  listSavedSessions(): Promise<SavedSessionInfo[]>
+  /** Makes a saved session of an agent in a worktree of a project. */
+  createSavedSession(
+    projectRoot: string,
+    worktreePath: string,
+    toolId: CodingToolId,
+  ): Promise<CreateSavedSessionResult>
+  /** Gives a saved session another name; an empty name gives it its default name again. */
+  renameSavedSession(id: string, name: string): void
+  /** Notes the terminal title the saved session's agent set, which names the session. */
+  setSavedSessionTitle(id: string, title: string): void
+  /** The saved sessions changed: one was made, renamed, split off or removed. */
+  onSavedSessionsChanged(listener: (sessions: SavedSessionInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
   setSidebarOpen(open: boolean): void
@@ -461,13 +519,6 @@ export interface HootApi {
    * is not in the list, or not a Git repository.
    */
   getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptionsResult>
-  /** Whether Git accepts the name as a new branch's name. */
-  checkBranchName(name: string): Promise<boolean>
-  /** Where a new worktree of the branch would be created, also with `~` for the home directory. */
-  previewWorktreePath(
-    projectRoot: string,
-    branch: string,
-  ): Promise<{ path: string; displayPath: string } | null>
   /** The submodules in the base branches' commits of the repositories that would take part. */
   getWorktreeSubmodules(
     projectRoot: string,

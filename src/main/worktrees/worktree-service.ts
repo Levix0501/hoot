@@ -4,13 +4,18 @@ import path from 'node:path'
 import { issueBranchAttempt, issueBranchName } from '../../shared/issue-worktrees'
 import type { Issue } from '../../shared/issues'
 import {
+  randomWorktreeName,
+  worktreeBranchAttempt,
+  worktreeBranchName,
+} from '../../shared/worktree-names'
+import {
   compareWorktrees,
   defaultNestedBase,
   inspectionIsClean,
   isWithin,
   type CreateIssueWorktreeResult,
+  type CreateWorktreeMembersResult,
   type CreateWorktreeRequest,
-  type CreateWorktreeResult,
   type DeleteWorktreeResult,
   type InspectWorktreeResult,
   type NewWorktreeOptionsResult,
@@ -38,6 +43,7 @@ import {
   type GitContext,
   type InnerRepository,
 } from './repositories'
+import type { WorktreeStore } from './worktree-store'
 
 /** Creating or removing a worktree runs hooks and touches many files: no short limit. */
 const WORKTREE_COMMAND_TIMEOUT = 10 * 60_000
@@ -47,12 +53,40 @@ const ISSUE_BRANCH_ATTEMPTS = 1_000
 
 /** What the start button says to do instead when it cannot tell a base branch. */
 const PICK_BASE_IN_DIALOG =
-  "Create the worktree with New Worktree… from the project's + menu instead, and pick the base branches there."
+  "Open the New Worktree dialog with the project's + button instead, and pick the base branches under Advanced."
+
+/** How many branch names a new worktree is tried with before Hoot gives up: its name, then `-2` on. */
+const WORKTREE_BRANCH_ATTEMPTS = 1_000
+
+/** What creating a worktree with a name came to, before a session is opened in it. */
+export type CreateNamedWorktreeResult =
+  | {
+      ok: true
+      path: string
+      branch: string
+      name: string
+      /** Set when Git reported a problem (such as a failing hook) for a member it created. */
+      warning: string | null
+    }
+  | { ok: false; reason: 'invalid' | 'failed'; message: string }
+
+/** What a worktree Hoot created to start with, before it is given a name. */
+interface WorktreeCreation {
+  projectRoot: string
+  /** The branch to create, which no repository taking part has. */
+  branch: string
+  base: string
+  nested: Array<{ relativePath: string; base: string }>
+}
 
 export interface WorktreeServiceOptions {
   layout: WorktreeLayout
+  /** The names and creation times of the worktrees Hoot made with the dialog. */
+  records: WorktreeStore
   /** How to run git, resolved for each operation. */
   gitContext(): Promise<GitContext>
+  /** The time to record, in milliseconds since the Unix epoch. */
+  now?: () => number
 }
 
 interface ProjectState {
@@ -91,6 +125,12 @@ export function deepestFirst<T extends { relativePath: string }>(members: readon
 
 async function isDirectory(directory: string): Promise<boolean> {
   return (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ?? false
+}
+
+/** When a folder was created, in milliseconds since the Unix epoch; `0` when it cannot be told. */
+async function folderCreatedAt(directory: string): Promise<number> {
+  const stats = await fs.promises.stat(directory).catch(() => null)
+  return stats?.birthtimeMs ?? 0
 }
 
 /** The real path of a file that may not exist: its nearest existing ancestor's, with the rest. */
@@ -300,13 +340,75 @@ export class WorktreeService extends EventEmitter<{
   }
 
   /**
+   * Creates a worktree with the name the user typed: the branch comes from
+   * the name with slugify, or is a random name when the name is blank or
+   * cannot become one, with `-2`, `-3` and on while any repository taking
+   * part has the branch. A blank name is also the worktree's random name.
+   * Hoot records the worktree's name and when it made it, which its row shows.
+   */
+  async createNamed(request: CreateWorktreeRequest): Promise<CreateNamedWorktreeResult> {
+    const state = this.projects.get(request.projectRoot)
+    if (!state) return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
+    await this.discover(state)
+    const context = await this.options.gitContext()
+    const typed = request.name.trim()
+    const name = typed === '' ? randomWorktreeName() : typed
+    const base = worktreeBranchName(name) ?? randomWorktreeName()
+    const participants = [state.root]
+    for (const entry of request.nested) {
+      const inner = state.inner?.find((candidate) => candidate.relativePath === entry.relativePath)
+      if (inner) participants.push(inner.path)
+    }
+    let branch: string | null = null
+    for (let attempt = 1; attempt <= WORKTREE_BRANCH_ATTEMPTS; attempt++) {
+      const candidate = worktreeBranchAttempt(base, attempt)
+      let taken = false
+      for (const repository of participants) {
+        if (await hasBranch(context, repository, candidate)) {
+          taken = true
+          break
+        }
+      }
+      if (!taken) {
+        branch = candidate
+        break
+      }
+    }
+    if (branch === null) {
+      return {
+        ok: false,
+        reason: 'invalid',
+        message: `Branches named ${base} with every suffix up to -${WORKTREE_BRANCH_ATTEMPTS} exist already.`,
+      }
+    }
+    const result = await this.create({
+      projectRoot: request.projectRoot,
+      branch,
+      base: request.base,
+      nested: request.nested,
+    })
+    if (!result.ok) {
+      return {
+        ok: false,
+        reason: result.reason === 'failed' ? 'failed' : 'invalid',
+        message: result.message,
+      }
+    }
+    const at = (this.options.now ?? Date.now)()
+    this.options.records.record(state.root, result.path, name, at)
+    // Read them again, so that the row shows its name and its place.
+    await this.refresh(state)
+    return { ok: true, path: result.path, branch, name, warning: result.warning }
+  }
+
+  /**
    * Creates a worktree: a new branch in the project repository and in each
    * included inner repository, from each one's base branch, checked out in
    * linked worktrees at the root and at the inner repositories' relative paths
    * inside it. When a member cannot be created, the members and branches
    * created so far are removed again.
    */
-  async create(request: CreateWorktreeRequest): Promise<CreateWorktreeResult> {
+  async create(request: WorktreeCreation): Promise<CreateWorktreeMembersResult> {
     const state = this.projects.get(request.projectRoot)
     if (!state) return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
     if (!(await this.isValidBranchName(request.branch))) {
@@ -607,6 +709,7 @@ export class WorktreeService extends EventEmitter<{
       }
     }
     await this.clearRegistrationsWithin(context, state, entry.path)
+    this.options.records.remove(entry.path)
     await this.refresh(state)
     return { ok: true }
   }
@@ -652,6 +755,7 @@ export class WorktreeService extends EventEmitter<{
         }
       }
     }
+    this.options.records.remove(worktree.path)
     await this.refresh(state)
     return { ok: true }
   }
@@ -835,15 +939,19 @@ export class WorktreeService extends EventEmitter<{
     const innerRegistrations = await Promise.all(
       inner.map((repository) => this.registeredPaths(context, repository.path)),
     )
+    const records = this.options.records.forProject(state.root)
     const worktrees = await Promise.all(
       entries.map(async (entry): Promise<WorktreeInfo> => {
         const missing = !(await isDirectory(entry.path))
+        const recorded = records.get(entry.path)
         return {
           path: entry.path,
           branch: entry.branch ? shortBranchName(entry.branch) : null,
           displayName: entry.branch
             ? shortBranchName(entry.branch)
             : await this.shortCommit(context, state, entry, missing),
+          name: recorded?.name ?? null,
+          createdAt: recorded?.createdAt ?? (missing ? 0 : await folderCreatedAt(entry.path)),
           missing,
           locked: entry.locked,
           lockReason: entry.lockReason,

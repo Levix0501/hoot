@@ -1,4 +1,4 @@
-import { MessageSquarePlusIcon, MoreHorizontalIcon } from 'lucide-react'
+import { MoreHorizontalIcon, PencilSparklesIcon } from 'lucide-react'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { contextComponents, dropdownComponents } from './project-item'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './ui/context-menu'
@@ -25,7 +25,7 @@ export function NewChatItem() {
             data-testid="new-chat-button"
             className="group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-8"
           >
-            <MessageSquarePlusIcon />
+            <PencilSparklesIcon />
             <span className="min-w-0 flex-1 truncate">New chat</span>
           </SidebarMenuButton>
           <DropdownMenuTrigger

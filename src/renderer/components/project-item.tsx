@@ -1,5 +1,5 @@
 import {
-  FolderIcon,
+  FolderClosedIcon,
   FolderOpenIcon,
   GitBranchPlusIcon,
   MoreHorizontalIcon,
@@ -98,7 +98,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
   // On macOS, a tool that is not installed is installed on the Agents page.
   const installInSettings = api.manageAgents ? () => showSettings('agents') : undefined
   const newWorktree = () => openNewWorktreeDialog(project.root)
-  const Folder = expanded ? FolderOpenIcon : FolderIcon
+  const Folder = expanded ? FolderOpenIcon : FolderClosedIcon
 
   return (
     <ContextMenu>

@@ -144,7 +144,8 @@ export async function inspectAddProject(
  * Makes the first commit of a folder's files, from an index of its own: one
  * that the commit cannot make leaves the repository's staged files as they
  * were, so a repository without commits keeps its index when the commit
- * fails.
+ * fails. The repository's index then takes the commit's tree, as after any
+ * commit, so that Git sees the folder without changes.
  */
 async function makeFirstCommit(
   folder: string,
@@ -164,6 +165,12 @@ async function makeFirstCommit(
       { timeout: ADD_PROJECT_TIMEOUT },
     )
     if (committed.code !== 0) return { ok: false, message: gitErrorMessage(committed) }
+    // The commit's index went with the temporary folder; the repository's own
+    // index now takes HEAD's tree, as a commit leaves it.
+    const staged = await runGit(options.git, ['-C', folder, 'read-tree', 'HEAD'], options.env, {
+      timeout: ADD_PROJECT_TIMEOUT,
+    })
+    if (staged.code !== 0) return { ok: false, message: gitErrorMessage(staged) }
     return { ok: true }
   } finally {
     await fs.rm(temporary, { recursive: true, force: true }).catch(() => undefined)

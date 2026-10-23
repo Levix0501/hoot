@@ -96,6 +96,8 @@ describe('adding a project', () => {
       '.gitignore',
       'README.md',
     ])
+    // The first commit leaves the folder without changes, as any commit does.
+    expect(run('-C', ignored, 'status', '--porcelain')).toBe('')
   })
 
   it('makes the first commit of a folder it initialized', async () => {
@@ -109,6 +111,8 @@ describe('adding a project', () => {
     expect(fs.existsSync(path.join(plain, '.git'))).toBe(true)
     expect(run('-C', plain, 'rev-list', '--count', 'HEAD')).toBe('1')
     expect(run('-C', plain, 'ls-tree', '--name-only', 'HEAD')).toBe('README.md')
+    // Git sees no staged deletions and no untracked copies of the files.
+    expect(run('-C', plain, 'status', '--porcelain')).toBe('')
   })
 
   it('makes the first commit of a repository without one, keeping its staged files', async () => {
@@ -134,6 +138,8 @@ describe('adding a project', () => {
       'other.txt',
       'staged.txt',
     ])
+    // Everything the commit made is staged too, so the folder is clean.
+    expect(run('-C', repo, 'status', '--porcelain')).toBe('')
   })
 
   it('adds a repository with a commit as it is', async () => {

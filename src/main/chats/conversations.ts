@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 import type { Env } from '../env/env'
 import { commandProgram } from '../tools/command-program'
@@ -71,6 +73,58 @@ function objectLine(line: string): Record<string, unknown> | null {
       : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Whether a transcript entry is a message the user sent: a user message that
+ * is not one Claude Code marks as its own, and is not one of its slash
+ * commands, which it records as user messages too, or only a tool's result.
+ * A command such as `/clear` leaves a conversation without messages.
+ */
+function sentMessage(record: Record<string, unknown>): boolean {
+  if (record.type !== 'user' || record.isMeta === true) return false
+  const message = record.message
+  if (typeof message !== 'object' || message === null || Array.isArray(message)) return false
+  const content = (message as { content?: unknown }).content
+  if (typeof content === 'string') {
+    const text = content.trim()
+    return text !== '' && !text.startsWith('<command-') && !text.startsWith('<local-command-')
+  }
+  if (!Array.isArray(content)) return false
+  let text = ''
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    const { type, text: part } = block as { type?: unknown; text?: unknown }
+    if (type === 'tool_result') continue
+    if (type === 'text' && typeof part === 'string') {
+      text += part
+      continue
+    }
+    // An image, a document or another part of a message the user sent.
+    if (type !== undefined) return true
+  }
+  const trimmed = text.trim()
+  return (
+    trimmed !== '' && !trimmed.startsWith('<command-') && !trimmed.startsWith('<local-command-')
+  )
+}
+
+/** Whether Claude Code recorded a message the user sent in a transcript file. */
+async function claudeConversationHasMessage(file: string): Promise<boolean> {
+  const input = createReadStream(file)
+  const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY })
+  try {
+    for await (const line of lines) {
+      const record = objectLine(line)
+      if (record !== null && sentMessage(record)) return true
+    }
+    return false
+  } catch {
+    return false
+  } finally {
+    lines.close()
+    input.destroy()
   }
 }
 
@@ -201,11 +255,7 @@ export function localChatConversations(options: {
         encoded,
         `${conversationId}.jsonl`,
       )
-      try {
-        return (await fs.stat(file)).isFile()
-      } catch {
-        return false
-      }
+      return claudeConversationHasMessage(file)
     },
     codexConversations(folder) {
       return codexConversations(options.home, folder)

@@ -72,9 +72,60 @@ describe('localChatConversations', () => {
     const encoded = folder.replace(/[^A-Za-z0-9]/g, '-')
     const transcripts = path.join(home, '.claude', 'projects', encoded)
     fs.mkdirSync(transcripts, { recursive: true })
-    fs.writeFileSync(path.join(transcripts, `${id}.jsonl`), '{}\n')
+    fs.writeFileSync(
+      path.join(transcripts, `${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'Fix the login bug' },
+      })}\n`,
+    )
     expect(await conversations().claudeConversation(folder, id)).toBe(true)
     expect(await conversations().claudeConversation(folder, 'another')).toBe(false)
+  })
+
+  it('counts only a message the user sent, not Claude Code’s commands, metadata or tool results', async () => {
+    const encoded = folder.replace(/[^A-Za-z0-9]/g, '-')
+    const transcripts = path.join(home, '.claude', 'projects', encoded)
+    fs.mkdirSync(transcripts, { recursive: true })
+    const transcript = (id: string, records: unknown[]) =>
+      fs.writeFileSync(
+        path.join(transcripts, `${id}.jsonl`),
+        records.map((record) => `${JSON.stringify(record)}\n`).join(''),
+      )
+    transcript('empty', [{ type: 'mode' }, { type: 'file-history-snapshot' }])
+    transcript('command', [
+      {
+        type: 'user',
+        isMeta: true,
+        message: {
+          role: 'user',
+          content: '<local-command-caveat>Not a request.</local-command-caveat>',
+        },
+      },
+      {
+        type: 'user',
+        message: { role: 'user', content: '<command-name>/clear</command-name>' },
+      },
+    ])
+    transcript('tool-result', [
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }],
+        },
+      },
+    ])
+    transcript('message', [
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: 'Ship it' }] },
+      },
+    ])
+    expect(await conversations().claudeConversation(folder, 'empty')).toBe(false)
+    expect(await conversations().claudeConversation(folder, 'command')).toBe(false)
+    expect(await conversations().claudeConversation(folder, 'tool-result')).toBe(false)
+    expect(await conversations().claudeConversation(folder, 'message')).toBe(true)
   })
 
   it('reads the conversations OpenCode lists for a folder', async () => {

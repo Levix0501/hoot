@@ -158,7 +158,7 @@ export function WorktreeItem({
                 className={cn(
                   'cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-14',
                   // A named worktree shows its name above its branch.
-                  worktree.name !== null && 'h-auto min-h-7.5 py-1',
+                  worktree.name !== null && 'h-auto py-1.5',
                 )}
                 data-testid="worktree-row"
               />
@@ -182,9 +182,10 @@ export function WorktreeItem({
                 )}
               </>
             ) : (
-              // A named worktree: its name above the branch, which shows in
-              // the monospace font, or the abbreviated commit when detached.
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              // A named worktree: its name alone above the branch icon and
+              // the branch, which shows in the monospace font, or the
+              // abbreviated commit when detached.
+              <span className="grid min-w-0 flex-1 gap-0.5 pl-6 leading-tight">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
                     {worktree.name}
@@ -200,10 +201,10 @@ export function WorktreeItem({
                     </Badge>
                   )}
                 </span>
-                <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  <GitBranchIcon className="size-3.5 shrink-0" />
+                <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+                  <GitBranchIcon className="size-3!" />
                   <span
-                    className="min-w-0 truncate font-mono text-foreground"
+                    className="truncate font-mono text-[11px]"
                     data-user-text=""
                     data-testid="worktree-branch"
                   >
@@ -224,7 +225,11 @@ export function WorktreeItem({
             render={
               <SidebarMenuAction
                 // The button pointed at stands out on the highlighted row.
-                className="right-7 hover:bg-sidebar-foreground/10 disabled:pointer-events-none disabled:opacity-50"
+                className={cn(
+                  'right-7 hover:bg-sidebar-foreground/10 disabled:pointer-events-none disabled:opacity-50',
+                  // Level with the name on a named worktree's taller row.
+                  worktree.name !== null && 'peer-data-[size=default]/menu-button:top-3',
+                )}
                 aria-label={`New session in ${worktree.displayName}`}
                 title="New Session"
                 // Its label names the branch.
@@ -253,7 +258,10 @@ export function WorktreeItem({
           <DropdownMenuTrigger
             render={
               <SidebarMenuAction
-                className="hover:bg-sidebar-foreground/10"
+                className={cn(
+                  'hover:bg-sidebar-foreground/10',
+                  worktree.name !== null && 'peer-data-[size=default]/menu-button:top-3',
+                )}
                 aria-label={`More actions for ${worktree.displayName}`}
                 title="More Actions"
                 data-user-text=""

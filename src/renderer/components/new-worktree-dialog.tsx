@@ -1,4 +1,11 @@
-import { ChevronDownIcon, FolderIcon, XIcon } from 'lucide-react'
+import {
+  ChevronRightIcon,
+  FolderIcon,
+  GitBranchIcon,
+  ShuffleIcon,
+  SlidersHorizontalIcon,
+  XIcon,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   defaultAgentUsable,
@@ -14,7 +21,7 @@ import {
   type NewWorktreeOptions,
   type NewWorktreeOptionsResult,
 } from '../../shared/worktrees'
-import { worktreeBranchName } from '../../shared/worktree-names'
+import { hasUntransliterableText, worktreeBranchName } from '../../shared/worktree-names'
 import { api } from '../lib/api'
 import { cn } from '../lib/utils'
 import { errorMessage, focusAfterOverlay, useAppStore, warnAboutWorktree } from '../store/app-store'
@@ -23,7 +30,6 @@ import { ToolIcon } from './tool-icon'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import {
   Combobox,
   ComboboxContent,
@@ -33,21 +39,62 @@ import {
   ComboboxList,
   ComboboxTrigger,
 } from './ui/combobox'
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog'
-import { Input } from './ui/input'
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTitle } from './ui/dialog'
 import { Kbd } from './ui/kbd'
 import { Label } from './ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select'
 
 /** The small rounded buttons of the dialog's agent and Advanced choices. */
 const CHIP = 'rounded-full'
+
+/**
+ * Why a name gets a random branch, when it does but is not blank: it has
+ * text that cannot become ASCII, or it becomes nothing, as when it is only
+ * symbols.
+ */
+function randomBranchReason(name: string): 'non-ascii' | 'no-letters' | null {
+  if (name.trim() === '' || hasUntransliterableText(name)) return null
+  return worktreeBranchName(name) === null ? 'no-letters' : null
+}
+
+/** The branch the name gives, or why the branch will be named at random. */
+function BranchHint({ name }: { name: string }) {
+  const branch = worktreeBranchName(name)
+  const reason = randomBranchReason(name)
+  return (
+    <p
+      className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+      data-testid="worktree-branch-hint"
+    >
+      {branch !== null ? (
+        <>
+          <GitBranchIcon className="size-3.5 shrink-0" />
+          <span className="truncate font-mono text-foreground/80" data-user-text="">
+            {branch}
+          </span>
+        </>
+      ) : (
+        <>
+          <ShuffleIcon className="size-3.5 shrink-0" />
+          <span className="truncate">
+            {reason === 'non-ascii'
+              ? 'The branch gets a random name: this one cannot be spelled in ASCII.'
+              : reason === 'no-letters'
+                ? 'The branch gets a random name: this one has no letters or digits.'
+                : 'A random name is picked when you create it.'}
+          </span>
+        </>
+      )}
+    </p>
+  )
+}
 
 /** What the user chose for an inner repository. */
 interface NestedChoice {
@@ -86,11 +133,13 @@ function BranchSelect({
         <SelectValue placeholder="Choose a branch" data-user-text="" />
       </SelectTrigger>
       <SelectContent data-testid={`${testId}-options`}>
-        {branches.map((branch) => (
-          <SelectItem key={branch} value={branch} data-user-text="">
-            {branch}
-          </SelectItem>
-        ))}
+        <SelectGroup>
+          {branches.map((branch) => (
+            <SelectItem key={branch} value={branch} data-user-text="">
+              {branch}
+            </SelectItem>
+          ))}
+        </SelectGroup>
       </SelectContent>
     </Select>
   )
@@ -132,13 +181,13 @@ function AgentPicker({
           />
         }
       >
-        <ToolIcon toolId={selected} />
+        <ToolIcon toolId={selected} className="size-3.5" />
         <span>{getTool(selected).label}</span>
       </ComboboxTrigger>
       <ComboboxContent className="w-56" finalFocus={focusAfterOverlay}>
         <ComboboxInput
           showTrigger={false}
-          placeholder="Search agents…"
+          placeholder="Choose an agent…"
           aria-label="Agent"
           data-testid="worktree-agent-search"
         />
@@ -194,22 +243,20 @@ function ProjectPicker({
           <Button
             variant="outline"
             size="xs"
-            className={cn(CHIP, 'max-w-56')}
+            className={CHIP}
             aria-label={`Project: ${value.name}`}
             disabled={disabled}
             data-testid="worktree-project-button"
           />
         }
       >
-        <FolderIcon className="text-muted-foreground" />
-        <span className="min-w-0 truncate" data-path="">
-          {value.name}
-        </span>
+        <FolderIcon className="size-3.5 text-muted-foreground" />
+        <span data-path="">{value.name}</span>
       </ComboboxTrigger>
       <ComboboxContent className="w-64" finalFocus={focusAfterOverlay}>
         <ComboboxInput
           showTrigger={false}
-          placeholder="Search projects…"
+          placeholder="Set project…"
           aria-label="Project"
           data-testid="worktree-project-search"
         />
@@ -283,7 +330,12 @@ function NestedRepositoryRow({
   )
 }
 
-/** The form of the new worktree dialog for a project, from its options. */
+/**
+ * The form of the new worktree dialog for a project, usable before its
+ * options arrive: only Advanced and Create wait for the branches and inner
+ * repositories that `options` carries, while the name, the branch it gives
+ * and the agent work at once.
+ */
 function NewWorktreeForm({
   projectRoot,
   project,
@@ -301,46 +353,66 @@ function NewWorktreeForm({
   onNameChange: (name: string) => void
   agent: CodingToolId
   onAgentChange: (agent: CodingToolId) => void
-  options: NewWorktreeOptions
+  /** The project's branches and inner repositories, or `null` while they load. */
+  options: NewWorktreeOptions | null
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
 }) {
-  const [base, setBase] = useState<string | null>(options.current)
-  const [nested, setNested] = useState<Record<string, NestedChoice>>(() =>
-    Object.fromEntries(
+  // The choices to make, from the project's own branches once Git has given
+  // them: kept with the options they were made from, so that the first
+  // options to arrive replace them.
+  const [choices, setChoices] = useState<{
+    from: NewWorktreeOptions | null
+    base: string | null
+    nested: Record<string, NestedChoice>
+    advancedOpen: boolean
+  }>({ from: null, base: null, nested: {}, advancedOpen: false })
+  if (options !== null && choices.from !== options) {
+    const nested = Object.fromEntries(
       options.nested.map((repository) => [
         repository.relativePath,
         {
           included: repository.hasCommits,
           base: defaultNestedBase(repository, options.current),
           manual: false,
-        },
+        } satisfies NestedChoice,
       ]),
-    ),
-  )
+    )
+    // Advanced opens by itself while a base branch cannot be told, to be picked.
+    const undecided =
+      options.current === null ||
+      options.nested.some((repository) => {
+        const choice = nested[repository.relativePath]
+        return choice?.included && choice.base === null
+      })
+    setChoices({ from: options, base: options.current, nested, advancedOpen: undecided })
+  }
+  const { base, nested, advancedOpen } = choices
+  const setAdvancedOpen = (open: boolean) =>
+    setChoices((current) => ({ ...current, advancedOpen: open }))
   const [submodules, setSubmodules] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
   const openCreatedSession = useAppStore((state) => state.openCreatedSession)
 
-  const included = options.nested.filter((repository) => nested[repository.relativePath]?.included)
+  const included =
+    options?.nested.filter((repository) => nested[repository.relativePath]?.included) ?? []
   const undecided =
-    base === null || included.some((repository) => nested[repository.relativePath]!.base === null)
-  // Advanced opens by itself while a base branch cannot be told, to be picked.
-  const [advancedOpen, setAdvancedOpen] = useState(undecided)
+    options !== null &&
+    (base === null || included.some((repository) => nested[repository.relativePath]!.base === null))
 
   const participants = useMemo(
     () => [
       ...(base === null ? [] : [{ relativePath: '', base }]),
-      ...options.nested.flatMap((repository) => {
+      ...(options?.nested.flatMap((repository) => {
         const choice = nested[repository.relativePath]
         return choice?.included && choice.base !== null
           ? [{ relativePath: repository.relativePath, base: choice.base }]
           : []
-      }),
+      }) ?? []),
     ],
-    [base, nested, options.nested],
+    [base, nested, options],
   )
   useEffect(() => {
     let current = true
@@ -355,30 +427,32 @@ function NewWorktreeForm({
     }
   }, [participants, projectRoot])
 
-  const branch = worktreeBranchName(name)
-  const canCreate = !creating && base !== null && !undecided
-  const summary = [
-    base ?? 'No base branch',
-    ...included.map((repository) => repository.relativePath),
-  ]
-    .filter(Boolean)
-    .join(', ')
+  const canCreate = !creating && options !== null && base !== null && !undecided
+  const summary =
+    options === null
+      ? null
+      : [
+          base === null ? 'Choose a base branch' : `From ${base}`,
+          ...(included.length > 0
+            ? [`with ${included.map((repository) => repository.relativePath).join(', ')}`]
+            : []),
+        ].join(' · ')
 
-  const changeBase = (value: string | null) => {
-    setBase(value)
-    // Inner repositories whose base was not picked by hand follow the project's.
-    setNested((choices) =>
-      Object.fromEntries(
-        options.nested.map((repository) => {
-          const choice = choices[repository.relativePath]!
+  const changeBase = (value: string | null) =>
+    setChoices((current) => ({
+      ...current,
+      base: value,
+      // Inner repositories whose base was not picked by hand follow the project's.
+      nested: Object.fromEntries(
+        (options?.nested ?? []).map((repository) => {
+          const choice = current.nested[repository.relativePath]!
           return [
             repository.relativePath,
             choice.manual ? choice : { ...choice, base: defaultNestedBase(repository, value) },
           ]
         }),
       ),
-    )
-  }
+    }))
 
   const create = async (event?: { preventDefault(): void }) => {
     event?.preventDefault()
@@ -413,70 +487,74 @@ function NewWorktreeForm({
   }
 
   return (
-    <form className="flex min-h-0 flex-col gap-3" onSubmit={(event) => void create(event)}>
-      <div
-        className="-mx-4 grid min-h-0 gap-3 overflow-y-auto px-4 py-1"
-        data-testid="new-worktree-fields"
-      >
-        <div className="grid gap-2">
-          <Input
-            value={name}
-            onChange={(event) => {
-              onNameChange(event.target.value)
-              setError(null)
-            }}
-            onKeyDown={(event) => {
-              // Enter creates, also while the name is blank, which takes a random one.
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) void create(event)
-            }}
-            disabled={creating}
-            autoFocus
-            spellCheck={false}
-            autoComplete="off"
-            placeholder="Name (optional)"
-            aria-label="Worktree name"
-            data-testid="worktree-name-input"
-          />
-          <p className="text-xs text-muted-foreground" data-testid="worktree-branch-hint">
-            {branch === null ? (
-              'The branch will get a random name when the worktree is created.'
-            ) : (
-              <>
-                Branch: <span className="font-mono text-foreground">{branch}</span>
-              </>
-            )}
-          </p>
-        </div>
+    <form onSubmit={(event) => void create(event)}>
+      <div className="grid gap-2 px-4 pt-4 pb-3" data-testid="new-worktree-fields">
+        <input
+          value={name}
+          onChange={(event) => {
+            onNameChange(event.target.value)
+            setError(null)
+          }}
+          onKeyDown={(event) => {
+            // Enter creates, also while the name is blank, which takes a random one.
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void create(event)
+          }}
+          disabled={creating}
+          autoFocus
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="Worktree name, or leave empty"
+          aria-label="Name"
+          data-testid="worktree-name-input"
+          className="w-full bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground/60"
+        />
+        <BranchHint name={name} />
+      </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <AgentPicker value={agent} onChange={onAgentChange} />
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-            <CollapsibleTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className={cn(CHIP, 'max-w-72', undecided && 'border-destructive')}
-                  aria-expanded={advancedOpen}
-                  data-testid="worktree-advanced-button"
-                />
-              }
+      <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+        <AgentPicker value={agent} onChange={onAgentChange} />
+        <Button
+          type="button"
+          variant={advancedOpen ? 'secondary' : 'outline'}
+          size="xs"
+          className={cn(CHIP, 'max-w-72', undecided && 'text-destructive')}
+          onClick={() => setAdvancedOpen(!advancedOpen)}
+          aria-expanded={advancedOpen}
+          data-testid="worktree-advanced-button"
+        >
+          <SlidersHorizontalIcon className="size-3.5" />
+          <span className="min-w-0 truncate">
+            {advancedOpen || summary === null ? 'Advanced' : summary}
+          </span>
+        </Button>
+      </div>
+
+      {error !== null && (
+        <p
+          className="mx-4 mb-3 max-h-40 overflow-auto rounded-md bg-destructive/10 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-destructive"
+          role="alert"
+          data-path=""
+          data-testid="worktree-create-error"
+        >
+          {error}
+        </p>
+      )}
+
+      {advancedOpen && (
+        <div
+          className="max-h-[40vh] overflow-y-auto border-t px-4 py-3"
+          data-testid="worktree-advanced"
+        >
+          {options === null ? (
+            <p
+              className="flex items-center gap-2 text-xs text-muted-foreground"
+              data-testid="new-worktree-loading"
             >
-              <span>Advanced</span>
-              <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
-              <ChevronDownIcon
-                className={cn(
-                  'text-muted-foreground transition-transform',
-                  advancedOpen && 'rotate-180',
-                )}
-              />
-            </CollapsibleTrigger>
-          </Collapsible>
-        </div>
-
-        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-          <CollapsibleContent>
-            <div className="grid gap-3 rounded-lg border p-3" data-testid="worktree-advanced">
+              <Spinner />
+              Looking for branches and inner repositories…
+            </p>
+          ) : (
+            <div className="grid gap-4">
               <div className="grid gap-2">
                 <Label>Base branch</Label>
                 <BranchSelect
@@ -488,18 +566,20 @@ function NewWorktreeForm({
                   testId="worktree-base-select"
                   missing={base === null}
                 />
+                {base === null && (
+                  <p className="text-xs text-destructive">
+                    The main worktree has no branch checked out: pick the branch to start from.
+                  </p>
+                )}
               </div>
 
               {options.nested.length > 0 && (
                 <div className="grid gap-2">
-                  <Label>Inner repositories</Label>
+                  <Label>Nested repositories</Label>
                   <p className="text-xs text-muted-foreground">
                     Each one gets the same branch, at the same path inside the new worktree.
                   </p>
-                  <ul
-                    className="-mx-1 grid max-h-64 gap-2 overflow-y-auto px-1 py-0.5"
-                    data-testid="worktree-nested-list"
-                  >
+                  <ul className="grid gap-2" data-testid="worktree-nested-list">
                     {options.nested.map((repository) => (
                       <NestedRepositoryRow
                         key={repository.relativePath}
@@ -507,11 +587,14 @@ function NewWorktreeForm({
                         choice={nested[repository.relativePath]!}
                         disabled={creating}
                         onChange={(change) =>
-                          setNested((choices) => ({
-                            ...choices,
-                            [repository.relativePath]: {
-                              ...choices[repository.relativePath]!,
-                              ...change,
+                          setChoices((current) => ({
+                            ...current,
+                            nested: {
+                              ...current.nested,
+                              [repository.relativePath]: {
+                                ...current.nested[repository.relativePath]!,
+                                ...change,
+                              },
                             },
                           }))
                         }
@@ -527,7 +610,7 @@ function NewWorktreeForm({
                   data-testid="worktree-submodules"
                 >
                   <span>These submodules will not be populated; their folders stay empty:</span>
-                  <ul className="grid max-h-40 gap-0.5 overflow-y-auto">
+                  <ul className="grid gap-0.5">
                     {submodules.map((submodule) => (
                       <li
                         key={submodule}
@@ -542,26 +625,15 @@ function NewWorktreeForm({
                 </div>
               )}
             </div>
-          </CollapsibleContent>
-        </Collapsible>
+          )}
+        </div>
+      )}
 
-        {error !== null && (
-          <p
-            className="max-h-40 overflow-auto rounded-md bg-destructive/10 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-destructive"
-            role="alert"
-            data-path=""
-            data-testid="worktree-create-error"
-          >
-            {error}
-          </p>
-        )}
-      </div>
-
-      <DialogFooter>
-        <span className="mr-auto text-xs text-muted-foreground">
-          Press <Kbd>Enter</Kbd> to create
+      <DialogFooter className="m-0 flex-row items-center justify-end gap-3 px-4 py-3 sm:flex-row">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Kbd>Enter</Kbd> to create
         </span>
-        <Button type="submit" disabled={!canCreate} data-testid="worktree-create">
+        <Button type="submit" size="sm" disabled={!canCreate} data-testid="worktree-create">
           {creating && <Spinner />}
           {creating ? 'Creating…' : 'Create worktree'}
         </Button>
@@ -573,10 +645,12 @@ function NewWorktreeForm({
 /** Loads the options of a project's new worktree dialog, then shows its form. */
 function NewWorktreeContent({
   initialProject,
+  busy,
   onCreatingChange,
   onDone,
 }: {
   initialProject: Project
+  busy: boolean
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
 }) {
@@ -611,34 +685,43 @@ function NewWorktreeContent({
     }
   }, [root])
   const result = loaded !== null && loaded.root === root ? loaded : null
+  const options =
+    result !== null && !('error' in result) && result.options.ok ? result.options.options : null
+  // Why the dialog cannot make a worktree here, once that is known.
+  const problem =
+    result === null
+      ? null
+      : 'error' in result
+        ? result.error
+        : result.options.ok
+          ? null
+          : result.options.message
 
   if (project === undefined) return null
   return (
     <>
-      <DialogHeader className="flex-row items-center gap-2 pr-8">
-        <ProjectPicker value={project} onChange={setChosen} disabled={false} />
-        <span className="text-sm text-muted-foreground" aria-hidden>
-          ›
-        </span>
-        <DialogTitle data-testid="new-worktree-title">New worktree</DialogTitle>
-      </DialogHeader>
-      {result === null ? (
-        <p
-          className="flex items-center gap-2 text-sm text-muted-foreground"
-          data-testid="new-worktree-loading"
+      <div className="flex items-center gap-1.5 px-4 pt-3">
+        <ProjectPicker value={project} onChange={setChosen} disabled={busy} />
+        <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+        <DialogTitle className="text-sm font-normal" data-testid="new-worktree-title">
+          New worktree
+        </DialogTitle>
+        <div className="flex-1" />
+        <DialogClose
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close"
+              disabled={busy}
+              data-testid="worktree-close"
+            />
+          }
         >
-          <Spinner />
-          Looking for branches and inner repositories…
-        </p>
-      ) : 'error' in result ? (
-        <p className="text-sm text-destructive" data-path="">
-          {result.error}
-        </p>
-      ) : !result.options.ok ? (
-        <p className="text-sm text-destructive" data-testid="new-worktree-unavailable">
-          {result.options.message}
-        </p>
-      ) : (
+          <XIcon />
+        </DialogClose>
+      </div>
+      {problem === null ? (
         <NewWorktreeForm
           key={project.root}
           projectRoot={project.root}
@@ -647,10 +730,18 @@ function NewWorktreeContent({
           onNameChange={setName}
           agent={agent}
           onAgentChange={setAgent}
-          options={result.options.options}
+          options={options}
           onCreatingChange={onCreatingChange}
           onDone={onDone}
         />
+      ) : (
+        <p
+          className="px-4 py-3 text-sm text-destructive"
+          data-path=""
+          data-testid="new-worktree-unavailable"
+        >
+          {problem}
+        </p>
       )}
     </>
   )
@@ -683,29 +774,16 @@ export function NewWorktreeDialog() {
       <DialogContent
         showCloseButton={false}
         // Below the window's top row, whose blank parts drag the window.
-        className="flex max-h-[calc(100dvh-7rem)] flex-col gap-4 sm:max-w-md"
+        className="top-[max(3.5rem,12vh)] translate-y-0 gap-0 p-0 sm:max-w-xl"
         finalFocus={focusAfterOverlay}
         data-testid="new-worktree-dialog"
         data-creating={busy}
       >
-        <DialogClose
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="absolute top-2 right-2"
-              aria-label="Close"
-              disabled={busy}
-              data-testid="worktree-close"
-            />
-          }
-        >
-          <XIcon />
-        </DialogClose>
         {project !== undefined && (
           <NewWorktreeContent
             key={project.root}
             initialProject={project}
+            busy={busy}
             onCreatingChange={(value) => {
               creating.current = value
               setBusy(value)

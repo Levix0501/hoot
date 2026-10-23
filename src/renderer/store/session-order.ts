@@ -36,13 +36,18 @@ export function sidebarOrder<T extends { projectRoot: string; worktreePath: stri
  * The sessions of the switch order among those given: a saved session that is
  * not running is left out, as its page may stay after an unexpected end with
  * its Resume button, which the shortcuts do not show; every other session
- * stays, as a session of a project does after it ended.
+ * stays, as a session of a project does after it ended. A session that is
+ * being closed stays too, at its place: end it at its place as a chat does,
+ * so that the session shown next is the one after it.
  */
-export function sessionsInSwitchOrder<T extends { savedSessionId: string | null }>(
+export function sessionsInSwitchOrder<T extends { id: string; savedSessionId: string | null }>(
   sessions: readonly T[],
   running: (session: T) => boolean,
+  closing: ReadonlySet<string> = new Set(),
 ): T[] {
-  return sessions.filter((session) => session.savedSessionId === null || running(session))
+  return sessions.filter(
+    (session) => session.savedSessionId === null || running(session) || closing.has(session.id),
+  )
 }
 
 /**

@@ -1120,7 +1120,10 @@ export function orderedSessions(
     AppState,
     'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'savedSessions' | 'chats'
   >,
-  /** Sessions that are being closed count too, at the place of their chat. */
+  /**
+   * Sessions that are being closed count too, at the place of their chat, or
+   * of their row in the sidebar for a saved session.
+   */
   closing: ReadonlySet<string> = new Set(),
 ): UiSession[] {
   const sessions = sidebarOrder(
@@ -1128,6 +1131,7 @@ export function orderedSessions(
     sessionsInSwitchOrder(
       state.sessions.filter((session) => session.chatId === null),
       isSessionRunning,
+      closing,
     ),
     (root) => projectWorktreeRows(state, root).map((row) => row.path),
   )

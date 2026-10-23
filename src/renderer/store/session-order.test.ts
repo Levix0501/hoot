@@ -89,6 +89,20 @@ describe('sessionsInSwitchOrder', () => {
       'saved-running',
     ])
   })
+
+  it('keeps a closing saved session at its place, so the next one shown is the one after it', () => {
+    const sessions = [
+      { id: 'plain', savedSessionId: null },
+      { id: 'saved-closing', savedSessionId: 'a' },
+      { id: 'saved-ended', savedSessionId: 'b' },
+      { id: 'saved-running', savedSessionId: 'c' },
+    ]
+    const running = (session: (typeof sessions)[number]) => session.id === 'saved-running'
+    const closing = new Set(['saved-closing'])
+    const order = sessionsInSwitchOrder(sessions, running, closing).map((session) => session.id)
+    expect(order).toEqual(['plain', 'saved-closing', 'saved-running'])
+    expect(currentAfterClosing(order, 'saved-closing', closing)).toBe('saved-running')
+  })
 })
 
 describe('orderedChatSessions', () => {

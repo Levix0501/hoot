@@ -1166,15 +1166,24 @@ export function focusCurrentTerminal(): void {
   getSessionTerminal(currentSessionId(useAppStore.getState()))?.terminal.focus()
 }
 
+/** A menu or dialog that is open, as Base UI marks its popup. */
+const OPEN_OVERLAY = ':is([role="menu"], [role="dialog"], [role="alertdialog"])[data-open]'
+
 /**
  * Where a menu or dialog moves the keyboard focus when it closes: into the
  * current session's terminal, or where it would go anyway when the main area
  * shows no session. A menu that opened the picker of issues leaves the focus
- * where the picker put it.
+ * where the picker put it, and so does one closed while another menu or
+ * dialog took the focus: the dialog that one of its items opened, say, or the
+ * menu of another row that was right-clicked. (Base UI leaves such focus
+ * alone by itself only when it is not told where the focus goes.)
  */
 export function focusAfterOverlay(): HTMLElement | boolean {
   const { issuePicker, dependentIssueDialog } = useAppStore.getState()
   if (issuePicker !== null || dependentIssueDialog !== null) return false
+  // Base UI calls this once the closing one has played its exit animation,
+  // by when the other one has taken the focus.
+  if (document.activeElement?.closest(OPEN_OVERLAY)) return false
   const id = currentSessionId(useAppStore.getState())
   if (id === null) return true
   // A terminal that is not on screen yet takes the focus once it is.

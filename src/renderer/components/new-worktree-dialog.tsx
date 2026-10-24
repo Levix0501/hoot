@@ -184,7 +184,7 @@ function AgentPicker({
         <ToolIcon toolId={selected} className="size-3.5" />
         <span>{getTool(selected).label}</span>
       </ComboboxTrigger>
-      <ComboboxContent className="w-56" finalFocus={focusAfterOverlay}>
+      <ComboboxContent className="w-56">
         <ComboboxInput
           showTrigger={false}
           placeholder="Choose an agent…"
@@ -253,7 +253,7 @@ function ProjectPicker({
         <FolderIcon className="size-3.5 text-muted-foreground" />
         <span data-path="">{value.name}</span>
       </ComboboxTrigger>
-      <ComboboxContent className="w-64" finalFocus={focusAfterOverlay}>
+      <ComboboxContent className="w-64">
         <ComboboxInput
           showTrigger={false}
           placeholder="Set project…"

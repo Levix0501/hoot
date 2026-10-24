@@ -459,6 +459,7 @@ export function registerIpc(deps: IpcDependencies): void {
     sidebarOpen: deps.sidebar.open,
     sidebarWidth: deps.sidebar.width,
     collapsedProjects: deps.sidebar.collapsedProjects,
+    collapsedWorktrees: deps.sidebar.collapsedWorktrees,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
     focused: deps.getWindow()?.isFocused() ?? false,
   }))
@@ -477,6 +478,14 @@ export function registerIpc(deps: IpcDependencies): void {
     // Only a project in the list is kept collapsed.
     if (!expanded && !deps.projects.list().some((project) => project.id === id)) return
     deps.sidebar.setProjectCollapsed(id, !expanded)
+  })
+  on(IpcChannel.setWorktreeExpanded, (...args) => {
+    const parsed = z.tuple([projectRoot, z.string().min(1), z.boolean()]).safeParse(args)
+    if (!parsed.success) return
+    const [root, worktreePath, expanded] = parsed.data
+    // Only a worktree of a project in the list is kept collapsed.
+    if (!expanded && !deps.projects.find(root)) return
+    deps.sidebar.setWorktreeCollapsed(worktreePath, !expanded)
   })
 
   handle(IpcChannel.getAppearance, () => deps.appearance.appearance)
@@ -834,10 +843,12 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     const result = await deps.worktrees.delete(root, worktreePath, discard, running)
-    // Its sessions, which have all ended, close with it, and so do its saved sessions.
+    // Its sessions, which have all ended, close with it, and so do its saved
+    // sessions. A worktree made again at its root is expanded.
     if (result.ok) {
       deps.sessions.forgetWorktree(worktreePath)
       deps.chats.removeForWorktree(worktreePath)
+      deps.sidebar.setWorktreeCollapsed(worktreePath, false)
     }
     return result
   })
@@ -849,6 +860,7 @@ export function registerIpc(deps: IpcDependencies): void {
     if (result.ok) {
       deps.sessions.forgetWorktree(parsed.data[1])
       deps.chats.removeForWorktree(parsed.data[1])
+      deps.sidebar.setWorktreeCollapsed(parsed.data[1], false)
     }
     return result
   })

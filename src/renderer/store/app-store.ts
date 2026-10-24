@@ -385,6 +385,8 @@ export interface AppState {
   sidebarEdgeDragging: boolean
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
   collapsedProjects: ReadonlySet<number>
+  /** The worktrees collapsed in the sidebar, by root; every other worktree is expanded. */
+  collapsedWorktrees: ReadonlySet<string>
   /** Whether the window is in full screen. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -656,6 +658,8 @@ export interface AppState {
   setSidebarEdgeDragging(dragging: boolean): void
   /** Expands or collapses a project in the sidebar, and saves its state. */
   setProjectExpanded(projectId: number, expanded: boolean): void
+  /** Expands or collapses a worktree in the sidebar, and saves its state. */
+  setWorktreeExpanded(projectRoot: string, path: string, expanded: boolean): void
   /** Closes a session, asking for confirmation first while it runs. */
   requestCloseSession(id: string): void
   answerCloseConfirmation(confirmed: boolean): void
@@ -1236,15 +1240,18 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
-   * Expands the project of a session that has just become the current one,
-   * however it became current, so that its row shows in the sidebar.
+   * Expands the project and the worktree of a session that has just become
+   * the current one, however it became current, so that its row shows in the
+   * sidebar.
    */
-  const expandProjectOf = (page: Page | null) => {
+  const expandParentsOf = (page: Page | null) => {
     if (page?.kind !== 'session') return
-    const { sessions, projects, setProjectExpanded } = get()
+    const { sessions, projects, setProjectExpanded, setWorktreeExpanded } = get()
     const session = sessions.find((candidate) => candidate.id === page.sessionId)
     const project = projects.find((candidate) => candidate.root === session?.projectRoot)
-    if (project) setProjectExpanded(project.id, true)
+    if (!session || !project) return
+    setProjectExpanded(project.id, true)
+    if (session.worktreePath !== null) setWorktreeExpanded(project.root, session.worktreePath, true)
   }
 
   /**
@@ -1255,7 +1262,7 @@ export const useAppStore = create<AppState>()((set, get) => {
   const showPage = (page: Page) => {
     const { currentPage } = get()
     // Also a session shown again becomes current again.
-    expandProjectOf(page)
+    expandParentsOf(page)
     if (samePage(currentPage, page)) {
       if (page.kind === 'session') focusCurrentTerminal()
       return
@@ -1343,7 +1350,7 @@ export const useAppStore = create<AppState>()((set, get) => {
             : state.dependentIssueDialog,
       }
     })
-    if (sessionShown) expandProjectOf(get().currentPage)
+    if (sessionShown) expandParentsOf(get().currentPage)
     // Once the window no longer shows them.
     setTimeout(() => {
       for (const id of ids) {
@@ -1618,6 +1625,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (ended.length > 0) removeSessions(ended)
   }
 
+  /**
+   * Forgets that a worktree that is gone was collapsed, as the main process
+   * does: one made again at its root is expanded.
+   */
+  const forgetCollapsedWorktree = (path: string) => {
+    const { collapsedWorktrees } = get()
+    if (!collapsedWorktrees.has(path)) return
+    const collapsed = new Set(collapsedWorktrees)
+    collapsed.delete(path)
+    set({ collapsedWorktrees: collapsed })
+  }
+
   const selectAt = (index: number) => {
     const session = orderedSessions(get())[index]
     if (session) get().selectSession(session.id)
@@ -1639,7 +1658,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     if (isSettingsPage(page)) blurBeforeSettings()
     // The terminal view of a session takes the focus once it is shown.
     set({ history: stepped, currentPage: page, newIssueDialogOpen: false })
-    expandProjectOf(page)
+    expandParentsOf(page)
   }
 
   /**
@@ -1691,8 +1710,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           }
         : {}),
     }))
-    // Its row shows in the sidebar, also when its project was collapsed.
-    expandProjectOf(sessionPage(id))
+    // Its row shows in the sidebar, also when its project or its worktree was collapsed.
+    expandParentsOf(sessionPage(id))
     return id
   }
 
@@ -1916,6 +1935,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarResizing: false,
     sidebarEdgeDragging: false,
     collapsedProjects: new Set(),
+    collapsedWorktrees: new Set(),
     fullScreen: false,
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
@@ -1926,12 +1946,15 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
       api.onWindowFocusChanged((windowFocused) => set({ windowFocused }))
       api.onAppearanceChanged((appearance) => set({ appearance }))
-      const [{ sidebarOpen, sidebarWidth, collapsedProjects, fullScreen, focused }, appearance] =
-        await Promise.all([api.getWindowState(), api.getAppearance()])
+      const [
+        { sidebarOpen, sidebarWidth, collapsedProjects, collapsedWorktrees, fullScreen, focused },
+        appearance,
+      ] = await Promise.all([api.getWindowState(), api.getAppearance()])
       set({
         sidebarOpen,
         sidebarWidth,
         collapsedProjects: new Set(collapsedProjects),
+        collapsedWorktrees: new Set(collapsedWorktrees),
         fullScreen,
         windowFocused: focused,
         appearance,
@@ -2104,7 +2127,7 @@ export const useAppStore = create<AppState>()((set, get) => {
                 : visit(state.history, currentPage),
           }
         })
-        if (shown === null) expandProjectOf(get().currentPage)
+        if (shown === null) expandParentsOf(get().currentPage)
       }
       const tools = await api.getTools()
       set({ tools })
@@ -2952,6 +2975,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.setProjectExpanded(projectId, expanded)
     },
 
+    setWorktreeExpanded(projectRoot, path, expanded) {
+      const { collapsedWorktrees } = get()
+      if (collapsedWorktrees.has(path) === !expanded) return
+      const collapsed = new Set(collapsedWorktrees)
+      if (expanded) collapsed.delete(path)
+      else collapsed.add(path)
+      set({ collapsedWorktrees: collapsed })
+      api.setWorktreeExpanded(projectRoot, path, expanded)
+    },
+
     requestCloseSession(id) {
       const session = findSession(id)
       if (!session || session.closing) return
@@ -3101,6 +3134,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (result.ok) {
         set({ worktreeDeletion: null })
         closeEndedSessionsIn(deletion.path)
+        forgetCollapsedWorktree(deletion.path)
         return
       }
       // Something to lose appeared since the check: ask again, listing it.
@@ -3120,6 +3154,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         return
       }
       closeEndedSessionsIn(path)
+      forgetCollapsedWorktree(path)
     },
   }
 })

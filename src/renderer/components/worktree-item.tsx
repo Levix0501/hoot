@@ -3,18 +3,23 @@ import {
   FolderOpenIcon,
   MoreHorizontalIcon,
   PackageIcon,
+  PackageOpenIcon,
   PlusIcon,
   Trash2Icon,
 } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { CodingToolId } from '../../shared/tools'
 import { isWithin } from '../../shared/worktrees'
 import { api } from '../lib/api'
+import { sessionsSummary, sessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
+import { StateLight } from './state-light'
 import { Badge } from './ui/badge'
+import { CollapsibleTrigger } from './ui/collapsible'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,8 +40,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
 
 /** The parts a worktree's menus are made of: its `⋯` menu's, or its context menu's. */
 interface WorktreeMenuComponents {
@@ -91,34 +95,6 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
         '.'
       )}
     </Note>
-  )
-}
-
-/** The path of the worktree's root, and the relative paths of its inner members. */
-function WorktreeTooltip({ worktree }: { worktree: WorktreeRow }) {
-  return (
-    <div className="grid gap-1 text-left" data-testid="worktree-tooltip">
-      <span className="font-mono break-all" data-path="" data-testid="worktree-tooltip-path">
-        {worktree.path}
-      </span>
-      {worktree.innerMembers.length > 0 && (
-        <div className="grid gap-0.5">
-          <span className="opacity-70">Includes</span>
-          <ul className="grid gap-0.5">
-            {worktree.innerMembers.map((member) => (
-              <li
-                key={member}
-                className="font-mono break-all"
-                data-path=""
-                data-testid="worktree-tooltip-member"
-              >
-                {member}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -228,78 +204,94 @@ function WorktreeMenuEntries({
 }
 
 /**
- * A worktree's row in the sidebar, below its project's sessions: a package
- * icon, its name when Hoot made it with the New Worktree dialog, otherwise
- * its branch (or abbreviated commit), and whether it is missing or locked.
- * Pointing at it for a moment shows its root's path and its inner members.
- * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button,
- * which opens the same menu as a right click, and right of it, unless the
- * worktree is missing, its `+`, which starts a session in the worktree with
- * the agent a new chat would start with. Clicking the row itself does
- * nothing.
+ * A worktree's row in the sidebar, below its project's sessions: click it to
+ * expand or collapse the worktree. It shows a package icon, lined up with the
+ * project's name, closed while the worktree is collapsed and open while it is
+ * expanded; the worktree's name when Hoot made it with the New Worktree
+ * dialog, otherwise its branch (or abbreviated commit); whether it is missing
+ * or locked; and, while it is collapsed, at its right end, the light of the
+ * state of its sessions that needs the user most, if any does. Pointing at
+ * it, or moving the keyboard focus into it, shows its `⋯` button in the
+ * light's place, which opens the same menu as a right click, and right of it,
+ * unless the worktree is missing, its `+`, which starts a session in the
+ * worktree with the agent a new chat would start with.
  */
 export function WorktreeItem({
   projectRoot,
   worktree,
+  expanded,
 }: {
   projectRoot: string
   worktree: WorktreeRow
+  expanded: boolean
 }) {
   const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
+  const states = useAppStore(
+    useShallow((state) =>
+      state.sessions
+        .filter(
+          (session) =>
+            session.projectRoot === projectRoot && session.worktreePath === worktree.path,
+        )
+        .map((session) => sessionState(session)),
+    ),
+  )
+  // Its rows show the sessions themselves while it is expanded.
+  const summary = expanded ? null : sessionsSummary(states)
   const title = worktree.name ?? worktree.displayName
+  const Package = expanded ? PackageOpenIcon : PackageIcon
+  // While they show, its buttons take the room of two, or of `⋯` alone for a missing worktree.
+  const buttonsRoom = worktree.missing
+    ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
+    : 'group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12'
 
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        render={<SidebarMenuItem />}
+        className="group/menu-item relative"
         data-testid="worktree-item"
         data-project-root={projectRoot}
         data-worktree-path={worktree.path}
         data-missing={worktree.missing}
         data-locked={worktree.locked}
       >
-        <Tooltip>
-          <TooltipTrigger
-            // Unlike the toolbar's buttons, a row shows its details only when pointed at for a moment.
-            delay={400}
-            render={
-              <SidebarMenuButton
-                render={<div />}
-                // Highlighted also while the pointer is on one of the buttons over it.
-                className="cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
-                data-testid="worktree-row"
-              />
-            }
-          >
-            <PackageIcon />
-            <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
-              {title}
-            </span>
-            {worktree.missing && (
-              <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
-                Missing
-              </Badge>
-            )}
-            {worktree.locked && (
-              <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
-                Locked
-              </Badge>
-            )}
-            {/* Room for the row's buttons while they show. */}
-            <span
-              className={cn(
-                '-ml-2 w-0 shrink-0',
-                worktree.missing
-                  ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
-                  : 'group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12',
-              )}
-              aria-hidden
+        <CollapsibleTrigger
+          render={
+            <SidebarMenuButton
+              // Highlighted also while the pointer is on one of the buttons over it.
+              className="cursor-default pl-8 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
+              data-testid="worktree-row"
             />
-          </TooltipTrigger>
-          <TooltipContent side="right" align="start" className="max-w-80">
-            <WorktreeTooltip worktree={worktree} />
-          </TooltipContent>
-        </Tooltip>
+          }
+        >
+          <Package data-testid="worktree-package-icon" />
+          <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
+            {title}
+          </span>
+          {worktree.missing && (
+            <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
+              Missing
+            </Badge>
+          )}
+          {worktree.locked && (
+            <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
+              Locked
+            </Badge>
+          )}
+          {summary && (
+            <>
+              <StateLight
+                state={summary.state}
+                // At the row's right end, hidden while the row's buttons show in its place.
+                className="ml-auto group-hover/menu-item:hidden group-has-focus-visible/menu-item:hidden group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:hidden"
+                testId="worktree-light"
+              />
+              <span className="sr-only">{summary.description}</span>
+            </>
+          )}
+          {/* Room for the row's buttons while they show. */}
+          <span className={cn('-ml-2 w-0 shrink-0', buttonsRoom)} aria-hidden />
+        </CollapsibleTrigger>
 
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -309,7 +301,6 @@ export function WorktreeItem({
                 // The button pointed at stands out on the highlighted row.
                 className={cn('hover:bg-sidebar-foreground/10', !worktree.missing && 'right-7')}
                 aria-label={`More actions for ${title}`}
-                title="More Actions"
                 // Its label names the worktree.
                 data-user-text=""
                 data-testid="worktree-actions-button"
@@ -337,7 +328,6 @@ export function WorktreeItem({
             showOnHover
             className="hover:bg-sidebar-foreground/10"
             aria-label={`New session in ${title}`}
-            title="New Session"
             data-user-text=""
             onClick={() => void newWorktreeSession(projectRoot, worktree.path)}
             data-testid="worktree-new-session-button"

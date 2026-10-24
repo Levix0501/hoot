@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { SessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
 import { Spinner } from './ui/spinner'
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 /** A filled circle of a color. */
 function Dot({ className }: { className: string }) {
@@ -75,33 +74,5 @@ export function StateLight({
     >
       <Shape state={state} />
     </span>
-  )
-}
-
-/** The light of a session state, which says what it shows in a tooltip when pointed at. */
-export function StateLightWithTooltip({
-  state,
-  tooltip,
-  testId,
-}: {
-  state: SessionState
-  tooltip: string
-  testId: string
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        // Shown only when pointed at for a moment, as a row's details are.
-        delay={400}
-        render={<span />}
-        className="flex shrink-0"
-        data-state={state}
-        data-testid={testId}
-      >
-        <StateLight state={state} />
-        <span className="sr-only">{tooltip}</span>
-      </TooltipTrigger>
-      <TooltipContent data-testid={`${testId}-tooltip`}>{tooltip}</TooltipContent>
-    </Tooltip>
   )
 }

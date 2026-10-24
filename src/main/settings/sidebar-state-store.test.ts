@@ -146,6 +146,62 @@ describe('SidebarStateStore: collapsed projects', () => {
   })
 })
 
+describe('SidebarStateStore: collapsed worktrees', () => {
+  it('has every worktree expanded when nothing was saved, without writing anything', () => {
+    expect(new SidebarStateStore(directory).collapsedWorktrees).toEqual([])
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it('saves which worktrees are collapsed, and keeps them across instances', () => {
+    const first = new SidebarStateStore(directory)
+    first.setWorktreeCollapsed('/wt/b', true)
+    first.setWorktreeCollapsed('/wt/a', true)
+    expect(first.collapsedWorktrees).toEqual(['/wt/b', '/wt/a'])
+    expect(saved()).toEqual({ collapsedWorktrees: ['/wt/b', '/wt/a'] })
+    expect(new SidebarStateStore(directory).collapsedWorktrees).toEqual(['/wt/b', '/wt/a'])
+
+    first.setWorktreeCollapsed('/wt/b', false)
+    expect(saved()).toEqual({ collapsedWorktrees: ['/wt/a'] })
+    expect(new SidebarStateStore(directory).collapsedWorktrees).toEqual(['/wt/a'])
+  })
+
+  it('writes nothing when a worktree is already in the state asked for', () => {
+    const store = new SidebarStateStore(directory)
+    store.setWorktreeCollapsed('/wt/a', false)
+    expect(fs.existsSync(file)).toBe(false)
+    store.setWorktreeCollapsed('/wt/a', true)
+    fs.writeFileSync(file, JSON.stringify({ collapsedWorktrees: ['/wt/a'], marker: true }))
+    store.setWorktreeCollapsed('/wt/a', true)
+    expect(saved()).toEqual({ collapsedWorktrees: ['/wt/a'], marker: true })
+  })
+
+  it('shares settings.json with the collapsed projects and the rest of the sidebar state', () => {
+    const sidebar = new SidebarStateStore(directory)
+    sidebar.setProjectCollapsed(2, true)
+    sidebar.setWorktreeCollapsed('/wt/a', true)
+    sidebar.setOpen(false)
+    expect(saved()).toEqual({
+      collapsedProjects: [2],
+      collapsedWorktrees: ['/wt/a'],
+      sidebarCollapsed: true,
+    })
+    const reopened = new SidebarStateStore(directory)
+    expect(reopened.collapsedProjects).toEqual([2])
+    expect(reopened.collapsedWorktrees).toEqual(['/wt/a'])
+    expect(reopened.open).toBe(false)
+  })
+
+  it('leaves out saved values that are not worktree roots', () => {
+    writeSettings({ collapsedWorktrees: ['/wt/a', '', 3, null, '/wt/b'] })
+    expect(new SidebarStateStore(directory).collapsedWorktrees).toEqual(['/wt/a', '/wt/b'])
+    writeSettings({ collapsedWorktrees: '/wt/a' })
+    const store = new SidebarStateStore(directory)
+    expect(store.collapsedWorktrees).toEqual([])
+    store.setWorktreeCollapsed('/wt/c', true)
+    expect(saved()).toEqual({ collapsedWorktrees: ['/wt/c'] })
+  })
+})
+
 describe('SidebarStateStore: width', () => {
   it('is 275 pixels wide when nothing was saved, without writing anything', () => {
     expect(new SidebarStateStore(directory).width).toBe(275)

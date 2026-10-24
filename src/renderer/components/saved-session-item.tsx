@@ -1,8 +1,8 @@
 import { PencilIcon, XIcon } from 'lucide-react'
 import { chatName, type SavedSessionInfo } from '../../shared/chats'
-import { sessionState, stateTooltip } from '../lib/session-state'
+import { sessionState, stateDescription } from '../lib/session-state'
 import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-store'
-import { StateLightWithTooltip } from './state-light'
+import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import {
   ContextMenu,
@@ -11,14 +11,14 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
-import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
+import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
- * A saved session's row below its worktree: the agent's icon and the
- * session's name, and while its agent runs, at its right end, the light of
- * its state. Click it to show the session, continuing its conversation when
- * its agent does not run; double-click it or use its context menu to rename
- * it, and close a running one from its context menu.
+ * A saved session's row below its worktree's: the agent's icon, lined up with
+ * the worktree's name; the session's name; and while its agent runs, at its
+ * right end, the light of its state. Click it to show the session, continuing
+ * its conversation when its agent does not run; double-click it or use its
+ * context menu to rename it, and close a running one from its context menu.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>
@@ -42,17 +42,17 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        render={<SidebarMenuSubItem />}
+        render={<SidebarMenuItem />}
         data-testid="saved-session-item"
         data-saved-session-id={saved.id}
         data-tool={saved.toolId}
         data-running={running !== undefined}
         data-current={current}
       >
-        <SidebarMenuSubButton
+        <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className="w-full cursor-default text-left"
+          className="cursor-default pl-14"
           onClick={() => open(saved.id)}
           onDoubleClick={() => startRenaming(saved.id)}
           data-testid="saved-session-item-button"
@@ -60,20 +60,18 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           <ToolIcon toolId={saved.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
-            title={name}
             data-session-name=""
             data-testid="saved-session-item-name"
           >
             {name}
           </span>
           {running && state !== null && (
-            <StateLightWithTooltip
-              state={state}
-              tooltip={stateTooltip(state, running.exit)}
-              testId="saved-session-light"
-            />
+            <>
+              <StateLight state={state} testId="saved-session-light" />
+              <span className="sr-only">{stateDescription(state, running.exit)}</span>
+            </>
           )}
-        </SidebarMenuSubButton>
+        </SidebarMenuButton>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-auto min-w-36">
         <ContextMenuItem

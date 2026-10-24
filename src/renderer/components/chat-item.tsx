@@ -1,8 +1,8 @@
 import { PencilIcon, XIcon } from 'lucide-react'
 import { chatName, type ChatInfo } from '../../shared/chats'
-import { sessionState, stateTooltip } from '../lib/session-state'
+import { sessionState, stateDescription } from '../lib/session-state'
 import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-store'
-import { StateLightWithTooltip } from './state-light'
+import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import {
   ContextMenu,
@@ -56,18 +56,16 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
           <ToolIcon toolId={chat.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
-            title={name}
             data-session-name=""
             data-testid="chat-item-name"
           >
             {name}
           </span>
           {running && state !== null && (
-            <StateLightWithTooltip
-              state={state}
-              tooltip={stateTooltip(state, running.exit)}
-              testId="chat-light"
-            />
+            <>
+              <StateLight state={state} testId="chat-light" />
+              <span className="sr-only">{stateDescription(state, running.exit)}</span>
+            </>
           )}
         </SidebarMenuButton>
       </ContextMenuTrigger>

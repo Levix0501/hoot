@@ -4,10 +4,10 @@ import type { SessionExit } from '../../shared/session'
 import {
   afterHookEvent,
   afterTitle,
-  projectSummary,
+  sessionsSummary,
   sessionState,
+  stateDescription,
   stateLabel,
-  stateTooltip,
   type StateSource,
 } from './session-state'
 
@@ -449,7 +449,7 @@ describe('what a Claude Code session does', () => {
   })
 })
 
-describe('stateTooltip and stateLabel', () => {
+describe('stateDescription and stateLabel', () => {
   it("name a running session's state, and tell how an ended one ended", () => {
     const names = {
       starting: 'Starting',
@@ -461,59 +461,59 @@ describe('stateTooltip and stateLabel', () => {
       running: 'Running',
     } as const
     for (const [state, name] of Object.entries(names)) {
-      expect(stateTooltip(state as keyof typeof names, null)).toBe(name)
+      expect(stateDescription(state as keyof typeof names, null)).toBe(name)
       expect(stateLabel(state as keyof typeof names, null)).toBe(name)
     }
-    expect(stateTooltip('ended', exit({ code: 3 }))).toBe('Process exited with code 3.')
+    expect(stateDescription('ended', exit({ code: 3 }))).toBe('Process exited with code 3.')
     expect(stateLabel('ended', exit({ code: 3 }))).toBe('Exited (3)')
-    expect(stateTooltip('ended', exit({ signal: 'SIGKILL' }))).toBe(
+    expect(stateDescription('ended', exit({ signal: 'SIGKILL' }))).toBe(
       'Process terminated by signal SIGKILL.',
     )
     expect(stateLabel('ended', exit({ signal: 'SIGKILL' }))).toBe('Terminated (SIGKILL)')
-    expect(stateTooltip('ended-unexpectedly', exit({ abnormal: true }))).toBe(
+    expect(stateDescription('ended-unexpectedly', exit({ abnormal: true }))).toBe(
       'The terminal host stopped unexpectedly. The session has ended.',
     )
     expect(stateLabel('ended-unexpectedly', exit({ abnormal: true }))).toBe('Ended unexpectedly')
   })
 })
 
-describe('projectSummary', () => {
+describe('sessionsSummary', () => {
   it('shows nothing while no session needs the user', () => {
-    expect(projectSummary([])).toBeNull()
-    expect(projectSummary(['working', 'idle', 'running', 'starting'])).toBeNull()
+    expect(sessionsSummary([])).toBeNull()
+    expect(sessionsSummary(['working', 'idle', 'running', 'starting'])).toBeNull()
   })
 
   it('shows the light of the state that needs the user most, and counts the sessions in each', () => {
-    expect(projectSummary(['done', 'working'])).toEqual({
+    expect(sessionsSummary(['done', 'working'])).toEqual({
       state: 'done',
-      tooltip: '1 session done',
+      description: '1 session done',
     })
-    expect(projectSummary(['done', 'waiting', 'idle'])).toEqual({
+    expect(sessionsSummary(['done', 'waiting', 'idle'])).toEqual({
       state: 'waiting',
-      tooltip: '1 session waiting for you, 1 session done',
+      description: '1 session waiting for you, 1 session done',
     })
-    expect(projectSummary(['done', 'ended', 'waiting', 'running'])).toEqual({
+    expect(sessionsSummary(['done', 'ended', 'waiting', 'running'])).toEqual({
       state: 'waiting',
-      tooltip: '1 session waiting for you, 1 session ended, 1 session done',
+      description: '1 session waiting for you, 1 session ended, 1 session done',
     })
-    expect(projectSummary(['done', 'ended', 'error', 'waiting'])).toEqual({
+    expect(sessionsSummary(['done', 'ended', 'error', 'waiting'])).toEqual({
       state: 'waiting',
-      tooltip:
+      description:
         '1 session waiting for you, 1 session stopped by an error, 1 session ended, 1 session done',
     })
-    expect(projectSummary(['done', 'ended', 'error', 'done'])).toEqual({
+    expect(sessionsSummary(['done', 'ended', 'error', 'done'])).toEqual({
       state: 'error',
-      tooltip: '1 session stopped by an error, 1 session ended, 2 sessions done',
+      description: '1 session stopped by an error, 1 session ended, 2 sessions done',
     })
     expect(
-      projectSummary(['ended-unexpectedly', 'ended', 'ended-unexpectedly', 'ended-unexpectedly']),
+      sessionsSummary(['ended-unexpectedly', 'ended', 'ended-unexpectedly', 'ended-unexpectedly']),
     ).toEqual({
       state: 'ended-unexpectedly',
-      tooltip: '3 sessions ended unexpectedly, 1 session ended',
+      description: '3 sessions ended unexpectedly, 1 session ended',
     })
-    expect(projectSummary(['waiting', 'waiting', 'error', 'error', 'ended', 'ended'])).toEqual({
+    expect(sessionsSummary(['waiting', 'waiting', 'error', 'error', 'ended', 'ended'])).toEqual({
       state: 'waiting',
-      tooltip: '2 sessions waiting for you, 2 sessions stopped by an error, 2 sessions ended',
+      description: '2 sessions waiting for you, 2 sessions stopped by an error, 2 sessions ended',
     })
   })
 })

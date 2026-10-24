@@ -191,10 +191,10 @@ const STATE_NAMES: Record<Exclude<SessionState, 'ended' | 'ended-unexpectedly'>,
 }
 
 /**
- * What the tooltip of a session's light says: the name of its state, or for
- * a session that ended, how it ended, in a sentence.
+ * What a session's light says to screen readers: the name of its state, or
+ * for a session that ended, how it ended, in a sentence.
  */
-export function stateTooltip(state: SessionState, exit: SessionExit | null): string {
+export function stateDescription(state: SessionState, exit: SessionExit | null): string {
   if (state === 'ended' || state === 'ended-unexpectedly') {
     return exit ? describeExit(exit) : 'The session has ended.'
   }
@@ -213,9 +213,9 @@ export function stateLabel(state: SessionState, exit: SessionExit | null): strin
 }
 
 /**
- * The states a collapsed project's row sums up, from the one that needs the
- * user most, each with how the row's tooltip counts its sessions: for one
- * session, and for more.
+ * The states the row of a collapsed project or worktree sums up, from the one
+ * that needs the user most, each with how the row's description counts its
+ * sessions: for one session, and for more.
  */
 const SUMMED_UP: ReadonlyArray<[SessionState, string, string]> = [
   ['waiting', 'session waiting for you', 'sessions waiting for you'],
@@ -225,24 +225,28 @@ const SUMMED_UP: ReadonlyArray<[SessionState, string, string]> = [
   ['done', 'session done', 'sessions done'],
 ]
 
-/** What a collapsed project's row shows of its sessions: a light, and its tooltip. */
-export interface ProjectSummary {
+/**
+ * What the row of a collapsed project or worktree shows of its sessions: a
+ * light, and what it says to screen readers.
+ */
+export interface SessionsSummary {
   state: SessionState
-  tooltip: string
+  description: string
 }
 
 /**
- * What a collapsed project's row shows of the states of its sessions, those
- * of its worktrees included: the light of the state first in `SUMMED_UP`
- * that one of them is in, and a tooltip that counts the sessions in each of
- * those states, in that order; `null` when none is in one.
+ * What the row of a collapsed project or worktree shows of the states of its
+ * sessions (for a project, those of its worktrees included): the light of the
+ * state first in `SUMMED_UP` that one of them is in, and a description that
+ * counts the sessions in each of those states, in that order; `null` when
+ * none is in one.
  */
-export function projectSummary(states: readonly SessionState[]): ProjectSummary | null {
+export function sessionsSummary(states: readonly SessionState[]): SessionsSummary | null {
   const counted = SUMMED_UP.flatMap(([state, one, more]) => {
     const count = states.filter((candidate) => candidate === state).length
     if (count === 0) return []
     return [{ state, text: count === 1 ? `1 ${one}` : `${count} ${more}` }]
   })
   if (counted.length === 0) return null
-  return { state: counted[0]!.state, tooltip: counted.map(({ text }) => text).join(', ') }
+  return { state: counted[0]!.state, description: counted.map(({ text }) => text).join(', ') }
 }

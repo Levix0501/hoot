@@ -33,7 +33,6 @@ export function NewChatItem() {
               <SidebarMenuAction
                 showOnHover
                 aria-label="Choose an agent"
-                title="Choose an Agent"
                 data-testid="new-chat-agents"
               />
             }

@@ -9,24 +9,31 @@ interface StoredSettings {
   sidebarWidth?: number
   /** The ids of the projects collapsed in the sidebar; every other project is expanded. */
   collapsedProjects?: number[]
+  /** The roots of the worktrees collapsed in the sidebar; every other worktree is expanded. */
+  collapsedWorktrees?: string[]
 }
 
 function isProjectId(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0
 }
 
+function isWorktreeRoot(value: unknown): value is string {
+  return typeof value === 'string' && value !== ''
+}
+
 /**
  * Whether the sidebar is expanded, how wide it is, and which of its projects
- * are collapsed, kept in `settings.json` in the user data directory, next to
- * the launch settings, so that Hoot opens with the sidebar as it was left.
- * Conf reads the file before every change and writes all of it, so the
- * settings do not overwrite each other.
+ * and worktrees are collapsed, kept in `settings.json` in the user data
+ * directory, next to the launch settings, so that Hoot opens with the sidebar
+ * as it was left. Conf reads the file before every change and writes all of
+ * it, so the settings do not overwrite each other.
  */
 export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }> {
   private readonly config: Conf<StoredSettings>
   private expanded: boolean
   private sidebarWidth: number
   private collapsed: Set<number>
+  private collapsedRoots: Set<string>
 
   constructor(directory: string) {
     super()
@@ -42,6 +49,11 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     // A project is expanded until it is collapsed for the first time.
     const stored: unknown = this.config.get('collapsedProjects')
     this.collapsed = new Set(Array.isArray(stored) ? stored.filter(isProjectId) : [])
+    // So is a worktree.
+    const storedRoots: unknown = this.config.get('collapsedWorktrees')
+    this.collapsedRoots = new Set(
+      Array.isArray(storedRoots) ? storedRoots.filter(isWorktreeRoot) : [],
+    )
   }
 
   get open(): boolean {
@@ -111,6 +123,24 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     } catch (error) {
       // The projects stay as they are until Hoot quits.
       console.error('Could not save which projects are collapsed:', error)
+    }
+  }
+
+  /** The roots of the worktrees collapsed in the sidebar. */
+  get collapsedWorktrees(): string[] {
+    return [...this.collapsedRoots]
+  }
+
+  /** Records whether a worktree is collapsed in the sidebar and saves it. */
+  setWorktreeCollapsed(root: string, collapsed: boolean): void {
+    if (this.collapsedRoots.has(root) === collapsed) return
+    if (collapsed) this.collapsedRoots.add(root)
+    else this.collapsedRoots.delete(root)
+    try {
+      this.config.set('collapsedWorktrees', [...this.collapsedRoots])
+    } catch (error) {
+      // The worktrees stay as they are until Hoot quits.
+      console.error('Could not save which worktrees are collapsed:', error)
     }
   }
 }

@@ -78,6 +78,8 @@ const api: HootApi = {
   setSidebarWidth: (width) => ipcRenderer.send(IpcChannel.setSidebarWidth, width),
   setProjectExpanded: (projectId, expanded) =>
     ipcRenderer.send(IpcChannel.setProjectExpanded, projectId, expanded),
+  setWorktreeExpanded: (projectRoot, worktreePath, expanded) =>
+    ipcRenderer.send(IpcChannel.setWorktreeExpanded, projectRoot, worktreePath, expanded),
   onToggleSidebarRequested: (listener) => subscribe(IpcChannel.toggleSidebarRequested, listener),
   onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onWindowFocusChanged: (listener) => subscribe(IpcChannel.windowFocusChanged, listener),

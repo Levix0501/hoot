@@ -201,6 +201,8 @@ export interface WindowState {
   sidebarWidth: number
   /** The ids of the projects collapsed in the sidebar, as they were left; the others are expanded. */
   collapsedProjects: number[]
+  /** The roots of the worktrees collapsed in the sidebar, as they were left; the others are expanded. */
+  collapsedWorktrees: string[]
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -271,6 +273,7 @@ export const IpcChannel = {
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
   setProjectExpanded: 'window:set-project-expanded',
+  setWorktreeExpanded: 'window:set-worktree-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
   windowFocusChanged: 'window:focus-changed',
@@ -465,6 +468,8 @@ export interface HootApi {
   setSidebarWidth(width: number): void
   /** Saves whether a project is expanded in the sidebar, so that Hoot opens with it as it was left. */
   setProjectExpanded(projectId: number, expanded: boolean): void
+  /** Saves whether a worktree is expanded in the sidebar, so that Hoot opens with it as it was left. */
+  setWorktreeExpanded(projectRoot: string, worktreePath: string, expanded: boolean): void
   /** The application menu asked to show or hide the sidebar. */
   onToggleSidebarRequested(listener: () => void): () => void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void

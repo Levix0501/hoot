@@ -6,9 +6,9 @@ import {
   useAppStore,
   type UiSession,
 } from '../store/app-store'
-import { sessionState, stateTooltip } from '../lib/session-state'
+import { sessionState, stateDescription } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { StateLightWithTooltip } from './state-light'
+import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import {
   ContextMenu,
@@ -17,13 +17,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
-import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
+import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
- * A session's row in the sidebar: the tool's icon, the session's name and, at
- * its right end, the light of the session's state, which names the state when
- * pointed at. Click it to show the session, and double-click it or use its
- * context menu to rename it in a dialog; close it from its context menu.
+ * A session's row in the sidebar, below its worktree's, or for a session in
+ * its project's own folder, below its project's: the tool's icon, lined up
+ * with that row's name; the session's name; and, at its right end, the light
+ * of the session's state. Click it to show the session, and double-click it
+ * or use its context menu to rename it in a dialog; close it from its context
+ * menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
@@ -36,7 +38,7 @@ export function SessionItem({ session }: { session: UiSession }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        render={<SidebarMenuSubItem />}
+        render={<SidebarMenuItem />}
         className={cn(session.closing && 'opacity-60')}
         data-testid="session-item"
         data-session-id={session.id}
@@ -45,10 +47,10 @@ export function SessionItem({ session }: { session: UiSession }) {
         data-state={state}
         data-current={current}
       >
-        <SidebarMenuSubButton
+        <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className="w-full cursor-default text-left"
+          className={cn('cursor-default', session.worktreePath === null ? 'pl-8' : 'pl-14')}
           onClick={() => selectSession(session.id)}
           onDoubleClick={() => startRenaming(session.id)}
           data-testid="session-item-button"
@@ -56,18 +58,14 @@ export function SessionItem({ session }: { session: UiSession }) {
           <ToolIcon toolId={session.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
-            title={name}
             data-session-name=""
             data-testid="session-item-name"
           >
             {name}
           </span>
-          <StateLightWithTooltip
-            state={state}
-            tooltip={stateTooltip(state, session.exit)}
-            testId="session-light"
-          />
-        </SidebarMenuSubButton>
+          <StateLight state={state} testId="session-light" />
+          <span className="sr-only">{stateDescription(state, session.exit)}</span>
+        </SidebarMenuButton>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-auto min-w-36"

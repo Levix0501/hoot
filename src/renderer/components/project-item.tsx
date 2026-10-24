@@ -10,7 +10,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
 import type { ToolId } from '../../shared/tools'
 import { api } from '../lib/api'
-import { projectSummary, sessionState } from '../lib/session-state'
+import { sessionsSummary, sessionState } from '../lib/session-state'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import { StateLight } from './state-light'
 import { CollapsibleTrigger } from './ui/collapsible'
@@ -36,7 +36,6 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 import { ToolMenuEntries, type ToolMenuComponents } from './tool-menu-entries'
 
 export const dropdownComponents: ToolMenuComponents = {
@@ -57,11 +56,10 @@ export const contextComponents: ToolMenuComponents = {
  * A project's row in the sidebar: click it to expand or collapse the project.
  * It shows the project's name and, while the project is collapsed, at its
  * right end, the light of the state of its sessions that needs the user most,
- * if any does; pointed at for a moment, the row counts them in a tooltip.
- * Pointing at it, or moving the keyboard focus into it, shows its `⋯` and `+`
- * buttons in the light's place, and its context menu: `+` and New Worktree…
- * open the New Worktree dialog, and the context menu removes the project,
- * starting a session in its folder only on Windows.
+ * if any does. Pointing at it, or moving the keyboard focus into it, shows its
+ * `⋯` and `+` buttons in the light's place, and its context menu: `+` and New
+ * Worktree… open the New Worktree dialog, and the context menu removes the
+ * project, starting a session in its folder only on Windows.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const tools = useAppStore((state) => state.tools)
@@ -79,11 +77,8 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
         .map((session) => sessionState(session)),
     ),
   )
-  // What its states sum up to, which the row's tooltip keeps saying while it
-  // closes as the project expands.
-  const sessionsSummary = projectSummary(states)
   // Its rows show the sessions themselves while it is expanded.
-  const summary = expanded ? null : sessionsSummary
+  const summary = expanded ? null : sessionsSummary(states)
   // A project cannot be removed while one of its sessions runs, in any of its worktrees.
   const runningHere = useAppStore((state) =>
     state.sessions.some(
@@ -106,53 +101,41 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
         data-testid="project-item"
         data-project-root={project.root}
       >
-        <Tooltip disabled={summary === null}>
-          <TooltipTrigger
-            // Shown only when pointed at for a moment, as a row's details are.
-            delay={400}
-            render={
-              <CollapsibleTrigger
-                render={
-                  <SidebarMenuButton
-                    // Highlighted also while the pointer is on one of the buttons over it.
-                    className="cursor-default group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
-                    data-testid="project-item-button"
-                  />
-                }
-              />
-            }
-          >
-            <Folder data-testid="project-folder-icon" />
-            <span className="min-w-0 flex-1 truncate" data-testid="project-name">
-              {project.name}
-            </span>
-            {summary && (
-              <>
-                <StateLight
-                  state={summary.state}
-                  // Hidden while the row's buttons show in its place.
-                  className="group-hover/menu-item:hidden group-has-focus-visible/menu-item:hidden group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:hidden"
-                  testId="project-light"
-                />
-                <span className="sr-only">{summary.tooltip}</span>
-              </>
-            )}
-            {/* Room for the row's buttons while they show. */}
-            <span
-              className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12"
-              aria-hidden
+        <CollapsibleTrigger
+          render={
+            <SidebarMenuButton
+              // Highlighted also while the pointer is on one of the buttons over it.
+              className="cursor-default group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
+              data-testid="project-item-button"
             />
-          </TooltipTrigger>
-          <TooltipContent side="right" data-testid="project-summary-tooltip">
-            {sessionsSummary?.tooltip}
-          </TooltipContent>
-        </Tooltip>
+          }
+        >
+          <Folder data-testid="project-folder-icon" />
+          <span className="min-w-0 flex-1 truncate" data-testid="project-name">
+            {project.name}
+          </span>
+          {summary && (
+            <>
+              <StateLight
+                state={summary.state}
+                // Hidden while the row's buttons show in its place.
+                className="group-hover/menu-item:hidden group-has-focus-visible/menu-item:hidden group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:hidden"
+                testId="project-light"
+              />
+              <span className="sr-only">{summary.description}</span>
+            </>
+          )}
+          {/* Room for the row's buttons while they show. */}
+          <span
+            className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12"
+            aria-hidden
+          />
+        </CollapsibleTrigger>
 
         <SidebarMenuAction
           showOnHover
           className="right-1 hover:bg-sidebar-foreground/10"
           aria-label={`New worktree in ${project.name}`}
-          title="New Worktree"
           onClick={newWorktree}
           data-testid="new-worktree-button"
         >
@@ -166,7 +149,6 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
                 showOnHover
                 className="right-7 hover:bg-sidebar-foreground/10"
                 aria-label={`More actions for ${project.name}`}
-                title="More Actions"
                 data-testid="project-actions-button"
               />
             }

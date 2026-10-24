@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.17
+
+### Patch Changes
+
+- [`6f36076`](https://github.com/Levix0501/hoot/commit/6f3607670792a1de39e25edde046e1d4c210fe94) - The sidebar insets worktrees and their sessions less, shows session names smaller and lighter, and spaces every row like Issues and New chat.
+
 ## 0.1.0-alpha.16
 
 ### Patch Changes

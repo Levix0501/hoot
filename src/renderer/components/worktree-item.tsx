@@ -205,9 +205,9 @@ function WorktreeMenuEntries({
 
 /**
  * A worktree's row in the sidebar, below its project's sessions: click it to
- * expand or collapse the worktree. It shows a package icon, lined up with the
- * project's name, closed while the worktree is collapsed and open while it is
- * expanded; the worktree's name when Hoot made it with the New Worktree
+ * expand or collapse the worktree. It shows a package icon, 12px further in
+ * than the project's, closed while the worktree is collapsed and open while it
+ * is expanded; the worktree's name when Hoot made it with the New Worktree
  * dialog, otherwise its branch (or abbreviated commit); whether it is missing
  * or locked; and, while it is collapsed, at its right end, the light of the
  * state of its sessions that needs the user most, if any does. Pointing at
@@ -259,7 +259,7 @@ export function WorktreeItem({
           render={
             <SidebarMenuButton
               // Highlighted also while the pointer is on one of the buttons over it.
-              className="cursor-default pl-8 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
+              className="cursor-default pl-5 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
               data-testid="worktree-row"
             />
           }

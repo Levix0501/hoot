@@ -14,11 +14,13 @@ import {
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
- * A saved session's row below its worktree's: the agent's icon, lined up with
- * the worktree's name; the session's name; and while its agent runs, at its
- * right end, the light of its state. Click it to show the session, continuing
- * its conversation when its agent does not run; double-click it or use its
- * context menu to rename it, and close a running one from its context menu.
+ * A saved session's row below its worktree's: the agent's icon, 12px further
+ * in than the worktree's; the session's name, smaller than the worktree's
+ * and, unless the row is pointed at or selected, lighter; and while its agent
+ * runs, at its right end, the light of its state. Click it to show the
+ * session, continuing its conversation when its agent does not run;
+ * double-click it or use its context menu to rename it, and close a running
+ * one from its context menu.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>
@@ -52,7 +54,7 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
         <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className="cursor-default pl-14"
+          className="cursor-default pl-8 text-xs text-sidebar-foreground/70"
           onClick={() => open(saved.id)}
           onDoubleClick={() => startRenaming(saved.id)}
           data-testid="saved-session-item-button"

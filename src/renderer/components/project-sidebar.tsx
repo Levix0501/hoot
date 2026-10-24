@@ -34,23 +34,24 @@ import {
 /**
  * The rows below a project's or a worktree's row, which slide open and closed
  * as the sidebar itself slides, or show and hide at once when the system
- * reduces motion. What reaches more than 2px past them is cut off, so that
- * the focus ring of a row, 2px wide, shows whole, also at their top and
- * bottom. (Chromium keeps such a margin only when the sides are cut off too.)
+ * reduces motion. Like Issues and New chat, they are 1px apart, and 1px below
+ * that row. What reaches more than 2px past them is cut off, so that the
+ * focus ring of a row, 2px wide, shows whole, also at their top and bottom.
+ * (Chromium keeps such a margin only when the sides are cut off too.)
  */
 const SLIDING_ROWS =
-  'flex h-(--collapsible-panel-height) min-w-0 flex-col overflow-clip transition-[height] duration-200 ease-linear [overflow-clip-margin:2px] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0'
+  'flex h-(--collapsible-panel-height) min-w-0 flex-col gap-px overflow-clip transition-[height] duration-200 ease-linear [overflow-clip-margin:2px] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0 [&>:first-child]:mt-px'
 
 /**
  * The line saying a project or a worktree has no sessions, in the place of
- * their rows. It keeps its height while the list is measured closed, before
- * it slides open: shrunk to its text there, the list would slide open short
- * and then jump.
+ * their rows, as small as a session's name. It keeps its height while the
+ * list is measured closed, before it slides open: shrunk to its text there,
+ * the list would slide open short and then jump.
  */
 function NoSessions({ className, testId }: { className: string; testId: string }) {
   return (
     <li
-      className={cn('flex h-7.5 shrink-0 items-center text-sm text-muted-foreground', className)}
+      className={cn('flex h-7.5 shrink-0 items-center text-xs text-muted-foreground', className)}
       data-testid={testId}
     >
       No sessions
@@ -108,8 +109,8 @@ function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: st
       })),
   ].toSorted((a, b) => a.at - b.at)
   if (rows.length === 0) {
-    // Lined up with the worktree's name.
-    return <NoSessions className="pl-14" testId="no-worktree-sessions" />
+    // Where its sessions' icons would be.
+    return <NoSessions className="pl-8" testId="no-worktree-sessions" />
   }
   return rows.map((entry) => <Fragment key={entry.key}>{entry.row}</Fragment>)
 }
@@ -181,8 +182,8 @@ function ProjectEntry({ project }: { project: Project }) {
       <ProjectItem project={project} expanded={expanded} />
       <CollapsibleContent render={<ul />} className={SLIDING_ROWS} data-testid="project-rows">
         {empty ? (
-          // Lined up with the project's name.
-          <NoSessions className="pl-8" testId="no-sessions" />
+          // Where its worktrees' icons would be.
+          <NoSessions className="pl-5" testId="no-sessions" />
         ) : (
           <>
             <ProjectSessions project={project} />
@@ -233,7 +234,7 @@ function ChatsGroup() {
             No chats
           </p>
         ) : (
-          <SidebarMenu data-testid="chat-list">
+          <SidebarMenu className="gap-px" data-testid="chat-list">
             {chats.map((chat) => (
               <ChatItem key={chat.id} chat={chat} />
             ))}
@@ -290,7 +291,7 @@ export function ProjectSidebar() {
                 No projects
               </p>
             ) : (
-              <SidebarMenu data-testid="project-list">
+              <SidebarMenu className="gap-px" data-testid="project-list">
                 {projects.map((project) => (
                   <ProjectEntry key={project.root} project={project} />
                 ))}

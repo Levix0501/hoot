@@ -15,10 +15,10 @@ import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
 
 /**
  * A saved session's row below its worktree: the agent's icon and the
- * session's name, and while its agent runs, the light of its state. Click it
- * to show the session, continuing its conversation when its agent does not
- * run; double-click it or use its context menu to rename it, and close a
- * running one from its context menu.
+ * session's name, and while its agent runs, at its right end, the light of
+ * its state. Click it to show the session, continuing its conversation when
+ * its agent does not run; double-click it or use its context menu to rename
+ * it, and close a running one from its context menu.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>
@@ -57,13 +57,6 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           onDoubleClick={() => startRenaming(saved.id)}
           data-testid="saved-session-item-button"
         >
-          {running && state !== null && (
-            <StateLightWithTooltip
-              state={state}
-              tooltip={stateTooltip(state, running.exit)}
-              testId="saved-session-light"
-            />
-          )}
           <ToolIcon toolId={saved.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
@@ -73,6 +66,13 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           >
             {name}
           </span>
+          {running && state !== null && (
+            <StateLightWithTooltip
+              state={state}
+              tooltip={stateTooltip(state, running.exit)}
+              testId="saved-session-light"
+            />
+          )}
         </SidebarMenuSubButton>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-auto min-w-36">

@@ -1,12 +1,12 @@
 import {
   CopyIcon,
   FolderOpenIcon,
-  GitBranchIcon,
   MoreHorizontalIcon,
+  PackageIcon,
   PlusIcon,
   Trash2Icon,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import type { CodingToolId } from '../../shared/tools'
 import { isWithin } from '../../shared/worktrees'
 import { api } from '../lib/api'
@@ -14,7 +14,6 @@ import { cn } from '../lib/utils'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
-import { contextComponents, dropdownComponents } from './project-item'
 import { Badge } from './ui/badge'
 import {
   ContextMenu,
@@ -31,10 +30,44 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+
+/** The parts a worktree's menus are made of: its `⋯` menu's, or its context menu's. */
+interface WorktreeMenuComponents {
+  Item: ComponentType<{
+    children?: ReactNode
+    variant?: 'default' | 'destructive'
+    disabled?: boolean
+    onClick?: () => void
+    'data-testid'?: string
+  }>
+  Separator: ComponentType
+  Sub: ComponentType<{ children?: ReactNode }>
+  SubTrigger: ComponentType<{ children?: ReactNode; 'data-testid'?: string }>
+  SubContent: ComponentType<{ children?: ReactNode; className?: string }>
+}
+
+const dropdownMenuComponents: WorktreeMenuComponents = {
+  Item: DropdownMenuItem,
+  Separator: DropdownMenuSeparator,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+}
+
+const contextMenuComponents: WorktreeMenuComponents = {
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+}
 
 /** Below a menu item: why Delete is unavailable, or the lock that Remove overrides. */
 function Note({ children, testId }: { children: ReactNode; testId: string }) {
@@ -90,21 +123,21 @@ function WorktreeTooltip({ worktree }: { worktree: WorktreeRow }) {
 }
 
 /**
- * A worktree's row in the sidebar, below its project's sessions: its name over
- * its branch (or abbreviated commit) when Hoot made it with the New Worktree
- * dialog, otherwise the branch alone, and whether it is missing or locked.
- * Pointing at it shows its root's path and its inner members. Its `+` opens
- * the agents to start a session with in the worktree; its `⋯` menu and its
- * context menu reveal it in Finder (File Explorer on Windows), copy its path
- * or delete it, or for a missing worktree remove it. Clicking the row itself
- * does nothing.
+ * What a worktree's `⋯` menu and its context menu hold, the same in both: the
+ * agents to start a session with in the worktree, Reveal in Finder (File
+ * Explorer on Windows), Copy Path and Delete; for a missing worktree, Remove.
  */
-export function WorktreeItem({
+function WorktreeMenuEntries({
+  components,
   projectRoot,
   worktree,
+  testId,
 }: {
+  components: WorktreeMenuComponents
   projectRoot: string
   worktree: WorktreeRow
+  /** The prefix of the items' test ids, which tells the `⋯` menu from the context menu. */
+  testId: string
 }) {
   const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
@@ -118,9 +151,10 @@ export function WorktreeItem({
         isWithin(session.worktreePath ?? session.projectRoot, worktree.path),
     ),
   )
+  const { Item, Separator, Sub, SubTrigger, SubContent } = components
 
   const startSession = (toolId: CodingToolId) =>
-    void newWorktreeSession(projectRoot, toolId, worktree.path)
+    void newWorktreeSession(projectRoot, worktree.path, toolId)
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
@@ -136,6 +170,83 @@ export function WorktreeItem({
       End the running sessions in this worktree before deleting it.
     </Note>
   ) : null
+
+  if (worktree.missing) {
+    return (
+      <>
+        <Item
+          variant="destructive"
+          disabled={!removable}
+          onClick={remove}
+          data-testid={`${testId}-remove`}
+        >
+          <Trash2Icon />
+          Remove
+        </Item>
+        {worktree.locked && <LockNote worktree={worktree} />}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <Sub>
+        <SubTrigger data-testid={`${testId}-new-session`}>
+          <PlusIcon />
+          New Session
+        </SubTrigger>
+        <SubContent className="w-auto min-w-56">
+          <ChatAgentMenuEntries
+            components={components}
+            onSelect={startSession}
+            testId="worktree-agent"
+            failure="Could not start a session."
+          />
+        </SubContent>
+      </Sub>
+      <Item onClick={reveal} data-testid={`${testId}-reveal`}>
+        <FolderOpenIcon />
+        Reveal in {api.fileManager}
+      </Item>
+      <Item onClick={copyPath} data-testid={`${testId}-copy-path`}>
+        <CopyIcon />
+        Copy Path
+      </Item>
+      <Separator />
+      <Item
+        variant="destructive"
+        disabled={!deletable}
+        onClick={requestDelete}
+        data-testid={`${testId}-delete`}
+      >
+        <Trash2Icon />
+        Delete
+      </Item>
+      {deleteNote}
+    </>
+  )
+}
+
+/**
+ * A worktree's row in the sidebar, below its project's sessions: a package
+ * icon, its name when Hoot made it with the New Worktree dialog, otherwise
+ * its branch (or abbreviated commit), and whether it is missing or locked.
+ * Pointing at it for a moment shows its root's path and its inner members.
+ * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button,
+ * which opens the same menu as a right click, and right of it, unless the
+ * worktree is missing, its `+`, which starts a session in the worktree with
+ * the agent a new chat would start with. Clicking the row itself does
+ * nothing.
+ */
+export function WorktreeItem({
+  projectRoot,
+  worktree,
+}: {
+  projectRoot: string
+  worktree: WorktreeRow
+}) {
+  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
+  const title = worktree.name ?? worktree.displayName
 
   return (
     <ContextMenu>
@@ -155,64 +266,35 @@ export function WorktreeItem({
               <SidebarMenuButton
                 render={<div />}
                 // Highlighted also while the pointer is on one of the buttons over it.
-                className={cn(
-                  'cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-14',
-                  // A named worktree shows its name above its branch.
-                  worktree.name !== null && 'h-auto py-1.5',
-                )}
+                className="cursor-default pl-4 group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-2"
                 data-testid="worktree-row"
               />
             }
           >
-            {worktree.name === null ? (
-              <>
-                <GitBranchIcon />
-                <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
-                  {worktree.displayName}
-                </span>
-                {worktree.missing && (
-                  <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
-                    Missing
-                  </Badge>
-                )}
-                {worktree.locked && (
-                  <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
-                    Locked
-                  </Badge>
-                )}
-              </>
-            ) : (
-              // A named worktree: its name alone above the branch icon and
-              // the branch, which shows in the monospace font, or the
-              // abbreviated commit when detached.
-              <span className="grid min-w-0 flex-1 gap-0.5 pl-6 leading-tight">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
-                    {worktree.name}
-                  </span>
-                  {worktree.missing && (
-                    <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
-                      Missing
-                    </Badge>
-                  )}
-                  {worktree.locked && (
-                    <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
-                      Locked
-                    </Badge>
-                  )}
-                </span>
-                <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
-                  <GitBranchIcon className="size-3!" />
-                  <span
-                    className="truncate font-mono text-[11px]"
-                    data-user-text=""
-                    data-testid="worktree-branch"
-                  >
-                    {worktree.displayName}
-                  </span>
-                </span>
-              </span>
+            <PackageIcon />
+            <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
+              {title}
+            </span>
+            {worktree.missing && (
+              <Badge variant="outline" className="shrink-0" data-testid="worktree-missing">
+                Missing
+              </Badge>
             )}
+            {worktree.locked && (
+              <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
+                Locked
+              </Badge>
+            )}
+            {/* Room for the row's buttons while they show. */}
+            <span
+              className={cn(
+                '-ml-2 w-0 shrink-0',
+                worktree.missing
+                  ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
+                  : 'group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12',
+              )}
+              aria-hidden
+            />
           </TooltipTrigger>
           <TooltipContent side="right" align="start" className="max-w-80">
             <WorktreeTooltip worktree={worktree} />
@@ -221,49 +303,14 @@ export function WorktreeItem({
 
         <DropdownMenu>
           <DropdownMenuTrigger
-            disabled={worktree.missing}
             render={
               <SidebarMenuAction
+                showOnHover
                 // The button pointed at stands out on the highlighted row.
-                className={cn(
-                  'right-7 hover:bg-sidebar-foreground/10 disabled:pointer-events-none disabled:opacity-50',
-                  // Level with the name on a named worktree's taller row.
-                  worktree.name !== null && 'peer-data-[size=default]/menu-button:top-3',
-                )}
-                aria-label={`New session in ${worktree.displayName}`}
-                title="New Session"
-                // Its label names the branch.
-                data-user-text=""
-                data-testid="worktree-new-session-button"
-              />
-            }
-          >
-            <PlusIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="w-auto min-w-56"
-            finalFocus={focusAfterOverlay}
-          >
-            <ChatAgentMenuEntries
-              components={dropdownComponents}
-              onSelect={startSession}
-              testId="worktree-agent"
-              failure="Could not start a session."
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuAction
-                className={cn(
-                  'hover:bg-sidebar-foreground/10',
-                  worktree.name !== null && 'peer-data-[size=default]/menu-button:top-3',
-                )}
-                aria-label={`More actions for ${worktree.displayName}`}
+                className={cn('hover:bg-sidebar-foreground/10', !worktree.missing && 'right-7')}
+                aria-label={`More actions for ${title}`}
                 title="More Actions"
+                // Its label names the worktree.
                 data-user-text=""
                 data-testid="worktree-actions-button"
               />
@@ -273,100 +320,40 @@ export function WorktreeItem({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="w-auto min-w-44"
+            className="w-auto min-w-48"
             finalFocus={focusAfterOverlay}
           >
-            {worktree.missing ? (
-              <>
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={!removable}
-                  onClick={remove}
-                  data-testid="worktree-remove"
-                >
-                  <Trash2Icon />
-                  Remove
-                </DropdownMenuItem>
-                {worktree.locked && <LockNote worktree={worktree} />}
-              </>
-            ) : (
-              <>
-                <DropdownMenuItem onClick={reveal} data-testid="worktree-reveal">
-                  <FolderOpenIcon />
-                  Reveal in {api.fileManager}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={copyPath} data-testid="worktree-copy-path">
-                  <CopyIcon />
-                  Copy Path
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={!deletable}
-                  onClick={requestDelete}
-                  data-testid="worktree-delete"
-                >
-                  <Trash2Icon />
-                  Delete
-                </DropdownMenuItem>
-                {deleteNote}
-              </>
-            )}
+            <WorktreeMenuEntries
+              components={dropdownMenuComponents}
+              projectRoot={projectRoot}
+              worktree={worktree}
+              testId="worktree"
+            />
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {!worktree.missing && (
+          <SidebarMenuAction
+            showOnHover
+            className="hover:bg-sidebar-foreground/10"
+            aria-label={`New session in ${title}`}
+            title="New Session"
+            data-user-text=""
+            onClick={() => void newWorktreeSession(projectRoot, worktree.path)}
+            data-testid="worktree-new-session-button"
+          >
+            <PlusIcon />
+          </SidebarMenuAction>
+        )}
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
-        {worktree.missing ? (
-          <>
-            <ContextMenuItem
-              variant="destructive"
-              disabled={!removable}
-              onClick={remove}
-              data-testid="worktree-context-remove"
-            >
-              <Trash2Icon />
-              Remove
-            </ContextMenuItem>
-            {worktree.locked && <LockNote worktree={worktree} />}
-          </>
-        ) : (
-          <>
-            <ContextMenuSub>
-              <ContextMenuSubTrigger data-testid="worktree-context-new-session">
-                <PlusIcon />
-                New Session
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-auto min-w-56">
-                <ChatAgentMenuEntries
-                  components={contextComponents}
-                  onSelect={startSession}
-                  testId="worktree-agent"
-                  failure="Could not start a session."
-                />
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuItem onClick={reveal} data-testid="worktree-context-reveal">
-              <FolderOpenIcon />
-              Reveal in {api.fileManager}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={copyPath} data-testid="worktree-context-copy-path">
-              <CopyIcon />
-              Copy Path
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              disabled={!deletable}
-              onClick={requestDelete}
-              data-testid="worktree-context-delete"
-            >
-              <Trash2Icon />
-              Delete
-            </ContextMenuItem>
-            {deleteNote}
-          </>
-        )}
+        <WorktreeMenuEntries
+          components={contextMenuComponents}
+          projectRoot={projectRoot}
+          worktree={worktree}
+          testId="worktree-context"
+        />
       </ContextMenuContent>
     </ContextMenu>
   )

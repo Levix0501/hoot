@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { SessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
 import { Spinner } from './ui/spinner'
@@ -6,6 +7,25 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 /** A filled circle of a color. */
 function Dot({ className }: { className: string }) {
   return <span className={cn('size-2 rounded-full', className)} />
+}
+
+/** How long the waiting light takes to dim and light up again, in milliseconds. */
+const PULSE_MS = 1_000
+
+/**
+ * The amber dot of a session waiting for the user, which dims and lights up
+ * again in step with every other one, to catch the eye; it stays lit when the
+ * system reduces motion.
+ */
+function WaitingDot() {
+  // As far into its pulse as every waiting light is, whenever it starts.
+  const [delay] = useState(() => -(performance.now() % PULSE_MS))
+  return (
+    <span
+      className="size-2 animate-pulse rounded-full bg-amber-500 motion-reduce:animate-none"
+      style={{ animationDuration: `${PULSE_MS}ms`, animationDelay: `${delay}ms` }}
+    />
+  )
 }
 
 /** The shape of each state's light. */
@@ -17,7 +37,7 @@ function Shape({ state }: { state: SessionState }) {
       // 70% of the color of the text around it.
       return <Spinner className="size-3 text-current/70" />
     case 'waiting':
-      return <Dot className="bg-amber-500" />
+      return <WaitingDot />
     case 'done':
       return <Dot className="bg-[#339cff]" />
     case 'idle':
@@ -34,13 +54,23 @@ function Shape({ state }: { state: SessionState }) {
 /**
  * The light of a session state, in a place of its own that is as wide
  * whatever the state: a spinner while the session starts or Claude Code
- * works, a hollow circle once the session ended, and a dot otherwise.
+ * works, a hollow circle once the session ended, and a dot otherwise, which
+ * pulses while the session waits for the user.
  */
-export function StateLight({ state, className }: { state: SessionState; className?: string }) {
+export function StateLight({
+  state,
+  className,
+  testId,
+}: {
+  state: SessionState
+  className?: string
+  testId?: string
+}) {
   return (
     <span
       className={cn('flex size-3 shrink-0 items-center justify-center', className)}
       data-state={state}
+      data-testid={testId}
       aria-hidden
     >
       <Shape state={state} />

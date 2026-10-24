@@ -454,8 +454,18 @@ export interface AppState {
   openSavedSession(id: string): void
   /** Continues a saved session whose agent ended unexpectedly, as its Resume button does. */
   resumeSavedSession(id: string): void
-  /** Makes a saved session of an agent in a worktree, and opens it. */
-  newWorktreeSession(projectRoot: string, toolId: CodingToolId, worktreePath: string): Promise<void>
+  /**
+   * Makes a saved session in a worktree, and opens it: of `toolId`, or without
+   * one, of the agent a new chat would start with. Without an agent that can
+   * be used, opens the Agents page and says that one must be installed or
+   * turned on. Until the first detection of the agents finishes, nothing
+   * happens.
+   */
+  newWorktreeSession(
+    projectRoot: string,
+    worktreePath: string,
+    toolId?: CodingToolId,
+  ): Promise<void>
   /** Opens a saved session the New Worktree dialog made, showing its page. */
   openCreatedSession(session: SavedSessionInfo): void
   /** Asks for confirmation before closing a running saved session's agent. */
@@ -2287,10 +2297,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       get().openSavedSession(id)
     },
 
-    async newWorktreeSession(projectRoot, toolId, worktreePath) {
+    async newWorktreeSession(projectRoot, worktreePath, toolId) {
       const { tools, launchSettings } = get()
       if (firstDetectionRunning(tools)) return
-      if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
+      const agent = toolId ?? chatAgent(tools, launchSettings)
+      if (agent === null || !usableChatAgents(tools, launchSettings).includes(agent)) {
         toast.error('Could not start a session.', {
           description: 'Install an agent or turn one on in the Agents page first.',
         })
@@ -2298,7 +2309,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         return
       }
       const result = await api
-        .createSavedSession(projectRoot, worktreePath, toolId)
+        .createSavedSession(projectRoot, worktreePath, agent)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
       if (!result.ok) {
         toast.error('Could not start a session.', { description: result.message })

@@ -16,7 +16,7 @@ export interface WorktreeInfo {
   displayName: string
   /**
    * The name the New Worktree dialog gave the worktree, which its row shows
-   * above the branch; `null` for a worktree Hoot did not make that way.
+   * instead of the branch; `null` for a worktree Hoot did not make that way.
    */
   name: string | null
   /**

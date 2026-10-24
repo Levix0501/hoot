@@ -20,10 +20,10 @@ import {
 import { SidebarMenuSubButton, SidebarMenuSubItem } from './ui/sidebar'
 
 /**
- * A session's row in the sidebar: the light of the session's state, which
- * names the state when pointed at, the tool's icon and the session's name.
- * Click it to show the session, and double-click it or use its context menu
- * to rename it in a dialog; close it from its context menu.
+ * A session's row in the sidebar: the tool's icon, the session's name and, at
+ * its right end, the light of the session's state, which names the state when
+ * pointed at. Click it to show the session, and double-click it or use its
+ * context menu to rename it in a dialog; close it from its context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
@@ -53,11 +53,6 @@ export function SessionItem({ session }: { session: UiSession }) {
           onDoubleClick={() => startRenaming(session.id)}
           data-testid="session-item-button"
         >
-          <StateLightWithTooltip
-            state={state}
-            tooltip={stateTooltip(state, session.exit)}
-            testId="session-light"
-          />
           <ToolIcon toolId={session.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
@@ -67,6 +62,11 @@ export function SessionItem({ session }: { session: UiSession }) {
           >
             {name}
           </span>
+          <StateLightWithTooltip
+            state={state}
+            tooltip={stateTooltip(state, session.exit)}
+            testId="session-light"
+          />
         </SidebarMenuSubButton>
       </ContextMenuTrigger>
       <ContextMenuContent

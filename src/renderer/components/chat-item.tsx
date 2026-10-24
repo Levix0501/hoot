@@ -14,10 +14,10 @@ import {
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
- * A chat's row in the sidebar's Chats group: the light of its agent's state
- * while it runs, the agent's icon and the chat's name. Click it to show the
- * chat, and double-click it or use its context menu to rename it; close a
- * running chat's agent from its context menu.
+ * A chat's row in the sidebar's Chats group: the agent's icon, the chat's
+ * name and, while its agent runs, at its right end, the light of the agent's
+ * state. Click it to show the chat, and double-click it or use its context
+ * menu to rename it; close a running chat's agent from its context menu.
  */
 export function ChatItem({ chat }: { chat: ChatInfo }) {
   const running = useAppStore((state) =>
@@ -53,13 +53,6 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
           onDoubleClick={() => startRenamingChat(chat.id)}
           data-testid="chat-item-button"
         >
-          {running && state !== null && (
-            <StateLightWithTooltip
-              state={state}
-              tooltip={stateTooltip(state, running.exit)}
-              testId="chat-light"
-            />
-          )}
           <ToolIcon toolId={chat.toolId} />
           <span
             className="min-w-0 flex-1 truncate"
@@ -69,6 +62,13 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
           >
             {name}
           </span>
+          {running && state !== null && (
+            <StateLightWithTooltip
+              state={state}
+              tooltip={stateTooltip(state, running.exit)}
+              testId="chat-light"
+            />
+          )}
         </SidebarMenuButton>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-auto min-w-36">

@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.18
+
+### Patch Changes
+
+- [`8cab827`](https://github.com/Levix0501/hoot/commit/8cab827b266763be15ddf8acdd2de9b84a5381ca) - The keyboard focus no longer jumps into the terminal behind an open dialog or menu, as it did after New Worktree… or Delete… in a right-click menu, a right click on another row, or choosing an agent in the New Worktree dialog.
+
+- [`72d2d4f`](https://github.com/Levix0501/hoot/commit/72d2d4f7d6c6b052c7c705de76d88996a61f31c3) - A click outside an open menu only closes it, instead of also clicking what it lands on, such as a row or a button in the sidebar.
+
+- [`57a04ae`](https://github.com/Levix0501/hoot/commit/57a04aea1c2ddb66462a644fabb0d38d9bea03fa) - The Add Project button shows only while you point at the Projects title, and the Chats title starts chats like New chat: with a button that shows the same way, or with an agent picked from its right-click menu.
+
 ## 0.1.0-alpha.17
 
 ### Patch Changes

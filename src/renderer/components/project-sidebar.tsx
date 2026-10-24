@@ -1,4 +1,4 @@
-import { CircleDotIcon, FolderPlusIcon, SettingsIcon } from 'lucide-react'
+import { CircleDotIcon, FolderPlusIcon, PencilSparklesIcon, SettingsIcon } from 'lucide-react'
 import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
@@ -8,15 +8,17 @@ import { sessionWorktrees, useAppStore } from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
 import { worktreeRows, type WorktreeRow } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
+import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { ChatItem } from './chat-item'
 import { NewChatItem } from './new-chat-item'
-import { ProjectItem } from './project-item'
+import { contextComponents, ProjectItem } from './project-item'
 import { SavedSessionItem } from './saved-session-item'
 import { SessionItem } from './session-item'
 import { SidebarResizeHandle } from './sidebar-resize-handle'
 import { UpdateButton } from './update-button'
 import { WorktreeItem } from './worktree-item'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './ui/context-menu'
 import {
   Sidebar,
   SidebarContent,
@@ -41,6 +43,13 @@ import {
  */
 const SLIDING_ROWS =
   'flex h-(--collapsible-panel-height) min-w-0 flex-col gap-px overflow-clip transition-[height] duration-200 ease-linear [overflow-clip-margin:2px] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0 [&>:first-child]:mt-px'
+
+/**
+ * A group's action, which shows only while the pointer is on the group's title
+ * row, or the action has the keyboard focus. The row marks itself `peer/title`.
+ */
+const GROUP_ACTION_ON_HOVER =
+  'opacity-0 peer-hover/title:opacity-100 hover:opacity-100 focus-visible:opacity-100'
 
 /**
  * The line saying a project or a worktree has no sessions, in the place of
@@ -222,12 +231,39 @@ function IssuesItem() {
 /** How far the project list was scrolled when the sidebar last left the window. */
 let listScrollTop = 0
 
-/** The sidebar's Chats group, below the projects: each chat, newest first. */
+/**
+ * The sidebar's Chats group, below the projects: its title, which starts a
+ * chat with the agent chosen from its right-click menu, and whose button does
+ * so with the default agent; then each chat, newest first.
+ */
 function ChatsGroup() {
   const chats = useAppStore((state) => state.chats)
+  const newChat = useAppStore((state) => state.newChat)
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Chats</SidebarGroupLabel>
+      <ContextMenu>
+        <ContextMenuTrigger
+          render={<SidebarGroupLabel className="peer/title" />}
+          data-testid="chats-label"
+        >
+          Chats
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-auto min-w-48">
+          <ChatAgentMenuEntries
+            components={contextComponents}
+            onSelect={(toolId) => void newChat(toolId)}
+            testId="chats-agent"
+          />
+        </ContextMenuContent>
+      </ContextMenu>
+      <SidebarGroupAction
+        className={GROUP_ACTION_ON_HOVER}
+        aria-label="New chat"
+        onClick={() => void newChat()}
+        data-testid="new-chat-group-action"
+      >
+        <PencilSparklesIcon />
+      </SidebarGroupAction>
       <SidebarGroupContent>
         {chats.length === 0 ? (
           <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-chats">
@@ -280,8 +316,12 @@ export function ProjectSidebar() {
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>Projects</SidebarGroupLabel>
-          <SidebarGroupAction onClick={() => void addProject()} data-testid="add-project">
+          <SidebarGroupLabel className="peer/title">Projects</SidebarGroupLabel>
+          <SidebarGroupAction
+            className={GROUP_ACTION_ON_HOVER}
+            onClick={() => void addProject()}
+            data-testid="add-project"
+          >
             <FolderPlusIcon />
             <span className="sr-only">Add Project</span>
           </SidebarGroupAction>

@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.16
+
+### Patch Changes
+
+- [`a969373`](https://github.com/Levix0501/hoot/commit/a96937329d7eb25b6dd27e798c1b3c3ed9826c44) - Every row in the sidebar spans its full width, with a worktree's sessions inset below it instead of beside a line, and a click collapses or expands a worktree as it does a project, showing a closed or an open package and, while collapsed, the light of its session that needs you most.
+
+- [`9d0ca2c`](https://github.com/Levix0501/hoot/commit/9d0ca2c9e1c72cc2021ef00e82c5f472c5291a60) - In the sidebar, session lights sit at the right end of their rows and a waiting session's light pulses; a project no longer counts its open issues, and its light gives way to its buttons while they show; and a worktree shows a package icon and its name on one line, without the branch, with its `⋯`, now the same menu as a right click, and a `+` that starts a session with the default agent showing only while it is pointed at.
+
+- [`a969373`](https://github.com/Levix0501/hoot/commit/a96937329d7eb25b6dd27e798c1b3c3ed9826c44) - Pointing at the sidebar's rows, lights and buttons no longer shows tooltips.
+
 ## 0.1.0-alpha.15
 
 ### Minor Changes

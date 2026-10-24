@@ -90,7 +90,16 @@ export function App() {
         onOpenChange={setSidebarOpen}
         data-edge-dragging={sidebarEdgeDragging || undefined}
         data-resizing={sidebarResizing || undefined}
-        className={cn('h-svh overflow-hidden', SIDEBAR_EDGE_DRAGGING_CLASS, SIDEBAR_RESIZING_CLASS)}
+        // A stacking context of its own, as Base UI asks of an app's root: the
+        // menus and dialogs, which it puts at the end of the page, then lie
+        // over the sidebar, the navigation and the terminals, whatever their
+        // z-index, so a click outside an open menu lands on the menu's
+        // backdrop and only closes it. The toasts are outside, and stay on top.
+        className={cn(
+          'isolate h-svh overflow-hidden',
+          SIDEBAR_EDGE_DRAGGING_CLASS,
+          SIDEBAR_RESIZING_CLASS,
+        )}
         style={{ '--sidebar-width': sidebarWidthStyle(sidebarWidth) } as React.CSSProperties}
       >
         {settingsShown ? (

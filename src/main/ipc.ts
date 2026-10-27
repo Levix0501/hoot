@@ -62,6 +62,7 @@ import { issueDescription, issuePriority, issueStatus, issueTitle } from './issu
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
 import type { AddProjectInspection } from './projects/add-project'
+import type { ProjectFolders } from './projects/project-folders'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import type { SentIssue } from './session/launch'
@@ -93,6 +94,8 @@ export interface IpcDependencies {
   quitGuard: QuitGuard
   updates: UpdateService
   worktrees: WorktreeService
+  /** The projects' own folders: whether each is there, and what is checked out in it. */
+  projectFolders: ProjectFolders
   workflows: WorkflowExecutor
   /** The sessions hoot asked for, which the window answers. */
   sessionStarts: SessionStartRequests
@@ -136,7 +139,11 @@ const addProjectConfirmation = z.object({
   folder: z.string().min(1),
   mode: z.enum(['init', 'first-commit']),
 }) satisfies z.ZodType<AddProjectConfirmation>
-const savedSessionArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
+const savedSessionArguments = z.tuple([
+  projectRoot,
+  z.string().min(1).nullable(),
+  z.enum(CODING_TOOL_IDS),
+])
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -328,6 +335,7 @@ export function registerIpc(deps: IpcDependencies): void {
     const { added, project } = deps.projects.add(root)
     if (!added) return { kind: 'duplicate', project }
     deps.worktrees.addProject(project.root)
+    deps.projectFolders.addProject(project.root)
     send(IpcChannel.projectsChanged, deps.projects.list())
     return { kind: 'added', project }
   }
@@ -411,8 +419,10 @@ export function registerIpc(deps: IpcDependencies): void {
     deps.projects.remove(root)
     // Added again, it is expanded in the sidebar.
     deps.sidebar.retainProjects(deps.projects.list().map((project) => project.id))
-    // Its worktrees, their files and branches stay as they are.
+    // Its worktrees, their files and branches stay as they are, and so does
+    // its own folder; its saved sessions stay for when it is added again.
     deps.worktrees.removeProject(root)
+    deps.projectFolders.removeProject(root)
     // Removing a project closes its sessions, which have all ended.
     deps.sessions.forgetProject(root)
     send(IpcChannel.projectsChanged, deps.projects.list())
@@ -464,6 +474,7 @@ export function registerIpc(deps: IpcDependencies): void {
     sidebarWidth: deps.sidebar.width,
     collapsedProjects: deps.sidebar.collapsedProjects,
     collapsedWorktrees: deps.sidebar.collapsedWorktrees,
+    collapsedLocal: deps.sidebar.collapsedLocal,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
     focused: deps.getWindow()?.isFocused() ?? false,
   }))
@@ -490,6 +501,14 @@ export function registerIpc(deps: IpcDependencies): void {
     // Only a worktree of a project in the list is kept collapsed.
     if (!expanded && !deps.projects.find(root)) return
     deps.sidebar.setWorktreeCollapsed(worktreePath, !expanded)
+  })
+  on(IpcChannel.setLocalExpanded, (...args) => {
+    const parsed = z.tuple([projectRoot, z.boolean()]).safeParse(args)
+    if (!parsed.success) return
+    const [root, expanded] = parsed.data
+    // Only the Local row of a project in the list is kept collapsed.
+    if (!expanded && !deps.projects.find(root)) return
+    deps.sidebar.setLocalCollapsed(root, !expanded)
   })
 
   handle(IpcChannel.getAppearance, () => deps.appearance.appearance)
@@ -526,6 +545,16 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.chats.on('changed', (chats) => send(IpcChannel.chatsChanged, chats))
 
   /**
+   * Why a session cannot start in a project's own folder as it is now, which
+   * the window then shows: it is gone. `null` when it can.
+   */
+  const projectFolderProblem = async (root: string): Promise<string | null> => {
+    const folder = await deps.projectFolders.current(root)
+    if (folder === null) return 'The project is not in the list.'
+    return folder.missing ? `The project folder is missing: ${root}` : null
+  }
+
+  /**
    * Deletes a chat, or a saved session for `saved`: its sessions close
    * first, also any that started since the window closed those it showed.
    * One that is gone already needs nothing more.
@@ -536,7 +565,7 @@ export function registerIpc(deps: IpcDependencies): void {
     const id = parsed.data
     const found = deps.chats.get(id)
     if (!found) return { ok: true }
-    if ((found.worktreePath !== null) !== saved) return { ok: false, message: 'Invalid request.' }
+    if ((found.projectRoot !== null) !== saved) return { ok: false, message: 'Invalid request.' }
     try {
       await deps.sessions.closeOf(id)
       await deps.chats.delete(id)
@@ -558,6 +587,12 @@ export function registerIpc(deps: IpcDependencies): void {
       const [root, worktreePath, toolId] = parsed.data
       if (!deps.projects.find(root))
         return { ok: false, message: 'The project is not in the list.' }
+      if (worktreePath === null) {
+        // As it is now: a project folder gone since its menu showed cannot start a session.
+        const problem = await projectFolderProblem(root)
+        if (problem !== null) return { ok: false, message: problem }
+        return { ok: true, session: deps.chats.createSavedSession(root, null, toolId) }
+      }
       // As it is now: a worktree deleted or missing since its row showed cannot start a session.
       const worktree = await deps.worktrees.currentWorktree(root, worktreePath)
       if (!worktree) {
@@ -592,7 +627,7 @@ export function registerIpc(deps: IpcDependencies): void {
       const chat = deps.chats.get(request.chatId)
       if (
         !chat ||
-        chat.worktreePath !== null ||
+        chat.projectRoot !== null ||
         chat.toolId !== request.toolId ||
         request.worktreePath !== null ||
         request.issueId !== null ||
@@ -626,7 +661,6 @@ export function registerIpc(deps: IpcDependencies): void {
       if (
         !saved ||
         saved.projectRoot === null ||
-        saved.worktreePath === null ||
         saved.projectRoot !== request.projectRoot ||
         saved.worktreePath !== request.worktreePath ||
         saved.toolId !== request.toolId ||
@@ -638,16 +672,23 @@ export function registerIpc(deps: IpcDependencies): void {
       if (!deps.projects.find(request.projectRoot)) {
         return { ok: false, message: 'The project is not in the list.' }
       }
-      // A session whose worktree is gone, or was deleted outside Hoot, stays
-      // but does not start; Hoot says why.
-      const worktree = await deps.worktrees.currentWorktree(saved.projectRoot, saved.worktreePath)
-      if (!worktree) {
-        return { ok: false, message: `The worktree no longer exists: ${saved.worktreePath}` }
-      }
-      if (worktree.missing) {
-        return {
-          ok: false,
-          message: `The folder of the worktree is missing: ${saved.worktreePath}`,
+      if (saved.worktreePath === null) {
+        // One whose project folder is gone, as when it was renamed, stays but
+        // does not start; Hoot says why, and starts it once it is back.
+        const problem = await projectFolderProblem(saved.projectRoot)
+        if (problem !== null) return { ok: false, message: problem }
+      } else {
+        // A session whose worktree is gone, or was deleted outside Hoot, stays
+        // but does not start; Hoot says why.
+        const worktree = await deps.worktrees.currentWorktree(saved.projectRoot, saved.worktreePath)
+        if (!worktree) {
+          return { ok: false, message: `The worktree no longer exists: ${saved.worktreePath}` }
+        }
+        if (worktree.missing) {
+          return {
+            ok: false,
+            message: `The folder of the worktree is missing: ${saved.worktreePath}`,
+          }
         }
       }
       let prepared
@@ -659,8 +700,8 @@ export function registerIpc(deps: IpcDependencies): void {
       if (!prepared) return { ok: false, message: 'The saved session no longer exists.' }
       try {
         const session = await deps.sessions.start(request, null, prepared.launch)
-        // It goes to the end of its worktree's sessions when split off; opening
-        // it again does not move its row.
+        // It goes to the end of its worktree's or Local row's sessions when
+        // split off; opening it again does not move its row.
         deps.chats.opened(saved.id)
         return { ok: true, session }
       } catch (error) {
@@ -923,6 +964,25 @@ export function registerIpc(deps: IpcDependencies): void {
     void deps.worktrees.isWorktreeOf(root, worktreePath).then((found) => {
       if (found) clipboard.writeText(worktreePath)
     })
+  })
+
+  handle(IpcChannel.listProjectFolders, () => deps.projectFolders.list())
+  deps.projectFolders.on('changed', (root, folder) =>
+    send(IpcChannel.projectFolderChanged, root, folder),
+  )
+
+  on(IpcChannel.revealProjectFolder, (value) => {
+    const parsed = projectRoot.safeParse(value)
+    if (!parsed.success || !deps.projects.find(parsed.data)) return
+    const root = parsed.data
+    void deps.projectFolders.current(root).then((folder) => {
+      if (folder?.missing === false) shell.showItemInFolder(root)
+    })
+  })
+
+  on(IpcChannel.copyProjectFolderPath, (value) => {
+    const parsed = projectRoot.safeParse(value)
+    if (parsed.success && deps.projects.find(parsed.data)) clipboard.writeText(parsed.data)
   })
 
   const noIssue = 'The issue no longer exists.'

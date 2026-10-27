@@ -67,6 +67,7 @@ import {
   type SessionExit,
   type SessionInfo,
 } from '../../shared/session'
+import type { ProjectFolderInfo } from '../../shared/project-folders'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { startBlockers, startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
@@ -131,11 +132,17 @@ export type LabelMatch = 'any' | 'all'
 export interface UiSession {
   id: string
   projectRoot: string
-  /** The root of the worktree it runs in, or `null` for the project's main worktree. */
+  /**
+   * The root of the worktree it runs in, or `null` for the project's main
+   * worktree, its own folder, and for a chat.
+   */
   worktreePath: string | null
   /** The chat whose agent it runs, which belongs to no project; `null` for a session. */
   chatId: string | null
-  /** The saved session whose agent it runs, in the worktree; `null` for every other session. */
+  /**
+   * The saved session whose agent it runs, in the worktree or the project's
+   * own folder; `null` for every other session.
+   */
   savedSessionId: string | null
   toolId: ToolId
   /**
@@ -273,6 +280,12 @@ export interface AppState {
   worktrees: Record<string, WorktreeInfo[]>
   /** The last known state of every worktree listed since Hoot started, by root. */
   knownWorktrees: Record<string, WorktreeInfo>
+  /**
+   * Each project's own folder, by project root, once Hoot has looked at it:
+   * whether it is there, and what is checked out in it, which its Local row
+   * shows.
+   */
+  projectFolders: Record<string, ProjectFolderInfo>
   /** The project whose new worktree dialog is open. */
   newWorktreeProject: string | null
   worktreeDeletion: WorktreeDeletion | null
@@ -289,7 +302,10 @@ export interface AppState {
   sessions: UiSession[]
   /** Every chat, in the order of the sidebar's Chats group. */
   chats: ChatInfo[]
-  /** Every saved session, oldest first, as they show below their worktrees. */
+  /**
+   * Every saved session, oldest first, as they show below their worktrees and
+   * their projects' Local rows.
+   */
   savedSessions: SavedSessionInfo[]
   /**
    * The order the tabs of worktrees were dragged into, by the root of the
@@ -426,6 +442,11 @@ export interface AppState {
   collapsedProjects: ReadonlySet<number>
   /** The worktrees collapsed in the sidebar, by root; every other worktree is expanded. */
   collapsedWorktrees: ReadonlySet<string>
+  /**
+   * The projects whose Local row is collapsed in the sidebar, by root; every
+   * other project's Local row is expanded.
+   */
+  collapsedLocal: ReadonlySet<string>
   /** Whether the window is in full screen. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -491,22 +512,23 @@ export interface AppState {
   openChat(chatId: string): void
   /**
    * Opens a saved session's page: when its agent does not run, starts it in
-   * the worktree with the session's agent, continuing its conversation — or,
-   * for a worktree whose folder is gone, says so instead and starts nothing.
+   * the worktree, or in the project's own folder, with the session's agent,
+   * continuing its conversation — or, for a worktree or project folder that
+   * is gone, says so instead and starts nothing.
    */
   openSavedSession(id: string): void
   /** Continues a saved session whose agent ended unexpectedly, as its Resume button does. */
   resumeSavedSession(id: string): void
   /**
-   * Makes a saved session in a worktree, and opens it: of `toolId`, or without
-   * one, of the agent a new chat would start with. Without an agent that can
-   * be used, opens the Agents page and says that one must be installed or
-   * turned on. Until the first detection of the agents finishes, nothing
-   * happens.
+   * Makes a saved session in a worktree, or with `null` for the worktree, in
+   * the project's own folder, and opens it: of `toolId`, or without one, of
+   * the agent a new chat would start with. Without an agent that can be used,
+   * opens the Agents page and says that one must be installed or turned on.
+   * Until the first detection of the agents finishes, nothing happens.
    */
   newWorktreeSession(
     projectRoot: string,
-    worktreePath: string,
+    worktreePath: string | null,
     toolId?: CodingToolId,
   ): Promise<void>
   /** Opens a saved session the New Worktree dialog made, showing its page. */
@@ -718,6 +740,8 @@ export interface AppState {
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Expands or collapses a worktree in the sidebar, and saves its state. */
   setWorktreeExpanded(projectRoot: string, path: string, expanded: boolean): void
+  /** Expands or collapses a project's Local row in the sidebar, and saves its state. */
+  setLocalExpanded(projectRoot: string, expanded: boolean): void
   /**
    * Closes a session, asking for confirmation first while it runs, unless
    * the Agents page says not to ask.
@@ -1231,6 +1255,28 @@ export function projectWorktreeRows(
 }
 
 /**
+ * Whether a project has sessions in its own folder, which its Local row
+ * lists: saved ones, whether or not their agents run, or any other session
+ * started there.
+ */
+export function hasLocalSessions(
+  state: Pick<AppState, 'savedSessions' | 'sessions'>,
+  projectRoot: string,
+): boolean {
+  return (
+    state.savedSessions.some(
+      (saved) => saved.projectRoot === projectRoot && saved.worktreePath === null,
+    ) ||
+    state.sessions.some(
+      (session) =>
+        session.chatId === null &&
+        session.projectRoot === projectRoot &&
+        session.worktreePath === null,
+    )
+  )
+}
+
+/**
  * The worktrees a project's open sessions are in, without duplicates. Saved
  * sessions alone give no row: those of a worktree that is gone go with it
  * as it is cleaned up, so their row would only show as missing for a moment.
@@ -1380,18 +1426,19 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
-   * Expands the project and the worktree of a session that has just become
-   * the current one, however it became current, so that its row shows in the
-   * sidebar.
+   * Expands the project and the worktree, or the Local row, of a session that
+   * has just become the current one, however it became current, so that its
+   * row shows in the sidebar.
    */
   const expandParentsOf = (page: Page | null) => {
     if (page?.kind !== 'session') return
-    const { sessions, projects, setProjectExpanded, setWorktreeExpanded } = get()
+    const { sessions, projects, setProjectExpanded, setWorktreeExpanded, setLocalExpanded } = get()
     const session = sessions.find((candidate) => candidate.id === page.sessionId)
     const project = projects.find((candidate) => candidate.root === session?.projectRoot)
-    if (!session || !project) return
+    if (!session || !project || session.chatId !== null) return
     setProjectExpanded(project.id, true)
     if (session.worktreePath !== null) setWorktreeExpanded(project.root, session.worktreePath, true)
+    else setLocalExpanded(project.root, true)
   }
 
   /**
@@ -1690,6 +1737,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         worktrees: Object.fromEntries(
           Object.entries(current.worktrees).filter(([root]) => roots.has(root)),
         ),
+        projectFolders: Object.fromEntries(
+          Object.entries(current.projectFolders).filter(([root]) => roots.has(root)),
+        ),
         collapsedProjects:
           collapsed.length === current.collapsedProjects.size
             ? current.collapsedProjects
@@ -1763,6 +1813,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         ...Object.fromEntries(worktrees.map((worktree) => [worktree.path, worktree])),
       },
     }))
+  }
+
+  /** Applies what Hoot found of a project's own folder as it looked at it last. */
+  const applyProjectFolder = (projectRoot: string, folder: ProjectFolderInfo) => {
+    set((state) => ({ projectFolders: { ...state.projectFolders, [projectRoot]: folder } }))
   }
 
   /** Whether Delete was chosen and the worktree is being read again before it is checked. */
@@ -2090,6 +2145,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     projects: [],
     worktrees: {},
     knownWorktrees: {},
+    projectFolders: {},
     newWorktreeProject: null,
     worktreeDeletion: null,
     worktreeRemoval: null,
@@ -2136,6 +2192,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarEdgeDragging: false,
     collapsedProjects: new Set(),
     collapsedWorktrees: new Set(),
+    collapsedLocal: new Set(),
     fullScreen: false,
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
@@ -2147,7 +2204,15 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.onWindowFocusChanged((windowFocused) => set({ windowFocused }))
       api.onAppearanceChanged((appearance) => set({ appearance }))
       const [
-        { sidebarOpen, sidebarWidth, collapsedProjects, collapsedWorktrees, fullScreen, focused },
+        {
+          sidebarOpen,
+          sidebarWidth,
+          collapsedProjects,
+          collapsedWorktrees,
+          collapsedLocal,
+          fullScreen,
+          focused,
+        },
         appearance,
       ] = await Promise.all([api.getWindowState(), api.getAppearance()])
       set({
@@ -2155,6 +2220,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         sidebarWidth,
         collapsedProjects: new Set(collapsedProjects),
         collapsedWorktrees: new Set(collapsedWorktrees),
+        collapsedLocal: new Set(collapsedLocal),
         fullScreen,
         windowFocused: focused,
         appearance,
@@ -2275,6 +2341,20 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       // Before the worktrees show without them.
       api.onWorktreesRemoved((_root, paths) => forgetWorktrees(paths))
+      // Changes reported while the list is read are newer than the list.
+      const changedFolders = new Set<string>()
+      api.onProjectFolderChanged((root, folder) => {
+        changedFolders.add(root)
+        applyProjectFolder(root, folder)
+      })
+      void api.listProjectFolders().then(
+        (folders) => {
+          for (const [root, folder] of Object.entries(folders)) {
+            if (!changedFolders.has(root)) applyProjectFolder(root, folder)
+          }
+        },
+        (error: unknown) => console.error("Could not read the projects' folders:", error),
+      )
       // Read in the background: listing worktrees waits for Git, the projects do not.
       void api.listWorktrees().then(
         (worktrees) => {
@@ -2482,16 +2562,26 @@ export const useAppStore = create<AppState>()((set, get) => {
         showPage(sessionPage(running.id))
         return
       }
-      // Hoot starts nothing in a worktree whose folder is gone, and says why;
-      // the session stays below its row.
-      const worktree = projectWorktreeRows(get(), saved.projectRoot).find(
-        (row) => row.path === saved.worktreePath,
-      )
-      if (worktree?.missing === true) {
-        toast.error('Could not open the session.', {
-          description: `The folder of the worktree is missing: ${saved.worktreePath}`,
-        })
-        return
+      // Hoot starts nothing in a worktree or project folder that is gone, and
+      // says why; the session stays below its row. One that went since Hoot
+      // last looked does not start either: the main process says why then.
+      if (saved.worktreePath === null) {
+        if (get().projectFolders[saved.projectRoot]?.missing === true) {
+          toast.error('Could not open the session.', {
+            description: `The project folder is missing: ${saved.projectRoot}`,
+          })
+          return
+        }
+      } else {
+        const worktree = projectWorktreeRows(get(), saved.projectRoot).find(
+          (row) => row.path === saved.worktreePath,
+        )
+        if (worktree?.missing === true) {
+          toast.error('Could not open the session.', {
+            description: `The folder of the worktree is missing: ${saved.worktreePath}`,
+          })
+          return
+        }
       }
       // An agent that ended unexpectedly leaves its page with the last output
       // and a Resume button; continuing it starts a new session.
@@ -3227,6 +3317,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       else collapsed.add(path)
       set({ collapsedWorktrees: collapsed })
       api.setWorktreeExpanded(projectRoot, path, expanded)
+    },
+
+    setLocalExpanded(projectRoot, expanded) {
+      const { collapsedLocal } = get()
+      if (collapsedLocal.has(projectRoot) === !expanded) return
+      const collapsed = new Set(collapsedLocal)
+      if (expanded) collapsed.delete(projectRoot)
+      else collapsed.add(projectRoot)
+      set({ collapsedLocal: collapsed })
+      api.setLocalExpanded(projectRoot, expanded)
     },
 
     requestCloseSession(id) {

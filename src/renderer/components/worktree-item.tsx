@@ -6,7 +6,6 @@ import {
   PlusIcon,
   Trash2Icon,
 } from 'lucide-react'
-import type { ComponentType, ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { CodingToolId } from '../../shared/tools'
 import { api } from '../lib/api'
@@ -15,62 +14,14 @@ import { cn } from '../lib/utils'
 import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
+import { contextMenuParts, dropdownMenuParts, type MenuParts } from './menu-parts'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { StateLight } from './state-light'
 import { Badge } from './ui/badge'
 import { CollapsibleTrigger } from './ui/collapsible'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from './ui/context-menu'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
-
-/** The parts a worktree's menus are made of: its `⋯` menu's, or its context menu's. */
-interface WorktreeMenuComponents {
-  Item: ComponentType<{
-    children?: ReactNode
-    variant?: 'default' | 'destructive'
-    disabled?: boolean
-    onClick?: () => void
-    'data-testid'?: string
-  }>
-  Separator: ComponentType
-  Sub: ComponentType<{ children?: ReactNode }>
-  SubTrigger: ComponentType<{ children?: ReactNode; 'data-testid'?: string }>
-  SubContent: ComponentType<{ children?: ReactNode; className?: string }>
-}
-
-const dropdownMenuComponents: WorktreeMenuComponents = {
-  Item: DropdownMenuItem,
-  Separator: DropdownMenuSeparator,
-  Sub: DropdownMenuSub,
-  SubTrigger: DropdownMenuSubTrigger,
-  SubContent: DropdownMenuSubContent,
-}
-
-const contextMenuComponents: WorktreeMenuComponents = {
-  Item: ContextMenuItem,
-  Separator: ContextMenuSeparator,
-  Sub: ContextMenuSub,
-  SubTrigger: ContextMenuSubTrigger,
-  SubContent: ContextMenuSubContent,
-}
 
 /**
  * What the menus say about a locked worktree, below Delete, which the lock
@@ -105,7 +56,7 @@ function WorktreeMenuEntries({
   worktree,
   testId,
 }: {
-  components: WorktreeMenuComponents
+  components: MenuParts
   projectRoot: string
   worktree: WorktreeRow
   /** The prefix of the items' test ids, which tells the `⋯` menu from the context menu. */
@@ -181,13 +132,14 @@ function WorktreeMenuEntries({
 }
 
 /**
- * A worktree's row in the sidebar, below its project's sessions: click it to
- * expand or collapse the worktree. It shows a chevron, 12px further in than
- * the project's icon, which points right while the worktree is collapsed and
- * turns down as it expands; the worktree's name when Hoot made it with the New
- * Worktree dialog, otherwise its branch (or abbreviated commit); whether it
- * is missing or locked; and, while it is collapsed, at its right end, the
- * light of the state of its sessions that needs the user most, if any does.
+ * A worktree's row in the sidebar, below its project's Local row, if it has
+ * one: click it to expand or collapse the worktree. It shows a chevron, 12px
+ * further in than the project's icon, which points right while the worktree
+ * is collapsed and turns down as it expands; the worktree's name when Hoot
+ * made it with the New Worktree dialog, otherwise its branch (or abbreviated
+ * commit); whether it is missing or locked; and, while it is collapsed, at
+ * its right end, the light of the state of its sessions that needs the user
+ * most, if any does.
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and right
  * of it, unless the worktree is missing, its `+`, which starts a session in
@@ -303,7 +255,7 @@ export function WorktreeItem({
             finalFocus={focusAfterOverlay}
           >
             <WorktreeMenuEntries
-              components={dropdownMenuComponents}
+              components={dropdownMenuParts}
               projectRoot={projectRoot}
               worktree={worktree}
               testId="worktree"
@@ -333,7 +285,7 @@ export function WorktreeItem({
 
       <ContextMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
         <WorktreeMenuEntries
-          components={contextMenuComponents}
+          components={contextMenuParts}
           projectRoot={projectRoot}
           worktree={worktree}
           testId="worktree-context"

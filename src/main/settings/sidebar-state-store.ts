@@ -11,6 +11,11 @@ interface StoredSettings {
   collapsedProjects?: number[]
   /** The roots of the worktrees collapsed in the sidebar; every other worktree is expanded. */
   collapsedWorktrees?: string[]
+  /**
+   * The roots of the projects whose Local row is collapsed in the sidebar;
+   * every other project's is expanded.
+   */
+  collapsedLocal?: string[]
 }
 
 function isProjectId(value: unknown): value is number {
@@ -22,8 +27,8 @@ function isWorktreeRoot(value: unknown): value is string {
 }
 
 /**
- * Whether the sidebar is expanded, how wide it is, and which of its projects
- * and worktrees are collapsed, kept in `settings.json` in the user data
+ * Whether the sidebar is expanded, how wide it is, and which of its projects,
+ * worktrees and Local rows are collapsed, kept in `settings.json` in the user data
  * directory, next to the launch settings, so that Hoot opens with the sidebar
  * as it was left. Conf reads the file before every change and writes all of
  * it, so the settings do not overwrite each other.
@@ -34,6 +39,7 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
   private sidebarWidth: number
   private collapsed: Set<number>
   private collapsedRoots: Set<string>
+  private collapsedLocalRoots: Set<string>
 
   constructor(directory: string) {
     super()
@@ -53,6 +59,11 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     const storedRoots: unknown = this.config.get('collapsedWorktrees')
     this.collapsedRoots = new Set(
       Array.isArray(storedRoots) ? storedRoots.filter(isWorktreeRoot) : [],
+    )
+    // And a project's Local row.
+    const storedLocal: unknown = this.config.get('collapsedLocal')
+    this.collapsedLocalRoots = new Set(
+      Array.isArray(storedLocal) ? storedLocal.filter(isWorktreeRoot) : [],
     )
   }
 
@@ -141,6 +152,24 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     } catch (error) {
       // The worktrees stay as they are until Hoot quits.
       console.error('Could not save which worktrees are collapsed:', error)
+    }
+  }
+
+  /** The roots of the projects whose Local row is collapsed in the sidebar. */
+  get collapsedLocal(): string[] {
+    return [...this.collapsedLocalRoots]
+  }
+
+  /** Records whether a project's Local row is collapsed in the sidebar and saves it. */
+  setLocalCollapsed(projectRoot: string, collapsed: boolean): void {
+    if (this.collapsedLocalRoots.has(projectRoot) === collapsed) return
+    if (collapsed) this.collapsedLocalRoots.add(projectRoot)
+    else this.collapsedLocalRoots.delete(projectRoot)
+    try {
+      this.config.set('collapsedLocal', [...this.collapsedLocalRoots])
+    } catch (error) {
+      // The Local rows stay as they are until Hoot quits.
+      console.error('Could not save which Local rows are collapsed:', error)
     }
   }
 }

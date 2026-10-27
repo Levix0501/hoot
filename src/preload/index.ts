@@ -81,6 +81,8 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.setProjectExpanded, projectId, expanded),
   setWorktreeExpanded: (projectRoot, worktreePath, expanded) =>
     ipcRenderer.send(IpcChannel.setWorktreeExpanded, projectRoot, worktreePath, expanded),
+  setLocalExpanded: (projectRoot, expanded) =>
+    ipcRenderer.send(IpcChannel.setLocalExpanded, projectRoot, expanded),
   onToggleSidebarRequested: (listener) => subscribe(IpcChannel.toggleSidebarRequested, listener),
   onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onWindowFocusChanged: (listener) => subscribe(IpcChannel.windowFocusChanged, listener),
@@ -119,6 +121,12 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.copyWorktreePath, projectRoot, worktreePath),
+  listProjectFolders: () => ipcRenderer.invoke(IpcChannel.listProjectFolders),
+  onProjectFolderChanged: (listener) => subscribe(IpcChannel.projectFolderChanged, listener),
+  revealProjectFolder: (projectRoot) =>
+    ipcRenderer.send(IpcChannel.revealProjectFolder, projectRoot),
+  copyProjectFolderPath: (projectRoot) =>
+    ipcRenderer.send(IpcChannel.copyProjectFolderPath, projectRoot),
   listIssues: () => ipcRenderer.invoke(IpcChannel.listIssues),
   createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),

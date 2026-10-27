@@ -8,13 +8,14 @@ import { dropdownComponents } from './project-item'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /**
- * A `+` that starts a session in a worktree, drawn as `render` with
- * `children` in it. While more than one agent can be used, pressing it opens
- * a menu of them, as New Session ▸ lists them, and choosing one starts a
- * session of it; with only one, clicking it starts that one at once; with
- * none, clicking it says that one must be installed or turned on, and opens
- * the Agents page. Until the first detection of the agents finishes, its
- * menu says that they are being checked for.
+ * A `+` that starts a session in a worktree, or for a `worktreePath` of
+ * `null`, in the project's own folder, drawn as `render` with `children` in
+ * it. While more than one agent can be used, pressing it opens a menu of
+ * them, as New Session ▸ lists them, and choosing one starts a session of
+ * it; with only one, clicking it starts that one at once; with none,
+ * clicking it says that one must be installed or turned on, and opens the
+ * Agents page. Until the first detection of the agents finishes, its menu
+ * says that they are being checked for.
  */
 export function NewWorktreeSessionButton({
   projectRoot,
@@ -24,7 +25,7 @@ export function NewWorktreeSessionButton({
   testId,
 }: {
   projectRoot: string
-  worktreePath: string
+  worktreePath: string | null
   render: ReactElement
   children: ReactNode
   /** The prefix of its menu items' test ids. */

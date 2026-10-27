@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { type ChatInfo, type SavedSessionInfo } from '../../shared/chats'
+import { inProjectFolder, type ChatInfo, type SavedSessionInfo } from '../../shared/chats'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
@@ -49,15 +49,19 @@ export function visibleInput(data: string): string {
 
 /**
  * The chats Hoot lists in the sidebar, and the saved sessions it lists below
- * their worktrees, and what running them takes: the folder each agent runs in
- * (a chat's own under `~/.hoot/chats`, a worktree's root for a saved session),
- * the conversation its agent continues, and the new conversation an agent
- * starts with `/clear` or `/new`.
+ * their worktrees and their projects' Local rows, and what running them
+ * takes: the folder each agent runs in (a chat's own under `~/.hoot/chats`,
+ * for a saved session a worktree's root or its project's own folder), the
+ * conversation its agent continues, and the new conversation an agent starts
+ * with `/clear` or `/new`.
  *
  * It reads the agent's own records when a chat's process ends, and when Hoot
  * starts, to tell whether the chat's conversation got a message, to learn the
  * ids of the conversations an agent started since, and to split off the
- * conversations that came before them as chats of their own.
+ * conversations that came before them as chats of their own. A project's own
+ * folder may hold conversations from before Hoot ran an agent there: a saved
+ * session in it never takes up, nor splits off, one that started before the
+ * session was made.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -106,7 +110,10 @@ export class ChatManager extends EventEmitter<{
     return this.chats.list()
   }
 
-  /** Every saved session, oldest first, as they show below their worktrees. */
+  /**
+   * Every saved session, oldest first, as they show below their worktrees and
+   * their projects' Local rows.
+   */
   listSavedSessions(): SavedSessionInfo[] {
     return this.chats.listSavedSessions()
   }
@@ -155,19 +162,20 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * Makes a saved session of an agent, in a worktree of a project: the agent
-   * runs in the worktree's folder, which Hoot keeps as it is.
+   * Makes a saved session of an agent, in a worktree of a project, or with
+   * `null` for the worktree, in the project's own folder: the agent runs in
+   * that folder, which Hoot keeps as it is.
    */
   createSavedSession(
     projectRoot: string,
-    worktreePath: string,
+    worktreePath: string | null,
     toolId: CodingToolId,
   ): SavedSessionInfo {
     const at = this.now()
     const session = {
       id: this.newId(),
       toolId,
-      folder: worktreePath,
+      folder: worktreePath ?? projectRoot,
       projectRoot,
       worktreePath,
       conversationId: newConversationId(toolId, this.newId),
@@ -211,8 +219,9 @@ export class ChatManager extends EventEmitter<{
     if (!chat || chat.deleted) return null
     this.clearTitles.delete(id)
     this.conversationStartedAt.delete(id)
-    // A saved session's folder is its worktree, which Hoot does not make.
-    if (chat.worktreePath === null) await this.ensureFolder(chat)
+    // A saved session's folder is its worktree or its project's folder, which
+    // Hoot does not make.
+    if (chat.projectRoot === null) await this.ensureFolder(chat)
     let conversationId = chat.conversationId
     if (conversationId === null && chat.toolId !== 'codex') {
       conversationId = newConversationId(chat.toolId, this.newId)
@@ -411,7 +420,8 @@ export class ChatManager extends EventEmitter<{
    * as one of its own again. A Claude Code one, whose conversations no other
    * takes up, goes altogether. A chat's own folder goes to the Trash with
    * what is in it, once no other chat runs in it; a folder that cannot be
-   * moved there stays as it is. A saved session's worktree stays as it is.
+   * moved there stays as it is. A saved session's worktree or project folder
+   * stays as it is.
    */
   delete(id: string): Promise<void> {
     return this.enqueue(id, async () => {
@@ -472,14 +482,15 @@ export class ChatManager extends EventEmitter<{
 
     chat = this.chats.get(chatId)
     if (!chat) return
-    const conversations =
+    const recorded =
       chat.toolId === 'codex'
         ? await this.conversations.codexConversations(chat.folder)
         : await this.conversations.openCodeConversations(chat.folder)
     // Without the agent's records, the chat is left as it is.
-    if (conversations === null) return
+    if (recorded === null) return
     chat = this.chats.get(chatId)
     if (!chat) return
+    const conversations = ownConversations(chat, recorded)
     // The conversations that already belong to a chat of their own: those
     // this chat leaves for another stay as chats, and are not taken again.
     const claimed = new Set(
@@ -615,7 +626,7 @@ export class ChatManager extends EventEmitter<{
         // A saved session split off shows where it was split off, after the
         // sessions made before it; a chat comes in the order of Chats.
         createdAt:
-          chat.worktreePath === null
+          chat.projectRoot === null
             ? conversation.createdAt === 0
               ? this.now()
               : conversation.createdAt
@@ -628,7 +639,7 @@ export class ChatManager extends EventEmitter<{
 
   /** Removes a chat whose conversation never got a message, with its folder when nothing else uses it. */
   private async removeChat(chat: ChatInfo): Promise<void> {
-    // A saved session's worktree stays as it is.
+    // A saved session's worktree or project folder stays as it is.
     this.chats.delete(chat.id)
     this.forget(chat.id)
     await this.removeFolderIfOwned(chat)
@@ -645,11 +656,11 @@ export class ChatManager extends EventEmitter<{
   /**
    * Whether a chat runs in a folder Hoot made for it alone: one under
    * `~/.hoot/chats` for a Codex or OpenCode chat, which the chats split off
-   * from it share. Claude Code's shared folder and a saved session's worktree
-   * are not.
+   * from it share. Claude Code's shared folder, and a saved session's
+   * worktree or project folder, are not.
    */
   private ownsFolder(chat: ChatInfo): boolean {
-    if (chat.worktreePath !== null) return false
+    if (chat.projectRoot !== null) return false
     if (chat.toolId === 'claude') return false
     if (path.resolve(path.dirname(chat.folder)) !== path.resolve(this.chatsRoot)) return false
     return path.resolve(chat.folder) !== path.resolve(this.claudeFolder)
@@ -709,6 +720,26 @@ export class ChatManager extends EventEmitter<{
     })
     return run
   }
+}
+
+/**
+ * The conversations of a chat's folder, oldest first, that can be the chat's
+ * own: all of them, except in a project's own folder, which may hold
+ * conversations the agent had there before Hoot ran it there, in Hoot or out
+ * of it. A saved session there never takes up one that started before Hoot
+ * made the session, nor splits one off as a session of its own: only the one
+ * it is in, which a session split off had before it was made, and those that
+ * started since.
+ */
+export function ownConversations(
+  chat: Pick<ChatInfo, 'projectRoot' | 'worktreePath' | 'conversationId' | 'createdAt'>,
+  recorded: readonly AgentConversation[],
+): AgentConversation[] {
+  if (!inProjectFolder(chat)) return [...recorded]
+  return recorded.filter(
+    (conversation) =>
+      conversation.id === chat.conversationId || conversation.createdAt >= chat.createdAt,
+  )
 }
 
 /**

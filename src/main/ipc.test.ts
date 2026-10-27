@@ -9,6 +9,7 @@ import type { Issue, NewIssue } from '../shared/issues'
 import type { ParentChange, SubIssues } from '../shared/sub-issues'
 import type { Labels } from '../shared/labels'
 import type { ChatInfo, SavedSessionInfo } from '../shared/chats'
+import type { ProjectFolderInfo } from '../shared/project-folders'
 import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
@@ -28,7 +29,7 @@ const electron = vi.hoisted(() => {
     clipboard: { writeText: vi.fn<(text: string) => Promise<void>>(async () => {}) },
     app: {},
     dialog: {},
-    shell: {},
+    shell: { showItemInFolder: vi.fn<(path: string) => void>() },
   }
 })
 vi.mock('electron', () => electron)
@@ -157,13 +158,29 @@ const saved: SavedSessionInfo = {
   createdAt: 2_000,
   lastOpenedAt: 2_000,
 }
+/** A saved session in the project's own folder, which its Local row lists. */
+const local: SavedSessionInfo = {
+  id: 'local-1',
+  toolId: 'claude',
+  folder: '/work/project',
+  projectRoot: '/work/project',
+  worktreePath: null,
+  conversationId: 'conversation-3',
+  title: '',
+  customName: null,
+  hasMessages: true,
+  createdAt: 3_000,
+  lastOpenedAt: 3_000,
+}
 const chats = Object.assign(emitter(), {
   list: vi.fn<() => ChatInfo[]>(() => [chat]),
-  listSavedSessions: vi.fn<() => SavedSessionInfo[]>(() => [saved]),
-  createSavedSession: vi.fn<() => SavedSessionInfo>(() => saved),
+  listSavedSessions: vi.fn<() => SavedSessionInfo[]>(() => [saved, local]),
+  createSavedSession: vi.fn<
+    (root: string, worktreePath: string | null, toolId: string) => SavedSessionInfo
+  >((_root, worktreePath) => (worktreePath === null ? local : saved)),
   removeForWorktree: vi.fn<(path: string) => void>(),
   get: vi.fn<(id: string) => ChatInfo | undefined>((id) =>
-    id === chat.id ? chat : id === saved.id ? saved : undefined,
+    id === chat.id ? chat : id === saved.id ? saved : id === local.id ? local : undefined,
   ),
   create: vi.fn<(toolId: ChatInfo['toolId']) => Promise<ChatInfo>>(async () => chat),
   prepareSession: vi.fn<
@@ -172,7 +189,7 @@ const chats = Object.assign(emitter(), {
       launch: { conversationId: string | null; resume: boolean }
     }>
   >(async (id: string) => {
-    const record = id === saved.id ? saved : chat
+    const record = id === saved.id ? saved : id === local.id ? local : chat
     return {
       folder: record.folder,
       launch: { conversationId: record.conversationId, resume: record.hasMessages },
@@ -216,7 +233,21 @@ const worktrees = Object.assign(emitter(), {
     (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
   >(async () => ({ ok: true })),
 })
-const sidebar = { setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>() }
+const sidebar = {
+  setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
+  setLocalCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
+}
+const folderThere: ProjectFolderInfo = { missing: false, branch: 'main', displayName: 'main' }
+const projectFolders = Object.assign(emitter(), {
+  list: vi.fn<() => Promise<Record<string, ProjectFolderInfo>>>(async () => ({
+    [project.root]: folderThere,
+  })),
+  current: vi.fn<(root: string) => Promise<ProjectFolderInfo | null>>(async (root) =>
+    root === project.root ? folderThere : null,
+  ),
+  addProject: vi.fn<(root: string) => void>(),
+  removeProject: vi.fn<(root: string) => void>(),
+})
 const sessionManager = Object.assign(emitter(), {
   closeOf: vi.fn<(chatId: string) => Promise<void>>(async () => {}),
   closeIn: vi.fn<(root: string, worktreePath: string) => Promise<void>>(async () => {}),
@@ -251,6 +282,11 @@ beforeEach(() => {
   sessionManager.removeAllListeners()
   worktrees.currentWorktree.mockReset()
   worktrees.currentWorktree.mockImplementation(async () => worktreeAt)
+  projectFolders.removeAllListeners()
+  projectFolders.current.mockReset()
+  projectFolders.current.mockImplementation(async (root) =>
+    root === project.root ? folderThere : null,
+  )
   registerIpc({
     issues,
     projects,
@@ -264,6 +300,7 @@ beforeEach(() => {
     chats,
     updates,
     worktrees,
+    projectFolders,
     workflows,
     labels,
     sessionStarts,
@@ -398,7 +435,7 @@ describe('the messages of chats', () => {
   })
 
   it('gives the saved sessions, makes one in a worktree, and passes on every change of them', async () => {
-    expect(await invoke(IpcChannel.listSavedSessions)).toEqual([saved])
+    expect(await invoke(IpcChannel.listSavedSessions)).toEqual([saved, local])
     expect(
       await invoke(IpcChannel.createSavedSession, project.root, saved.worktreePath, 'claude'),
     ).toEqual({
@@ -582,6 +619,136 @@ describe('the messages of chats', () => {
     })
     expect(result).toEqual({ ok: false, message: 'Invalid session request.' })
     expect(sessionManager.start).not.toHaveBeenCalled()
+  })
+})
+
+/** Starts the saved session in the project's own folder, as its row would. */
+const startLocal = (overrides: Partial<StartSessionRequest> = {}) =>
+  invoke(IpcChannel.startSession, {
+    id: 's1',
+    projectRoot: project.root,
+    worktreePath: null,
+    savedSessionId: local.id,
+    toolId: 'claude',
+    issueId: null,
+    cols: 80,
+    rows: 24,
+    ...overrides,
+  })
+
+describe("the messages of a project's own folder", () => {
+  it('make a saved session in the folder, without asking for a worktree', async () => {
+    expect(await invoke(IpcChannel.createSavedSession, project.root, null, 'codex')).toEqual({
+      ok: true,
+      session: local,
+    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex')
+    expect(projectFolders.current).toHaveBeenCalledWith(project.root)
+    expect(worktrees.currentWorktree).not.toHaveBeenCalled()
+  })
+
+  it('make none while the folder is missing, or for a project not in the list, and say why', async () => {
+    projectFolders.current.mockResolvedValue({ ...folderThere, missing: true })
+    expect(await invoke(IpcChannel.createSavedSession, project.root, null, 'claude')).toEqual({
+      ok: false,
+      message: `The project folder is missing: ${project.root}`,
+    })
+    expect(await invoke(IpcChannel.createSavedSession, '/work/other', null, 'claude')).toEqual({
+      ok: false,
+      message: 'The project is not in the list.',
+    })
+    expect(chats.createSavedSession).not.toHaveBeenCalled()
+  })
+
+  it('start a saved session of the folder there, continuing its conversation', async () => {
+    expect(await startLocal()).toMatchObject({ ok: true, session: { savedSessionId: local.id } })
+    expect(chats.prepareSession).toHaveBeenCalledWith(local.id)
+    expect(sessionManager.start).toHaveBeenCalledWith(
+      expect.objectContaining({ projectRoot: project.root, worktreePath: null }),
+      null,
+      { conversationId: local.conversationId, resume: true },
+    )
+    expect(chats.opened).toHaveBeenCalledWith(local.id)
+    expect(worktrees.currentWorktree).not.toHaveBeenCalled()
+  })
+
+  it('start nothing while the folder is missing, keeping the session, and say why', async () => {
+    projectFolders.current.mockResolvedValue({ ...folderThere, missing: true })
+    expect(await startLocal()).toEqual({
+      ok: false,
+      message: `The project folder is missing: ${project.root}`,
+    })
+    expect(chats.prepareSession).not.toHaveBeenCalled()
+    expect(sessionManager.start).not.toHaveBeenCalled()
+    expect(chats.delete).not.toHaveBeenCalled()
+
+    // Back at its path, it starts again.
+    projectFolders.current.mockResolvedValue(folderThere)
+    expect(await startLocal()).toMatchObject({ ok: true })
+  })
+
+  it('refuse a request that puts a saved session of the folder in a worktree, or a chat', async () => {
+    expect(await startLocal({ worktreePath: saved.worktreePath })).toEqual({
+      ok: false,
+      message: 'Invalid session request.',
+    })
+    expect(
+      await startLocal({ savedSessionId: null, chatId: local.id, projectRoot: local.folder }),
+    ).toEqual({ ok: false, message: 'Invalid session request.' })
+    expect(sessionManager.start).not.toHaveBeenCalled()
+  })
+
+  it('delete a saved session of the folder as a saved session, not as a chat', async () => {
+    expect(await invoke(IpcChannel.deleteChat, local.id)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+    expect(await invoke(IpcChannel.deleteSavedSession, local.id)).toEqual({ ok: true })
+    expect(chats.delete).toHaveBeenCalledWith(local.id)
+  })
+
+  it('give what Hoot found of the folders, and pass on every change of them', async () => {
+    expect(await invoke(IpcChannel.listProjectFolders)).toEqual({ [project.root]: folderThere })
+    const changed: ProjectFolderInfo = { missing: false, branch: 'dev', displayName: 'dev' }
+    projectFolders.emit('changed', project.root, changed)
+    expect(webContents.send).toHaveBeenCalledWith(
+      IpcChannel.projectFolderChanged,
+      project.root,
+      changed,
+    )
+  })
+
+  it('show the folder in the file manager while it is there, and copy its path', async () => {
+    electron.listeners.get(IpcChannel.revealProjectFolder)!(trusted, project.root)
+    await vi.waitFor(() =>
+      expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(project.root),
+    )
+    electron.listeners.get(IpcChannel.copyProjectFolderPath)!(trusted, project.root)
+    expect(electron.clipboard.writeText).toHaveBeenCalledWith(project.root)
+
+    vi.clearAllMocks()
+    projectFolders.current.mockResolvedValue({ ...folderThere, missing: true })
+    electron.listeners.get(IpcChannel.revealProjectFolder)!(trusted, project.root)
+    // Not for a project not in the list.
+    electron.listeners.get(IpcChannel.revealProjectFolder)!(trusted, '/work/other')
+    electron.listeners.get(IpcChannel.copyProjectFolderPath)!(trusted, '/work/other')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(electron.shell.showItemInFolder).not.toHaveBeenCalled()
+    expect(electron.clipboard.writeText).not.toHaveBeenCalled()
+  })
+
+  it("keep whether a project's Local row is collapsed, only for a project in the list", () => {
+    const setLocalExpanded = electron.listeners.get(IpcChannel.setLocalExpanded)!
+    setLocalExpanded(trusted, project.root, false)
+    setLocalExpanded(trusted, project.root, true)
+    setLocalExpanded(trusted, '/work/other', false)
+    setLocalExpanded(trusted, '/work/other', true)
+    setLocalExpanded(trusted, project.root, 'no')
+    expect(sidebar.setLocalCollapsed.mock.calls).toEqual([
+      [project.root, true],
+      [project.root, false],
+      ['/work/other', false],
+    ])
   })
 })
 

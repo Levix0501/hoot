@@ -4,12 +4,13 @@ import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
 import { cn } from '../lib/utils'
-import { sessionWorktrees, useAppStore } from '../store/app-store'
+import { hasLocalSessions, sessionWorktrees, useAppStore } from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
 import { worktreeRows, type WorktreeRow } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { ChatItem } from './chat-item'
+import { LocalItem } from './local-item'
 import { NewChatItem } from './new-chat-item'
 import { contextComponents, ProjectItem } from './project-item'
 import { SavedSessionItem } from './saved-session-item'
@@ -52,10 +53,10 @@ const GROUP_ACTION_ON_HOVER =
   'opacity-0 peer-hover/title:opacity-100 hover:opacity-100 focus-visible:opacity-100'
 
 /**
- * The line saying a project or a worktree has no sessions, in the place of
- * their rows, as small as a session's name. It keeps its height while the
- * list is measured closed, before it slides open: shrunk to its text there,
- * the list would slide open short and then jump.
+ * The line saying a project, a worktree or a Local row has no sessions, in
+ * the place of their rows, as small as a session's name. It keeps its height
+ * while the list is measured closed, before it slides open: shrunk to its
+ * text there, the list would slide open short and then jump.
  */
 function NoSessions({ className, testId }: { className: string; testId: string }) {
   return (
@@ -69,30 +70,19 @@ function NoSessions({ className, testId }: { className: string; testId: string }
 }
 
 /**
- * The sessions in a project's main worktree, below its row, in the order they
- * were started.
+ * A worktree's sessions, below its row, or with a `path` of `null`, those in
+ * the project's own folder, below its Local row; in the order they were made
+ * or split off: the saved sessions, and the sessions started there that Hoot
+ * does not keep, such as those of an issue; or a line saying there are none.
  */
-function ProjectSessions({ project }: { project: Project }) {
+function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: string | null }) {
   const sessions = useAppStore(
     useShallow((state) =>
       state.sessions.filter(
-        (session) => session.projectRoot === project.root && session.worktreePath === null,
-      ),
-    ),
-  )
-  return sessions.map((session) => <SessionItem key={session.id} session={session} />)
-}
-
-/**
- * A worktree's sessions, below its row, in the order they were made or split
- * off: its saved sessions, and the sessions started in it that Hoot does not
- * keep, such as those of an issue; or a line saying it has none.
- */
-function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: string }) {
-  const sessions = useAppStore(
-    useShallow((state) =>
-      state.sessions.filter(
-        (session) => session.projectRoot === projectRoot && session.worktreePath === path,
+        (session) =>
+          session.chatId === null &&
+          session.projectRoot === projectRoot &&
+          session.worktreePath === path,
       ),
     ),
   )
@@ -148,8 +138,33 @@ function WorktreeEntry({ project, worktree }: { project: Project; worktree: Work
 }
 
 /**
- * A project's worktrees, after the sessions of its main worktree, newest
- * first by when they were made; each with its sessions below it.
+ * A project's Local row, for the sessions in its own folder, with their rows
+ * below it while it is expanded; only while it has such sessions.
+ */
+function LocalEntry({ project }: { project: Project }) {
+  const shown = useAppStore((state) => hasLocalSessions(state, project.root))
+  const expanded = useAppStore((state) => !state.collapsedLocal.has(project.root))
+  const setLocalExpanded = useAppStore((state) => state.setLocalExpanded)
+  if (!shown) return null
+  return (
+    <Collapsible
+      render={<li />}
+      open={expanded}
+      onOpenChange={(open) => setLocalExpanded(project.root, open)}
+      data-testid="local"
+      data-project-root={project.root}
+    >
+      <LocalItem project={project} expanded={expanded} />
+      <CollapsibleContent render={<ul />} className={SLIDING_ROWS} data-testid="local-rows">
+        <WorktreeSessions projectRoot={project.root} path={null} />
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/**
+ * A project's worktrees, after its Local row, newest first by when they were
+ * made; each with its sessions below it.
  */
 function ProjectWorktrees({ project }: { project: Project }) {
   const listed = useAppStore((state) => state.worktrees[project.root])
@@ -167,18 +182,19 @@ function ProjectWorktrees({ project }: { project: Project }) {
 }
 
 /**
- * A project in the sidebar: its row, with the rows of its sessions and
- * worktrees below it while it is expanded, or a line saying it has none.
+ * A project in the sidebar: its row, with its Local row and its worktrees
+ * below it while it is expanded, or a line saying it has no sessions.
  */
 function ProjectEntry({ project }: { project: Project }) {
   const expanded = useAppStore((state) => !state.collapsedProjects.has(project.id))
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
   // Whether nothing is listed below its row: known once its worktrees have been read.
-  // Saved sessions show only below the rows of their worktrees.
+  // Saved sessions of a worktree show only below the worktree's row.
   const empty = useAppStore(
     (state) =>
       state.worktrees[project.root]?.length === 0 &&
-      !state.sessions.some((session) => session.projectRoot === project.root),
+      !state.sessions.some((session) => session.projectRoot === project.root) &&
+      !hasLocalSessions(state, project.root),
   )
   return (
     <Collapsible
@@ -195,7 +211,7 @@ function ProjectEntry({ project }: { project: Project }) {
           <NoSessions className="pl-5" testId="no-sessions" />
         ) : (
           <>
-            <ProjectSessions project={project} />
+            <LocalEntry project={project} />
             <ProjectWorktrees project={project} />
           </>
         )}

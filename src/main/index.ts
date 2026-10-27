@@ -32,6 +32,7 @@ import { registerDatabaseErrorIpc, registerIpc } from './ipc'
 import { IssueStore } from './issues/issue-store'
 import { LabelStore } from './labels/label-store'
 import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-project'
+import { ProjectFolders } from './projects/project-folders'
 import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
@@ -230,6 +231,9 @@ async function gitExecutable(): Promise<string | null> {
 /** The worktrees of the projects in the list; started with the database, which keeps their names. */
 let worktrees: WorktreeService | null = null
 
+/** The own folders of the projects in the list, followed once the database is open. */
+let projectFolders: ProjectFolders | null = null
+
 /** How to run git for the projects: where it is, and the login shell environment it gets. */
 async function projectGit(): Promise<{ git: string; env: ReturnType<typeof gitEnvironment> }> {
   const git = await gitExecutable()
@@ -275,9 +279,13 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
   })
-  // Nothing is watched: what changed outside Hoot, such as a worktree's
-  // folder deleted, shows when the window gets the focus.
-  window.on('focus', () => worktrees?.refreshAll())
+  // The worktrees are not watched: what changed outside Hoot, such as a
+  // worktree's folder deleted, shows when the window gets the focus. The
+  // projects' own folders are looked at all the time, and again then.
+  window.on('focus', () => {
+    worktrees?.refreshAll()
+    projectFolders?.refreshAll()
+  })
   // A session shown while the window is the active one counts as seen.
   window.on('focus', () => window.webContents.send(IpcChannel.windowFocusChanged, true))
   window.on('blur', () => window.webContents.send(IpcChannel.windowFocusChanged, false))
@@ -337,6 +345,7 @@ if (!app.requestSingleInstanceLock()) {
     if (shutDown) return
     event.preventDefault()
     worktrees?.dispose()
+    projectFolders?.dispose()
     const shutdown = (async () => {
       // Also when Hoot quits without asking, as on SIGTERM.
       await agents.stopAll()
@@ -395,16 +404,20 @@ function startWithDatabase(database: DatabaseSync): void {
     records: new WorktreeStore(database),
     gitContext: projectGit,
     keeping: {
+      // Those in the project's own folder belong to no worktree.
       savedSessionPaths: (root) =>
         chats
           .listSavedSessions()
-          .filter((saved) => saved.projectRoot === root)
-          .map((saved) => saved.worktreePath),
+          .flatMap((saved) =>
+            saved.projectRoot === root && saved.worktreePath !== null ? [saved.worktreePath] : [],
+          ),
       collapsedPaths: () => sidebar.collapsedWorktrees,
       hasOpenSessions: (root, worktreePath) => sessions.hasOpenIn(root, worktreePath),
     },
   })
   worktrees = worktreeService
+  const folders = new ProjectFolders({ gitContext: projectGit })
+  projectFolders = folders
   // A worktree that is gone is cleaned up once the last of its open sessions closes.
   sessions.on('closed', (session) => {
     if (session.chatId === null && session.worktreePath !== null) {
@@ -444,6 +457,7 @@ function startWithDatabase(database: DatabaseSync): void {
     quitGuard,
     updates,
     worktrees: worktreeService,
+    projectFolders: folders,
     workflows,
     sessionStarts,
     inspectProjectFolder: async (directory) => {
@@ -557,6 +571,7 @@ function startWithDatabase(database: DatabaseSync): void {
     app.on('activate', showMainWindow)
     void tools.detect()
     worktreeService.setProjects(projects.list().map((project) => project.root))
+    folders.setProjects(projects.list().map((project) => project.root))
     updates.start()
   })
 }

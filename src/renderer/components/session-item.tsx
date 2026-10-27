@@ -10,9 +10,9 @@ import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
  * A session's row in the sidebar, below its worktree's, or for a session in
- * its project's own folder, below its project's: the tool's icon, 12px
- * further in than that row's icon; the session's name; both smaller than
- * that row's, and the name, unless the row is pointed at or selected,
+ * its project's own folder, below its project's Local row: the tool's icon,
+ * 12px further in than that row's chevron; the session's name; both smaller
+ * than that row's, and the name, unless the row is pointed at or selected,
  * lighter; and, at its right end, the light of the session's state. Click it
  * to show the session, and double-click it or use its context menu to rename
  * it in a dialog; close it from its context menu.
@@ -39,10 +39,7 @@ export function SessionItem({ session }: { session: UiSession }) {
         <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className={cn(
-            'cursor-default text-xs text-sidebar-foreground/70',
-            session.worktreePath === null ? 'pl-5' : 'pl-8',
-          )}
+          className="cursor-default pl-8 text-xs text-sidebar-foreground/70"
           onClick={() => selectSession(session.id)}
           onDoubleClick={() => startRenaming(session.id)}
           data-testid="session-item-button"

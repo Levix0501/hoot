@@ -7,6 +7,7 @@ import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
 import type { AgentLaunchSettingsChange, LaunchSettings } from './launch-settings'
+import type { ProjectFolderInfo } from './project-folders'
 import type { QuitReason, SessionInfo } from './session'
 import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
@@ -87,7 +88,10 @@ export interface StartSessionRequest {
   id: string
   /** The project's root, or for a chat the folder its agent runs in. */
   projectRoot: string
-  /** The root of one of the project's worktrees to run in, or `null` for the main worktree. */
+  /**
+   * The root of one of the project's worktrees to run in, or `null` for the
+   * main worktree, the project's own folder.
+   */
   worktreePath: string | null
   /**
    * The chat whose agent the session runs, which has no project and runs in
@@ -96,7 +100,8 @@ export interface StartSessionRequest {
   chatId?: string | null
   /**
    * The saved session whose agent the session runs, in the worktree the
-   * request names; `null` or left out for every other session.
+   * request names, or with none, in the project's own folder; `null` or left
+   * out for every other session.
    */
   savedSessionId?: string | null
   toolId: ToolId
@@ -206,6 +211,11 @@ export interface WindowState {
   collapsedProjects: number[]
   /** The roots of the worktrees collapsed in the sidebar, as they were left; the others are expanded. */
   collapsedWorktrees: string[]
+  /**
+   * The roots of the projects whose Local row is collapsed in the sidebar, as
+   * they were left; the others are expanded.
+   */
+  collapsedLocal: string[]
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -279,6 +289,7 @@ export const IpcChannel = {
   setSidebarWidth: 'window:set-sidebar-width',
   setProjectExpanded: 'window:set-project-expanded',
   setWorktreeExpanded: 'window:set-worktree-expanded',
+  setLocalExpanded: 'window:set-local-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
   fullScreenChanged: 'window:full-screen-changed',
   windowFocusChanged: 'window:focus-changed',
@@ -308,6 +319,10 @@ export const IpcChannel = {
   removeWorktree: 'worktrees:remove',
   revealWorktree: 'worktrees:reveal',
   copyWorktreePath: 'worktrees:copy-path',
+  listProjectFolders: 'project-folders:list',
+  projectFolderChanged: 'project-folders:changed',
+  revealProjectFolder: 'project-folders:reveal',
+  copyProjectFolderPath: 'project-folders:copy-path',
   listIssues: 'issues:list',
   createIssue: 'issues:create',
   updateIssue: 'issues:update',
@@ -460,12 +475,18 @@ export interface HootApi {
   deleteChat(id: string): Promise<DeleteChatResult>
   /** The chats changed: one was made, opened, renamed, split off, removed or deleted. */
   onChatsChanged(listener: (chats: ChatInfo[]) => void): () => void
-  /** Every saved session, oldest first, as they show below their worktrees. */
+  /**
+   * Every saved session, oldest first, as they show below their worktrees and
+   * their projects' Local rows.
+   */
   listSavedSessions(): Promise<SavedSessionInfo[]>
-  /** Makes a saved session of an agent in a worktree of a project. */
+  /**
+   * Makes a saved session of an agent in a worktree of a project, or with
+   * `null` for the worktree, in the project's own folder.
+   */
   createSavedSession(
     projectRoot: string,
-    worktreePath: string,
+    worktreePath: string | null,
     toolId: CodingToolId,
   ): Promise<CreateSavedSessionResult>
   /** Gives a saved session another name; an empty name gives it its default name again. */
@@ -485,6 +506,11 @@ export interface HootApi {
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Saves whether a worktree is expanded in the sidebar, so that Hoot opens with it as it was left. */
   setWorktreeExpanded(projectRoot: string, worktreePath: string, expanded: boolean): void
+  /**
+   * Saves whether a project's Local row is expanded in the sidebar, so that
+   * Hoot opens with it as it was left.
+   */
+  setLocalExpanded(projectRoot: string, expanded: boolean): void
   /** The application menu asked to show or hide the sidebar. */
   onToggleSidebarRequested(listener: () => void): () => void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
@@ -578,6 +604,22 @@ export interface HootApi {
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void
+  /**
+   * The own folder of every project in the list, by project root, once Hoot
+   * has looked at it: whether it is there, and what is checked out in it.
+   */
+  listProjectFolders(): Promise<Record<string, ProjectFolderInfo>>
+  /**
+   * A project's own folder changed: it went or came back, or another branch
+   * or commit was checked out in it, however that was done.
+   */
+  onProjectFolderChanged(
+    listener: (projectRoot: string, folder: ProjectFolderInfo) => void,
+  ): () => void
+  /** Shows a project's own folder in Finder (File Explorer on Windows). */
+  revealProjectFolder(projectRoot: string): void
+  /** Puts the path of a project's own folder on the clipboard. */
+  copyProjectFolderPath(projectRoot: string): void
   /**
    * The issues without a project and those of the projects in the list, in
    * the order they were created.

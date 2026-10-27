@@ -256,3 +256,41 @@ describe('SidebarStateStore: width', () => {
     expect(reopened.collapsedProjects).toEqual([2])
   })
 })
+
+describe('SidebarStateStore: collapsed Local rows', () => {
+  it('has every Local row expanded when nothing was saved', () => {
+    expect(new SidebarStateStore(directory).collapsedLocal).toEqual([])
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it('saves which Local rows are collapsed, apart from the worktrees, across instances', () => {
+    const first = new SidebarStateStore(directory)
+    first.setWorktreeCollapsed('/work/project', true)
+    first.setLocalCollapsed('/work/project', true)
+    first.setLocalCollapsed('/work/other', true)
+    expect(first.collapsedLocal).toEqual(['/work/project', '/work/other'])
+    expect(saved()).toEqual({
+      collapsedWorktrees: ['/work/project'],
+      collapsedLocal: ['/work/project', '/work/other'],
+    })
+    expect(new SidebarStateStore(directory).collapsedLocal).toEqual([
+      '/work/project',
+      '/work/other',
+    ])
+
+    first.setLocalCollapsed('/work/project', false)
+    const reopened = new SidebarStateStore(directory)
+    expect(reopened.collapsedLocal).toEqual(['/work/other'])
+    expect(reopened.collapsedWorktrees).toEqual(['/work/project'])
+  })
+
+  it('leaves out saved values that are not project roots, and writes nothing needlessly', () => {
+    writeSettings({ collapsedLocal: ['/work/a', '', 3, null] })
+    const store = new SidebarStateStore(directory)
+    expect(store.collapsedLocal).toEqual(['/work/a'])
+    fs.writeFileSync(file, JSON.stringify({ collapsedLocal: ['/work/a'], marker: true }))
+    store.setLocalCollapsed('/work/a', true)
+    store.setLocalCollapsed('/work/b', false)
+    expect(saved()).toEqual({ collapsedLocal: ['/work/a'], marker: true })
+  })
+})

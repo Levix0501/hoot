@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import { openDatabase } from '../database/database'
-import { ChatManager, newConversationId, visibleInput } from './chat-manager'
+import { ChatManager, newConversationId, ownConversations, visibleInput } from './chat-manager'
 import type { AgentConversation, ChatConversations } from './conversations'
 
 class FakeConversations implements ChatConversations {
@@ -50,6 +50,23 @@ const endedSaved = (
   id: `session-${savedSessionId}`,
   projectRoot: '/work/project',
   worktreePath,
+  chatId: null,
+  savedSessionId,
+  toolId,
+  issueId: null,
+  status: 'exited',
+  exit: { code: 0, signal: null, abnormal: false },
+})
+
+/** The process of a saved session in its project's own folder that ended. */
+const endedLocal = (
+  savedSessionId: string,
+  projectRoot: string,
+  toolId: 'claude' | 'codex' | 'opencode',
+): SessionInfo => ({
+  id: `session-${savedSessionId}`,
+  projectRoot,
+  worktreePath: null,
   chatId: null,
   savedSessionId,
   toolId,
@@ -983,6 +1000,253 @@ describe('ChatManager', () => {
       expect(again.listSavedSessions().map((entry) => entry.id)).not.toContain(deleted.id)
     })
   }
+
+  /** A project's own folder, with a file in it. */
+  const projectFolder = (): string => {
+    const folder = path.join(root, 'projects', 'app')
+    fs.mkdirSync(folder, { recursive: true })
+    fs.writeFileSync(path.join(folder, 'README.md'), '# App\n')
+    return folder
+  }
+
+  /** Two conversations an agent had in the project folder out of Hoot, before any session there. */
+  const outside: AgentConversation[] = [
+    { id: 'outside-1', title: 'Outside 1', createdAt: 10 },
+    { id: 'outside-2', title: 'Outside 2', createdAt: 20 },
+  ]
+
+  it('keeps a saved session in the project folder apart from the chats, and never makes the folder', async () => {
+    const folder = projectFolder()
+    const local = manager.createSavedSession(folder, null, 'claude')
+
+    expect(local).toMatchObject({
+      folder,
+      projectRoot: folder,
+      worktreePath: null,
+      hasMessages: false,
+    })
+    expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([local.id])
+    expect(manager.list()).toEqual([])
+    expect(fs.readdirSync(folder)).toEqual(['README.md'])
+
+    // One whose folder is gone, as when it was renamed, does not make it again.
+    fs.renameSync(folder, `${folder}-renamed`)
+    expect(await manager.prepareSession(local.id)).toEqual({
+      folder,
+      launch: { conversationId: local.conversationId, resume: false },
+    })
+    expect(fs.existsSync(folder)).toBe(false)
+  })
+
+  it('keeps a Claude Code session of the project folder that got a message, and resumes it', async () => {
+    const folder = projectFolder()
+    const local = manager.createSavedSession(folder, null, 'claude')
+    manager.opened(local.id)
+    manager.noteHookEvent(local.id, hook('UserPromptSubmit', local.conversationId))
+    conversations.claude = true
+    manager.sessionEnded(endedLocal(local.id, folder, 'claude'))
+    await manager.flush()
+
+    const again = await restarted()
+    expect(again.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: local.id, worktreePath: null, hasMessages: true }),
+    ])
+    expect(await again.prepareSession(local.id)).toEqual({
+      folder,
+      launch: { conversationId: local.conversationId, resume: true },
+    })
+  })
+
+  it('leaves the project folder as it is when its sessions go', async () => {
+    const folder = projectFolder()
+    // One that never got a message goes once its agent ends.
+    const empty = manager.createSavedSession(folder, null, 'codex')
+    manager.opened(empty.id)
+    manager.sessionEnded(endedLocal(empty.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.get(empty.id)).toBeUndefined()
+    // One the user deletes goes too.
+    const deleted = manager.createSavedSession(folder, null, 'opencode')
+    await manager.delete(deleted.id)
+    expect(manager.listSavedSessions()).toEqual([])
+
+    expect(trashed).toEqual([])
+    expect(fs.readdirSync(folder)).toEqual(['README.md'])
+  })
+
+  for (const toolId of ['codex', 'opencode'] as const) {
+    const record = (list: AgentConversation[]) => {
+      if (toolId === 'codex') conversations.codex = list
+      else conversations.opencode = list
+    }
+
+    it(`gives a ${toolId} session of the project folder none of the conversations from before it`, async () => {
+      const folder = projectFolder()
+      record(outside)
+      const local = manager.createSavedSession(folder, null, toolId)
+      const own = local.conversationId ?? 'thread-own'
+      manager.opened(local.id)
+      manager.typed(local.id, 'session-local', 'a question\r')
+      record([...outside, { id: own, title: 'Own', createdAt: local.createdAt + 5 }])
+      manager.sessionEnded(endedLocal(local.id, folder, toolId))
+      await manager.flush()
+
+      expect(manager.listSavedSessions()).toEqual([
+        expect.objectContaining({ id: local.id, conversationId: own, hasMessages: true }),
+      ])
+      // Opened last, it still takes none of them up when Hoot starts again.
+      manager.opened(local.id)
+      const again = await restarted()
+      expect(again.listSavedSessions()).toEqual([
+        expect.objectContaining({ id: local.id, conversationId: own }),
+      ])
+    })
+
+    it(`splits off what a ${toolId} session of the project folder left at /new, and nothing older`, async () => {
+      const folder = projectFolder()
+      record(outside)
+      const local = manager.createSavedSession(folder, null, toolId)
+      const first = local.conversationId ?? 'thread-1'
+      manager.opened(local.id)
+      manager.typed(local.id, 'session-local', 'first question\r')
+      manager.typed(local.id, 'session-local', '/new\r')
+      manager.typed(local.id, 'session-local', 'second question\r')
+      record([
+        ...outside,
+        { id: first, title: 'First', createdAt: local.createdAt + 1 },
+        { id: 'thread-2', title: 'Second', createdAt: local.createdAt + 2 },
+      ])
+      manager.sessionEnded(endedLocal(local.id, folder, toolId))
+      await manager.flush()
+
+      const listed = manager.listSavedSessions()
+      expect(listed.map((entry) => [entry.id === local.id, entry.conversationId])).toEqual([
+        [true, 'thread-2'],
+        [false, first],
+      ])
+      expect(listed[1]).toMatchObject({ folder, projectRoot: folder, worktreePath: null })
+      // The one split off keeps its conversation, which began before it was split off.
+      const again = await restarted()
+      expect(again.listSavedSessions().map((entry) => entry.conversationId)).toEqual([
+        'thread-2',
+        first,
+      ])
+    })
+
+    it(`gives a new ${toolId} session of the project folder nothing from before it, once the others are deleted`, async () => {
+      const folder = projectFolder()
+      record(outside)
+      const deleted = manager.createSavedSession(folder, null, toolId)
+      const deletedOwn = deleted.conversationId ?? 'thread-deleted'
+      manager.opened(deleted.id)
+      manager.typed(deleted.id, 'session-deleted', 'a question\r')
+      const recorded = [
+        ...outside,
+        { id: deletedOwn, title: 'Deleted', createdAt: deleted.createdAt + 1 },
+      ]
+      record(recorded)
+      manager.sessionEnded(endedLocal(deleted.id, folder, toolId))
+      await manager.flush()
+      await manager.delete(deleted.id)
+      // Another conversation out of Hoot, before the next session.
+      recorded.push({ id: 'outside-3', title: 'Outside 3', createdAt: clock })
+
+      const local = manager.createSavedSession(folder, null, toolId)
+      const own = local.conversationId ?? 'thread-own'
+      manager.opened(local.id)
+      manager.typed(local.id, 'session-local', 'another question\r')
+      record([...recorded, { id: own, title: 'Own', createdAt: local.createdAt + 1 }])
+      manager.sessionEnded(endedLocal(local.id, folder, toolId))
+      await manager.flush()
+
+      const again = await restarted()
+      expect(again.listSavedSessions()).toEqual([
+        expect.objectContaining({ id: local.id, conversationId: own }),
+      ])
+    })
+
+    it(`gives ${toolId} sessions of the project folder that ran side by side nothing from before them`, async () => {
+      const folder = projectFolder()
+      record(outside)
+      const first = manager.createSavedSession(folder, null, toolId)
+      const second = manager.createSavedSession(folder, null, toolId)
+      // Both start a conversation Hoot does not know while both run.
+      for (const [saved, message] of [
+        [first, 'first question\r'],
+        [second, 'second question\r'],
+      ] as const) {
+        manager.opened(saved.id)
+        if (toolId === 'opencode') manager.typed(saved.id, `session-${saved.id}`, '/new\r')
+        manager.typed(saved.id, `session-${saved.id}`, message)
+      }
+      record([
+        ...outside,
+        { id: 'side-1', title: 'Side 1', createdAt: second.createdAt + 1 },
+        { id: 'side-2', title: 'Side 2', createdAt: second.createdAt + 2 },
+      ])
+      manager.sessionEnded(endedLocal(first.id, folder, toolId))
+      manager.sessionEnded(endedLocal(second.id, folder, toolId))
+      await manager.flush()
+
+      const again = await restarted()
+      const held = again.listSavedSessions().map((entry) => entry.conversationId)
+      expect(held.length).toBeGreaterThan(0)
+      expect(held).not.toContain('outside-1')
+      expect(held).not.toContain('outside-2')
+    })
+  }
+
+  it('still splits off every earlier conversation of a worktree for a saved session there', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    conversations.codex = outside
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(saved.id)
+    manager.typed(saved.id, 'session-saved', 'a question\r')
+    conversations.codex = [...outside, { id: 'own', title: 'Own', createdAt: saved.createdAt + 1 }]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+
+    expect(manager.listSavedSessions().map((entry) => entry.conversationId)).toEqual([
+      'own',
+      'outside-1',
+      'outside-2',
+    ])
+  })
+})
+
+describe('ownConversations', () => {
+  const recorded: AgentConversation[] = [
+    { id: 'old', title: null, createdAt: 10 },
+    { id: 'kept', title: null, createdAt: 20 },
+    { id: 'unknown', title: null, createdAt: 0 },
+    { id: 'new', title: null, createdAt: 40 },
+  ]
+
+  it('leaves a session of a project folder its own conversation and those since it was made', () => {
+    const local = { projectRoot: '/work/app', worktreePath: null, createdAt: 30 }
+    expect(
+      ownConversations({ ...local, conversationId: null }, recorded).map((entry) => entry.id),
+    ).toEqual(['new'])
+    expect(
+      ownConversations({ ...local, conversationId: 'kept' }, recorded).map((entry) => entry.id),
+    ).toEqual(['kept', 'new'])
+    expect(
+      ownConversations({ ...local, createdAt: 40, conversationId: null }, recorded).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['new'])
+  })
+
+  it('leaves a chat and a saved session of a worktree every conversation', () => {
+    for (const owner of [
+      { projectRoot: null, worktreePath: null },
+      { projectRoot: '/work/app', worktreePath: '/work/app-fix' },
+    ]) {
+      expect(ownConversations({ ...owner, createdAt: 30, conversationId: null }, recorded)).toEqual(
+        recorded,
+      )
+    }
+  })
 })
 
 const makeId = () => 'ABC-123'

@@ -51,10 +51,8 @@ function storedFromRow(row: ChatRow): StoredChat {
 
 function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
   const chat = chatFromRow(row)
-  if (chat.projectRoot === null || chat.worktreePath === null) {
-    throw new Error(`The saved session ${chat.id} has no worktree.`)
-  }
-  return { ...chat, projectRoot: chat.projectRoot, worktreePath: chat.worktreePath }
+  if (chat.projectRoot === null) throw new Error(`The saved session ${chat.id} has no project.`)
+  return { ...chat, projectRoot: chat.projectRoot }
 }
 
 /** What can change about a chat; what is left out stays as it is. */
@@ -67,10 +65,12 @@ export interface ChatChanges {
 }
 
 /**
- * The chats and saved sessions, kept in the database. The chats come in the
- * order of the sidebar's Chats group, by when they were last opened, newest
- * first; the saved sessions come by when they were made or split off, oldest
- * first, as they show below their worktree. Those the user deleted are in
+ * The chats and saved sessions, kept in the database. A chat has no project;
+ * a saved session has one, and a worktree of it, or none for one in the
+ * project's own folder. The chats come in the order of the sidebar's Chats
+ * group, by when they were last opened, newest first; the saved sessions come
+ * by when they were made or split off, oldest first, as they show below their
+ * worktree or their project's Local row. Those the user deleted are in
  * neither list, but are kept with their conversations.
  */
 export class ChatStore {
@@ -80,12 +80,12 @@ export class ChatStore {
     this.statements = {
       chats: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE worktree_path IS NULL AND deleted_at IS NULL
+         FROM chats WHERE project_root IS NULL AND deleted_at IS NULL
          ORDER BY opened_at DESC, created_at DESC, id`,
       ),
       savedSessions: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE worktree_path IS NOT NULL AND deleted_at IS NULL
+         FROM chats WHERE project_root IS NOT NULL AND deleted_at IS NULL
          ORDER BY created_at, id`,
       ),
       chat: db.prepare(`SELECT ${COLUMNS} FROM chats WHERE id = ?`),

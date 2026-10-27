@@ -13,12 +13,16 @@ export interface ChatInfo {
   toolId: CodingToolId
   /**
    * The folder the agent runs in: the chat's own folder under `~/.hoot/chats`,
-   * or the root of a saved session's worktree.
+   * the root of a saved session's worktree, or for a saved session in its
+   * project's own folder, that folder.
    */
   folder: string
-  /** The root of the project of a saved session's worktree; `null` for a chat. */
+  /** The root of the project of a saved session; `null` for a chat. */
   projectRoot: string | null
-  /** The root of the worktree a saved session runs in; `null` for a chat. */
+  /**
+   * The root of the worktree a saved session runs in; `null` for a chat, and
+   * for a saved session in its project's own folder.
+   */
   worktreePath: string | null
   /** The agent's own id of the conversation the chat is in; `null` until it is known. */
   conversationId: string | null
@@ -36,17 +40,27 @@ export interface ChatInfo {
 
 /**
  * A saved session: an agent session Hoot keeps and lists below its worktree,
- * which it continues when the user opens it again. It is a chat of a worktree
- * instead of a folder of its own.
+ * or below its project's Local row for one in the project's own folder, which
+ * it continues when the user opens it again. It is a chat of a worktree or of
+ * the project folder instead of a folder of its own.
  */
 export interface SavedSessionInfo extends ChatInfo {
   projectRoot: string
-  worktreePath: string
+  /** The root of the worktree it runs in, or `null` for one in the project's own folder. */
+  worktreePath: string | null
 }
 
-/** Whether a chat is a saved session, whose worktree Hoot opened it in. */
+/** Whether a chat is a saved session, of a project's worktree or of its own folder. */
 export function isSavedSession(chat: ChatInfo): chat is SavedSessionInfo {
-  return chat.worktreePath !== null
+  return chat.projectRoot !== null
+}
+
+/**
+ * Whether a chat is a saved session in its project's own folder, which the
+ * project's Local row lists, rather than in one of its worktrees.
+ */
+export function inProjectFolder(chat: Pick<ChatInfo, 'projectRoot' | 'worktreePath'>): boolean {
+  return chat.projectRoot !== null && chat.worktreePath === null
 }
 
 /** The name Hoot shows for a chat: the one the user gave it, else the agent's title, else the agent's name. */

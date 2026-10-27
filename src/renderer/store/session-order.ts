@@ -2,10 +2,11 @@ import type { Project } from '../../shared/ipc'
 
 /**
  * Sessions in sidebar order: grouped by project in the order of the project
- * list. Within a project come first the sessions in its main worktree, then
- * those of each of its worktrees in the order of the worktree rows
- * (`worktreeOrder` gives the roots of a project's worktree rows); each in
- * the order the sessions are given in, which is the order of their tabs.
+ * list. Within a project come first the sessions in its own folder, which its
+ * Local row lists, then those of each of its worktrees in the order of the
+ * worktree rows (`worktreeOrder` gives the roots of a project's worktree
+ * rows); each in the order the sessions are given in, which is the order of
+ * their tabs.
  */
 export function sidebarOrder<T extends { projectRoot: string; worktreePath: string | null }>(
   projects: readonly Project[],

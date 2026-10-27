@@ -8,13 +8,14 @@ import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
- * A saved session's row below its worktree's: the agent's icon, 12px further
- * in than the worktree's; the session's name; both smaller than the
- * worktree's, and the name, unless the row is pointed at or selected,
- * lighter; and while its agent runs, at its right end, the light of its
- * state. Click it to show the session, continuing its conversation when its
- * agent does not run; double-click it or use its context menu to rename it.
- * Its context menu also closes a running one, and deletes it.
+ * A saved session's row below its worktree's, or below its project's Local
+ * row: the agent's icon, 12px further in than that row's chevron; the
+ * session's name; both smaller than that row's, and the name, unless the row
+ * is pointed at or selected, lighter; and while its agent runs, at its right
+ * end, the light of its state. Click it to show the session, continuing its
+ * conversation when its agent does not run; double-click it or use its
+ * context menu to rename it. Its context menu also closes a running one, and
+ * deletes it.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>

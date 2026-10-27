@@ -39,9 +39,10 @@ const TAB = 'group/tab relative flex h-7 w-full min-w-0 items-center rounded-lg 
 const LABEL = 'relative flex min-w-0 flex-1 items-center gap-2 text-sm'
 
 /**
- * The keys of a worktree's tabs (see `tabKey`), in their order: one for each
- * of its saved sessions, whether its agent runs or not, and one for each
- * other session started in it, such as an issue's.
+ * The keys of a worktree's tabs (see `tabKey`), or for a `worktreePath` of
+ * `null`, of the tabs of the project's own folder, in their order: one for
+ * each saved session there, whether its agent runs or not, and one for each
+ * other session started there, such as an issue's.
  */
 function worktreeTabs(
   state: Pick<AppState, 'sessions' | 'savedSessions' | 'tabOrders'>,
@@ -299,23 +300,25 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
 }
 
 /**
- * The tabs of a session's worktree, for the main area's top row: one for each
- * of its saved sessions, whether its agent runs or not, and one for each
- * other session started in it; in the order its sessions switch in, which
- * dragging a tab changes. The session shown has the current tab. The tab of
- * a saved session whose agent does not run has no light, as its row in the
- * sidebar has none, and its agent starts only once the tab is clicked. Right
- * after the last tab, unless the worktree is missing, a `+` starts another
- * session in the worktree, as the `+` on its row in the sidebar does; while
- * the tabs do not fit, they scroll, and the `+` stays at the end of the row.
+ * The tabs of a session's worktree, or of its project's own folder, for the
+ * main area's top row: one for each saved session there, whether its agent
+ * runs or not, and one for each other session started there; in the order
+ * its sessions switch in, which dragging a tab changes. The session shown has
+ * the current tab. The tab of a saved session whose agent does not run has
+ * no light, as its row in the sidebar has none, and its agent starts only
+ * once the tab is clicked. Right after the last tab, unless the worktree or
+ * the project folder is missing, a `+` starts another session there, as the
+ * `+` on its row in the sidebar does; while the tabs do not fit, they
+ * scroll, and the `+` stays at the end of the row.
  */
 export function SessionTabs({ session }: { session: UiSession }) {
   const { projectRoot, worktreePath } = session
   const keys = useAppStore(useShallow((state) => worktreeTabs(state, projectRoot, worktreePath)))
-  const missing = useAppStore(
-    (state) =>
-      projectWorktreeRows(state, projectRoot).find((row) => row.path === worktreePath)?.missing ??
-      true,
+  const missing = useAppStore((state) =>
+    worktreePath === null
+      ? state.projectFolders[projectRoot]?.missing === true
+      : (projectWorktreeRows(state, projectRoot).find((row) => row.path === worktreePath)
+          ?.missing ?? true),
   )
   const reorderTabs = useAppStore((state) => state.reorderTabs)
   const [dragged, setDragged] = useState<string | null>(null)
@@ -353,7 +356,7 @@ export function SessionTabs({ session }: { session: UiSession }) {
             ))}
           </div>
         </SortableContext>
-        {worktreePath !== null && !missing && (
+        {!missing && (
           <div className="flex shrink-0 items-center ps-1.5">
             <NewWorktreeSessionButton
               projectRoot={projectRoot}

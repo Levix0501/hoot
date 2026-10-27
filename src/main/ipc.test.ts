@@ -180,6 +180,7 @@ const chats = Object.assign(emitter(), {
   opened: vi.fn<(id: string) => void>(),
   rename: vi.fn<(id: string, name: string) => boolean>(() => true),
   setTitle: vi.fn<(id: string, title: string) => void>(),
+  delete: vi.fn<(id: string) => Promise<void>>(async () => {}),
 })
 const project = { id: 1, root: '/work/project', name: 'project' }
 const projects = {
@@ -216,6 +217,7 @@ const worktrees = Object.assign(emitter(), {
 })
 const sidebar = { setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>() }
 const sessionManager = Object.assign(emitter(), {
+  closeOf: vi.fn<(chatId: string) => Promise<void>>(async () => {}),
   closeIn: vi.fn<(root: string, worktreePath: string) => Promise<void>>(async () => {}),
   closeRunningWithin: vi.fn<(directory: string) => Promise<void>>(async () => {}),
   forgetWorktree: vi.fn<(worktreePath: string) => void>(),
@@ -414,6 +416,50 @@ describe('the messages of chats', () => {
     const changed = [{ ...saved, title: 'Fix the login' }]
     chats.emit('saved-changed', changed)
     expect(webContents.send).toHaveBeenCalledWith(IpcChannel.savedSessionsChanged, changed)
+  })
+
+  it('delete a chat or a saved session once its sessions have closed', async () => {
+    const order: string[] = []
+    sessionManager.closeOf.mockImplementation(async (id) => {
+      order.push(`close ${id}`)
+    })
+    chats.delete.mockImplementation(async (id) => {
+      order.push(`delete ${id}`)
+    })
+    expect(await invoke(IpcChannel.deleteChat, chat.id)).toEqual({ ok: true })
+    expect(await invoke(IpcChannel.deleteSavedSession, saved.id)).toEqual({ ok: true })
+    expect(order).toEqual([
+      `close ${chat.id}`,
+      `delete ${chat.id}`,
+      `close ${saved.id}`,
+      `delete ${saved.id}`,
+    ])
+
+    // One that is gone needs nothing more; one of the other kind is refused.
+    vi.clearAllMocks()
+    expect(await invoke(IpcChannel.deleteChat, 'gone')).toEqual({ ok: true })
+    expect(await invoke(IpcChannel.deleteChat, saved.id)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+    expect(await invoke(IpcChannel.deleteSavedSession, chat.id)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+    expect(await invoke(IpcChannel.deleteChat, 7)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+    expect(sessionManager.closeOf).not.toHaveBeenCalled()
+    expect(chats.delete).not.toHaveBeenCalled()
+
+    chats.delete.mockRejectedValueOnce(new Error('database is locked'))
+    expect(await invoke(IpcChannel.deleteChat, chat.id)).toEqual({
+      ok: false,
+      message: 'database is locked',
+    })
+    sessionManager.closeOf.mockImplementation(async () => {})
+    chats.delete.mockImplementation(async () => {})
   })
 
   it('creates a named worktree and the session it opens', async () => {

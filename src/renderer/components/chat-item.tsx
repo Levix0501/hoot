@@ -1,23 +1,18 @@
-import { PencilIcon, XIcon } from 'lucide-react'
 import { chatName, type ChatInfo } from '../../shared/chats'
 import { sessionState, stateDescription } from '../lib/session-state'
 import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-store'
+import { ChatMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from './ui/context-menu'
+import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
  * A chat's row in the sidebar's Chats group: the agent's icon, the chat's
  * name and, while its agent runs, at its right end, the light of the agent's
  * state. Click it to show the chat, and double-click it or use its context
- * menu to rename it; close a running chat's agent from its context menu.
+ * menu to rename it. Its context menu also closes a running chat's agent, and
+ * deletes the chat.
  */
 export function ChatItem({ chat }: { chat: ChatInfo }) {
   const running = useAppStore((state) =>
@@ -31,7 +26,6 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
   })
   const openChat = useAppStore((state) => state.openChat)
   const startRenamingChat = useAppStore((state) => state.startRenamingChat)
-  const closeChat = useAppStore((state) => state.closeChat)
   const name = chatName(chat)
   const state = running ? sessionState(running) : null
 
@@ -69,29 +63,7 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
           )}
         </SidebarMenuButton>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-auto min-w-36">
-        <ContextMenuItem
-          onClick={() => startRenamingChat(chat.id)}
-          data-testid="chat-context-rename"
-        >
-          <PencilIcon />
-          Rename…
-        </ContextMenuItem>
-        {running && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              disabled={running.closing}
-              onClick={() => closeChat(chat.id)}
-              data-testid="chat-context-close"
-            >
-              <XIcon />
-              Close
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
+      <ChatMenu chatId={chat.id} testId="chat-context" />
     </ContextMenu>
   )
 }

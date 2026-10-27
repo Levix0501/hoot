@@ -220,6 +220,18 @@ export class SessionManager extends EventEmitter<{
   }
 
   /**
+   * Closes the sessions of a chat or saved session, by its id, whether they
+   * are starting, running or ended, as before it is deleted: settles once
+   * their processes have ended.
+   */
+  async closeOf(chatId: string): Promise<void> {
+    const ids = [...this.records.values()]
+      .filter((record) => record.info.chatId === chatId || record.info.savedSessionId === chatId)
+      .map((record) => record.info.id)
+    await Promise.all(ids.map((id) => this.close(id)))
+  }
+
+  /**
    * Starts a session; `issue` is what it sends Claude Code when it starts
    * from the start button of the issue the request names.
    */

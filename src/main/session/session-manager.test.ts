@@ -490,6 +490,30 @@ describe('SessionManager', () => {
     expect(closed).toEqual(['w1', 'w2', 'o1'])
   })
 
+  it('closes the sessions of a chat or saved session, running or ended, and no others', async () => {
+    const { manager, host } = setup()
+    const closed: string[] = []
+    manager.on('closed', (session) => closed.push(session.id))
+    await manager.start({ ...request('c1', 'claude', '/chats/one'), chatId: 'chat' })
+    await manager.start({ ...request('c2', 'claude', '/chats/two'), chatId: 'other' })
+    await manager.start({
+      ...request('s1', 'claude', '/work/project', '/wt/feat'),
+      savedSessionId: 'saved',
+    })
+    await manager.start({
+      ...request('s2', 'claude', '/work/project', '/wt/feat'),
+      savedSessionId: 'saved',
+    })
+    host.emit('exit', 's1', 1, 0)
+
+    await manager.closeOf('saved')
+    expect(closed).toEqual(['s1', 's2'])
+    expect(host.killed).toEqual([['s2', 'SIGHUP']])
+    await manager.closeOf('chat')
+    expect(closed).toEqual(['s1', 's2', 'c1'])
+    expect(manager.list().map((session) => session.id)).toEqual(['c2'])
+  })
+
   it('forgets the ended sessions of a removed project', async () => {
     const { manager, host } = setup()
     await manager.start(request('s1'))

@@ -384,6 +384,8 @@ export interface AppState {
   renamingSavedSessionId: string | null
   /** A running session the user asked to close, while Hoot asks for confirmation. */
   closeConfirmation: string | null
+  /** A chat or saved session the user asked to delete, by its id, while Hoot asks for confirmation. */
+  sessionDeletion: string | null
   /**
    * While Hoot asks whether to quit, or to restart into an update: how many
    * sessions are running, which agents are being installed or updated or wait
@@ -514,6 +516,18 @@ export interface AppState {
   resumeChat(chatId: string): void
   /** Asks for confirmation before closing a running chat's agent, as closing a session does. */
   closeChat(chatId: string): void
+  /**
+   * Asks for confirmation before deleting a chat or saved session, by its id,
+   * every time, whether or not its agent runs.
+   */
+  requestDeleteSession(id: string): void
+  /**
+   * Deletes the chat or saved session asked about, once confirmed: its
+   * sessions close first, as closing them does but without asking again,
+   * then it leaves the sidebar and its worktree's tabs for good. Says why
+   * when it cannot be deleted.
+   */
+  answerDeleteSession(confirmed: boolean): Promise<void>
   startRenamingChat(chatId: string): void
   /** Ends renaming a chat; `null` keeps its name as it was. */
   finishRenamingChat(chatId: string, name: string | null): void
@@ -873,6 +887,19 @@ function whyNotDeletable(worktree: WorktreeInfo | null): string | null {
   if (worktree.missing) return 'The folder of the worktree is missing.'
   if (worktree.locked) return 'The worktree is locked.'
   return null
+}
+
+/** A chat or saved session asked to be deleted, unless it is in neither list. */
+function deletionAmong(
+  id: string | null,
+  chats: readonly ChatInfo[],
+  savedSessions: readonly SavedSessionInfo[],
+): string | null {
+  return id !== null &&
+    !chats.some((chat) => chat.id === id) &&
+    !savedSessions.some((saved) => saved.id === id)
+    ? null
+    : id
 }
 
 /** True while a session is starting or running. */
@@ -1485,19 +1512,29 @@ export const useAppStore = create<AppState>()((set, get) => {
   /** Whether the issues have been read since Hoot started. */
   let issuesRead = false
 
+  /**
+   * The chats and saved sessions being deleted, by id, from when their
+   * sessions have closed: they no longer show, also when a list read meanwhile
+   * still has them.
+   */
+  const beingDeleted = new Set<string>()
+
   /** Shows the chats as they are now, in the order the sidebar lists them. */
-  const applyChats = (chats: ChatInfo[]) => {
+  const applyChats = (listed: ChatInfo[]) => {
+    const chats = listed.filter((chat) => !beingDeleted.has(chat.id))
     set((state) => ({
       chats,
       renamingChatId:
         state.renamingChatId !== null && !chats.some((chat) => chat.id === state.renamingChatId)
           ? null
           : state.renamingChatId,
+      sessionDeletion: deletionAmong(state.sessionDeletion, chats, state.savedSessions),
     }))
   }
 
   /** Shows the saved sessions as they are now, with the names of those running. */
-  const applySavedSessions = (savedSessions: SavedSessionInfo[]) => {
+  const applySavedSessions = (listed: SavedSessionInfo[]) => {
+    const savedSessions = listed.filter((saved) => !beingDeleted.has(saved.id))
     set((state) => ({
       savedSessions,
       renamingSavedSessionId:
@@ -1505,6 +1542,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         !savedSessions.some((saved) => saved.id === state.renamingSavedSessionId)
           ? null
           : state.renamingSavedSessionId,
+      sessionDeletion: deletionAmong(state.sessionDeletion, state.chats, savedSessions),
       sessions: state.sessions.map((session) => {
         if (session.savedSessionId === null) return session
         const saved = savedSessions.find((candidate) => candidate.id === session.savedSessionId)
@@ -2074,6 +2112,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     renamingChatId: null,
     renamingSavedSessionId: null,
     closeConfirmation: null,
+    sessionDeletion: null,
     quitConfirmation: null,
     update: { kind: 'none' },
     updateCheck: null,
@@ -2536,6 +2575,48 @@ export const useAppStore = create<AppState>()((set, get) => {
         (session) => session.chatId === chatId && isSessionRunning(session),
       )
       if (running) get().requestCloseSession(running.id)
+    },
+
+    requestDeleteSession(id) {
+      const { chats, savedSessions, sessionDeletion } = get()
+      if (sessionDeletion !== null) return
+      if (deletionAmong(id, chats, savedSessions) === null) return
+      set({ sessionDeletion: id })
+    },
+
+    async answerDeleteSession(confirmed) {
+      const id = get().sessionDeletion
+      if (id === null) return
+      set({ sessionDeletion: null })
+      if (!confirmed) return
+      const saved = get().savedSessions.some((entry) => entry.id === id)
+      if (!saved && !get().chats.some((chat) => chat.id === id)) return
+      // Its sessions close first, ending a running agent, as closing them
+      // does: the page shown instead of one of them is the one closing it
+      // shows.
+      const open = get().sessions.filter(
+        (session) => session.chatId === id || session.savedSessionId === id,
+      )
+      await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
+      beingDeleted.add(id)
+      set((state) => ({
+        chats: state.chats.filter((chat) => chat.id !== id),
+        savedSessions: state.savedSessions.filter((entry) => entry.id !== id),
+      }))
+      const result = await (saved ? api.deleteSavedSession(id) : api.deleteChat(id)).catch(
+        (error: unknown) => ({ ok: false as const, message: errorMessage(error) }),
+      )
+      beingDeleted.delete(id)
+      if (result.ok) return
+      toast.error('Could not delete the session.', { description: result.message })
+      // It stays as the main process has it.
+      void Promise.all([api.listChats(), api.listSavedSessions()]).then(
+        ([chats, savedSessions]) => {
+          applyChats(chats)
+          applySavedSessions(savedSessions)
+        },
+        (error: unknown) => console.error('Could not list the chats:', error),
+      )
     },
 
     startRenamingChat(chatId) {

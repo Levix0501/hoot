@@ -132,6 +132,9 @@ export type CreateSavedSessionResult =
   | { ok: true; session: SavedSessionInfo }
   | { ok: false; message: string }
 
+/** Whether a chat or saved session was deleted, or why not. */
+export type DeleteChatResult = { ok: true } | { ok: false; message: string }
+
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
 
@@ -262,11 +265,13 @@ export const IpcChannel = {
   createChat: 'chats:create',
   renameChat: 'chats:rename',
   setChatTitle: 'chats:set-title',
+  deleteChat: 'chats:delete',
   chatsChanged: 'chats:changed',
   listSavedSessions: 'saved-sessions:list',
   createSavedSession: 'saved-sessions:create',
   renameSavedSession: 'saved-sessions:rename',
   setSavedSessionTitle: 'saved-sessions:set-title',
+  deleteSavedSession: 'saved-sessions:delete',
   savedSessionsChanged: 'saved-sessions:changed',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
@@ -442,7 +447,12 @@ export interface HootApi {
   renameChat(id: string, name: string): void
   /** Notes the terminal title the chat's agent set, which names the chat. */
   setChatTitle(id: string, title: string): void
-  /** The chats changed: one was made, opened, renamed, split off or removed. */
+  /**
+   * Deletes a chat for good, once its agent has ended: its folder goes to the
+   * Trash unless another chat runs in it. Settles once it is deleted.
+   */
+  deleteChat(id: string): Promise<DeleteChatResult>
+  /** The chats changed: one was made, opened, renamed, split off, removed or deleted. */
   onChatsChanged(listener: (chats: ChatInfo[]) => void): () => void
   /** Every saved session, oldest first, as they show below their worktrees. */
   listSavedSessions(): Promise<SavedSessionInfo[]>
@@ -456,7 +466,9 @@ export interface HootApi {
   renameSavedSession(id: string, name: string): void
   /** Notes the terminal title the saved session's agent set, which names the session. */
   setSavedSessionTitle(id: string, title: string): void
-  /** The saved sessions changed: one was made, renamed, split off or removed. */
+  /** Deletes a saved session for good, once its agent has ended; settles once it is deleted. */
+  deleteSavedSession(id: string): Promise<DeleteChatResult>
+  /** The saved sessions changed: one was made, renamed, split off, removed or deleted. */
   onSavedSessionsChanged(listener: (sessions: SavedSessionInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */

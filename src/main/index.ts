@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
-import { app, BrowserWindow, Menu, nativeTheme, net } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, net, shell as desktop } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { ISSUE_WORKFLOW } from '../shared/built-in-workflow'
 import { waitedOnIds } from '../shared/dependencies'
@@ -383,6 +383,8 @@ function startWithDatabase(database: DatabaseSync): void {
       home: os.homedir(),
       getLoginEnvironment: () => tools.getLoginEnvironment(),
     }),
+    // The folder of a deleted chat goes where the user can still find it.
+    trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
   // Worktrees live in the home directory, not in the user data directory, so

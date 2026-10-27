@@ -21,6 +21,7 @@ import {
   type CreateLabelGroupResult,
   type CreateLabelResult,
   type CreateSavedSessionResult,
+  type DeleteChatResult,
   type DependencyChangeResult,
   type IssueLabelsRequest,
   type LabelChangeRequest,
@@ -520,6 +521,29 @@ export function registerIpc(deps: IpcDependencies): void {
 
   deps.chats.on('changed', (chats) => send(IpcChannel.chatsChanged, chats))
 
+  /**
+   * Deletes a chat, or a saved session for `saved`: its sessions close
+   * first, also any that started since the window closed those it showed.
+   * One that is gone already needs nothing more.
+   */
+  const deleteChat = async (value: unknown, saved: boolean): Promise<DeleteChatResult> => {
+    const parsed = sessionId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    const id = parsed.data
+    const found = deps.chats.get(id)
+    if (!found) return { ok: true }
+    if ((found.worktreePath !== null) !== saved) return { ok: false, message: 'Invalid request.' }
+    try {
+      await deps.sessions.closeOf(id)
+      await deps.chats.delete(id)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
+  }
+
+  handle(IpcChannel.deleteChat, (_event, value) => deleteChat(value, false))
+
   handle(IpcChannel.listSavedSessions, () => deps.chats.listSavedSessions())
 
   handle(
@@ -551,6 +575,8 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.tuple([sessionId, z.string().max(10_000)]).safeParse(args)
     if (parsed.success) deps.chats.setTitle(...parsed.data)
   })
+
+  handle(IpcChannel.deleteSavedSession, (_event, value) => deleteChat(value, true))
 
   deps.chats.on('saved-changed', (sessions) => send(IpcChannel.savedSessionsChanged, sessions))
 

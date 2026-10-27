@@ -14,10 +14,20 @@ interface ChatRow {
   has_messages: number
   created_at: number
   opened_at: number
+  deleted_at: number | null
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
-                 custom_name, has_messages, created_at, opened_at`
+                 custom_name, has_messages, created_at, opened_at, deleted_at`
+
+/**
+ * A chat or saved session as the database keeps it: also one the user
+ * deleted, which keeps its row so that its conversation stays its own.
+ */
+export interface StoredChat extends ChatInfo {
+  /** Whether the user deleted it, which leaves it out of the sidebar for good. */
+  deleted: boolean
+}
 
 function chatFromRow(row: ChatRow): ChatInfo {
   return {
@@ -33,6 +43,10 @@ function chatFromRow(row: ChatRow): ChatInfo {
     createdAt: row.created_at,
     lastOpenedAt: row.opened_at,
   }
+}
+
+function storedFromRow(row: ChatRow): StoredChat {
+  return { ...chatFromRow(row), deleted: row.deleted_at !== null }
 }
 
 function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
@@ -56,7 +70,8 @@ export interface ChatChanges {
  * The chats and saved sessions, kept in the database. The chats come in the
  * order of the sidebar's Chats group, by when they were last opened, newest
  * first; the saved sessions come by when they were made or split off, oldest
- * first, as they show below their worktree.
+ * first, as they show below their worktree. Those the user deleted are in
+ * neither list, but are kept with their conversations.
  */
 export class ChatStore {
   private readonly statements
@@ -65,12 +80,12 @@ export class ChatStore {
     this.statements = {
       chats: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE worktree_path IS NULL
+         FROM chats WHERE worktree_path IS NULL AND deleted_at IS NULL
          ORDER BY opened_at DESC, created_at DESC, id`,
       ),
       savedSessions: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE worktree_path IS NOT NULL
+         FROM chats WHERE worktree_path IS NOT NULL AND deleted_at IS NULL
          ORDER BY created_at, id`,
       ),
       chat: db.prepare(`SELECT ${COLUMNS} FROM chats WHERE id = ?`),
@@ -78,17 +93,24 @@ export class ChatStore {
         `SELECT ${COLUMNS}
          FROM chats WHERE folder = ? ORDER BY opened_at DESC, created_at DESC, id`,
       ),
+      deletedWithoutConversation: db.prepare(
+        `SELECT ${COLUMNS}
+         FROM chats WHERE deleted_at IS NOT NULL AND conversation_id IS NULL
+         ORDER BY created_at, id`,
+      ),
       insert: db.prepare(
         `INSERT INTO chats (id, tool_id, folder, project_root, worktree_path, conversation_id,
-                            title, custom_name, has_messages, created_at, opened_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            title, custom_name, has_messages, created_at, opened_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
       update: db.prepare(
         `UPDATE chats
          SET conversation_id = ?, title = ?, custom_name = ?, has_messages = ?, opened_at = ?
          WHERE id = ?`,
       ),
+      markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
       delete: db.prepare('DELETE FROM chats WHERE id = ?'),
+      deleteInFolder: db.prepare('DELETE FROM chats WHERE folder = ?'),
       deleteForWorktree: db.prepare('DELETE FROM chats WHERE worktree_path = ?'),
     }
   }
@@ -103,18 +125,26 @@ export class ChatStore {
     return (this.statements.savedSessions.all() as unknown as ChatRow[]).map(savedSessionFromRow)
   }
 
-  /** The chat or saved session with this id, if any. */
-  get(id: string): ChatInfo | undefined {
+  /** The chat or saved session with this id, if any, also one the user deleted. */
+  get(id: string): StoredChat | undefined {
     const row = this.statements.chat.get(id) as ChatRow | undefined
-    return row ? chatFromRow(row) : undefined
+    return row ? storedFromRow(row) : undefined
   }
 
-  /** The chats and saved sessions whose agent runs in this folder. */
-  inFolder(folder: string): ChatInfo[] {
-    return (this.statements.inFolder.all(folder) as unknown as ChatRow[]).map(chatFromRow)
+  /** The chats and saved sessions whose agent runs in this folder, also those the user deleted. */
+  inFolder(folder: string): StoredChat[] {
+    return (this.statements.inFolder.all(folder) as unknown as ChatRow[]).map(storedFromRow)
   }
 
-  insert(chat: ChatInfo): void {
+  /** The chats and saved sessions the user deleted before Hoot learned their conversation's id. */
+  deletedWithoutConversation(): StoredChat[] {
+    return (this.statements.deletedWithoutConversation.all() as unknown as ChatRow[]).map(
+      storedFromRow,
+    )
+  }
+
+  /** Adds a chat or saved session; `deletedAt`, when given, is when the user deleted it. */
+  insert(chat: ChatInfo, deletedAt: number | null = null): void {
     this.statements.insert.run(
       chat.id,
       chat.toolId,
@@ -127,6 +157,7 @@ export class ChatStore {
       chat.hasMessages ? 1 : 0,
       chat.createdAt,
       chat.lastOpenedAt,
+      deletedAt,
     )
   }
 
@@ -145,8 +176,18 @@ export class ChatStore {
     return true
   }
 
+  /** Leaves a chat or saved session out of the lists from now on, keeping its row. */
+  markDeleted(id: string, at: number): void {
+    this.statements.markDeleted.run(at, id)
+  }
+
   delete(id: string): void {
     this.statements.delete.run(id)
+  }
+
+  /** Deletes every chat whose agent runs in this folder, which is gone. */
+  deleteInFolder(folder: string): void {
+    this.statements.deleteInFolder.run(folder)
   }
 
   /** Deletes the saved sessions of a worktree, whose folder is gone or was deleted. */

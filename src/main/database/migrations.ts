@@ -219,4 +219,13 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX chats_by_worktree ON chats (worktree_path, created_at);
   `,
+  // 8: chats and saved sessions the user deleted.
+  `
+  -- A chat or saved session the user deleted keeps its row, out of the
+  -- sidebar, so that its conversation stays its own: no other chat or saved
+  -- session in its folder takes the conversation up, nor does Hoot list it
+  -- again as one of its own. NULL while it is not deleted; otherwise when it
+  -- was, in milliseconds since the Unix epoch.
+  ALTER TABLE chats ADD COLUMN deleted_at INTEGER;
+  `,
 ]

@@ -9,7 +9,7 @@ import type { HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
 import type { ChatLaunch } from '../session/launch'
-import { ChatStore } from './chat-store'
+import { ChatStore, type StoredChat } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
 /** What a chat session runs: the folder its agent runs in, and how to continue its conversation. */
@@ -27,6 +27,11 @@ export interface ChatManagerOptions {
   now?: () => number
   /** Makes the ids of chats and of the conversations Hoot starts. */
   newId?: () => string
+  /**
+   * Moves a folder, with what is in it, to the Trash (the Recycle Bin on
+   * Windows); rejects when it cannot. Without it, every folder stays.
+   */
+  trash?: (folder: string) => Promise<void>
 }
 
 // Terminal queries and their answers are control characters by nature.
@@ -53,6 +58,10 @@ export function visibleInput(data: string): string {
  * starts, to tell whether the chat's conversation got a message, to learn the
  * ids of the conversations an agent started since, and to split off the
  * conversations that came before them as chats of their own.
+ *
+ * A chat the user deletes leaves the lists for good, but keeps its row, with
+ * the conversation it was in, for as long as another chat in its folder could
+ * take that conversation up: the agent's records still hold it.
  */
 export class ChatManager extends EventEmitter<{
   changed: [chats: ChatInfo[]]
@@ -63,6 +72,7 @@ export class ChatManager extends EventEmitter<{
   private readonly now: () => number
   private readonly newId: () => string
   private readonly conversations: ChatConversations
+  private readonly trash: (folder: string) => Promise<void>
   /** The work under way for each chat, one after another. */
   private readonly queues = new Map<string, Promise<void>>()
   private readonly pending = new Set<Promise<void>>()
@@ -84,6 +94,11 @@ export class ChatManager extends EventEmitter<{
     this.now = options.now ?? Date.now
     this.newId = options.newId ?? randomUUID
     this.conversations = options.conversations
+    this.trash =
+      options.trash ??
+      (async () => {
+        throw new Error('There is no Trash to move the folder to.')
+      })
   }
 
   /** Every chat, in the order of the sidebar's Chats group. */
@@ -96,9 +111,12 @@ export class ChatManager extends EventEmitter<{
     return this.chats.listSavedSessions()
   }
 
-  /** The chat or saved session with this id, if any. */
+  /** The chat or saved session with this id, if any and the user has not deleted it. */
   get(id: string): ChatInfo | undefined {
-    return this.chats.get(id)
+    const chat = this.chats.get(id)
+    if (!chat || chat.deleted) return undefined
+    const { deleted: _deleted, ...info } = chat
+    return info
   }
 
   /** The folder all the chats of an agent share, or where every other chat's folder goes. */
@@ -190,7 +208,7 @@ export class ChatManager extends EventEmitter<{
    */
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
     const chat = this.chats.get(id)
-    if (!chat) return null
+    if (!chat || chat.deleted) return null
     this.clearTitles.delete(id)
     this.conversationStartedAt.delete(id)
     // A saved session's folder is its worktree, which Hoot does not make.
@@ -211,14 +229,16 @@ export class ChatManager extends EventEmitter<{
 
   /** Notes that the chat's agent started, which moves the chat to the top of Chats. */
   opened(id: string): void {
-    if (!this.chats.update(id, { lastOpenedAt: this.now() })) return
+    if (this.chats.get(id)?.deleted !== false) return
+    this.chats.update(id, { lastOpenedAt: this.now() })
     this.running.add(id)
     this.emitChanged()
   }
 
   /** Changes the name the user gave a chat; an empty name takes it away. */
   rename(id: string, name: string): boolean {
-    if (!this.chats.update(id, { customName: name === '' ? null : name })) return false
+    if (this.chats.get(id)?.deleted !== false) return false
+    this.chats.update(id, { customName: name === '' ? null : name })
     this.emitChanged()
     return true
   }
@@ -226,7 +246,7 @@ export class ChatManager extends EventEmitter<{
   /** Notes the terminal title an agent set in the chat's conversation. */
   setTitle(id: string, title: string): void {
     const chat = this.chats.get(id)
-    if (!chat || chat.title === title) return
+    if (!chat || chat.deleted || chat.title === title) return
     // A program clears its title when it ends; the last title it set stays,
     // so that the chat's name does not change when it exits.
     if (title === '') return
@@ -245,7 +265,7 @@ export class ChatManager extends EventEmitter<{
     const started = report.conversationId ?? null
     void this.enqueue(chatId, async () => {
       const chat = this.chats.get(chatId)
-      if (!chat) return
+      if (!chat || chat.deleted) return
       if (started === null) {
         if (report.event === 'UserPromptSubmit' && !chat.hasMessages) {
           this.chats.update(chatId, { hasMessages: true })
@@ -299,7 +319,7 @@ export class ChatManager extends EventEmitter<{
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
-    if (!chat) return
+    if (!chat || chat.deleted) return
     let line = this.typing.get(sessionId) ?? ''
     for (const character of visibleInput(data)) {
       if (character === '\r' || character === '\n') {
@@ -364,12 +384,50 @@ export class ChatManager extends EventEmitter<{
     void this.enqueue(id, () => this.reconcileChat(id))
   }
 
-  /** Reads the records of every chat's and saved session's agent, as when Hoot starts. */
+  /**
+   * Reads the records of every chat's and saved session's agent, as when Hoot
+   * starts: first for those the user deleted before Hoot learned which
+   * conversation they were in, so that no other takes it up.
+   */
   reconcileAll(): Promise<void> {
     return this.enqueue('*', async () => {
-      for (const chat of [...this.list(), ...this.listSavedSessions()]) {
+      for (const chat of [
+        ...this.chats.deletedWithoutConversation(),
+        ...this.list(),
+        ...this.listSavedSessions(),
+      ]) {
         await this.reconcileChat(chat.id)
       }
+    })
+  }
+
+  /**
+   * Deletes a chat or saved session the user no longer wants, once its agent
+   * has ended: it leaves the lists for good, and the agent's own records of
+   * its conversations stay as they are. As those records still hold its
+   * conversation, a Codex or OpenCode one keeps its row, with the
+   * conversation it was in, once Hoot read which that is: no other chat or
+   * saved session in its folder takes it up then, and Hoot does not list it
+   * as one of its own again. A Claude Code one, whose conversations no other
+   * takes up, goes altogether. A chat's own folder goes to the Trash with
+   * what is in it, once no other chat runs in it; a folder that cannot be
+   * moved there stays as it is. A saved session's worktree stays as it is.
+   */
+  delete(id: string): Promise<void> {
+    return this.enqueue(id, async () => {
+      const chat = this.chats.get(id)
+      if (!chat || chat.deleted) return
+      if (chat.toolId === 'claude') {
+        this.chats.delete(id)
+        this.forget(id)
+      } else {
+        this.chats.markDeleted(id, this.now())
+        // The conversation it was in, as its agent left its records: the one
+        // it started, when Hoot did not know it yet, or one it went on to.
+        await this.reconcileChat(id)
+      }
+      this.emitChanged()
+      await this.trashFolderIfOwned(chat)
     })
   }
 
@@ -510,9 +568,12 @@ export class ChatManager extends EventEmitter<{
     return active.id === chat.id
   }
 
-  /** Adds a chat for a conversation the agent started and left, unless one has it already. */
+  /**
+   * Adds a chat for a conversation the agent started and left, unless one has
+   * it already: deleted, when the user deleted the chat it comes from.
+   */
   private insertSplit(
-    chat: ChatInfo,
+    chat: StoredChat,
     conversation: Pick<AgentConversation, 'id' | 'title' | 'createdAt'>,
   ): void {
     const existing = this.chats
@@ -526,37 +587,58 @@ export class ChatManager extends EventEmitter<{
       }
       return
     }
-    this.chats.insert({
-      id: this.newId(),
-      toolId: chat.toolId,
-      folder: chat.folder,
-      projectRoot: chat.projectRoot,
-      worktreePath: chat.worktreePath,
-      conversationId: conversation.id,
-      title: conversation.title ?? '',
-      customName: null,
-      hasMessages: true,
-      // A saved session split off shows where it was split off, after the
-      // sessions made before it; a chat comes in the order of Chats.
-      createdAt:
-        chat.worktreePath === null
-          ? conversation.createdAt === 0
-            ? this.now()
-            : conversation.createdAt
-          : this.now(),
-      lastOpenedAt: chat.lastOpenedAt,
-    })
+    this.chats.insert(
+      {
+        id: this.newId(),
+        toolId: chat.toolId,
+        folder: chat.folder,
+        projectRoot: chat.projectRoot,
+        worktreePath: chat.worktreePath,
+        conversationId: conversation.id,
+        title: conversation.title ?? '',
+        customName: null,
+        hasMessages: true,
+        // A saved session split off shows where it was split off, after the
+        // sessions made before it; a chat comes in the order of Chats.
+        createdAt:
+          chat.worktreePath === null
+            ? conversation.createdAt === 0
+              ? this.now()
+              : conversation.createdAt
+            : this.now(),
+        lastOpenedAt: chat.lastOpenedAt,
+      },
+      chat.deleted ? this.now() : null,
+    )
   }
 
   /** Removes a chat whose conversation never got a message, with its folder when nothing else uses it. */
   private async removeChat(chat: ChatInfo): Promise<void> {
     // A saved session's worktree stays as it is.
     this.chats.delete(chat.id)
-    this.clearTitles.delete(chat.id)
-    this.conversationStartedAt.delete(chat.id)
-    this.previousTitles.delete(chat.id)
+    this.forget(chat.id)
     await this.removeFolderIfOwned(chat)
     this.emitChanged()
+  }
+
+  /** Forgets what Hoot noted of a chat while its agent ran. */
+  private forget(id: string): void {
+    this.clearTitles.delete(id)
+    this.conversationStartedAt.delete(id)
+    this.previousTitles.delete(id)
+  }
+
+  /**
+   * Whether a chat runs in a folder Hoot made for it alone: one under
+   * `~/.hoot/chats` for a Codex or OpenCode chat, which the chats split off
+   * from it share. Claude Code's shared folder and a saved session's worktree
+   * are not.
+   */
+  private ownsFolder(chat: ChatInfo): boolean {
+    if (chat.worktreePath !== null) return false
+    if (chat.toolId === 'claude') return false
+    if (path.resolve(path.dirname(chat.folder)) !== path.resolve(this.chatsRoot)) return false
+    return path.resolve(chat.folder) !== path.resolve(this.claudeFolder)
   }
 
   /**
@@ -565,10 +647,7 @@ export class ChatManager extends EventEmitter<{
    * which Hoot never removes.
    */
   private async removeFolderIfOwned(chat: ChatInfo): Promise<void> {
-    if (chat.worktreePath !== null) return
-    if (chat.toolId === 'claude') return
-    if (path.resolve(path.dirname(chat.folder)) !== path.resolve(this.chatsRoot)) return
-    if (path.resolve(chat.folder) === path.resolve(this.claudeFolder)) return
+    if (!this.ownsFolder(chat)) return
     if (this.chats.inFolder(chat.folder).length > 0) return
     try {
       // Only an empty folder is removed; one with anything in it stays.
@@ -576,6 +655,24 @@ export class ChatManager extends EventEmitter<{
     } catch {
       // What is in it stays as it is.
     }
+  }
+
+  /**
+   * Moves the folder Hoot made for a deleted chat to the Trash, with what is
+   * in it, once no chat the user has not deleted runs in it. The deleted
+   * chats of the folder go with it, as no other chat can take up their
+   * conversations then. A folder that cannot be moved stays as it is, and so
+   * do they.
+   */
+  private async trashFolderIfOwned(chat: ChatInfo): Promise<void> {
+    if (!this.ownsFolder(chat)) return
+    if (this.chats.inFolder(chat.folder).some((other) => !other.deleted)) return
+    try {
+      await this.trash(chat.folder)
+    } catch {
+      return
+    }
+    this.chats.deleteInFolder(chat.folder)
   }
 
   private emitChanged(): void {

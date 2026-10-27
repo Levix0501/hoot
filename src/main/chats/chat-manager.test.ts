@@ -41,6 +41,23 @@ const hook = (
   reason: null,
 })
 
+/** A saved session's process that ended. */
+const endedSaved = (
+  savedSessionId: string,
+  worktreePath: string,
+  toolId: 'claude' | 'codex' | 'opencode',
+): SessionInfo => ({
+  id: `session-${savedSessionId}`,
+  projectRoot: '/work/project',
+  worktreePath,
+  chatId: null,
+  savedSessionId,
+  toolId,
+  issueId: null,
+  status: 'exited',
+  exit: { code: 0, signal: null, abnormal: false },
+})
+
 const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): SessionInfo => ({
   id: `session-${chatId}`,
   projectRoot: `/chats/${chatId}`,
@@ -59,17 +76,28 @@ describe('ChatManager', () => {
   let conversations: FakeConversations
   let clock: number
   let manager: ChatManager
+  /** The folders moved to the Trash, in order. */
+  let trashed: string[]
+  /** Moves a folder to the Trash, which is a folder of the test's own. */
+  let trash: (folder: string) => Promise<void>
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-chats-'))
     db = openDatabase(path.join(root, 'data', 'hoot.db'))
     conversations = new FakeConversations()
     clock = 1_000
+    trashed = []
+    trash = async (folder) => {
+      fs.mkdirSync(path.join(root, 'Trash'), { recursive: true })
+      fs.renameSync(folder, path.join(root, 'Trash', path.basename(folder)))
+      trashed.push(folder)
+    }
     manager = new ChatManager({
       db,
       conversations,
       home: path.join(root, 'home'),
       now: () => ++clock,
+      trash: (folder) => trash(folder),
     })
   })
 
@@ -79,6 +107,58 @@ describe('ChatManager', () => {
   })
 
   const chatsRoot = () => path.join(root, 'home', '.hoot', 'chats')
+
+  /** The manager of a Hoot started again, which reads what happened meanwhile. */
+  const restarted = async (): Promise<ChatManager> => {
+    const again = new ChatManager({
+      db,
+      conversations,
+      home: path.join(root, 'home'),
+      now: () => ++clock,
+      trash: (folder) => trash(folder),
+    })
+    await again.reconcileAll()
+    return again
+  }
+
+  /** A worktree's folder, with a file in it. */
+  const worktreeFolder = (name: string): string => {
+    const folder = path.join(root, 'worktrees', name)
+    fs.mkdirSync(folder, { recursive: true })
+    fs.writeFileSync(path.join(folder, 'README.md'), '# Project\n')
+    return folder
+  }
+
+  /**
+   * Two saved sessions of an agent in a worktree, each with a conversation of
+   * its own, which their agents recorded and ended: the second made later.
+   */
+  const twoSavedSessions = async (toolId: 'codex' | 'opencode', folder: string) => {
+    const first = manager.createSavedSession('/work/project', folder, toolId)
+    const firstConversation = first.conversationId ?? 'thread-1'
+    const record = (list: AgentConversation[]) => {
+      if (toolId === 'codex') conversations.codex = list
+      else conversations.opencode = list
+    }
+    manager.opened(first.id)
+    manager.typed(first.id, 'session-first', 'first question\r')
+    record([{ id: firstConversation, title: 'First', createdAt: 1 }])
+    manager.sessionEnded(endedSaved(first.id, folder, toolId))
+    await manager.flush()
+    const second = manager.createSavedSession('/work/project', folder, toolId)
+    const secondConversation = second.conversationId ?? 'thread-2'
+    manager.opened(second.id)
+    manager.typed(second.id, 'session-second', 'second question\r')
+    record([
+      { id: firstConversation, title: 'First', createdAt: 1 },
+      { id: secondConversation, title: 'Second', createdAt: 2 },
+    ])
+    manager.sessionEnded(endedSaved(second.id, folder, toolId))
+    await manager.flush()
+    expect(manager.get(first.id)?.conversationId).toBe(firstConversation)
+    expect(manager.get(second.id)?.conversationId).toBe(secondConversation)
+    return { first, second, firstConversation, secondConversation, record }
+  }
 
   it('gives every Codex and OpenCode chat a new folder, and Claude Code chats the shared one', async () => {
     const claude = await manager.create('claude')
@@ -513,6 +593,247 @@ describe('ChatManager', () => {
       conversationId: 'first',
     })
     expect(manager.get(saved.id)?.conversationId).toBe('second')
+  })
+
+  it('deletes a Claude Code chat for good, leaving the shared folder and what is in it', async () => {
+    const chat = await manager.create('claude')
+    const other = await manager.create('claude')
+    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId))
+    await manager.flush()
+    conversations.claude = true
+
+    await manager.delete(chat.id)
+
+    expect(manager.list().map((entry) => entry.id)).toEqual([other.id])
+    expect(manager.get(chat.id)).toBeUndefined()
+    expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
+    expect(trashed).toEqual([])
+    const again = await restarted()
+    expect(again.list().map((entry) => entry.id)).toEqual([other.id])
+    expect(again.get(chat.id)).toBeUndefined()
+  })
+
+  it('no longer starts, renames or opens a deleted chat', async () => {
+    const chat = await manager.create('opencode')
+    manager.typed(chat.id, 'session-1', 'question\r')
+    await manager.flush()
+    await manager.delete(chat.id)
+
+    expect(await manager.prepareSession(chat.id)).toBeNull()
+    expect(manager.rename(chat.id, 'Back')).toBe(false)
+    manager.opened(chat.id)
+    manager.setTitle(chat.id, 'A title')
+    expect(manager.list()).toEqual([])
+    expect(manager.get(chat.id)).toBeUndefined()
+  })
+
+  for (const toolId of ['codex', 'opencode'] as const) {
+    it(`keeps the conversation of a deleted ${toolId} saved session from the other sessions of its worktree`, async () => {
+      const folder = worktreeFolder('fix-login-bug')
+      const { first, second, firstConversation } = await twoSavedSessions(toolId, folder)
+      manager.rename(first.id, 'Kept')
+
+      await manager.delete(second.id)
+
+      expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([first.id])
+      expect(manager.get(second.id)).toBeUndefined()
+      // Opened last, the one left is the one an agent's later conversation
+      // would belong to; the deleted one's is not one of them.
+      manager.opened(first.id)
+      const again = await restarted()
+      expect(again.listSavedSessions()).toEqual([
+        expect.objectContaining({
+          id: first.id,
+          conversationId: firstConversation,
+          customName: 'Kept',
+        }),
+      ])
+      // The worktree stays as it was.
+      expect(fs.readdirSync(folder)).toEqual(['README.md'])
+      expect(fs.readFileSync(path.join(folder, 'README.md'), 'utf8')).toBe('# Project\n')
+    })
+
+    it(`gives the conversation of a deleted ${toolId} saved session to no session made after it`, async () => {
+      const folder = worktreeFolder('fix-login-bug')
+      const { first, second, secondConversation } = await twoSavedSessions(toolId, folder)
+
+      await manager.delete(first.id)
+      // A new session, closed without a message.
+      const third = manager.createSavedSession('/work/project', folder, toolId)
+      manager.opened(third.id)
+      manager.sessionEnded(endedSaved(third.id, folder, toolId))
+      await manager.flush()
+
+      expect(manager.get(third.id)).toBeUndefined()
+      const again = await restarted()
+      expect(again.listSavedSessions()).toEqual([
+        expect.objectContaining({ id: second.id, conversationId: secondConversation }),
+      ])
+    })
+  }
+
+  it('learns the conversation of a Codex saved session deleted while it ran, before any other takes it', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const first = manager.createSavedSession('/work/project', folder, 'codex')
+    conversations.codex = [{ id: 'thread-1', title: 'First', createdAt: 1 }]
+    manager.opened(first.id)
+    manager.sessionEnded(endedSaved(first.id, folder, 'codex'))
+    await manager.flush()
+    const second = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(second.id)
+    manager.typed(second.id, 'session-second', 'second question\r')
+    // The first is opened again after it, so that it is the one opened last.
+    manager.opened(first.id)
+    conversations.codex = [
+      { id: 'thread-1', title: 'First', createdAt: 1 },
+      { id: 'thread-2', title: 'Second', createdAt: 2 },
+    ]
+
+    // Deleted while its agent still ran, as when Hoot quit before it saw it end.
+    await manager.delete(second.id)
+    expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([first.id])
+
+    const again = await restarted()
+    expect(again.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: first.id, conversationId: 'thread-1' }),
+    ])
+
+    // Deleted once its agent ended, it takes its conversation along at once.
+    const third = again.createSavedSession('/work/project', folder, 'codex')
+    again.opened(third.id)
+    again.typed(third.id, 'session-third', 'third question\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'First', createdAt: 1 },
+      { id: 'thread-2', title: 'Second', createdAt: 2 },
+      { id: 'thread-3', title: 'Third', createdAt: 3 },
+    ]
+    again.sessionEnded(endedSaved(third.id, folder, 'codex'))
+    await again.delete(third.id)
+    again.opened(first.id)
+    const later = await restarted()
+    expect(later.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: first.id, conversationId: 'thread-1' }),
+    ])
+  })
+
+  it('keeps the conversation a deleted Codex chat went on to after /new from the chat it split off', async () => {
+    const chat = await manager.create('codex')
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', 'first question\r')
+    manager.typed(chat.id, 'session-1', '/new\r')
+    manager.typed(chat.id, 'session-1', 'second question\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'First', createdAt: 1 },
+      { id: 'thread-2', title: 'Second', createdAt: 2 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    const split = manager.list().find((entry) => entry.id !== chat.id)!
+    expect(split.conversationId).toBe('thread-1')
+    expect(manager.get(chat.id)?.conversationId).toBe('thread-2')
+    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
+
+    await manager.delete(chat.id)
+
+    // The folder stays while the other chat runs in it.
+    expect(trashed).toEqual([])
+    expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
+    manager.opened(split.id)
+    const again = await restarted()
+    expect(again.list()).toEqual([
+      expect.objectContaining({ id: split.id, conversationId: 'thread-1' }),
+    ])
+  })
+
+  it('keeps the conversation a deleted OpenCode chat went on to after /new from the chat it left', async () => {
+    const chat = await manager.create('opencode')
+    const old = chat.conversationId!
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', 'first question\r')
+    manager.typed(chat.id, 'session-1', '/new\r')
+    manager.typed(chat.id, 'session-1', 'second question\r')
+    await manager.flush()
+    const split = manager.list().find((entry) => entry.id !== chat.id)!
+    expect(split.conversationId).toBe(old)
+
+    // Deleted while it still ran, before Hoot learned the conversation it went on to.
+    conversations.opencode = [
+      { id: old, title: 'First', createdAt: 1 },
+      { id: 'ses_second', title: 'Second', createdAt: 2 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'opencode'))
+    await manager.delete(chat.id)
+
+    manager.opened(split.id)
+    const again = await restarted()
+    expect(again.list()).toEqual([expect.objectContaining({ id: split.id, conversationId: old })])
+  })
+
+  it('moves the folder of a deleted chat to the Trash with what is in it, once no other chat runs in it', async () => {
+    const chat = await manager.create('opencode')
+    const old = chat.conversationId!
+    manager.typed(chat.id, 'session-1', 'first question\r')
+    manager.typed(chat.id, 'session-1', '/new\r')
+    manager.typed(chat.id, 'session-1', 'second question\r')
+    conversations.opencode = [
+      { id: old, title: 'First', createdAt: 1 },
+      { id: 'ses_second', title: 'Second', createdAt: 2 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'opencode'))
+    await manager.flush()
+    const split = manager.list().find((entry) => entry.id !== chat.id)!
+    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
+
+    await manager.delete(split.id)
+    expect(trashed).toEqual([])
+    expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
+    expect(manager.list().map((entry) => entry.id)).toEqual([chat.id])
+
+    await manager.delete(chat.id)
+    expect(trashed).toEqual([chat.folder])
+    expect(fs.existsSync(chat.folder)).toBe(false)
+    expect(fs.readdirSync(path.join(root, 'Trash', path.basename(chat.folder)))).toEqual([
+      'notes.txt',
+    ])
+    expect(manager.list()).toEqual([])
+    // Nothing of the folder's chats is kept once it is gone.
+    expect(db.prepare('SELECT COUNT(*) AS count FROM chats').get()).toEqual({ count: 0 })
+  })
+
+  it('deletes a chat whose folder cannot go to the Trash, leaving the folder as it is', async () => {
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-1', 'question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'Question', createdAt: 1 }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
+    trash = async () => {
+      throw new Error('The folder is in use.')
+    }
+
+    await manager.delete(chat.id)
+
+    expect(manager.list()).toEqual([])
+    expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
+    const again = await restarted()
+    expect(again.list()).toEqual([])
+  })
+
+  it('leaves the other chats and saved sessions as they are', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const { first, second } = await twoSavedSessions('opencode', folder)
+    manager.rename(second.id, 'Second one')
+    const chat = await manager.create('claude')
+    manager.rename(chat.id, 'Chat')
+    const before = { chats: manager.list(), saved: manager.listSavedSessions() }
+
+    await manager.delete(first.id)
+
+    expect(manager.list()).toEqual(before.chats)
+    expect(manager.listSavedSessions()).toEqual(
+      before.saved.filter((entry) => entry.id !== first.id),
+    )
   })
 })
 

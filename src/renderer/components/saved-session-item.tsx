@@ -1,16 +1,10 @@
-import { PencilIcon, XIcon } from 'lucide-react'
 import { chatName, type SavedSessionInfo } from '../../shared/chats'
 import { sessionState, stateDescription } from '../lib/session-state'
 import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-store'
+import { SavedSessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from './ui/context-menu'
+import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
@@ -19,8 +13,8 @@ import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
  * worktree's, and the name, unless the row is pointed at or selected,
  * lighter; and while its agent runs, at its right end, the light of its
  * state. Click it to show the session, continuing its conversation when its
- * agent does not run; double-click it or use its context menu to rename it,
- * and close a running one from its context menu.
+ * agent does not run; double-click it or use its context menu to rename it.
+ * Its context menu also closes a running one, and deletes it.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>
@@ -37,7 +31,6 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   })
   const open = useAppStore((state) => state.openSavedSession)
   const startRenaming = useAppStore((state) => state.startRenamingSavedSession)
-  const close = useAppStore((state) => state.closeSavedSession)
   const name = chatName(saved)
   const state = running ? sessionState(running) : null
 
@@ -76,29 +69,7 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           )}
         </SidebarMenuButton>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-auto min-w-36">
-        <ContextMenuItem
-          onClick={() => startRenaming(saved.id)}
-          data-testid="saved-session-context-rename"
-        >
-          <PencilIcon />
-          Rename…
-        </ContextMenuItem>
-        {running && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              disabled={running.closing}
-              onClick={() => close(saved.id)}
-              data-testid="saved-session-context-close"
-            >
-              <XIcon />
-              Close
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
+      <SavedSessionMenu savedId={saved.id} testId="saved-session-context" />
     </ContextMenu>
   )
 }

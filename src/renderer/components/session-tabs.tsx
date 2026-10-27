@@ -191,8 +191,10 @@ function SessionTab({ id, current }: { id: string; current: boolean }) {
         <Button
           variant="ghost"
           size="icon-xs"
+          // It shows and hides at once, as the light moves aside for it at
+          // once: fading out, it would stay over the light for a moment.
           className={cn(
-            'absolute inset-y-0 end-1 my-auto size-5 text-muted-foreground',
+            'absolute inset-y-0 end-1 my-auto size-5 text-muted-foreground transition-none',
             !current &&
               'pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
           )}

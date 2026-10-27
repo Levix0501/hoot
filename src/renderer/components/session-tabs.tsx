@@ -14,7 +14,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { XIcon } from 'lucide-react'
+import { PlusIcon, XIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -23,8 +23,9 @@ import { sessionName } from '../../shared/session'
 import type { ToolId } from '../../shared/tools'
 import { sessionState, type SessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { useAppStore, type AppState, type UiSession } from '../store/app-store'
+import { projectWorktreeRows, useAppStore, type AppState, type UiSession } from '../store/app-store'
 import { inTabOrder, tabKey } from '../store/session-order'
+import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import { Button } from './ui/button'
@@ -188,10 +189,11 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
         setNodeRef(node)
         nodeRef.current = node
       }}
-      // The tabs share the row's width, between 90px and 160px each. While a
-      // tab is dragged, the one following the pointer stands for it.
+      // The tabs are 160px wide each, and narrow alike, down to 90px, when the
+      // row is too short for them. While a tab is dragged, the one following
+      // the pointer stands for it.
       className={cn(
-        'flex max-w-40 min-w-[90px] shrink-0 grow basis-0 items-center pe-1 [app-region:no-drag]',
+        'flex w-40 min-w-[90px] items-center pe-1 [app-region:no-drag]',
         isDragging && 'opacity-0',
       )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
@@ -292,11 +294,19 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
  * other session started in it; in the order its sessions switch in, which
  * dragging a tab changes. The session shown has the current tab. The tab of
  * a saved session whose agent does not run has no light, as its row in the
- * sidebar has none, and its agent starts only once the tab is clicked.
+ * sidebar has none, and its agent starts only once the tab is clicked. Right
+ * after the last tab, unless the worktree is missing, a `+` starts another
+ * session in the worktree, as the `+` on its row in the sidebar does; while
+ * the tabs do not fit, they scroll, and the `+` stays at the end of the row.
  */
 export function SessionTabs({ session }: { session: UiSession }) {
   const { projectRoot, worktreePath } = session
   const keys = useAppStore(useShallow((state) => worktreeTabs(state, projectRoot, worktreePath)))
+  const missing = useAppStore(
+    (state) =>
+      projectWorktreeRows(state, projectRoot).find((row) => row.path === worktreePath)?.missing ??
+      true,
+  )
   const reorderTabs = useAppStore((state) => state.reorderTabs)
   const [dragged, setDragged] = useState<string | null>(null)
   // A press that moves the pointer less than 6px is a click.
@@ -320,18 +330,41 @@ export function SessionTabs({ session }: { session: UiSession }) {
       onDragEnd={onDragEnd}
       onDragCancel={() => setDragged(null)}
     >
-      <SortableContext items={keys} strategy={horizontalListSortingStrategy}>
-        <div
-          role="tablist"
-          aria-label="Sessions"
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pe-2 select-none [scrollbar-width:none]"
-          data-testid="session-tabs"
-        >
-          {keys.map((key) => (
-            <SessionTab key={key} id={key} shown={session.id} />
-          ))}
-        </div>
-      </SortableContext>
+      <div className="flex h-full min-w-0 flex-1 items-center pe-2">
+        <SortableContext items={keys} strategy={horizontalListSortingStrategy}>
+          <div
+            role="tablist"
+            aria-label="Sessions"
+            className="flex h-full min-w-0 items-center gap-1.5 overflow-x-auto select-none [scrollbar-width:none]"
+            data-testid="session-tabs"
+          >
+            {keys.map((key) => (
+              <SessionTab key={key} id={key} shown={session.id} />
+            ))}
+          </div>
+        </SortableContext>
+        {worktreePath !== null && !missing && (
+          <div className="flex shrink-0 items-center ps-1.5">
+            <NewWorktreeSessionButton
+              projectRoot={projectRoot}
+              worktreePath={worktreePath}
+              testId="session-tabs-agent"
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  // Its shade comes and goes at once, as a tab's does.
+                  className="text-muted-foreground transition-none [app-region:no-drag]"
+                  aria-label="New Session"
+                  data-testid="session-tabs-new-session"
+                />
+              }
+            >
+              <PlusIcon />
+            </NewWorktreeSessionButton>
+          </div>
+        )}
+      </div>
       {createPortal(
         <>
           {/*

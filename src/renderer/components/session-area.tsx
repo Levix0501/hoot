@@ -75,10 +75,13 @@ export function SessionPane({ session }: { session: UiSession }) {
         button. Its blank parts drag the window; the tabs, the name, which
         shows its full text on hover, and the close button do not. While the
         sidebar slides, its left padding changes in step, keeping its content
-        clear of the navigation. At its right end it leaves room for the
-        window's buttons on Windows.
+        clear of the navigation. The tabs and a chat's row keep their content
+        at different distances from its ends, so each has a row of its own:
+        switching between them does not slide the content as well. At its
+        right end it leaves room for the window's buttons on Windows.
       */}
       <header
+        key={session.chatId === null ? 'tabs' : 'chat'}
         className={cn(
           'flex h-11 shrink-0 items-center gap-3 transition-[padding] duration-200 ease-linear [app-region:drag]',
           session.chatId === null

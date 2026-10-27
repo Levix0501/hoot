@@ -65,9 +65,10 @@ function readSettings(value: unknown): LaunchSettings {
 /**
  * The default agent, the YOLO mode switch, whether closing a running session
  * asks first, and the launch settings of each agent, kept in `settings.json`
- * in the user data directory. Sessions read
- * them when they start, so a change applies to the next session and never to
- * a running one. Permission levels saved by earlier versions are ignored.
+ * in the user data directory. Sessions read the others when they start, so a
+ * change to them applies to the next session and never to a running one;
+ * whether closing asks applies at once. Permission levels saved by earlier
+ * versions are ignored.
  */
 export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings] }> {
   private readonly config: Conf<StoredSettings>

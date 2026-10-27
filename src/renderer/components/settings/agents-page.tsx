@@ -1068,9 +1068,9 @@ function DefaultAgentPicker({ value, disabled }: { value: CodingToolId; disabled
 
 /**
  * The settings' Agents page: the default agent, the YOLO mode switch and the
- * switch for asking before a running session is closed, the installed agents with the command each new session runs and the settings in
- * it, Update all and Re-detect, and below a group of the agents that are not
- * installed.
+ * switch for asking before a running session is closed, the installed agents
+ * with the command each new session runs and the settings in it, Update all
+ * and Re-detect, and below a group of the agents that are not installed.
  */
 export function AgentsPage() {
   const agents = useAppStore((state) => state.agents)

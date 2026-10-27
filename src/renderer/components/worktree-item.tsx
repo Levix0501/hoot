@@ -1,9 +1,8 @@
 import {
+  ChevronRightIcon,
   CopyIcon,
   FolderOpenIcon,
   MoreHorizontalIcon,
-  PackageIcon,
-  PackageOpenIcon,
   PlusIcon,
   Trash2Icon,
 } from 'lucide-react'
@@ -205,16 +204,16 @@ function WorktreeMenuEntries({
 
 /**
  * A worktree's row in the sidebar, below its project's sessions: click it to
- * expand or collapse the worktree. It shows a package icon, 12px further in
- * than the project's, closed while the worktree is collapsed and open while it
- * is expanded; the worktree's name when Hoot made it with the New Worktree
- * dialog, otherwise its branch (or abbreviated commit); whether it is missing
- * or locked; and, while it is collapsed, at its right end, the light of the
- * state of its sessions that needs the user most, if any does. Pointing at
- * it, or moving the keyboard focus into it, shows its `⋯` button in the
- * light's place, which opens the same menu as a right click, and right of it,
- * unless the worktree is missing, its `+`, which starts a session in the
- * worktree with the agent a new chat would start with.
+ * expand or collapse the worktree. It shows a chevron, 12px further in than
+ * the project's icon, which points right while the worktree is collapsed and
+ * turns down as it expands; the worktree's name when Hoot made it with the New
+ * Worktree dialog, otherwise its branch (or abbreviated commit); whether it
+ * is missing or locked; and, while it is collapsed, at its right end, the
+ * light of the state of its sessions that needs the user most, if any does.
+ * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
+ * in the light's place, which opens the same menu as a right click, and right
+ * of it, unless the worktree is missing, its `+`, which starts a session in
+ * the worktree with the agent a new chat would start with.
  */
 export function WorktreeItem({
   projectRoot,
@@ -239,7 +238,6 @@ export function WorktreeItem({
   // Its rows show the sessions themselves while it is expanded.
   const summary = expanded ? null : sessionsSummary(states)
   const title = worktree.name ?? worktree.displayName
-  const Package = expanded ? PackageOpenIcon : PackageIcon
   // While they show, its buttons take the room of two, or of `⋯` alone for a missing worktree.
   const buttonsRoom = worktree.missing
     ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
@@ -264,7 +262,19 @@ export function WorktreeItem({
             />
           }
         >
-          <Package data-testid="worktree-package-icon" />
+          {/*
+            It turns as the rows below slide. Its box turns rather than the
+            icon itself, which Chromium would turn without the GPU.
+          */}
+          <span
+            className={cn(
+              'flex shrink-0 transition-[rotate] duration-200 ease-linear motion-reduce:duration-0',
+              expanded && 'rotate-90',
+            )}
+            data-testid="worktree-chevron"
+          >
+            <ChevronRightIcon />
+          </span>
           <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
             {title}
           </span>

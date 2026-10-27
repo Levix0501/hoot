@@ -235,7 +235,6 @@ export const IpcChannel = {
   projectsChanged: 'projects:changed',
   addProjectRequested: 'projects:add-requested',
   getTools: 'tools:get',
-  redetectTools: 'tools:redetect',
   toolsChanged: 'tools:changed',
   getAgents: 'agents:get',
   enterAgentsPage: 'agents:enter-page',
@@ -356,8 +355,6 @@ export interface HootApi {
    * do, through the Edit menu.
    */
   windowsClipboardKeys: boolean
-  /** Whether Hoot runs on Windows, where the project's context menu can start a session. */
-  windows: boolean
   /** The app that shows files and folders: Finder, or File Explorer on Windows. */
   fileManager: string
   /**
@@ -389,7 +386,6 @@ export interface HootApi {
   /** The application menu asked to add a project. */
   onAddProjectRequested(listener: () => void): () => void
   getTools(): Promise<ToolsState>
-  redetectTools(): Promise<ToolsState>
   onToolsChanged(listener: (state: ToolsState) => void): () => void
   /** The agents of the Agents page, as last read, with their operations. */
   getAgents(): Promise<AgentsState>

@@ -419,7 +419,6 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle(IpcChannel.getTools, () => deps.tools.settledState())
-  handle(IpcChannel.redetectTools, () => deps.tools.detect())
   deps.tools.on('changed', (state) => send(IpcChannel.toolsChanged, state))
 
   handle(IpcChannel.getAgents, () => deps.agents.getState())

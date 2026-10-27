@@ -419,7 +419,6 @@ export interface AppState {
   initialize(): Promise<void>
   addProject(): Promise<void>
   removeProject(root: string): Promise<void>
-  redetectTools(): Promise<void>
   /**
    * Tells Hoot that the Agents page opened: it detects the first time since
    * Hoot started, and once the last detection started 20 hours ago or more.
@@ -441,8 +440,6 @@ export interface AppState {
   setYoloMode(on: boolean): void
   /** Changes an agent's launch settings for the sessions that start from now on. */
   changeAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
-  /** Starts a session in the project's main worktree, or in one of its worktrees. */
-  newSession(projectRoot: string, toolId: ToolId, worktreePath?: string | null): void
   /**
    * Opens a new chat with `toolId`, or with the default agent while it can be
    * used, else the first agent that can: a chat of the agent, shown in the
@@ -2190,12 +2187,6 @@ export const useAppStore = create<AppState>()((set, get) => {
       applyProjects(get().projects.filter((project) => project.root !== root))
     },
 
-    async redetectTools() {
-      set((state) => ({ tools: { ...state.tools, detecting: true } }))
-      const tools = await api.redetectTools()
-      set({ tools })
-    },
-
     enterAgentsPage() {
       api.enterAgentsPage()
     },
@@ -2236,10 +2227,6 @@ export const useAppStore = create<AppState>()((set, get) => {
       const launchSettings = withAgentLaunchSettingsChange(get().launchSettings, id, change)
       if (launchSettings !== null) set({ launchSettings })
       api.setAgentLaunchSettings(id, change)
-    },
-
-    newSession(projectRoot, toolId, worktreePath = null) {
-      addSession(projectRoot, toolId, worktreePath, null)
     },
 
     async newChat(toolId) {

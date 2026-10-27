@@ -8,49 +8,29 @@ import {
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
-import type { ToolId } from '../../shared/tools'
-import { api } from '../lib/api'
 import { sessionsSummary, sessionState } from '../lib/session-state'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import type { ChatMenuComponents } from './chat-agent-menu'
 import { StateLight } from './state-light'
 import { CollapsibleTrigger } from './ui/collapsible'
 import {
   ContextMenu,
   ContextMenuContent,
-  ContextMenuGroup,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from './ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
-import { ToolMenuEntries, type ToolMenuComponents } from './tool-menu-entries'
 
-export const dropdownComponents: ToolMenuComponents = {
-  Group: DropdownMenuGroup,
-  Item: DropdownMenuItem,
-  Separator: DropdownMenuSeparator,
-  Label: DropdownMenuLabel,
-}
+export const dropdownComponents: ChatMenuComponents = { Item: DropdownMenuItem }
 
-export const contextComponents: ToolMenuComponents = {
-  Group: ContextMenuGroup,
-  Item: ContextMenuItem,
-  Separator: ContextMenuSeparator,
-  Label: ContextMenuLabel,
-}
+export const contextComponents: ChatMenuComponents = { Item: ContextMenuItem }
 
 /**
  * A project's row in the sidebar: click it to expand or collapse the project.
@@ -58,16 +38,11 @@ export const contextComponents: ToolMenuComponents = {
  * right end, the light of the state of its sessions that needs the user most,
  * if any does. Pointing at it, or moving the keyboard focus into it, shows its
  * `⋯` and `+` buttons in the light's place, and its context menu: `+` and New
- * Worktree… open the New Worktree dialog, and the context menu removes the
- * project, starting a session in its folder only on Windows.
+ * Worktree… open the New Worktree dialog, and the context menu also removes
+ * the project.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
-  const tools = useAppStore((state) => state.tools)
-  const launchSettings = useAppStore((state) => state.launchSettings)
-  const newSession = useAppStore((state) => state.newSession)
   const removeProject = useAppStore((state) => state.removeProject)
-  const redetectTools = useAppStore((state) => state.redetectTools)
-  const showSettings = useAppStore((state) => state.showSettings)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
   // The states of its sessions, in any of its worktrees.
   const states = useAppStore(
@@ -86,11 +61,7 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
     ),
   )
 
-  const startSession = (toolId: ToolId) => newSession(project.root, toolId)
   const remove = () => void removeProject(project.root)
-  const redetect = () => void redetectTools()
-  // On macOS, a tool that is not installed is installed on the Agents page.
-  const installInSettings = api.manageAgents ? () => showSettings('agents') : undefined
   const newWorktree = () => openNewWorktreeDialog(project.root)
   const Folder = expanded ? FolderOpenIcon : FolderClosedIcon
 
@@ -174,25 +145,6 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
-        {/* Only on Windows can a session start in a project's own folder. */}
-        {api.windows && (
-          <ContextMenuSub>
-            <ContextMenuSubTrigger data-testid="context-new-session">
-              <PlusIcon />
-              New Session
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-auto min-w-56">
-              <ToolMenuEntries
-                components={contextComponents}
-                tools={tools}
-                launchSettings={launchSettings}
-                onSelect={startSession}
-                onRedetect={redetect}
-                onInstall={installInSettings}
-              />
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-        )}
         <ContextMenuItem onClick={newWorktree} data-testid="context-new-worktree">
           <GitBranchPlusIcon />
           New Worktree…

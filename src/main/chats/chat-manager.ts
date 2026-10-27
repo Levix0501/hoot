@@ -422,9 +422,11 @@ export class ChatManager extends EventEmitter<{
         this.forget(id)
       } else {
         this.chats.markDeleted(id, this.now())
-        // The conversation it was in, as its agent left its records: the one
-        // it started, when Hoot did not know it yet, or one it went on to.
-        await this.reconcileChat(id)
+        // The conversation it was in, as its agent left its records, when
+        // Hoot did not know it yet. While the agent of another session of its
+        // folder runs, a conversation Hoot does not know may be that one's:
+        // it is read when Hoot starts again, before any other.
+        if (!this.anotherRunsIn(chat)) await this.reconcileChat(id)
       }
       this.emitChanged()
       await this.trashFolderIfOwned(chat)
@@ -523,7 +525,9 @@ export class ChatManager extends EventEmitter<{
     const after = conversations
       .slice(current + 1)
       .filter((conversation) => !claimed.has(conversation.id))
-    if (after.length > 0 && this.isActiveChat(chat)) {
+    // A deleted chat keeps the conversation it was in: one after it may be
+    // that of another chat in its folder.
+    if (after.length > 0 && !chat.deleted && this.isActiveChat(chat)) {
       // The chat left its conversation for the newest one no other chat has,
       // as when the agent started another; the conversation it left stays as
       // a chat of its own, and so does any between them.
@@ -550,6 +554,16 @@ export class ChatManager extends EventEmitter<{
     return this.chats
       .inFolder(chat.folder)
       .some((other) => other.id !== chat.id && other.conversationId !== null)
+  }
+
+  /** Whether the agent of another chat of the same agent runs in the chat's folder. */
+  private anotherRunsIn(chat: ChatInfo): boolean {
+    return this.chats
+      .inFolder(chat.folder)
+      .some(
+        (other) =>
+          other.id !== chat.id && other.toolId === chat.toolId && this.running.has(other.id),
+      )
   }
 
   /**

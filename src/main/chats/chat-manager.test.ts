@@ -835,6 +835,154 @@ describe('ChatManager', () => {
       before.saved.filter((entry) => entry.id !== first.id),
     )
   })
+
+  for (const toolId of ['codex', 'opencode'] as const) {
+    for (const kind of ['saved session', 'chat'] as const) {
+      it(`leaves the conversation a running ${toolId} ${kind} went on to after /new to it when the one split off is deleted`, async () => {
+        const folder = worktreeFolder('fix-login-bug')
+        const made =
+          kind === 'chat'
+            ? await manager.create(toolId)
+            : manager.createSavedSession('/work/project', folder, toolId)
+        const listed = (from: ChatManager) =>
+          kind === 'chat' ? from.list() : from.listSavedSessions()
+        const end = () =>
+          manager.sessionEnded(
+            kind === 'chat' ? ended(made.id, toolId) : endedSaved(made.id, folder, toolId),
+          )
+        const record = (list: AgentConversation[]) => {
+          if (toolId === 'codex') conversations.codex = list
+          else conversations.opencode = list
+        }
+        const first = made.conversationId ?? 'thread-1'
+        manager.opened(made.id)
+        manager.typed(made.id, 'session-1', 'first question\r')
+        record([{ id: first, title: 'First', createdAt: 1 }])
+        end()
+        await manager.flush()
+        // Opened again, it starts another conversation, whose id Hoot learns
+        // once its agent ends.
+        manager.opened(made.id)
+        manager.typed(made.id, 'session-2', '/new\r')
+        manager.typed(made.id, 'session-2', 'second question\r')
+        await manager.flush()
+        const split = listed(manager).find((entry) => entry.id !== made.id)!
+        expect(split.conversationId).toBe(first)
+        record([
+          { id: first, title: 'First', createdAt: 1 },
+          { id: 'second', title: 'Second', createdAt: 2 },
+        ])
+
+        await manager.delete(split.id)
+        end()
+        await manager.flush()
+
+        expect(listed(manager)).toEqual([
+          expect.objectContaining({ id: made.id, conversationId: 'second' }),
+        ])
+        const again = await restarted()
+        expect(listed(again)).toEqual([
+          expect.objectContaining({ id: made.id, conversationId: 'second' }),
+        ])
+      })
+    }
+  }
+
+  it('leaves the conversation a running session started to it when a session without one is deleted', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    // A message its agent did not record leaves it without a conversation.
+    const broken = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(broken.id)
+    manager.typed(broken.id, 'session-broken', 'question\r')
+    manager.sessionEnded(endedSaved(broken.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.get(broken.id)).toEqual(
+      expect.objectContaining({ conversationId: null, hasMessages: true }),
+    )
+    const running = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(running.id)
+    manager.typed(running.id, 'session-running', 'question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'Question', createdAt: 1 }]
+
+    await manager.delete(broken.id)
+    manager.sessionEnded(endedSaved(running.id, folder, 'codex'))
+    await manager.flush()
+
+    expect(manager.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: running.id, conversationId: 'thread-1' }),
+    ])
+    const again = await restarted()
+    expect(again.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: running.id, conversationId: 'thread-1' }),
+    ])
+  })
+
+  it('leaves a later conversation to the session it is of when the session opened last is deleted', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const deleted = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(deleted.id)
+    manager.typed(deleted.id, 'session-1', 'first question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'First', createdAt: 1 }]
+    manager.sessionEnded(endedSaved(deleted.id, folder, 'codex'))
+    await manager.flush()
+    // Codex's records cannot be read when the other's agent ends, nor when
+    // the first is opened again, last, and ends.
+    const other = manager.createSavedSession('/work/project', folder, 'codex')
+    manager.opened(other.id)
+    manager.typed(other.id, 'session-2', 'second question\r')
+    conversations.codex = null
+    manager.sessionEnded(endedSaved(other.id, folder, 'codex'))
+    await manager.flush()
+    manager.opened(deleted.id)
+    manager.sessionEnded(endedSaved(deleted.id, folder, 'codex'))
+    await manager.flush()
+    conversations.codex = [
+      { id: 'thread-1', title: 'First', createdAt: 1 },
+      { id: 'thread-2', title: 'Second', createdAt: 2 },
+    ]
+
+    await manager.delete(deleted.id)
+
+    const again = await restarted()
+    expect(again.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: other.id, conversationId: 'thread-2' }),
+    ])
+  })
+
+  for (const toolId of ['codex', 'opencode'] as const) {
+    it(`keeps a ${toolId} saved session deleted while another of its worktree ran out of Hoot`, async () => {
+      const folder = worktreeFolder('fix-login-bug')
+      const deleted = manager.createSavedSession('/work/project', folder, toolId)
+      const other = manager.createSavedSession('/work/project', folder, toolId)
+      // Both start a conversation Hoot does not know while both run.
+      for (const [saved, message] of [
+        [deleted, 'first question\r'],
+        [other, 'second question\r'],
+      ] as const) {
+        manager.opened(saved.id)
+        if (toolId === 'opencode') manager.typed(saved.id, `session-${saved.id}`, '/new\r')
+        manager.typed(saved.id, `session-${saved.id}`, message)
+      }
+      const recorded = [
+        { id: 'first', title: 'First', createdAt: 1 },
+        { id: 'second', title: 'Second', createdAt: 2 },
+      ]
+      if (toolId === 'codex') conversations.codex = recorded
+      else conversations.opencode = recorded
+
+      // As deleting a running session does: its agent ends first.
+      manager.sessionEnded(endedSaved(deleted.id, folder, toolId))
+      await manager.delete(deleted.id)
+      expect(manager.get(deleted.id)).toBeUndefined()
+      expect(manager.listSavedSessions().map((entry) => entry.id)).not.toContain(deleted.id)
+      manager.sessionEnded(endedSaved(other.id, folder, toolId))
+      await manager.flush()
+
+      const again = await restarted()
+      expect(again.get(deleted.id)).toBeUndefined()
+      expect(again.listSavedSessions().map((entry) => entry.id)).not.toContain(deleted.id)
+    })
+  }
 })
 
 const makeId = () => 'ABC-123'

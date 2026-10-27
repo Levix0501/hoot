@@ -1,5 +1,10 @@
 import { PencilIcon, Trash2Icon, XIcon } from 'lucide-react'
-import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import {
+  focusAfterOverlay,
+  isSessionRunning,
+  useAppStore,
+  type UiSession,
+} from '../store/app-store'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 
 /**
@@ -102,6 +107,40 @@ export function ChatMenu({ chatId, testId }: { chatId: string; testId: string })
       >
         <Trash2Icon />
         Delete
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}
+
+/**
+ * The context menu of a session Hoot does not keep, such as one started for
+ * an issue, the same on its row in the sidebar and on its tab: Rename… and
+ * Close, which takes it away.
+ */
+export function SessionMenu({ session, testId }: { session: UiSession; testId: string }) {
+  const startRenaming = useAppStore((state) => state.startRenaming)
+  const requestCloseSession = useAppStore((state) => state.requestCloseSession)
+  return (
+    <ContextMenuContent
+      className="w-auto min-w-36"
+      // The rename dialog takes the focus; otherwise it returns to the terminal.
+      finalFocus={focusAfterSessionMenu(
+        () => useAppStore.getState().renamingSessionId === session.id,
+      )}
+    >
+      <ContextMenuItem onClick={() => startRenaming(session.id)} data-testid={`${testId}-rename`}>
+        <PencilIcon />
+        Rename…
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        disabled={session.closing}
+        onClick={() => requestCloseSession(session.id)}
+        data-testid={`${testId}-close`}
+      >
+        <XIcon />
+        Close
       </ContextMenuItem>
     </ContextMenuContent>
   )

@@ -26,9 +26,11 @@ import { cn } from '../lib/utils'
 import { projectWorktreeRows, useAppStore, type AppState, type UiSession } from '../store/app-store'
 import { inTabOrder, tabKey } from '../store/session-order'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
+import { SavedSessionMenu, SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import { Button } from './ui/button'
+import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 
 /** A tab, on the main area's background so that it hides what it passes over while dragged. */
 const TAB = 'group/tab relative flex h-7 w-full min-w-0 items-center rounded-lg bg-background px-2'
@@ -164,7 +166,8 @@ function TabLabel({
  * sidebar does. Moving the pointer 6px while pressing drags the tab instead.
  * A session's close button shows on the current tab, and on another while
  * the pointer is over it; a middle click closes the session too. A double
- * click renames it.
+ * click renames it. Its context menu is the one of its session's row in the
+ * sidebar.
  */
 function SessionTab({ id, shown }: { id: string; shown: string }) {
   const { session, saved, toolId, name, state: light } = useTab(id)
@@ -202,70 +205,77 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
       data-session-id={session?.id}
       data-current={current}
     >
-      <div
-        className={cn(TAB, session?.closing === true && 'opacity-60')}
-        {...listeners}
-        onMouseDown={(event) => {
-          if (event.button === 1) event.preventDefault()
-          if (event.button !== 0) return
-          event.preventDefault()
-          if (session !== undefined) selectSession(session.id)
-        }}
-        // On a click rather than a press, which may begin a drag instead.
-        onClick={() => {
-          if (session === undefined && saved !== undefined) openSavedSession(saved.id)
-        }}
-        onAuxClick={(event) => {
-          if (event.button !== 1 || session === undefined) return
-          event.preventDefault()
-          requestCloseSession(session.id)
-        }}
-        // A saved session is renamed as its row in the sidebar renames it.
-        onDoubleClick={() => {
-          if (saved !== undefined) startRenamingSavedSession(saved.id)
-          else if (session !== undefined) startRenaming(session.id)
-        }}
-      >
-        <TabShade shaded={current} />
-        <div
-          role="tab"
-          aria-selected={current}
-          className={cn(
-            LABEL,
-            current ? 'pe-5 text-foreground' : 'text-foreground/70',
-            !current && session !== undefined && 'group-hover/tab:pe-5',
-          )}
+      <ContextMenu>
+        <ContextMenuTrigger
+          className={cn(TAB, session?.closing === true && 'opacity-60')}
+          {...listeners}
+          onMouseDown={(event) => {
+            if (event.button === 1) event.preventDefault()
+            if (event.button !== 0) return
+            event.preventDefault()
+            if (session !== undefined) selectSession(session.id)
+          }}
+          // On a click rather than a press, which may begin a drag instead.
+          onClick={() => {
+            if (session === undefined && saved !== undefined) openSavedSession(saved.id)
+          }}
+          onAuxClick={(event) => {
+            if (event.button !== 1 || session === undefined) return
+            event.preventDefault()
+            requestCloseSession(session.id)
+          }}
+          // A saved session is renamed as its row in the sidebar renames it.
+          onDoubleClick={() => {
+            if (saved !== undefined) startRenamingSavedSession(saved.id)
+            else if (session !== undefined) startRenaming(session.id)
+          }}
         >
-          <TabLabel toolId={toolId} name={name} state={light} />
-        </div>
-        {session !== undefined && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            // It shows and hides at once, as the light moves aside for it at
-            // once: fading out, it would stay over the light for a moment.
+          <TabShade shaded={current} />
+          <div
+            role="tab"
+            aria-selected={current}
             className={cn(
-              'absolute inset-y-0 end-1 my-auto size-5 text-muted-foreground transition-none',
-              !current &&
-                'pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
+              LABEL,
+              current ? 'pe-5 text-foreground' : 'text-foreground/70',
+              !current && session !== undefined && 'group-hover/tab:pe-5',
             )}
-            disabled={session.closing}
-            // Pressing it neither shows nor drags the tab, and leaves the
-            // keyboard focus where it is.
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onDoubleClick={(event) => event.stopPropagation()}
-            onClick={() => requestCloseSession(session.id)}
-            aria-label="Close Session"
-            data-testid="session-tab-close"
           >
-            <XIcon />
-          </Button>
-        )}
-      </div>
+            <TabLabel toolId={toolId} name={name} state={light} />
+          </div>
+          {session !== undefined && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              // It shows and hides at once, as the light moves aside for it at
+              // once: fading out, it would stay over the light for a moment.
+              className={cn(
+                'absolute inset-y-0 end-1 my-auto size-5 text-muted-foreground transition-none',
+                !current &&
+                  'pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
+              )}
+              disabled={session.closing}
+              // Pressing it neither shows nor drags the tab, and leaves the
+              // keyboard focus where it is.
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onClick={() => requestCloseSession(session.id)}
+              aria-label="Close Session"
+              data-testid="session-tab-close"
+            >
+              <XIcon />
+            </Button>
+          )}
+        </ContextMenuTrigger>
+        {saved !== undefined ? (
+          <SavedSessionMenu savedId={saved.id} testId="session-tab-context" />
+        ) : session !== undefined ? (
+          <SessionMenu session={session} testId="session-tab-context" />
+        ) : null}
+      </ContextMenu>
     </div>
   )
 }

@@ -1,22 +1,11 @@
-import { PencilIcon, XIcon } from 'lucide-react'
 import { sessionName } from '../../shared/session'
-import {
-  currentSessionId,
-  focusAfterOverlay,
-  useAppStore,
-  type UiSession,
-} from '../store/app-store'
+import { currentSessionId, useAppStore, type UiSession } from '../store/app-store'
 import { sessionState, stateDescription } from '../lib/session-state'
 import { cn } from '../lib/utils'
+import { SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from './ui/context-menu'
+import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
@@ -32,7 +21,6 @@ export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
   const selectSession = useAppStore((state) => state.selectSession)
   const startRenaming = useAppStore((state) => state.startRenaming)
-  const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const name = sessionName(session)
   const state = sessionState(session)
 
@@ -72,31 +60,7 @@ export function SessionItem({ session }: { session: UiSession }) {
           <span className="sr-only">{stateDescription(state, session.exit)}</span>
         </SidebarMenuButton>
       </ContextMenuTrigger>
-      <ContextMenuContent
-        className="w-auto min-w-36"
-        // The rename dialog takes the focus; otherwise it returns to the terminal.
-        finalFocus={() =>
-          useAppStore.getState().renamingSessionId === session.id ? false : focusAfterOverlay()
-        }
-      >
-        <ContextMenuItem
-          onClick={() => startRenaming(session.id)}
-          data-testid="session-context-rename"
-        >
-          <PencilIcon />
-          Rename…
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          variant="destructive"
-          disabled={session.closing}
-          onClick={() => requestCloseSession(session.id)}
-          data-testid="session-context-close"
-        >
-          <XIcon />
-          Close
-        </ContextMenuItem>
-      </ContextMenuContent>
+      <SessionMenu session={session} testId="session-context" />
     </ContextMenu>
   )
 }

@@ -92,14 +92,25 @@ export class WorktreeLayout {
     return displayPath(file, this.home)
   }
 
-  /** The project folder that already belongs to the project, if any. */
+  /** The project folder that already belongs to the project, if any: the first of them. */
   async existingProjectFolder(projectRoot: string): Promise<string | null> {
+    return (await this.projectFolders(projectRoot))[0] ?? null
+  }
+
+  /**
+   * Every folder that belongs to the project, in the order of their names.
+   * There is more than one when a worktree was made while the first was a
+   * link that led nowhere, as on a disk that was not connected: another
+   * folder was made for it then.
+   */
+  async projectFolders(projectRoot: string): Promise<string[]> {
     const entries = await fs.readdir(this.directory).catch(() => [] as string[])
+    const folders: string[] = []
     for (const entry of entries.toSorted()) {
       const folder = path.join(this.directory, entry)
-      if ((await readMarker(folder)) === projectRoot) return folder
+      if ((await readMarker(folder)) === projectRoot) folders.push(folder)
     }
-    return null
+    return folders
   }
 
   /**

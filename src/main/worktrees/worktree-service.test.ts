@@ -1329,6 +1329,50 @@ describe('WorktreeService', () => {
     expect([...records.forProject(project).keys()]).toEqual([R])
   })
 
+  it('keeps the worktrees made while the project folder led nowhere, once it leads somewhere again', async () => {
+    await start()
+    const before = await named('Before the link', [{ relativePath: 'inner', base: 'main' }])
+    const folder = path.join(W, 'project')
+    const disk = path.join(root, 'disk', 'project')
+    fs.mkdirSync(path.dirname(disk))
+    fs.renameSync(folder, disk)
+    fs.symlinkSync(disk, folder)
+    // The disk is not connected: a worktree made meanwhile goes to another folder.
+    fs.renameSync(disk, `${disk}.away`)
+    await service.read(project)
+    const meanwhile = await named('Made meanwhile', [{ relativePath: 'inner', base: 'main' }])
+    expect(meanwhile).toBe(path.join(W, 'project-2', 'made-meanwhile'))
+    fs.writeFileSync(path.join(meanwhile, 'work.txt'), 'work\n')
+    kept.saved = [before, meanwhile]
+    kept.collapsed = [meanwhile]
+    const events = reports()
+
+    // It is connected again.
+    fs.renameSync(`${disk}.away`, disk)
+    service.refreshAll()
+    await expect
+      .poll(async () => (await listed()).map((worktree) => [worktree.path, worktree.missing]))
+      .toEqual([
+        [meanwhile, false],
+        [before, false],
+      ])
+    await delay(300)
+    expect(events.every(([kind]) => kind === 'changed')).toBe(true)
+    expect(await listed()).toMatchObject([{ name: 'Made meanwhile' }, { name: 'Before the link' }])
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toEqual(
+      expect.arrayContaining([before, meanwhile]),
+    )
+    expect(linkedWorktrees(inner).map((entry) => entry.path)).toEqual(
+      expect.arrayContaining([path.join(meanwhile, 'inner')]),
+    )
+    expect(git(meanwhile, 'status', '--short')).toContain('work.txt')
+    expect([...records.forProject(project).keys()].toSorted()).toEqual(
+      [before, meanwhile].toSorted(),
+    )
+    // New worktrees go to the first folder again.
+    expect(path.dirname(await named('Made after', []))).toBe(await fs.promises.realpath(folder))
+  })
+
   it('removes a worktree Git no longer lists while Hoot keeps something of it, and none of another', async () => {
     await start()
     const R = await named('Unlisted', [])

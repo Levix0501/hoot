@@ -135,8 +135,11 @@ interface ProjectState {
 /** The project's worktrees as Git lists them, and where they are. */
 interface ProjectEntries {
   entries: WorktreeEntry[]
-  /** The real path of the project folder, as far as it exists. */
-  folder: string
+  /**
+   * The real paths, as far as they exist, of the project folder and of every
+   * other folder that belongs to the project.
+   */
+  folders: string[]
   /**
    * The project folder is a symbolic link that leads nowhere now, as when the
    * disk it was moved to is not connected: the worktrees in it are missing,
@@ -213,12 +216,13 @@ function sameWorktrees(a: readonly WorktreeInfo[], b: readonly WorktreeInfo[]): 
 /**
  * Lists, creates and deletes the worktrees of the projects in the list. A
  * project's worktrees are the linked worktrees of its repository directly in
- * its project folder, where Hoot creates them; they are told apart by where
- * they are, so that the worktrees made by any Hoot are listed. Nothing is
- * watched: the worktrees are read from Git when a project is added, when
- * `refreshAll` is called (as the window gets the focus), after Hoot creates
- * or deletes one, before a session starts in one or one is deleted or
- * removed, and once the last open session of one that is gone closes.
+ * its project folder, where Hoot creates them, or in another folder that
+ * belongs to the project; they are told apart by where they are, so that
+ * the worktrees made by any Hoot are listed. Nothing is watched: the
+ * worktrees are read from Git when a project is added, when `refreshAll` is
+ * called (as the window gets the focus), after Hoot creates or deletes one,
+ * before a session starts in one or one is deleted or removed, and once the
+ * last open session of one that is gone closes.
  * Inner repositories are looked for when a project is added, when the new
  * worktree dialog opens, and before a worktree is checked, deleted or
  * removed. `changed` reports a project's worktrees once they are first
@@ -955,8 +959,11 @@ export class WorktreeService extends EventEmitter<{
       ...(keeping?.savedSessionPaths(state.root) ?? []),
     ]
     for (const collapsed of keeping?.collapsedPaths() ?? []) {
-      // Collapsed state is kept by root alone: one in the project folder is the project's.
-      if (!listed.has(collapsed) && (await realPath(path.dirname(collapsed))) === read.folder) {
+      // Collapsed state is kept by root alone: one in a project folder is the project's.
+      if (
+        !listed.has(collapsed) &&
+        read.folders.includes(await realPath(path.dirname(collapsed)))
+      ) {
         kept.push(collapsed)
       }
     }
@@ -995,10 +1002,10 @@ export class WorktreeService extends EventEmitter<{
 
   /**
    * The project's worktrees as Git lists them now: the project repository's
-   * linked worktrees directly in the project folder. Its other linked
-   * worktrees, such as those coding agents make elsewhere, are not Hoot's.
-   * `null` when Git does not list them, as when the project repository
-   * cannot be read for now.
+   * linked worktrees directly in the project folder, or in another folder
+   * that belongs to the project. Its other linked worktrees, such as those
+   * coding agents make elsewhere, are not Hoot's. `null` when Git does not
+   * list them, as when the project repository cannot be read for now.
    */
   private async readEntries(
     context: GitContext,
@@ -1012,7 +1019,17 @@ export class WorktreeService extends EventEmitter<{
     // folder may be gone, with its worktrees missing.
     const { layout } = this.options
     const { folder } = await layout.projectFolder(state.root, { create: false })
-    const realFolder = await realPath(folder)
+    // Also a folder made while the first led nowhere: the worktrees made in
+    // it meanwhile stay the project's once the first leads somewhere again.
+    const folders = [
+      ...new Set(
+        await Promise.all(
+          [folder, ...(await layout.projectFolders(state.root))].map((candidate) =>
+            realPath(candidate),
+          ),
+        ),
+      ),
+    ]
     // A link in a project folder's place that leads nowhere, whose marker
     // cannot be read, is the project's when Git lists the project's worktrees
     // in it: by the link's path those made before the folder moved behind it,
@@ -1032,12 +1049,12 @@ export class WorktreeService extends EventEmitter<{
     let unreachable = false
     const own = entries.filter((_entry, index) => {
       const parent = parents[index]!
-      if (parent === realFolder) return true
+      if (folders.includes(parent)) return true
       if (!dangling.includes(parent)) return false
       unreachable = true
       return true
     })
-    return { entries: own, folder: realFolder, unreachable, dangling }
+    return { entries: own, folders, unreachable, dangling }
   }
 
   /** The paths of a repository's linked worktrees; `null` when Git does not list them. */

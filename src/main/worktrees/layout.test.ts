@@ -135,6 +135,28 @@ describe('WorktreeLayout', () => {
     ])
   })
 
+  it('tells every folder of a project, as one is made while the first leads nowhere', async () => {
+    const G = path.join(root, 'G')
+    expect(await layout.projectFolders(G)).toEqual([])
+    const { folder } = await layout.projectFolder(G, { create: true })
+    await layout.projectFolder(path.join(root, 'other', 'G'), { create: true })
+    // Moved to a disk that is then not connected, with a link to it in its place.
+    const disk = path.join(root, 'disk')
+    fs.mkdirSync(disk)
+    fs.renameSync(folder, path.join(disk, 'G'))
+    fs.symlinkSync(path.join(disk, 'G'), folder)
+    fs.renameSync(path.join(disk, 'G'), path.join(disk, 'G-away'))
+    expect((await layout.projectFolder(G, { create: true })).folder).toBe(
+      path.join(directory, 'G-3'),
+    )
+    expect(await layout.projectFolders(G)).toEqual([path.join(directory, 'G-3')])
+
+    // Connected again: the first one is where new worktrees go.
+    fs.renameSync(path.join(disk, 'G-away'), path.join(disk, 'G'))
+    expect(await layout.projectFolders(G)).toEqual([folder, path.join(directory, 'G-3')])
+    expect(await layout.existingProjectFolder(G)).toBe(folder)
+  })
+
   it('names a worktree folder after the branch, with -2, -3, … when taken', async () => {
     const folder = path.join(directory, 'G')
     fs.mkdirSync(path.join(folder, 'fix-1'), { recursive: true })

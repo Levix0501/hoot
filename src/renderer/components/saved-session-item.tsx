@@ -15,12 +15,12 @@ import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
 /**
  * A saved session's row below its worktree's: the agent's icon, 12px further
- * in than the worktree's; the session's name, smaller than the worktree's
- * and, unless the row is pointed at or selected, lighter; and while its agent
- * runs, at its right end, the light of its state. Click it to show the
- * session, continuing its conversation when its agent does not run;
- * double-click it or use its context menu to rename it, and close a running
- * one from its context menu.
+ * in than the worktree's; the session's name; both smaller than the
+ * worktree's, and the name, unless the row is pointed at or selected,
+ * lighter; and while its agent runs, at its right end, the light of its
+ * state. Click it to show the session, continuing its conversation when its
+ * agent does not run; double-click it or use its context menu to rename it,
+ * and close a running one from its context menu.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
   const running = useAppStore((state) =>
@@ -59,7 +59,8 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           onDoubleClick={() => startRenaming(saved.id)}
           data-testid="saved-session-item-button"
         >
-          <ToolIcon toolId={saved.toolId} />
+          {/* As much smaller as its name, centered where a full-size icon would be. */}
+          <ToolIcon toolId={saved.toolId} className="mx-px size-3.5" />
           <span
             className="min-w-0 flex-1 truncate"
             data-session-name=""

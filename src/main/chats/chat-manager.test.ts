@@ -1194,6 +1194,106 @@ describe('ChatManager', () => {
       expect(held).not.toContain('outside-1')
       expect(held).not.toContain('outside-2')
     })
+
+    /**
+     * A session S of the project folder that got a message, its agent ended,
+     * and a later one, L, whose agent runs and started a conversation Hoot
+     * does not know yet, before S is opened again: the two agents run side
+     * by side, and neither starts another conversation meanwhile.
+     */
+    const sideBySide = async (folder: string) => {
+      /** Starts a session's agent as Hoot does. */
+      const start = async (id: string) => {
+        await manager.prepareSession(id)
+        manager.opened(id)
+      }
+      const earlier = manager.createSavedSession(folder, null, toolId)
+      const own = earlier.conversationId ?? 'thread-earlier'
+      await start(earlier.id)
+      manager.typed(earlier.id, 'session-earlier-1', 'a question\r')
+      const recorded: AgentConversation[] = [
+        { id: own, title: 'Earlier', createdAt: earlier.createdAt + 1 },
+      ]
+      record(recorded)
+      manager.sessionEnded(endedLocal(earlier.id, folder, toolId))
+      await manager.flush()
+
+      const later = manager.createSavedSession(folder, null, toolId)
+      await start(later.id)
+      if (toolId === 'opencode') manager.typed(later.id, 'session-later', '/new\r')
+      manager.typed(later.id, 'session-later', 'another question\r')
+      recorded.push({ id: 'thread-later', title: 'Later', createdAt: ++clock })
+      record(recorded)
+      await start(earlier.id)
+      await manager.flush()
+      return { earlier, own, later }
+    }
+
+    it(`keeps a ${toolId} session of the project folder on its conversation when it ends while another runs`, async () => {
+      const folder = projectFolder()
+      const { earlier, own, later } = await sideBySide(folder)
+
+      manager.sessionEnded(endedLocal(earlier.id, folder, toolId))
+      await manager.flush()
+      // The conversation the later one started is not the earlier one's.
+      expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+        [earlier.id, own],
+        [later.id, null],
+      ])
+
+      manager.sessionEnded(endedLocal(later.id, folder, toolId))
+      await manager.flush()
+      const expected = [
+        [earlier.id, own],
+        [later.id, 'thread-later'],
+      ]
+      expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+      const again = await restarted()
+      expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+    })
+
+    it(`keeps each ${toolId} session of the project folder on its conversation when both end at once`, async () => {
+      for (const order of ['earlier first', 'later first'] as const) {
+        const folder = path.join(projectFolder(), order.replace(' ', '-'))
+        fs.mkdirSync(folder)
+        const { earlier, own, later } = await sideBySide(folder)
+        const both = order === 'earlier first' ? [earlier, later] : [later, earlier]
+        // Each is read once both ended.
+        for (const saved of both) manager.sessionEnded(endedLocal(saved.id, folder, toolId))
+        await manager.flush()
+        expect(
+          manager
+            .listSavedSessions()
+            .filter((entry) => entry.folder === folder)
+            .map((entry) => [entry.id, entry.conversationId]),
+        ).toEqual([
+          [earlier.id, own],
+          [later.id, 'thread-later'],
+        ])
+      }
+    })
+
+    it(`removes a ${toolId} session of the project folder left empty at /new while another runs, and nothing else`, async () => {
+      const folder = projectFolder()
+      const { earlier, own, later } = await sideBySide(folder)
+      manager.typed(earlier.id, 'session-earlier-2', '/new\r')
+      await manager.flush()
+
+      manager.sessionEnded(endedLocal(earlier.id, folder, toolId))
+      manager.sessionEnded(endedLocal(later.id, folder, toolId))
+      await manager.flush()
+      // The conversation it left stays as a session of its own.
+      const listed = manager.listSavedSessions()
+      expect(listed.map((entry) => entry.id)).not.toContain(earlier.id)
+      expect(listed.map((entry) => [entry.id === later.id, entry.conversationId])).toEqual([
+        [true, 'thread-later'],
+        [false, own],
+      ])
+    })
   }
 
   it('still splits off every earlier conversation of a worktree for a saved session there', async () => {
@@ -1237,14 +1337,39 @@ describe('ownConversations', () => {
     ).toEqual(['new'])
   })
 
+  it('leaves a session of a project folder only those since its agent began to start, once it ends', () => {
+    const local = { projectRoot: '/work/app', worktreePath: null, createdAt: 15 }
+    expect(
+      ownConversations({ ...local, conversationId: 'kept' }, recorded).map((entry) => entry.id),
+    ).toEqual(['kept', 'new'])
+    expect(
+      ownConversations({ ...local, conversationId: 'old' }, recorded, 30).map((entry) => entry.id),
+    ).toEqual(['old', 'new'])
+    expect(
+      ownConversations({ ...local, conversationId: null }, recorded, 30).map((entry) => entry.id),
+    ).toEqual(['new'])
+    // Nor any from before it was made, as for one split off since.
+    expect(
+      ownConversations({ ...local, createdAt: 45, conversationId: 'kept' }, recorded, 30).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['kept'])
+  })
+
   it('leaves a chat and a saved session of a worktree every conversation', () => {
     for (const owner of [
       { projectRoot: null, worktreePath: null },
       { projectRoot: '/work/app', worktreePath: '/work/app-fix' },
     ]) {
-      expect(ownConversations({ ...owner, createdAt: 30, conversationId: null }, recorded)).toEqual(
-        recorded,
-      )
+      for (const runStartedAt of [null, 35]) {
+        expect(
+          ownConversations(
+            { ...owner, createdAt: 30, conversationId: null },
+            recorded,
+            runStartedAt,
+          ),
+        ).toEqual(recorded)
+      }
     }
   })
 })

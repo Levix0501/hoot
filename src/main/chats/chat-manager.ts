@@ -61,7 +61,8 @@ export function visibleInput(data: string): string {
  * conversations that came before them as chats of their own. A project's own
  * folder may hold conversations from before Hoot ran an agent there: a saved
  * session in it never takes up, nor splits off, one that started before the
- * session was made.
+ * session was made; once its agent ends, not one that started before Hoot
+ * began to start that agent either, which may be another session's there.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -90,6 +91,8 @@ export class ChatManager extends EventEmitter<{
   private readonly previousTitles = new Map<string, string>()
   /** When the conversation a Claude Code chat is in started, by the hook that told of it. */
   private readonly conversationStartedAt = new Map<string, number>()
+  /** When Hoot last began to start each chat's agent, before its process ran. */
+  private readonly runStartedAt = new Map<string, number>()
 
   constructor(options: ChatManagerOptions) {
     super()
@@ -219,6 +222,7 @@ export class ChatManager extends EventEmitter<{
     if (!chat || chat.deleted) return null
     this.clearTitles.delete(id)
     this.conversationStartedAt.delete(id)
+    this.runStartedAt.set(id, this.now())
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
     if (chat.projectRoot === null) await this.ensureFolder(chat)
@@ -390,7 +394,10 @@ export class ChatManager extends EventEmitter<{
     if (id === null || session.status !== 'exited') return
     this.running.delete(id)
     this.typing.delete(session.id)
-    void this.enqueue(id, () => this.reconcileChat(id))
+    // The conversations its agent started, started once Hoot began to start it.
+    const since = this.runStartedAt.get(id) ?? null
+    this.runStartedAt.delete(id)
+    void this.enqueue(id, () => this.reconcileChat(id, since))
   }
 
   /**
@@ -453,9 +460,10 @@ export class ChatManager extends EventEmitter<{
    * message, and which conversations it holds. When the agent left the chat's
    * conversation for a later one, the conversation it left becomes a chat of
    * its own, and the chat continues the newest; when its conversation never
-   * got a message, the chat goes.
+   * got a message, the chat goes. `runStartedAt` is when Hoot began to start
+   * the agent whose process just ended, if it did.
    */
-  private async reconcileChat(chatId: string): Promise<void> {
+  private async reconcileChat(chatId: string, runStartedAt: number | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.
     if (this.running.has(chatId)) return
     let chat = this.chats.get(chatId)
@@ -490,7 +498,7 @@ export class ChatManager extends EventEmitter<{
     if (recorded === null) return
     chat = this.chats.get(chatId)
     if (!chat) return
-    const conversations = ownConversations(chat, recorded)
+    const conversations = ownConversations(chat, recorded, runStartedAt)
     // The conversations that already belong to a chat of their own: those
     // this chat leaves for another stay as chats, and are not taken again.
     const claimed = new Set(
@@ -651,6 +659,7 @@ export class ChatManager extends EventEmitter<{
     this.clearTitles.delete(id)
     this.conversationStartedAt.delete(id)
     this.previousTitles.delete(id)
+    this.runStartedAt.delete(id)
   }
 
   /**
@@ -729,16 +738,20 @@ export class ChatManager extends EventEmitter<{
  * of it. A saved session there never takes up one that started before Hoot
  * made the session, nor splits one off as a session of its own: only the one
  * it is in, which a session split off had before it was made, and those that
- * started since.
+ * started since. Once its agent's process ends, those that started since Hoot
+ * began to start that agent (`runStartedAt`): one that started before is not
+ * one that process started, and may be that of another session there whose
+ * agent runs, or ended since and is still to be read.
  */
 export function ownConversations(
   chat: Pick<ChatInfo, 'projectRoot' | 'worktreePath' | 'conversationId' | 'createdAt'>,
   recorded: readonly AgentConversation[],
+  runStartedAt: number | null = null,
 ): AgentConversation[] {
   if (!inProjectFolder(chat)) return [...recorded]
+  const since = Math.max(chat.createdAt, runStartedAt ?? 0)
   return recorded.filter(
-    (conversation) =>
-      conversation.id === chat.conversationId || conversation.createdAt >= chat.createdAt,
+    (conversation) => conversation.id === chat.conversationId || conversation.createdAt >= since,
   )
 }
 

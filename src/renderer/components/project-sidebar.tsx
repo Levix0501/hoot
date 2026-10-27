@@ -300,8 +300,9 @@ export function ProjectSidebar() {
   }, [])
 
   return (
-    // Slides out of the window when collapsed, and back in when expanded.
-    <Sidebar aria-label="Projects">
+    // Slides out of the window when collapsed, and back in when expanded. In
+    // each of its rows, the icon, the name and what follows are 6px apart.
+    <Sidebar aria-label="Projects" className="**:data-[sidebar=menu-button]:gap-1.5">
       {/*
         The sidebar's part of the window's top row, which drags the window.
         The traffic lights and the navigation sit on it. It reaches over the

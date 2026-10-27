@@ -125,9 +125,9 @@ export function ProjectItem({ project, expanded }: { project: Project; expanded:
               <span className="sr-only">{summary.description}</span>
             </>
           )}
-          {/* Room for the row's buttons while they show. */}
+          {/* Room for the row's buttons while they show, taking back the gap before it. */}
           <span
-            className="-ml-2 w-0 shrink-0 group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12"
+            className="-ml-1.5 w-0 shrink-0 group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12"
             aria-hidden
           />
         </CollapsibleTrigger>

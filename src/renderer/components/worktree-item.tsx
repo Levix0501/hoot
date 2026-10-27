@@ -299,8 +299,8 @@ export function WorktreeItem({
               <span className="sr-only">{summary.description}</span>
             </>
           )}
-          {/* Room for the row's buttons while they show. */}
-          <span className={cn('-ml-2 w-0 shrink-0', buttonsRoom)} aria-hidden />
+          {/* Room for the row's buttons while they show, taking back the gap before it. */}
+          <span className={cn('-ml-1.5 w-0 shrink-0', buttonsRoom)} aria-hidden />
         </CollapsibleTrigger>
 
         <DropdownMenu>

@@ -1067,8 +1067,8 @@ function DefaultAgentPicker({ value, disabled }: { value: CodingToolId; disabled
 }
 
 /**
- * The settings' Agents page: the default agent and the YOLO mode switch, the
- * installed agents with the command each new session runs and the settings in
+ * The settings' Agents page: the default agent, the YOLO mode switch and the
+ * switch for asking before a running session is closed, the installed agents with the command each new session runs and the settings in
  * it, Update all and Re-detect, and below a group of the agents that are not
  * installed.
  */
@@ -1079,6 +1079,7 @@ export function AgentsPage() {
   const detectAgents = useAppStore((state) => state.detectAgents)
   const updateAllAgents = useAppStore((state) => state.updateAllAgents)
   const setYoloMode = useAppStore((state) => state.setYoloMode)
+  const setConfirmClose = useAppStore((state) => state.setConfirmClose)
   const [failure, setFailure] = useState<AgentFailure | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
   // Whether the Update all run seen last has had an operation pending: it ends
@@ -1116,6 +1117,7 @@ export function AgentsPage() {
   const detecting = agents?.detecting ?? false
   const defaultAgent = launchSettings?.defaultAgent ?? 'claude'
   const yoloMode = launchSettings?.yoloMode ?? true
+  const confirmClose = launchSettings?.confirmClose ?? true
   const updateAllButton = (
     <Button
       variant="outline"
@@ -1196,6 +1198,23 @@ export function AgentsPage() {
                 disabled={launchSettings === null}
                 aria-labelledby="yolo-mode-label"
                 data-testid="yolo-mode"
+              />
+            </label>
+            <label className="flex items-center gap-4 px-4 py-3">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm font-medium" id="confirm-close-label">
+                  Confirm before closing
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Ask before closing a session whose agent is still running.
+                </span>
+              </span>
+              <Switch
+                checked={confirmClose}
+                onCheckedChange={setConfirmClose}
+                disabled={launchSettings === null}
+                aria-labelledby="confirm-close-label"
+                data-testid="confirm-close"
               />
             </label>
           </div>

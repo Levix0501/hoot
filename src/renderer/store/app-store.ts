@@ -54,6 +54,7 @@ import {
 } from '../../shared/labels'
 import {
   withAgentLaunchSettingsChange,
+  withConfirmClose,
   withDefaultAgent,
   withYoloMode,
   type AgentLaunchSettingsChange,
@@ -467,6 +468,11 @@ export interface AppState {
   setDefaultAgent(id: CodingToolId): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
+  /**
+   * Turns on or off asking before a running session is closed, by any of the
+   * ways to close a single session.
+   */
+  setConfirmClose(on: boolean): void
   /** Changes an agent's launch settings for the sessions that start from now on. */
   changeAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
   /**
@@ -712,9 +718,16 @@ export interface AppState {
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Expands or collapses a worktree in the sidebar, and saves its state. */
   setWorktreeExpanded(projectRoot: string, path: string, expanded: boolean): void
-  /** Closes a session, asking for confirmation first while it runs. */
+  /**
+   * Closes a session, asking for confirmation first while it runs, unless
+   * the Agents page says not to ask.
+   */
   requestCloseSession(id: string): void
-  answerCloseConfirmation(confirmed: boolean): void
+  /**
+   * Closes the session asked about, once confirmed; with `dontAskAgain`, a
+   * confirmation also turns asking off from now on.
+   */
+  answerCloseConfirmation(confirmed: boolean, dontAskAgain?: boolean): void
   /** Closes a session without asking: ends its process if it runs, then removes it. */
   closeSession(id: string): Promise<void>
   startRenaming(id: string): void
@@ -2382,6 +2395,12 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.setYoloMode(on)
     },
 
+    setConfirmClose(on) {
+      const launchSettings = withConfirmClose(get().launchSettings, on)
+      if (launchSettings !== null) set({ launchSettings })
+      api.setConfirmClose(on)
+    },
+
     changeAgentLaunchSettings(id, change) {
       const launchSettings = withAgentLaunchSettingsChange(get().launchSettings, id, change)
       if (launchSettings !== null) set({ launchSettings })
@@ -3213,18 +3232,21 @@ export const useAppStore = create<AppState>()((set, get) => {
     requestCloseSession(id) {
       const session = findSession(id)
       if (!session || session.closing) return
-      if (!isSessionRunning(session)) {
+      // Until the settings are read, it asks.
+      if (!isSessionRunning(session) || get().launchSettings?.confirmClose === false) {
         void get().closeSession(id)
         return
       }
       if (get().closeConfirmation === null) set({ closeConfirmation: id })
     },
 
-    answerCloseConfirmation(confirmed) {
+    answerCloseConfirmation(confirmed, dontAskAgain = false) {
       const id = get().closeConfirmation
       if (id === null) return
       set({ closeConfirmation: null })
-      if (confirmed) void get().closeSession(id)
+      if (!confirmed) return
+      if (dontAskAgain) get().setConfirmClose(false)
+      void get().closeSession(id)
     },
 
     async closeSession(id) {

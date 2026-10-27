@@ -105,6 +105,7 @@ const launchSettings = Object.assign(new EventEmitter(), {
   all: vi.fn<() => unknown>(() => launchSettingsState),
   setDefaultAgent: vi.fn<(id: string) => void>(),
   setYoloMode: vi.fn<(on: boolean) => void>(),
+  setConfirmClose: vi.fn<(on: boolean) => void>(),
   change: vi.fn<(id: string, change: unknown) => void>(),
 })
 
@@ -793,6 +794,9 @@ describe('the messages of the Agents page', () => {
     send(IpcChannel.setYoloMode, false)
     send(IpcChannel.setYoloMode, 'yes')
     expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])
+    send(IpcChannel.setConfirmClose, false)
+    send(IpcChannel.setConfirmClose, 'no')
+    expect(launchSettings.setConfirmClose.mock.calls).toEqual([[false]])
 
     send(IpcChannel.setAgentLaunchSettings, 'claude', {
       model: 'opus',

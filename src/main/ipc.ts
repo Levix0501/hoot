@@ -449,6 +449,10 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.boolean().safeParse(value)
     if (parsed.success) deps.launchSettings.setYoloMode(parsed.data)
   })
+  on(IpcChannel.setConfirmClose, (value) => {
+    const parsed = z.boolean().safeParse(value)
+    if (parsed.success) deps.launchSettings.setConfirmClose(parsed.data)
+  })
   on(IpcChannel.setAgentLaunchSettings, (...args) => {
     const parsed = z.tuple([agentId, agentLaunchSettingsChange]).safeParse(args)
     if (parsed.success) deps.launchSettings.change(...parsed.data)

@@ -55,6 +55,7 @@ function readSettings(value: unknown): LaunchSettings {
   return {
     defaultAgent: agentOf(stored.defaultAgent, fallback.defaultAgent),
     yoloMode: booleanOf(stored.yoloMode, fallback.yoloMode),
+    confirmClose: booleanOf(stored.confirmClose, fallback.confirmClose),
     agents: Object.fromEntries(
       CODING_TOOL_IDS.map((id) => [id, readAgent(agentSettings[id])]),
     ) as Record<CodingToolId, AgentLaunchSettings>,
@@ -62,8 +63,9 @@ function readSettings(value: unknown): LaunchSettings {
 }
 
 /**
- * The default agent, the YOLO mode switch and the launch settings of each
- * agent, kept in `settings.json` in the user data directory. Sessions read
+ * The default agent, the YOLO mode switch, whether closing a running session
+ * asks first, and the launch settings of each agent, kept in `settings.json`
+ * in the user data directory. Sessions read
  * them when they start, so a change applies to the next session and never to
  * a running one. Permission levels saved by earlier versions are ignored.
  */
@@ -100,6 +102,13 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
   setYoloMode(on: boolean): void {
     if (this.settings.yoloMode === on) return
     this.settings = { ...this.settings, yoloMode: on }
+    this.save()
+  }
+
+  /** Turns on or off asking before a running session is closed. */
+  setConfirmClose(on: boolean): void {
+    if (this.settings.confirmClose === on) return
+    this.settings = { ...this.settings, confirmClose: on }
     this.save()
   }
 

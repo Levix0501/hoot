@@ -250,6 +250,7 @@ export const IpcChannel = {
   getLaunchSettings: 'launch-settings:get',
   setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
+  setConfirmClose: 'launch-settings:set-confirm-close',
   setAgentLaunchSettings: 'launch-settings:set-agent',
   launchSettingsChanged: 'launch-settings:changed',
   listSessions: 'session:list',
@@ -414,12 +415,17 @@ export interface HootApi {
   updateAllAgents(): void
   /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
-  /** The default agent, the YOLO mode switch and each agent's launch settings. */
+  /**
+   * The default agent, the YOLO mode switch, whether closing a running
+   * session asks first, and each agent's launch settings.
+   */
   getLaunchSettings(): Promise<LaunchSettings>
   /** Makes an agent the default agent. */
   setDefaultAgent(id: CodingToolId): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
+  /** Turns on or off asking before a running session is closed. */
+  setConfirmClose(on: boolean): void
   /** Changes an agent's launch settings for the sessions that start from now on. */
   setAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
   onLaunchSettingsChanged(listener: (settings: LaunchSettings) => void): () => void

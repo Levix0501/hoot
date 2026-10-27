@@ -3,15 +3,17 @@ import {
   agentEnabled,
   defaultLaunchSettings,
   withAgentLaunchSettingsChange,
+  withConfirmClose,
   withDefaultAgent,
   withYoloMode,
 } from './launch-settings'
 
 describe('launch settings', () => {
-  it('start with Claude Code the default agent, YOLO mode on and every agent unchanged', () => {
+  it('start with Claude Code the default agent, YOLO mode on, closing asking first and every agent unchanged', () => {
     const settings = defaultLaunchSettings()
     expect(settings.defaultAgent).toBe('claude')
     expect(settings.yoloMode).toBe(true)
+    expect(settings.confirmClose).toBe(true)
     for (const id of ['claude', 'codex', 'opencode'] as const) {
       expect(agentEnabled(settings, id)).toBe(true)
       expect(settings.agents[id]).toEqual({
@@ -46,5 +48,7 @@ describe('launch settings', () => {
     expect(withYoloMode(null, false)).toBeNull()
     expect(withDefaultAgent(settings, 'codex')).toEqual({ ...settings, defaultAgent: 'codex' })
     expect(withDefaultAgent(null, 'codex')).toBeNull()
+    expect(withConfirmClose(settings, false)).toEqual({ ...settings, confirmClose: false })
+    expect(withConfirmClose(null, false)).toBeNull()
   })
 })

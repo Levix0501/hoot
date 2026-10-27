@@ -47,6 +47,7 @@ describe('LaunchSettingsStore', () => {
     expect(store.all()).toEqual({
       defaultAgent: 'codex',
       yoloMode: false,
+      confirmClose: true,
       agents: {
         claude: {
           enabled: false,
@@ -97,6 +98,25 @@ describe('LaunchSettingsStore', () => {
       extraArgs: [],
     })
     expect(settings.agents.opencode).toEqual(defaultAgentLaunchSettings())
+  })
+
+  it('asks before closing a running session until told not to, also after other settings changed', () => {
+    writeSettings({ launchSettings: { defaultAgent: 'codex', yoloMode: false } })
+    const store = new LaunchSettingsStore(directory)
+    expect(store.all().confirmClose).toBe(true)
+    const changes: LaunchSettings[] = []
+    store.on('changed', (settings) => changes.push(settings))
+
+    store.setConfirmClose(false)
+    store.setConfirmClose(false)
+    expect(changes.map((settings) => settings.confirmClose)).toEqual([false])
+    expect(saved()).toMatchObject({ launchSettings: { confirmClose: false, yoloMode: false } })
+    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(false)
+
+    store.setConfirmClose(true)
+    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(true)
+    writeSettings({ launchSettings: { confirmClose: 'no' } })
+    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(true)
   })
 
   it('reports each change once, and writes nothing when a change changes nothing', () => {

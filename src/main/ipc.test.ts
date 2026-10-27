@@ -202,8 +202,24 @@ const worktreeAt = {
 const worktrees = Object.assign(emitter(), {
   currentWorktree: vi.fn<() => Promise<typeof worktreeAt | null>>(async () => worktreeAt),
   createNamed: vi.fn<(request: unknown) => Promise<unknown>>(),
+  delete: vi.fn<
+    (
+      root: string,
+      worktreePath: string,
+      discard: boolean,
+      endSessions: () => Promise<void>,
+    ) => Promise<{ ok: boolean }>
+  >(async () => ({ ok: true })),
+  removeMissing: vi.fn<
+    (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
+  >(async () => ({ ok: true })),
 })
+const sidebar = { setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>() }
 const sessionManager = Object.assign(emitter(), {
+  closeIn: vi.fn<(root: string, worktreePath: string) => Promise<void>>(async () => {}),
+  closeRunningWithin: vi.fn<(directory: string) => Promise<void>>(async () => {}),
+  forgetWorktree: vi.fn<(worktreePath: string) => void>(),
+  forgetWithin: vi.fn<(directory: string) => void>(),
   start: vi.fn<(request: StartSessionRequest) => Promise<SessionInfo>>(async (request) => ({
     id: request.id,
     projectRoot: request.projectRoot,
@@ -248,6 +264,7 @@ beforeEach(() => {
     workflows,
     labels,
     sessionStarts,
+    sidebar,
   } as unknown as Parameters<typeof registerIpc>[0])
 })
 
@@ -518,6 +535,51 @@ describe('the messages of chats', () => {
     })
     expect(result).toEqual({ ok: false, message: 'Invalid session request.' })
     expect(sessionManager.start).not.toHaveBeenCalled()
+  })
+})
+
+describe('the messages of worktrees', () => {
+  it('forget what Hoot kept of the worktrees cleaned up, and tell the window which', () => {
+    const gone = ['/w/project/a', '/w/project/b']
+    worktrees.emit('removed', project.root, gone)
+    expect(chats.removeForWorktree.mock.calls).toEqual([[gone[0]], [gone[1]]])
+    expect(sidebar.setWorktreeCollapsed.mock.calls).toEqual([
+      [gone[0], false],
+      [gone[1], false],
+    ])
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.worktreesRemoved, project.root, gone)
+  })
+
+  it('end the sessions running in a worktree before deleting it, and forget it once deleted', async () => {
+    const at = saved.worktreePath
+    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, true)).toEqual({ ok: true })
+    const endSessions = worktrees.delete.mock.calls[0]![3]
+    expect(sessionManager.closeRunningWithin).not.toHaveBeenCalled()
+    await endSessions()
+    expect(sessionManager.closeRunningWithin).toHaveBeenCalledWith(at)
+    expect(sessionManager.forgetWithin).toHaveBeenCalledWith(at)
+    expect(chats.removeForWorktree).toHaveBeenCalledWith(at)
+    expect(sidebar.setWorktreeCollapsed).toHaveBeenCalledWith(at, false)
+  })
+
+  it('close the open sessions of a missing worktree before removing it, and forget it once removed', async () => {
+    const at = saved.worktreePath
+    expect(await invoke(IpcChannel.removeWorktree, project.root, at)).toEqual({ ok: true })
+    const closeSessions = worktrees.removeMissing.mock.calls[0]![2]
+    expect(sessionManager.closeIn).not.toHaveBeenCalled()
+    await closeSessions()
+    expect(sessionManager.closeIn).toHaveBeenCalledWith(project.root, at)
+    expect(sessionManager.forgetWorktree).toHaveBeenCalledWith(at)
+    expect(chats.removeForWorktree).toHaveBeenCalledWith(at)
+    expect(sidebar.setWorktreeCollapsed).toHaveBeenCalledWith(at, false)
+
+    vi.clearAllMocks()
+    worktrees.removeMissing.mockResolvedValueOnce({ ok: false, message: 'No.' })
+    expect(await invoke(IpcChannel.removeWorktree, project.root, at)).toEqual({
+      ok: false,
+      message: 'No.',
+    })
+    expect(chats.removeForWorktree).not.toHaveBeenCalled()
   })
 })
 

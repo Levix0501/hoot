@@ -35,6 +35,7 @@ import { InspectionError, inspectMembers, type MemberToCheck } from './inspectio
 import type { WorktreeLayout } from './layout'
 import {
   findInnerRepositories,
+  forgetLinkedWorktree,
   git,
   hasBranch,
   locateRepository,
@@ -79,6 +80,22 @@ interface WorktreeCreation {
   nested: Array<{ relativePath: string; base: string }>
 }
 
+/**
+ * What else Hoot keeps of the worktrees, besides their records: what tells
+ * which of the worktrees that are gone are cleaned up, and when.
+ */
+export interface WorktreeKeeping {
+  /** The roots of a project's worktrees that saved sessions belong to. */
+  savedSessionPaths(projectRoot: string): string[]
+  /** The roots of the worktrees collapsed in the sidebar, of every project. */
+  collapsedPaths(): string[]
+  /**
+   * Whether a session of a project's worktree is open: starting, running, or
+   * ended while its tab stays.
+   */
+  hasOpenSessions(projectRoot: string, worktreePath: string): boolean
+}
+
 export interface WorktreeServiceOptions {
   layout: WorktreeLayout
   /** The names and creation times of the worktrees Hoot made with the dialog. */
@@ -87,6 +104,8 @@ export interface WorktreeServiceOptions {
   gitContext(): Promise<GitContext>
   /** The time to record, in milliseconds since the Unix epoch. */
   now?: () => number
+  /** Without it, nothing but the records is known of the worktrees, and no session is open. */
+  keeping?: WorktreeKeeping
 }
 
 interface ProjectState {
@@ -104,6 +123,36 @@ interface ProjectState {
   /** Settles once the worktrees have been read for the first time. */
   ready: Promise<void>
   removed: boolean
+  /**
+   * The roots of the worktrees that were gone when they were last read, but
+   * stay until their open sessions close.
+   */
+  held: Set<string>
+  /** The roots of the worktrees Hoot is deleting or removing, which are not cleaned up meanwhile. */
+  busy: Set<string>
+}
+
+/** The project's worktrees as Git lists them, and where they are. */
+interface ProjectEntries {
+  entries: WorktreeEntry[]
+  /** The real path of the project folder, as far as it exists. */
+  folder: string
+  /**
+   * The project folder is a symbolic link that leads nowhere now, as when the
+   * disk it was moved to is not connected: the worktrees in it are missing,
+   * and none of the project's worktrees is cleaned up.
+   */
+  unreachable: boolean
+  /**
+   * The real paths, as far as they exist, of the links among the project
+   * folders that lead nowhere, and of where they lead.
+   */
+  dangling: string[]
+}
+
+/** The project's worktrees as they were read, and where they are. */
+interface ProjectWorktrees extends Omit<ProjectEntries, 'entries'> {
+  worktrees: WorktreeInfo[]
 }
 
 /** A member of a worktree in its repository. */
@@ -125,6 +174,20 @@ export function deepestFirst<T extends { relativePath: string }>(members: readon
 
 async function isDirectory(directory: string): Promise<boolean> {
   return (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ?? false
+}
+
+/**
+ * Whether nothing is at a path, as the system says; not when it cannot tell,
+ * as for a folder it may not read.
+ */
+async function absent(file: string): Promise<boolean> {
+  try {
+    await fs.promises.lstat(file)
+    return false
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR'
+  }
 }
 
 /** When a folder was created, in milliseconds since the Unix epoch; `0` when it cannot be told. */
@@ -154,14 +217,27 @@ function sameWorktrees(a: readonly WorktreeInfo[], b: readonly WorktreeInfo[]): 
  * they are, so that the worktrees made by any Hoot are listed. Nothing is
  * watched: the worktrees are read from Git when a project is added, when
  * `refreshAll` is called (as the window gets the focus), after Hoot creates
- * or deletes one, and before a session starts in one or one is deleted or
- * removed. Inner repositories are looked for when a project is added, when
- * the new worktree dialog opens, and before a worktree is checked, deleted
- * or removed. `changed` reports a project's worktrees once they are first
- * read, also when there are none, and then whenever they change.
+ * or deletes one, before a session starts in one or one is deleted or
+ * removed, and once the last open session of one that is gone closes.
+ * Inner repositories are looked for when a project is added, when the new
+ * worktree dialog opens, and before a worktree is checked, deleted or
+ * removed. `changed` reports a project's worktrees once they are first
+ * read, also when there are none, and then whenever they change; while Git
+ * cannot list them, they stay as they were.
+ *
+ * Each time they are read, the worktrees that are gone are cleaned up,
+ * without asking: one Git lists whose folder is gone, and one Git no longer
+ * lists that Hoot still keeps something of (its record, saved sessions or
+ * collapsed state). Their registrations in Git go, and so does their record,
+ * while their folders, where they are left, and their branches stay;
+ * `removed` reports them, for what else Hoot keeps of them to go too, before
+ * `changed` reports the worktrees without them. A worktree is kept, as
+ * missing, while any of its sessions is open, and while it is locked; none
+ * of a project's goes while its project folder is a link that leads nowhere.
  */
 export class WorktreeService extends EventEmitter<{
   changed: [projectRoot: string, worktrees: WorktreeInfo[]]
+  removed: [projectRoot: string, worktreePaths: string[]]
 }> {
   private readonly projects = new Map<string, ProjectState>()
 
@@ -189,6 +265,8 @@ export class WorktreeService extends EventEmitter<{
       refreshAgain: false,
       ready: Promise.resolve(),
       removed: false,
+      held: new Set(),
+      busy: new Set(),
     }
     this.projects.set(root, state)
     state.ready = this.refresh(state)
@@ -225,6 +303,17 @@ export class WorktreeService extends EventEmitter<{
   }
 
   /**
+   * Cleans up a worktree that was gone once the last of its open sessions has
+   * closed, without waiting for the worktrees to be read again for anything
+   * else.
+   */
+  sessionClosed(projectRoot: string, worktreePath: string): void {
+    const state = this.projects.get(projectRoot)
+    // A read under way may have found the session still open.
+    if (state && (state.held.has(worktreePath) || state.refreshing)) void this.refresh(state)
+  }
+
+  /**
    * Reads the project's worktrees again, which `changed` then reports, and
    * returns the worktree at a root as it is now, or `null` when there is no
    * such worktree: before a session starts in it, or before it is deleted or
@@ -256,8 +345,8 @@ export class WorktreeService extends EventEmitter<{
     const state = this.projects.get(projectRoot)
     if (!state) return false
     const context = await this.options.gitContext()
-    const entries = await this.readEntries(context, state)
-    const entry = entries.find((candidate) => candidate.path === directory)
+    const read = await this.readEntries(context, state)
+    const entry = read?.entries.find((candidate) => candidate.path === directory)
     return entry !== undefined && (await isDirectory(directory))
   }
 
@@ -492,9 +581,8 @@ export class WorktreeService extends EventEmitter<{
       }
       // A registration already at the path, of a worktree whose folder is
       // missing, is another worktree's: Git refuses to replace it, and it stays.
-      const registeredBefore = (await this.registeredPaths(context, repository)).includes(
-        member.path,
-      )
+      const registeredBefore =
+        (await this.registeredPaths(context, repository))?.includes(member.path) ?? false
       const result = await runGit(
         context.git,
         [
@@ -512,7 +600,8 @@ export class WorktreeService extends EventEmitter<{
         { timeout: WORKTREE_COMMAND_TIMEOUT },
       )
       const registered =
-        !registeredBefore && (await this.registeredPaths(context, repository)).includes(member.path)
+        !registeredBefore &&
+        ((await this.registeredPaths(context, repository))?.includes(member.path) ?? false)
       if (registered && (await isDirectory(member.path))) {
         created.push(member)
         branched.push(member)
@@ -618,7 +707,7 @@ export class WorktreeService extends EventEmitter<{
     // or since one was made.
     await this.discover(state)
     const context = await this.options.gitContext()
-    const entry = (await this.readEntries(context, state)).find(
+    const entry = (await this.readEntries(context, state))?.entries.find(
       (candidate) => candidate.path === worktreePath,
     )
     if (!entry) return { ok: false, message: 'The worktree no longer exists.' }
@@ -647,10 +736,26 @@ export class WorktreeService extends EventEmitter<{
     const state = this.projects.get(projectRoot)
     if (!state)
       return { ok: false, reason: 'not-found', message: 'The project is not in the list.' }
+    // Not cleaned up meanwhile, as when its folder is gone before its
+    // registration while Git deletes it.
+    state.busy.add(worktreePath)
+    try {
+      return await this.deleteMembers(state, worktreePath, discard, endSessions)
+    } finally {
+      state.busy.delete(worktreePath)
+    }
+  }
+
+  private async deleteMembers(
+    state: ProjectState,
+    worktreePath: string,
+    discard: boolean,
+    endSessions: () => Promise<void>,
+  ): Promise<DeleteWorktreeResult> {
     // Its inner members are found as when checking it.
     await this.discover(state)
     const context = await this.options.gitContext()
-    const entry = (await this.readEntries(context, state)).find(
+    const entry = (await this.readEntries(context, state))?.entries.find(
       (candidate) => candidate.path === worktreePath,
     )
     if (!entry) return { ok: false, reason: 'not-found', message: 'The worktree no longer exists.' }
@@ -710,78 +815,235 @@ export class WorktreeService extends EventEmitter<{
   }
 
   /**
-   * Removes the registrations of a worktree whose root is missing, in the
-   * project repository and the inner repositories, keeping every branch.
-   * A lock does not stop it: the user asks for the registrations to go.
-   * The worktrees are read again first, and nothing is removed unless the
-   * worktree is still there and still missing.
+   * Removes a worktree whose folder is missing, or that Git no longer lists
+   * while Hoot keeps something of it: its registrations in the project
+   * repository and the inner repositories go, keeping every branch, and so
+   * does its record. A lock does not stop it: the user asks for the
+   * registrations to go. Nothing is deleted or changed in a folder that is
+   * there, as for a worktree only the registration of which in the project
+   * repository was deleted. The worktrees are read again first: nothing is
+   * removed unless the worktree is still missing or no longer listed, and a
+   * worktree that is gone already, as when it was cleaned up as its last
+   * session closed, needs nothing more. Before anything is removed,
+   * `closeSessions` closes the worktree's open sessions.
    */
-  async removeMissing(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult> {
+  async removeMissing(
+    projectRoot: string,
+    worktreePath: string,
+    closeSessions: () => Promise<void> = async () => {},
+  ): Promise<RemoveWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state) return { ok: false, message: 'The project is not in the list.' }
-    const worktree = await this.currentWorktree(projectRoot, worktreePath)
-    if (!worktree) return { ok: false, message: 'The worktree no longer exists.' }
-    if (!worktree.missing) {
-      return {
-        ok: false,
-        message: 'The folder of the worktree exists; delete the worktree instead.',
-      }
-    }
-    // Its inner members are found as when checking a worktree.
-    await this.discover(state)
-    const context = await this.options.gitContext()
-    const members = await this.membersOf(context, state, worktree.path)
-    for (const member of [...deepestFirst(members.inner), members.outer]) {
-      // The folder is gone, so forcing twice only overrides a lock.
-      const result = await git(context, [
-        '-C',
-        member.repository,
-        'worktree',
-        'remove',
-        '--force',
-        '--force',
-        member.path,
-      ])
-      if (result.code !== 0) {
-        await this.refresh(state)
+    // Not cleaned up meanwhile, by a read of the worktrees.
+    state.busy.add(worktreePath)
+    try {
+      const worktree = await this.currentWorktree(projectRoot, worktreePath)
+      if (worktree?.missing === false) {
         return {
           ok: false,
-          message: `Could not remove ${member.path}: ${gitErrorMessage(result)}`,
+          message: 'The folder of the worktree exists; delete the worktree instead.',
         }
       }
+      if (worktree === null && !this.keepsAnything(state, worktreePath)) {
+        // Gone already; or never one of the project's worktrees, as another
+        // linked worktree of its repository, which is left as it is.
+        const registered = await this.registeredPaths(await this.options.gitContext(), state.root)
+        if (registered === null) {
+          return { ok: false, message: `Could not list the worktrees of ${state.name}.` }
+        }
+        return registered.includes(worktreePath)
+          ? { ok: false, message: 'The worktree no longer exists.' }
+          : { ok: true }
+      }
+      await closeSessions()
+      // Its inner members are found as when checking a worktree.
+      await this.discover(state)
+      const problem = await this.unregister(await this.options.gitContext(), state, worktreePath)
+      if (problem !== null) return { ok: false, message: problem }
+      this.options.records.remove(worktreePath)
+      return { ok: true }
+    } finally {
+      await this.refresh(state)
+      state.busy.delete(worktreePath)
     }
-    this.options.records.remove(worktree.path)
-    await this.refresh(state)
-    return { ok: true }
+  }
+
+  /** Whether Hoot keeps anything of a worktree of the project: its record, saved sessions or open sessions. */
+  private keepsAnything(state: ProjectState, worktreePath: string): boolean {
+    const { records, keeping } = this.options
+    return (
+      records.forProject(state.root).has(worktreePath) ||
+      (keeping?.savedSessionPaths(state.root).includes(worktreePath) ?? false) ||
+      (keeping?.hasOpenSessions(state.root, worktreePath) ?? false)
+    )
+  }
+
+  /**
+   * Removes the registrations of a worktree that is gone, in the project
+   * repository and the inner repositories, inner members first, keeping
+   * every branch, also when they are locked. Where a member's folder is still
+   * there, nothing in it is deleted or changed. Returns why a registration
+   * could not be removed, or `null`.
+   */
+  private async unregister(
+    context: GitContext,
+    state: ProjectState,
+    root: string,
+  ): Promise<string | null> {
+    const inner: Member[] = []
+    for (const repository of state.inner ?? []) {
+      const memberPath = path.join(root, repository.relativePath)
+      const registered = await this.registeredPaths(context, repository.path)
+      if (registered === null) return `Could not list the worktrees of ${repository.relativePath}.`
+      if (registered.includes(memberPath)) {
+        inner.push({
+          repository: repository.path,
+          path: memberPath,
+          relativePath: repository.relativePath,
+          label: repository.relativePath,
+        })
+      }
+    }
+    const members = deepestFirst(inner)
+    const outer = await this.registeredPaths(context, state.root)
+    if (outer === null) return `Could not list the worktrees of ${state.name}.`
+    if (outer.includes(root)) {
+      members.push({ repository: state.root, path: root, relativePath: '', label: state.name })
+    }
+    for (const member of members) {
+      if (await absent(member.path)) {
+        // Nothing is left to delete: forcing twice only overrides a lock.
+        const result = await git(context, [
+          '-C',
+          member.repository,
+          'worktree',
+          'remove',
+          '--force',
+          '--force',
+          member.path,
+        ])
+        if (result.code !== 0) return `Could not remove ${member.path}: ${gitErrorMessage(result)}`
+        continue
+      }
+      const problem = await forgetLinkedWorktree(context, member.repository, member.path)
+      if (problem !== null) return problem
+    }
+    return null
+  }
+
+  /**
+   * Cleans up the project's worktrees that are gone, as they were just read
+   * (see the class comment), unless Hoot is deleting or removing them; those
+   * with open sessions are held. Returns the roots of those cleaned up.
+   */
+  private async cleanUp(state: ProjectState, read: ProjectWorktrees): Promise<string[]> {
+    const { records, keeping } = this.options
+    state.held = new Set()
+    // As when the disk it is on is not connected: the worktrees come back with it.
+    if (read.unreachable) return []
+    const listed = new Set(read.worktrees.map((worktree) => worktree.path))
+    const gone = new Set<string>()
+    for (const worktree of read.worktrees) {
+      // A locked one is only away for now, as Git's lock says, and one whose
+      // folder may be there, but cannot be told, is not gone.
+      if (worktree.missing && !worktree.locked && (await absent(worktree.path))) {
+        gone.add(worktree.path)
+      }
+    }
+    const kept = [
+      ...records.forProject(state.root).keys(),
+      ...(keeping?.savedSessionPaths(state.root) ?? []),
+    ]
+    for (const collapsed of keeping?.collapsedPaths() ?? []) {
+      // Collapsed state is kept by root alone: one in the project folder is the project's.
+      if (!listed.has(collapsed) && (await realPath(path.dirname(collapsed))) === read.folder) {
+        kept.push(collapsed)
+      }
+    }
+    const unlisted = kept.filter((worktreePath) => !listed.has(worktreePath))
+    // Also when Git no longer lists them, as when `git gc` pruned their
+    // registrations while the disk was not connected: a worktree Hoot keeps
+    // something of in such a folder tells it is the project's.
+    if (read.dangling.length > 0) {
+      for (const worktreePath of unlisted) {
+        if (read.dangling.includes(await realPath(path.dirname(worktreePath)))) return []
+      }
+    }
+    for (const worktreePath of unlisted) gone.add(worktreePath)
+
+    const removed: string[] = []
+    let context: GitContext | null = null
+    for (const worktreePath of gone) {
+      if (state.busy.has(worktreePath)) continue
+      if (keeping?.hasOpenSessions(state.root, worktreePath)) {
+        state.held.add(worktreePath)
+        continue
+      }
+      context ??= await this.options.gitContext()
+      // Its inner members, which may not have been looked for yet, right after Hoot starts.
+      state.inner ??= await findInnerRepositories(context, state.root)
+      const problem = await this.unregister(context, state, worktreePath)
+      if (problem !== null) {
+        console.error('Could not clean up the worktree', worktreePath, problem)
+        continue
+      }
+      records.remove(worktreePath)
+      removed.push(worktreePath)
+    }
+    return removed
   }
 
   /**
    * The project's worktrees as Git lists them now: the project repository's
    * linked worktrees directly in the project folder. Its other linked
    * worktrees, such as those coding agents make elsewhere, are not Hoot's.
+   * `null` when Git does not list them, as when the project repository
+   * cannot be read for now.
    */
-  private async readEntries(context: GitContext, state: ProjectState): Promise<WorktreeEntry[]> {
+  private async readEntries(
+    context: GitContext,
+    state: ProjectState,
+  ): Promise<ProjectEntries | null> {
     const result = await git(context, ['-C', state.root, 'worktree', 'list', '--porcelain', '-z'])
-    if (result.code !== 0) return []
+    if (result.code !== 0) return null
     // Git lists a worktree by the real path it had when it was made, which a
     // symbolic link added on the way since (to move ~/.hoot to another disk,
     // say) no longer is: folders are compared by their real paths now. The
     // folder may be gone, with its worktrees missing.
-    const { folder } = await this.options.layout.projectFolder(state.root, { create: false })
+    const { layout } = this.options
+    const { folder } = await layout.projectFolder(state.root, { create: false })
     const realFolder = await realPath(folder)
+    // A link in a project folder's place that leads nowhere, whose marker
+    // cannot be read, is the project's when Git lists the project's worktrees
+    // in it: by the link's path those made before the folder moved behind it,
+    // by where it leads those made since.
+    const dangling = (
+      await Promise.all(
+        (await layout.danglingFolders()).map(async (link) => [
+          await realPath(link.folder),
+          await realPath(link.target),
+        ]),
+      )
+    ).flat()
     const entries = parseWorktreeList(result.stdout)
       .slice(1)
       .filter((entry) => !entry.bare)
-    const inFolder = await Promise.all(
-      entries.map(async (entry) => (await realPath(path.dirname(entry.path))) === realFolder),
-    )
-    return entries.filter((_entry, index) => inFolder[index])
+    const parents = await Promise.all(entries.map((entry) => realPath(path.dirname(entry.path))))
+    let unreachable = false
+    const own = entries.filter((_entry, index) => {
+      const parent = parents[index]!
+      if (parent === realFolder) return true
+      if (!dangling.includes(parent)) return false
+      unreachable = true
+      return true
+    })
+    return { entries: own, folder: realFolder, unreachable, dangling }
   }
 
-  /** The paths of a repository's linked worktrees. */
-  private async registeredPaths(context: GitContext, repository: string): Promise<string[]> {
+  /** The paths of a repository's linked worktrees; `null` when Git does not list them. */
+  private async registeredPaths(context: GitContext, repository: string): Promise<string[] | null> {
     const result = await git(context, ['-C', repository, 'worktree', 'list', '--porcelain', '-z'])
-    if (result.code !== 0) return []
+    if (result.code !== 0) return null
     return parseWorktreeList(result.stdout)
       .slice(1)
       .map((entry) => entry.path)
@@ -824,7 +1086,7 @@ export class WorktreeService extends EventEmitter<{
     const inner: Member[] = []
     for (const repository of state.inner ?? []) {
       const memberPath = path.join(root, repository.relativePath)
-      if ((await this.registeredPaths(context, repository.path)).includes(memberPath)) {
+      if ((await this.registeredPaths(context, repository.path))?.includes(memberPath)) {
         inner.push({
           repository: repository.path,
           path: memberPath,
@@ -909,8 +1171,21 @@ export class WorktreeService extends EventEmitter<{
     state.refreshing = (async () => {
       do {
         state.refreshAgain = false
-        const worktrees = await this.readWorktrees(state)
+        const read = await this.readWorktrees(state)
         if (state.removed) return
+        if (read === null) {
+          // Git did not list them: they stay as they were, and none is cleaned up.
+          if (!state.reported) {
+            state.reported = true
+            this.emit('changed', state.root, state.worktrees)
+          }
+          continue
+        }
+        const removed = await this.cleanUp(state, read)
+        // What else Hoot keeps of them goes before the worktrees show without them.
+        if (removed.length > 0) this.emit('removed', state.root, removed)
+        if (state.removed) return
+        const worktrees = read.worktrees.filter((worktree) => !removed.includes(worktree.path))
         if (!state.reported || !sameWorktrees(worktrees, state.worktrees)) {
           state.worktrees = worktrees
           state.reported = true
@@ -927,12 +1202,15 @@ export class WorktreeService extends EventEmitter<{
     return state.refreshing
   }
 
-  private async readWorktrees(state: ProjectState): Promise<WorktreeInfo[]> {
+  /** The project's worktrees as they are now; `null` when Git does not list them. */
+  private async readWorktrees(state: ProjectState): Promise<ProjectWorktrees | null> {
     const context = await this.options.gitContext()
-    const entries = await this.readEntries(context, state)
+    const read = await this.readEntries(context, state)
+    if (read === null) return null
+    const { entries, ...where } = read
     const inner = state.inner ?? []
     const innerRegistrations = await Promise.all(
-      inner.map((repository) => this.registeredPaths(context, repository.path)),
+      inner.map(async (repository) => (await this.registeredPaths(context, repository.path)) ?? []),
     )
     const records = this.options.records.forProject(state.root)
     const worktrees = await Promise.all(
@@ -958,7 +1236,7 @@ export class WorktreeService extends EventEmitter<{
         }
       }),
     )
-    return worktrees.toSorted(compareWorktrees)
+    return { ...where, worktrees: worktrees.toSorted(compareWorktrees) }
   }
 
   /** The abbreviated commit of a detached HEAD, as `git rev-parse --short HEAD` gives it there. */

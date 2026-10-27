@@ -121,6 +121,40 @@ export async function locateRepository(
   }
 }
 
+/**
+ * Removes a repository's registration of a linked worktree whose folder is
+ * still there, deleting and changing nothing in the folder: the folder Git
+ * keeps for the worktree in the repository's `worktrees`, which `git worktree
+ * remove` deletes only after the worktree's own files, and `git worktree
+ * prune` only once they are gone. A registration that is not there is left
+ * as it is. Returns why it could not be removed, or `null`.
+ */
+export async function forgetLinkedWorktree(
+  context: GitContext,
+  repository: string,
+  worktreePath: string,
+): Promise<string | null> {
+  const location = await locateRepository(context, repository)
+  if (!location) return `${repository} is not a Git repository.`
+  const registrations = path.join(location.commonDir, 'worktrees')
+  const names = await fs.readdir(registrations).catch(() => [] as string[])
+  for (const name of names) {
+    const registration = path.join(registrations, name)
+    // The worktree's `.git`, as Git wrote it: relative to the registration
+    // when Git writes relative paths.
+    const written = await fs.readFile(path.join(registration, 'gitdir'), 'utf8').catch(() => null)
+    if (written === null) continue
+    const registered = path.dirname(path.resolve(registration, written.trim()))
+    if (registered !== path.resolve(worktreePath)) continue
+    try {
+      await fs.rm(registration, { recursive: true, force: true })
+    } catch (error) {
+      return `Could not remove the registration of ${worktreePath}: ${(error as Error).message}`
+    }
+  }
+  return null
+}
+
 /** Paths that a repository's `.gitmodules` file registers as submodules. */
 async function registeredSubmodulePaths(context: GitContext, repository: string) {
   const file = path.join(repository, '.gitmodules')

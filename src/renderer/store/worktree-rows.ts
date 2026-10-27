@@ -1,13 +1,10 @@
 import { compareWorktrees, type WorktreeInfo } from '../../shared/worktrees'
 
-/** A worktree row of the sidebar. */
-export interface WorktreeRow extends WorktreeInfo {
-  /**
-   * False for a worktree that Git no longer lists but that still has
-   * sessions: its row stays, as missing, until they are closed.
-   */
-  registered: boolean
-}
+/**
+ * A worktree row of the sidebar: of a worktree Git lists, or of one Git no
+ * longer lists that still has open sessions, which shows as missing.
+ */
+export type WorktreeRow = WorktreeInfo
 
 function fallbackInfo(path: string): WorktreeInfo {
   return {
@@ -33,7 +30,7 @@ export function worktreeRows(
   sessionWorktrees: readonly string[],
   known: Readonly<Record<string, WorktreeInfo>>,
 ): WorktreeRow[] {
-  const rows: WorktreeRow[] = (listed ?? []).map((worktree) => ({ ...worktree, registered: true }))
+  const rows: WorktreeRow[] = [...(listed ?? [])]
   const paths = new Set(rows.map((row) => row.path))
   for (const path of sessionWorktrees) {
     if (paths.has(path)) continue
@@ -43,7 +40,6 @@ export function worktreeRows(
       missing: true,
       locked: false,
       lockReason: null,
-      registered: false,
     })
   }
   return rows.toSorted(compareWorktrees)

@@ -377,15 +377,6 @@ function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
   const labels = new LabelStore(database)
-  // Worktrees live in the home directory, not in the user data directory, so
-  // that an installed Hoot and one run from its repository share them; their
-  // names come from the database.
-  const worktreeService = new WorktreeService({
-    layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
-    records: new WorktreeStore(database),
-    gitContext: projectGit,
-  })
-  worktrees = worktreeService
   const chats = new ChatManager({
     db: database,
     conversations: localChatConversations({
@@ -394,6 +385,30 @@ function startWithDatabase(database: DatabaseSync): void {
     }),
   })
   chatManager = chats
+  // Worktrees live in the home directory, not in the user data directory, so
+  // that an installed Hoot and one run from its repository share them; their
+  // names come from the database.
+  const worktreeService = new WorktreeService({
+    layout: new WorktreeLayout(path.join(os.homedir(), '.hoot', 'worktrees'), os.homedir()),
+    records: new WorktreeStore(database),
+    gitContext: projectGit,
+    keeping: {
+      savedSessionPaths: (root) =>
+        chats
+          .listSavedSessions()
+          .filter((saved) => saved.projectRoot === root)
+          .map((saved) => saved.worktreePath),
+      collapsedPaths: () => sidebar.collapsedWorktrees,
+      hasOpenSessions: (root, worktreePath) => sessions.hasOpenIn(root, worktreePath),
+    },
+  })
+  worktrees = worktreeService
+  // A worktree that is gone is cleaned up once the last of its open sessions closes.
+  sessions.on('closed', (session) => {
+    if (session.chatId === null && session.worktreePath !== null) {
+      worktreeService.sessionClosed(session.projectRoot, session.worktreePath)
+    }
+  })
   // Puts the workflow's group of labels in place, before anything reads the labels.
   const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW, labels)
   // hoot's sessions, which the window starts as an issue's start button does.

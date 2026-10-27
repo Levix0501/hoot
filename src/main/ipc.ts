@@ -759,6 +759,16 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.worktrees.on('changed', (root, worktrees) =>
     send(IpcChannel.worktreesChanged, root, worktrees),
   )
+  // Worktrees that were gone, cleaned up as the worktrees were read: their
+  // saved sessions go with them, and one made again at a root of theirs is
+  // expanded.
+  deps.worktrees.on('removed', (root, worktreePaths) => {
+    for (const worktreePath of worktreePaths) {
+      deps.chats.removeForWorktree(worktreePath)
+      deps.sidebar.setWorktreeCollapsed(worktreePath, false)
+    }
+    send(IpcChannel.worktreesRemoved, root, worktreePaths)
+  })
 
   handle(IpcChannel.newWorktreeOptions, (_event, value): Promise<NewWorktreeOptionsResult> => {
     const parsed = projectRoot.safeParse(value)
@@ -852,11 +862,17 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.removeWorktree, async (_event, ...args): Promise<RemoveWorktreeResult> => {
     const parsed = worktreeArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-    const result = await deps.worktrees.removeMissing(...parsed.data)
+    const [root, worktreePath] = parsed.data
+    // Its open sessions close first: the window closes those it listed
+    // before asking, and any that opened since close here.
+    const result = await deps.worktrees.removeMissing(root, worktreePath, () =>
+      deps.sessions.closeIn(root, worktreePath),
+    )
+    // Its saved sessions go with it. A worktree made again at its root is expanded.
     if (result.ok) {
-      deps.sessions.forgetWorktree(parsed.data[1])
-      deps.chats.removeForWorktree(parsed.data[1])
-      deps.sidebar.setWorktreeCollapsed(parsed.data[1], false)
+      deps.sessions.forgetWorktree(worktreePath)
+      deps.chats.removeForWorktree(worktreePath)
+      deps.sidebar.setWorktreeCollapsed(worktreePath, false)
     }
     return result
   })

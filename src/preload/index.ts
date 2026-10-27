@@ -97,6 +97,7 @@ const api: HootApi = {
   currentWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.currentWorktree, projectRoot, worktreePath),
   onWorktreesChanged: (listener) => subscribe(IpcChannel.worktreesChanged, listener),
+  onWorktreesRemoved: (listener) => subscribe(IpcChannel.worktreesRemoved, listener),
   getNewWorktreeOptions: (projectRoot) =>
     ipcRenderer.invoke(IpcChannel.newWorktreeOptions, projectRoot),
   getWorktreeSubmodules: (projectRoot, participants) =>

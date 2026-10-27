@@ -84,13 +84,15 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
  * Tracks every session Hoot runs: starting each one, routing its input and
  * output and the events of its Claude Code's hooks, ending its process when it
  * is closed or Hoot quits, and marking the running ones ended when the pty
- * host stops.
+ * host stops. `closed` reports a session that started once it is gone: closed,
+ * or forgotten with its worktree or project.
  */
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
   input: [id: string, data: string]
   updated: [session: SessionInfo]
   'hook-event': [id: string, report: HookEventReport]
+  closed: [session: SessionInfo]
 }> {
   /** In the order the sessions were started. */
   private readonly records = new Map<string, SessionRecord>()
@@ -163,6 +165,19 @@ export class SessionManager extends EventEmitter<{
   }
 
   /**
+   * Whether a session of a project's worktree, other than a chat, is open:
+   * starting, running, or ended without being closed, as its tab stays.
+   */
+  hasOpenIn(projectRoot: string, worktreePath: string): boolean {
+    return [...this.records.values()].some(
+      (record) =>
+        record.info.chatId === null &&
+        record.info.projectRoot === projectRoot &&
+        record.info.worktreePath === worktreePath,
+    )
+  }
+
+  /**
    * The sessions starting or running in a directory or below it, other than
    * chats: in a worktree with this root, say, or in a project's worktree
    * inside it.
@@ -185,6 +200,23 @@ export class SessionManager extends EventEmitter<{
    */
   async closeRunningWithin(directory: string): Promise<void> {
     await Promise.all(this.runningIdsWithin(directory).map((id) => this.close(id)))
+  }
+
+  /**
+   * Closes the open sessions of a project's worktree, other than chats (see
+   * `hasOpenIn`), as before a worktree that is gone is removed: settles once
+   * their processes have ended.
+   */
+  async closeIn(projectRoot: string, worktreePath: string): Promise<void> {
+    const ids = [...this.records.values()]
+      .filter(
+        (record) =>
+          record.info.chatId === null &&
+          record.info.projectRoot === projectRoot &&
+          record.info.worktreePath === worktreePath,
+      )
+      .map((record) => record.info.id)
+    await Promise.all(ids.map((id) => this.close(id)))
   }
 
   /**
@@ -303,7 +335,7 @@ export class SessionManager extends EventEmitter<{
       if (record.info.status === 'running') await this.terminate(record)
       // Also when the process did not report its exit in time.
       cleanUp(record)
-      this.records.delete(id)
+      this.drop(id, record)
     })()
     return record.closing
   }
@@ -311,14 +343,14 @@ export class SessionManager extends EventEmitter<{
   /** Forgets the ended sessions of a project that is removed from the list. */
   forgetProject(projectRoot: string): void {
     for (const [id, record] of this.records) {
-      if (record.info.projectRoot === projectRoot && !isRunning(record)) this.records.delete(id)
+      if (record.info.projectRoot === projectRoot && !isRunning(record)) this.drop(id, record)
     }
   }
 
   /** Forgets the ended sessions of a worktree that is removed. */
   forgetWorktree(worktreePath: string): void {
     for (const [id, record] of this.records) {
-      if (record.info.worktreePath === worktreePath && !isRunning(record)) this.records.delete(id)
+      if (record.info.worktreePath === worktreePath && !isRunning(record)) this.drop(id, record)
     }
   }
 
@@ -334,7 +366,7 @@ export class SessionManager extends EventEmitter<{
         record.info.chatId === null &&
         isWithin(record.info.worktreePath ?? record.info.projectRoot, directory)
       ) {
-        this.records.delete(id)
+        this.drop(id, record)
       }
     }
   }
@@ -349,6 +381,13 @@ export class SessionManager extends EventEmitter<{
       return record.starting ? Promise.resolve() : closed
     })
     await Promise.all(ending)
+  }
+
+  /** Forgets a session, which is gone now. */
+  private drop(id: string, record: SessionRecord): void {
+    if (this.records.get(id) !== record) return
+    this.records.delete(id)
+    this.emit('closed', { ...record.info })
   }
 
   /** Ends a running session's process group: SIGHUP first, then SIGKILL. */

@@ -31,6 +31,31 @@ async function isFolder(file: string): Promise<boolean> {
 }
 
 /**
+ * Where a symbolic link leads when nothing is there, following links to
+ * links; `null` for anything else, such as a folder or a link to one.
+ */
+async function danglingTarget(file: string): Promise<string | null> {
+  try {
+    if (!(await fs.lstat(file)).isSymbolicLink()) return null
+    const reached = await fs.stat(file).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => error.code !== 'ENOENT' && error.code !== 'ENOTDIR',
+    )
+    if (reached) return null
+    let target = file
+    // As many links as the system follows in a path.
+    for (let hop = 0; hop < 40; hop++) {
+      const stats = await fs.lstat(target).catch(() => null)
+      if (!stats?.isSymbolicLink()) return target
+      target = path.resolve(path.dirname(target), await fs.readlink(target))
+    }
+    return target
+  } catch {
+    return null
+  }
+}
+
+/**
  * `undefined` when nothing is at the path, `null` when it is not a project
  * folder of Hoot's (also a link that leads nowhere).
  */
@@ -75,6 +100,23 @@ export class WorktreeLayout {
       if ((await readMarker(folder)) === projectRoot) return folder
     }
     return null
+  }
+
+  /**
+   * The entries of the directory that are symbolic links leading nowhere,
+   * each with where it leads: a project folder moved to another disk, with a
+   * link to it in its place, while that disk is not connected, say. Which
+   * project such a folder belongs to cannot be read from its marker then.
+   */
+  async danglingFolders(): Promise<Array<{ folder: string; target: string }>> {
+    const entries = await fs.readdir(this.directory).catch(() => [] as string[])
+    const found: Array<{ folder: string; target: string }> = []
+    for (const entry of entries.toSorted()) {
+      const folder = path.join(this.directory, entry)
+      const target = await danglingTarget(folder)
+      if (target !== null) found.push({ folder, target })
+    }
+    return found
   }
 
   /**

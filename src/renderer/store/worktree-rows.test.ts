@@ -18,9 +18,9 @@ const worktree = (path: string, displayName: string, changes: Partial<WorktreeIn
 describe('worktreeRows', () => {
   it('lists the worktrees Git lists, by display name', () => {
     const rows = worktreeRows([worktree('/w/b', 'b-tree'), worktree('/w/a', 'a-tree')], [], {})
-    expect(rows.map((row) => [row.displayName, row.registered])).toEqual([
-      ['a-tree', true],
-      ['b-tree', true],
+    expect(rows.map((row) => [row.displayName, row.missing])).toEqual([
+      ['a-tree', false],
+      ['b-tree', false],
     ])
   })
 
@@ -31,10 +31,10 @@ describe('worktreeRows', () => {
       ['/w/a', '/w/gone', '/w/unknown'],
       known,
     )
-    expect(rows.map((row) => [row.path, row.displayName, row.missing, row.registered])).toEqual([
-      ['/w/a', 'a-tree', false, true],
-      ['/w/gone', 'gone', true, false],
-      ['/w/unknown', 'unknown', true, false],
+    expect(rows.map((row) => [row.path, row.displayName, row.missing])).toEqual([
+      ['/w/a', 'a-tree', false],
+      ['/w/gone', 'gone', true],
+      ['/w/unknown', 'unknown', true],
     ])
     expect(rows[1]).toMatchObject({ locked: false, lockReason: null })
   })

@@ -118,6 +118,23 @@ describe('WorktreeLayout', () => {
     )
   })
 
+  it('tells the links among the project folders that lead nowhere, and where they lead', async () => {
+    expect(await layout.danglingFolders()).toEqual([])
+    const disk = path.join(root, 'disk')
+    fs.mkdirSync(path.join(disk, 'there'), { recursive: true })
+    fs.mkdirSync(path.join(directory, 'folder'), { recursive: true })
+    fs.symlinkSync(path.join(disk, 'there'), path.join(directory, 'linked'))
+    fs.symlinkSync(path.join(disk, 'away'), path.join(directory, 'unplugged'))
+    // A link to a link that leads nowhere, written relative to its folder.
+    fs.symlinkSync(path.join('..', '..', '..', 'disk', 'hop'), path.join(directory, 'chained'))
+    fs.symlinkSync(path.join(disk, 'gone'), path.join(disk, 'hop'))
+    fs.writeFileSync(path.join(directory, 'file'), '')
+    expect(await layout.danglingFolders()).toEqual([
+      { folder: path.join(directory, 'chained'), target: path.join(disk, 'gone') },
+      { folder: path.join(directory, 'unplugged'), target: path.join(disk, 'away') },
+    ])
+  })
+
   it('names a worktree folder after the branch, with -2, -3, … when taken', async () => {
     const folder = path.join(directory, 'G')
     fs.mkdirSync(path.join(folder, 'fix-1'), { recursive: true })

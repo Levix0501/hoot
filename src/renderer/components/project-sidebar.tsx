@@ -155,7 +155,7 @@ function ProjectWorktrees({ project }: { project: Project }) {
   const listed = useAppStore((state) => state.worktrees[project.root])
   const known = useAppStore((state) => state.knownWorktrees)
   const withSessions = useAppStore(
-    useShallow((state) => sessionWorktrees(state.sessions, project.root, state.savedSessions)),
+    useShallow((state) => sessionWorktrees(state.sessions, project.root)),
   )
   const rows = useMemo(
     () => worktreeRows(listed, withSessions, known),
@@ -174,11 +174,11 @@ function ProjectEntry({ project }: { project: Project }) {
   const expanded = useAppStore((state) => !state.collapsedProjects.has(project.id))
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
   // Whether nothing is listed below its row: known once its worktrees have been read.
+  // Saved sessions show only below the rows of their worktrees.
   const empty = useAppStore(
     (state) =>
       state.worktrees[project.root]?.length === 0 &&
-      !state.sessions.some((session) => session.projectRoot === project.root) &&
-      !state.savedSessions.some((saved) => saved.projectRoot === project.root),
+      !state.sessions.some((session) => session.projectRoot === project.root),
   )
   return (
     <Collapsible

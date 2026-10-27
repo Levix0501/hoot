@@ -31,6 +31,20 @@ describe('deepestFirst', () => {
   })
 })
 
+/** Every file below a folder, by its path relative to it, with what it holds. */
+function contents(folder: string): Record<string, string> {
+  const files: Record<string, string> = {}
+  const walk = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name)
+      if (entry.isDirectory()) walk(file)
+      else files[path.relative(folder, file)] = fs.readFileSync(file, 'utf8')
+    }
+  }
+  walk(folder)
+  return files
+}
+
 describe('WorktreeService', () => {
   let root: string
   let home: string
@@ -42,6 +56,22 @@ describe('WorktreeService', () => {
   let W: string
   let db: ReturnType<typeof openDatabase>
   let records: WorktreeStore
+  /** What else Hoot keeps of the project's worktrees, as the tests set it. */
+  let kept: { saved: string[]; collapsed: string[]; open: string[] }
+
+  function makeService(): WorktreeService {
+    return new WorktreeService({
+      layout: new WorktreeLayout(W, home),
+      records,
+      gitContext: async () => context,
+      keeping: {
+        savedSessionPaths: (projectRoot) => (projectRoot === project ? kept.saved : []),
+        collapsedPaths: () => kept.collapsed,
+        hasOpenSessions: (projectRoot, worktreePath) =>
+          projectRoot === project && kept.open.includes(worktreePath),
+      },
+    })
+  }
 
   beforeEach(() => {
     ;({ root, home, context } = makeSandbox('hoot-worktrees-'))
@@ -59,11 +89,8 @@ describe('WorktreeService', () => {
     git(inner, 'commit', '-q', '-m', 'ignore deep')
     addBranch(inner, 'develop')
     deep = makeRepository(path.join(inner, 'deep'))
-    service = new WorktreeService({
-      layout: new WorktreeLayout(W, home),
-      records,
-      gitContext: async () => context,
-    })
+    kept = { saved: [], collapsed: [], open: [] }
+    service = makeService()
   })
 
   afterEach(async () => {
@@ -96,6 +123,8 @@ describe('WorktreeService', () => {
     git(project, 'worktree', 'add', '-q', '-b', 'beta', path.join(folder, 'b'))
     git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(folder, 'b', 'inner'))
     fs.rmSync(path.join(folder, 'b'), { recursive: true })
+    // Gone, but kept while a session of it is open.
+    kept.open = [path.join(folder, 'b')]
     git(inner, 'worktree', 'add', '-q', '-b', 'zeta', path.join(folder, 'z', 'inner'))
     // A linked worktree of an inner repository outside any worktree is no member.
     git(deep, 'worktree', 'add', '-q', '-b', 'loner', path.join(root, 'loner'))
@@ -202,11 +231,11 @@ describe('WorktreeService', () => {
     git(project, 'worktree', 'remove', gone)
     expect(await service.currentWorktree(project, gone)).toBeNull()
     expect(shown().map((worktree) => worktree.path)).not.toContain(gone)
-    expect(await service.removeMissing(project, gone)).toEqual({
-      ok: false,
-      message: 'The worktree no longer exists.',
-    })
+    // Gone already: there is nothing more to remove.
+    expect(await service.removeMissing(project, gone)).toEqual({ ok: true })
 
+    // Gone, but kept while their sessions are open.
+    kept.open = [missing, back]
     fs.rmSync(missing, { recursive: true })
     expect(await service.currentWorktree(project, missing)).toMatchObject({ missing: true })
     expect(shown().find((worktree) => worktree.path === missing)).toMatchObject({ missing: true })
@@ -780,12 +809,21 @@ describe('WorktreeService', () => {
     git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)
     git(inner, 'worktree', 'add', '-q', '-b', 'beta', path.join(gone, 'inner'))
     fs.rmSync(gone, { recursive: true })
+    // Kept while a session of it is open, which removing it closes first.
+    kept.open = [gone]
+    let closed = 0
     await start()
     expect(await service.delete(project, gone, true)).toMatchObject({
       ok: false,
       reason: 'missing',
     })
-    expect(await service.removeMissing(project, gone)).toEqual({ ok: true })
+    expect(
+      await service.removeMissing(project, gone, async () => {
+        closed++
+        expect(linkedWorktrees(project)).toHaveLength(1)
+      }),
+    ).toEqual({ ok: true })
+    expect(closed).toBe(1)
     expect(linkedWorktrees(project)).toEqual([])
     expect(linkedWorktrees(inner)).toEqual([])
     expect(branches(project)).toContain('beta')
@@ -822,11 +860,7 @@ describe('WorktreeService', () => {
 
     // Hoot starts again, and lists the worktree before it has looked for inner repositories.
     service.dispose()
-    service = new WorktreeService({
-      layout: new WorktreeLayout(W, home),
-      records,
-      gitContext: async () => context,
-    })
+    service = makeService()
     service.addProject(project)
     expect((await listed()).map((worktree) => worktree.path)).toEqual([R])
     expect(await service.inspect(project, R)).toEqual({
@@ -874,11 +908,7 @@ describe('WorktreeService', () => {
     })
     if (!created.ok) throw new Error(created.message)
     service.dispose()
-    service = new WorktreeService({
-      layout: new WorktreeLayout(W, home),
-      records,
-      gitContext: async () => context,
-    })
+    service = makeService()
     service.addProject(project)
     await service.listAll()
     expect(await service.delete(project, created.path, true)).toEqual({ ok: true })
@@ -927,11 +957,7 @@ describe('WorktreeService', () => {
     fs.renameSync(path.join(home, '.hoot'), path.join(disk, '.hoot'))
     fs.symlinkSync(path.join(disk, '.hoot'), path.join(home, '.hoot'))
     expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
-    service = new WorktreeService({
-      layout: new WorktreeLayout(W, home),
-      records,
-      gitContext: async () => context,
-    })
+    service = makeService()
     await start()
     const after = await service.create({
       projectRoot: project,
@@ -979,11 +1005,7 @@ describe('WorktreeService', () => {
     fs.renameSync(folder, moved)
     fs.symlinkSync(moved, folder)
     expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
-    service = new WorktreeService({
-      layout: new WorktreeLayout(W, home),
-      records,
-      gitContext: async () => context,
-    })
+    service = makeService()
     await start()
     expect((await listed()).map((worktree) => [worktree.path, worktree.innerMembers])).toEqual([
       [R, ['inner']],
@@ -1021,6 +1043,8 @@ describe('WorktreeService', () => {
       nested: [],
     })
     if (!first.ok) throw new Error(first.message)
+    // Kept while a session of it is open.
+    kept.open = [first.path]
     fs.rmSync(first.path, { recursive: true })
     // `a-x` is also the folder of `a/x`, whose worktree Git still registers there.
     const result = await service.create({
@@ -1070,6 +1094,260 @@ describe('WorktreeService', () => {
       expect(branches(repository)).toContain('agent')
     }
     expect(await listed()).toEqual([])
+  })
+
+  /** The events the service reports, in the order it reports them. */
+  function reports(): Array<['removed', string[]] | ['changed', string[]]> {
+    const events: Array<['removed', string[]] | ['changed', string[]]> = []
+    service.on('removed', (_root, paths) => events.push(['removed', paths]))
+    service.on('changed', (_root, worktrees) =>
+      events.push(['changed', worktrees.map((worktree) => worktree.path)]),
+    )
+    return events
+  }
+
+  async function named(name: string, nested: Array<{ relativePath: string; base: string }>) {
+    const created = await service.createNamed({
+      projectRoot: project,
+      name,
+      toolId: 'claude',
+      base: 'main',
+      nested,
+    })
+    if (!created.ok) throw new Error(created.message)
+    return created.path
+  }
+
+  it('cleans up a worktree whose folder is gone as it reads them again, keeping its branches', async () => {
+    await start()
+    const R = await named('Gone soon', [{ relativePath: 'inner', base: 'main' }])
+    const other = await named('Stays', [])
+    kept.saved = [R]
+    kept.collapsed = [R]
+    const events = reports()
+    fs.rmSync(R, { recursive: true })
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(2)
+    // What else Hoot keeps of it goes before the worktrees show without it.
+    expect(events).toEqual([
+      ['removed', [R]],
+      ['changed', [other]],
+    ])
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toEqual([other])
+    expect(linkedWorktrees(inner)).toEqual([])
+    expect(branches(project)).toContain('gone-soon')
+    expect(branches(inner)).toContain('gone-soon')
+    expect([...records.forProject(project).keys()]).toEqual([other])
+  })
+
+  it('cleans up a worktree removed outside Hoot, of which it keeps saved sessions or collapsed state', async () => {
+    await start()
+    const S = await named('Saved', [])
+    const folder = path.join(W, 'project')
+    const C = path.join(folder, 'collapsed')
+    git(project, 'worktree', 'add', '-q', '-b', 'collapsed', C)
+    // Collapsed in another project's folder: not this project's.
+    const elsewhere = path.join(W, 'other', 'x')
+    kept.saved = [S]
+    kept.collapsed = [C, elsewhere]
+    await service.read(project)
+    const events = reports()
+    git(project, 'worktree', 'remove', S)
+    git(project, 'worktree', 'remove', C)
+    // Saved sessions Hoot keeps for a worktree whose record went already.
+    records.remove(S)
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(2)
+    expect(events).toEqual([
+      ['removed', [S, C]],
+      ['changed', []],
+    ])
+    expect(branches(project)).toEqual(expect.arrayContaining(['saved', 'collapsed']))
+  })
+
+  it('cleans up a worktree Git no longer lists, leaving its folder and everything in it as it is', async () => {
+    await start()
+    const R = await named('Kept files', [{ relativePath: 'inner', base: 'main' }])
+    fs.writeFileSync(path.join(R, 'work.txt'), 'outer work\n')
+    fs.writeFileSync(path.join(R, 'inner', 'work.txt'), 'inner work\n')
+    const before = contents(R)
+    const events = reports()
+    // Its registration in the project repository is deleted outside Hoot.
+    fs.rmSync(git(R, 'rev-parse', '--absolute-git-dir'), { recursive: true })
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(2)
+    expect(events).toEqual([
+      ['removed', [R]],
+      ['changed', []],
+    ])
+    expect(contents(R)).toEqual(before)
+    expect(linkedWorktrees(project)).toEqual([])
+    expect(linkedWorktrees(inner)).toEqual([])
+    expect(branches(project)).toContain('kept-files')
+    expect(branches(inner)).toContain('kept-files')
+    expect(records.forProject(project).size).toBe(0)
+  })
+
+  it('keeps a worktree that is gone while its sessions are open, and cleans it up once the last closes', async () => {
+    await start()
+    const R = await named('Busy', [])
+    kept.open = [R]
+    const events = reports()
+    fs.rmSync(R, { recursive: true })
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(1)
+    expect(events[0]).toEqual(['changed', [R]])
+    expect(await listed()).toMatchObject([{ path: R, name: 'Busy', missing: true }])
+    // A session that closes elsewhere changes nothing.
+    service.sessionClosed(project, path.join(W, 'project', 'elsewhere'))
+    await delay(300)
+    expect(events).toHaveLength(1)
+
+    kept.open = []
+    service.sessionClosed(project, R)
+    await expect.poll(() => events.length).toBe(3)
+    expect(events.slice(1)).toEqual([
+      ['removed', [R]],
+      ['changed', []],
+    ])
+    expect(linkedWorktrees(project)).toEqual([])
+  })
+
+  it('keeps a locked worktree whose folder is gone, until it is removed', async () => {
+    await start()
+    const R = await named('Locked away', [{ relativePath: 'inner', base: 'main' }])
+    git(project, 'worktree', 'lock', '--reason', 'on usb', R)
+    fs.rmSync(R, { recursive: true })
+    service.refreshAll()
+    await expect
+      .poll(async () => (await listed()).find((worktree) => worktree.path === R)?.missing)
+      .toBe(true)
+    expect(await listed()).toMatchObject([{ path: R, name: 'Locked away', locked: true }])
+    expect(linkedWorktrees(project)).toEqual([{ path: R, prunable: false }])
+
+    expect(await service.removeMissing(project, R)).toEqual({ ok: true })
+    expect(linkedWorktrees(project)).toEqual([])
+    expect(linkedWorktrees(inner)).toEqual([])
+    expect(branches(project)).toContain('locked-away')
+    expect(await listed()).toEqual([])
+  })
+
+  it('keeps the worktrees as they were, and cleans up none, while Git cannot list them', async () => {
+    await start()
+    const R = await named('Kept', [])
+    const gone = await named('Gone meanwhile', [])
+    const events = reports()
+    fs.renameSync(path.join(project, '.git'), path.join(project, '.git-away'))
+    service.refreshAll()
+    await delay(500)
+    expect(await listed()).toMatchObject([{ path: gone }, { path: R }])
+    fs.renameSync(path.join(project, '.git-away'), path.join(project, '.git'))
+    service.refreshAll()
+    await delay(500)
+    expect(events).toEqual([])
+    expect(await listed()).toMatchObject([
+      { path: gone, name: 'Gone meanwhile', missing: false },
+      { path: R, name: 'Kept', missing: false },
+    ])
+    expect(records.forProject(project).size).toBe(2)
+  })
+
+  it('keeps the worktrees of a project folder behind a link that leads nowhere, until it leads somewhere again', async () => {
+    await start()
+    const before = await named('Before the link', [])
+    const folder = path.join(W, 'project')
+    const disk = path.join(root, 'disk', 'project')
+    fs.mkdirSync(path.dirname(disk))
+    fs.renameSync(folder, disk)
+    fs.symlinkSync(disk, folder)
+    const after = await named('After the link', [])
+    expect(after).toBe(path.join(disk, 'after-the-link'))
+    kept.saved = [before, after]
+    const events = reports()
+
+    // The disk is not connected.
+    fs.renameSync(disk, `${disk}.away`)
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(1)
+    expect(await listed()).toMatchObject([
+      { path: after, name: 'After the link', missing: true },
+      { path: before, name: 'Before the link', missing: true },
+    ])
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toEqual(
+      expect.arrayContaining([before, after]),
+    )
+
+    // It is connected again.
+    fs.renameSync(`${disk}.away`, disk)
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(2)
+    expect(await listed()).toMatchObject([
+      { path: after, name: 'After the link', missing: false },
+      { path: before, name: 'Before the link', missing: false },
+    ])
+    expect(events.every(([kind]) => kind === 'changed')).toBe(true)
+
+    // The folder the link leads to is deleted, and the link stays: the same.
+    fs.renameSync(disk, `${disk}.deleted`)
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(3)
+    expect((await listed()).map((worktree) => worktree.missing)).toEqual([true, true])
+
+    // One is removed meanwhile, and the other stays.
+    expect(await service.removeMissing(project, before)).toEqual({ ok: true })
+    expect(linkedWorktrees(project).map((entry) => entry.path)).toEqual([after])
+    expect(await listed()).toMatchObject([{ path: after, missing: true }])
+    expect(branches(project)).toContain('before-the-link')
+    fs.renameSync(`${disk}.deleted`, disk)
+    service.refreshAll()
+    await expect
+      .poll(async () => (await listed()).map((worktree) => [worktree.path, worktree.missing]))
+      .toEqual([[after, false]])
+    expect([...records.forProject(project).keys()]).toEqual([after])
+  })
+
+  it('cleans up nothing behind a link that leads nowhere, also once Git no longer lists its worktrees', async () => {
+    await start()
+    const folder = path.join(W, 'project')
+    const disk = path.join(root, 'disk', 'project')
+    fs.mkdirSync(path.dirname(disk))
+    await service.read(project)
+    fs.mkdirSync(folder, { recursive: true })
+    fs.renameSync(folder, disk)
+    fs.symlinkSync(disk, folder)
+    const R = await named('On the disk', [])
+    kept.saved = [R]
+    const events = reports()
+    fs.renameSync(disk, `${disk}.away`)
+    // As `git gc` does, three months on.
+    git(project, 'worktree', 'prune')
+    expect(linkedWorktrees(project)).toEqual([])
+    service.refreshAll()
+    await expect.poll(() => events.length).toBe(1)
+    await delay(300)
+    expect(events).toEqual([['changed', []]])
+    expect([...records.forProject(project).keys()]).toEqual([R])
+  })
+
+  it('removes a worktree Git no longer lists while Hoot keeps something of it, and none of another', async () => {
+    await start()
+    const R = await named('Unlisted', [])
+    // Kept while a session of it is open, which removing it closes first.
+    kept.open = [R]
+    const before = contents(R)
+    fs.rmSync(git(R, 'rev-parse', '--absolute-git-dir'), { recursive: true })
+    await service.read(project)
+    expect(await listed()).toEqual([])
+    expect(records.forProject(project).has(R)).toBe(true)
+    let closed = false
+    expect(
+      await service.removeMissing(project, R, async () => {
+        closed = true
+      }),
+    ).toEqual({ ok: true })
+    expect(closed).toBe(true)
+    expect(records.forProject(project).size).toBe(0)
+    expect(contents(R)).toEqual(before)
   })
 
   it('lists the submodules of the base branches that would be left empty', async () => {

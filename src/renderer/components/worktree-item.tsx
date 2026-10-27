@@ -125,19 +125,14 @@ function WorktreeMenuEntries({
   // Also while sessions run in it, which the confirmation lists and which
   // end before it is deleted.
   const deletable = !worktree.locked
-  // A missing worktree can always be removed, also a locked one: its lock note
-  // shows below Remove.
-  const removable = worktree.registered
 
+  // A missing worktree can always be removed: also a locked one, whose lock
+  // note shows below Remove, one Git no longer lists, and one with open
+  // sessions, which Hoot asks to close first.
   if (worktree.missing) {
     return (
       <>
-        <Item
-          variant="destructive"
-          disabled={!removable}
-          onClick={remove}
-          data-testid={`${testId}-remove`}
-        >
+        <Item variant="destructive" onClick={remove} data-testid={`${testId}-remove`}>
           <Trash2Icon />
           Remove
         </Item>

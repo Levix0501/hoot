@@ -291,6 +291,7 @@ export const IpcChannel = {
   listWorktrees: 'worktrees:list',
   currentWorktree: 'worktrees:current',
   worktreesChanged: 'worktrees:changed',
+  worktreesRemoved: 'worktrees:removed',
   newWorktreeOptions: 'worktrees:new-options',
   worktreeSubmodules: 'worktrees:submodules',
   createWorktree: 'worktrees:create',
@@ -516,6 +517,12 @@ export interface HootApi {
   currentWorktree(projectRoot: string, worktreePath: string): Promise<WorktreeInfo | null>
   onWorktreesChanged(listener: (projectRoot: string, worktrees: WorktreeInfo[]) => void): () => void
   /**
+   * Worktrees of a project that were gone were cleaned up, as their worktrees
+   * were read; Hoot no longer keeps anything of them. Sent before
+   * `onWorktreesChanged` reports the worktrees without them.
+   */
+  onWorktreesRemoved(listener: (projectRoot: string, worktreePaths: string[]) => void): () => void
+  /**
    * What the new worktree dialog offers, or why it offers nothing: the project
    * is not in the list, or not a Git repository.
    */
@@ -546,7 +553,10 @@ export interface HootApi {
     worktreePath: string,
     discard: boolean,
   ): Promise<DeleteWorktreeResult>
-  /** Removes the registrations of a worktree whose folder is missing. */
+  /**
+   * Removes a worktree whose folder is missing, or that Git no longer lists:
+   * its registrations, and what Hoot keeps of it, such as its saved sessions.
+   */
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void

@@ -249,6 +249,22 @@ export interface WorktreeDeletion {
   error: string | null
 }
 
+/**
+ * The removal of a missing worktree some of whose sessions are open, from
+ * asking whether to close them until it is removed or cancelled.
+ */
+export interface WorktreeRemoval {
+  projectRoot: string
+  path: string
+  /** Asking for confirmation, or closing the sessions and removing the worktree. */
+  phase: 'confirm' | 'removing'
+  /**
+   * While removing, the names of the open sessions the confirmation listed,
+   * which close first; `null` until then, while it lists those open now.
+   */
+  closingSessions: string[] | null
+}
+
 export interface AppState {
   initialized: boolean
   projects: Project[]
@@ -259,6 +275,7 @@ export interface AppState {
   /** The project whose new worktree dialog is open. */
   newWorktreeProject: string | null
   worktreeDeletion: WorktreeDeletion | null
+  worktreeRemoval: WorktreeRemoval | null
   tools: ToolsState
   /** The agents of the Agents page and their operations; `null` until they are known. */
   agents: AgentsState | null
@@ -704,10 +721,15 @@ export interface AppState {
   requestDeleteWorktree(projectRoot: string, path: string): void
   answerDeleteWorktree(confirmed: boolean): Promise<void>
   /**
-   * Removes the registrations of a worktree whose folder is missing, unless
-   * reading the project's worktrees again shows it gone or no longer missing.
+   * Removes a worktree whose folder is missing, or that Git no longer lists:
+   * its registrations and what Hoot keeps of it, such as its saved
+   * sessions. While some of its sessions are open, asks first whether to
+   * close them. Nothing is removed when reading the project's worktrees
+   * again shows it no longer missing.
    */
   removeMissingWorktree(projectRoot: string, path: string): Promise<void>
+  /** Closes the open sessions of the worktree being removed, then removes it; or cancels. */
+  answerRemoveWorktree(confirmed: boolean): Promise<void>
 }
 
 declare global {
@@ -871,6 +893,23 @@ export function runningSessionsWithin(
       isSessionRunning(session) &&
       session.chatId === null &&
       isWithin(session.worktreePath ?? session.projectRoot, worktreePath),
+  )
+}
+
+/**
+ * The open sessions of a worktree: those listed below its row and shown in
+ * its tabs, starting, running, or ended while their pages stay.
+ */
+export function openSessionsOf(
+  state: Pick<AppState, 'sessions'>,
+  projectRoot: string,
+  worktreePath: string,
+): UiSession[] {
+  return state.sessions.filter(
+    (session) =>
+      session.chatId === null &&
+      session.projectRoot === projectRoot &&
+      session.worktreePath === worktreePath,
   )
 }
 
@@ -1139,33 +1178,30 @@ export function warnAboutWorktree(warning: string): void {
   })
 }
 
-/** The worktree rows of a project: its worktrees, and those its sessions and saved sessions are in. */
+/** The worktree rows of a project: its worktrees, and those its open sessions are in. */
 export function projectWorktreeRows(
-  state: Pick<AppState, 'worktrees' | 'knownWorktrees' | 'sessions' | 'savedSessions'>,
+  state: Pick<AppState, 'worktrees' | 'knownWorktrees' | 'sessions'>,
   projectRoot: string,
 ): WorktreeRow[] {
   return worktreeRows(
     state.worktrees[projectRoot],
-    sessionWorktrees(state.sessions, projectRoot, state.savedSessions),
+    sessionWorktrees(state.sessions, projectRoot),
     state.knownWorktrees,
   )
 }
 
-/** The worktrees a project's sessions run in and its saved sessions belong to, without duplicates. */
-export function sessionWorktrees(
-  sessions: readonly UiSession[],
-  projectRoot: string,
-  savedSessions: readonly SavedSessionInfo[] = [],
-): string[] {
+/**
+ * The worktrees a project's open sessions are in, without duplicates. Saved
+ * sessions alone give no row: those of a worktree that is gone go with it
+ * as it is cleaned up, so their row would only show as missing for a moment.
+ */
+export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: string): string[] {
   return [
-    ...new Set([
-      ...sessions
+    ...new Set(
+      sessions
         .filter((session) => session.projectRoot === projectRoot && session.worktreePath !== null)
         .map((session) => session.worktreePath!),
-      ...savedSessions
-        .filter((saved) => saved.projectRoot === projectRoot)
-        .map((saved) => saved.worktreePath),
-    ]),
+    ),
   ]
 }
 
@@ -1706,6 +1742,23 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
+   * Forgets the worktrees of a project that were gone and cleaned up, as the
+   * main process did: one made again at one of their roots is expanded, and
+   * shows as Git lists it then.
+   */
+  const forgetWorktrees = (paths: readonly string[]) => {
+    const gone = new Set(paths)
+    set((state) => ({
+      collapsedWorktrees: [...state.collapsedWorktrees].some((path) => gone.has(path))
+        ? new Set([...state.collapsedWorktrees].filter((path) => !gone.has(path)))
+        : state.collapsedWorktrees,
+      knownWorktrees: Object.fromEntries(
+        Object.entries(state.knownWorktrees).filter(([path]) => !gone.has(path)),
+      ),
+    }))
+  }
+
+  /**
    * Forgets that a worktree that is gone was collapsed, as the main process
    * does: one made again at its root is expanded.
    */
@@ -1715,6 +1768,19 @@ export const useAppStore = create<AppState>()((set, get) => {
     const collapsed = new Set(collapsedWorktrees)
     collapsed.delete(path)
     set({ collapsedWorktrees: collapsed })
+  }
+
+  /** Removes a worktree whose folder is missing, saying why when it cannot. */
+  const removeWorktree = async (projectRoot: string, path: string) => {
+    const result = await api
+      .removeWorktree(projectRoot, path)
+      .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    if (!result.ok) {
+      toast.error('Could not remove the worktree.', { description: result.message })
+      return
+    }
+    closeEndedSessionsIn(path)
+    forgetCollapsedWorktree(path)
   }
 
   const selectAt = (index: number) => {
@@ -1975,6 +2041,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     knownWorktrees: {},
     newWorktreeProject: null,
     worktreeDeletion: null,
+    worktreeRemoval: null,
     tools: { detecting: true, tools: [], error: null },
     agents: null,
     launchSettings: null,
@@ -2154,6 +2221,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         changedWorktrees.add(root)
         applyWorktrees(root, worktrees)
       })
+      // Before the worktrees show without them.
+      api.onWorktreesRemoved((_root, paths) => forgetWorktrees(paths))
       // Read in the background: listing worktrees waits for Git, the projects do not.
       void api.listWorktrees().then(
         (worktrees) => {
@@ -3230,15 +3299,34 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     async removeMissingWorktree(projectRoot, path) {
-      const result = await api
-        .removeWorktree(projectRoot, path)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-      if (!result.ok) {
-        toast.error('Could not remove the worktree.', { description: result.message })
+      if (get().worktreeRemoval !== null) return
+      // Its open sessions close first, once the user agrees.
+      if (openSessionsOf(get(), projectRoot, path).length > 0) {
+        set({ worktreeRemoval: { projectRoot, path, phase: 'confirm', closingSessions: null } })
         return
       }
-      closeEndedSessionsIn(path)
-      forgetCollapsedWorktree(path)
+      await removeWorktree(projectRoot, path)
+    },
+
+    async answerRemoveWorktree(confirmed) {
+      const removal = get().worktreeRemoval
+      if (removal === null || removal.phase !== 'confirm') return
+      if (!confirmed) {
+        set({ worktreeRemoval: null })
+        return
+      }
+      // Running ones end their processes first. The last to close may clean
+      // the worktree up already, which leaves nothing more to remove.
+      const open = openSessionsOf(get(), removal.projectRoot, removal.path)
+      const removing: WorktreeRemoval = {
+        ...removal,
+        phase: 'removing',
+        closingSessions: open.map((session) => shownSessionName(get(), session)),
+      }
+      set({ worktreeRemoval: removing })
+      await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
+      await removeWorktree(removal.projectRoot, removal.path)
+      if (get().worktreeRemoval === removing) set({ worktreeRemoval: null })
     },
   }
 })

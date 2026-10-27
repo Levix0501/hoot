@@ -463,6 +463,33 @@ describe('SessionManager', () => {
     expect(manager.list().map((session) => session.id)).toEqual(['w2', 'c1', 'o1'])
   })
 
+  it("tells whether a worktree's sessions are open, until they are closed, and closes them", async () => {
+    const { manager, host } = setup()
+    const closed: string[] = []
+    manager.on('closed', (session) => closed.push(session.id))
+    await manager.start(request('w1', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('w2', 'shell', '/work/project', '/wt/feat'))
+    await manager.start({ ...request('c1', 'claude', '/wt/chat'), chatId: 'chat' })
+    await manager.start(request('o1', 'shell', '/work/other', '/wt/feat'))
+    host.emit('exit', 'w2', 3, 0)
+    // An ended session is open while its tab stays.
+    expect(manager.hasOpenIn('/work/project', '/wt/feat')).toBe(true)
+    expect(manager.hasOpenIn('/work/project', '/wt/other')).toBe(false)
+
+    await manager.close('w1')
+    expect(closed).toEqual(['w1'])
+    expect(manager.hasOpenIn('/work/project', '/wt/feat')).toBe(true)
+    await manager.closeIn('/work/project', '/wt/feat')
+    expect(closed).toEqual(['w1', 'w2'])
+    expect(manager.hasOpenIn('/work/project', '/wt/feat')).toBe(false)
+    expect(manager.list().map((session) => session.id)).toEqual(['c1', 'o1'])
+
+    // Forgetting a session reports it gone too.
+    host.emit('exit', 'o1', 3, 0)
+    manager.forgetProject('/work/other')
+    expect(closed).toEqual(['w1', 'w2', 'o1'])
+  })
+
   it('forgets the ended sessions of a removed project', async () => {
     const { manager, host } = setup()
     await manager.start(request('s1'))

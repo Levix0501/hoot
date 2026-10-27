@@ -11,6 +11,7 @@ import { MainArea } from './components/main-area'
 import { NewWorktreeDialog } from './components/new-worktree-dialog'
 import { ProjectSidebar } from './components/project-sidebar'
 import { QuitDialog } from './components/quit-dialog'
+import { RemoveWorktreeDialog } from './components/remove-worktree-dialog'
 import {
   RenameChatDialog,
   RenameSavedSessionDialog,
@@ -121,6 +122,7 @@ export function App() {
       <CloseSessionDialog />
       <NewWorktreeDialog />
       <DeleteWorktreeDialog />
+      <RemoveWorktreeDialog />
       <NewIssueDialog />
       <DeleteIssueDialog />
       <IssuePickerDialog />

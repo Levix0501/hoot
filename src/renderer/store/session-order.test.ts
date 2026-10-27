@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   currentAfterClosing,
+  inTabOrder,
   orderedChatSessions,
   relativeSession,
-  reorderedSessions,
   sessionsInSwitchOrder,
   sidebarOrder,
+  tabKey,
 } from './session-order'
 
 const project = (root: string) => ({ id: root.charCodeAt(1), root, name: root.slice(1) })
@@ -144,33 +145,29 @@ describe('relativeSession', () => {
   })
 })
 
-describe('reorderedSessions', () => {
-  const sessions = [
-    { id: 'a1', worktree: 'a' },
-    { id: 'b1', worktree: 'b' },
-    { id: 'a2', worktree: 'a' },
-    { id: 'a3', worktree: 'a' },
-    { id: 'b2', worktree: 'b' },
-  ]
+describe('tabKey', () => {
+  it("is a saved session's id for its session, and a session's own id otherwise", () => {
+    expect(tabKey({ id: 's1', savedSessionId: 'v1' })).toBe('v1')
+    expect(tabKey({ id: 's2', savedSessionId: null })).toBe('s2')
+  })
+})
 
-  it('puts the sessions given in their new order, in the places they take', () => {
-    expect(reorderedSessions(sessions, ['a3', 'a1', 'a2']).map((session) => session.id)).toEqual([
-      'a3',
-      'b1',
-      'a1',
-      'a2',
-      'b2',
-    ])
-    expect(reorderedSessions(sessions, ['b2', 'b1']).map((session) => session.id)).toEqual([
-      'a1',
-      'b2',
-      'a2',
-      'a3',
-      'b1',
-    ])
+describe('inTabOrder', () => {
+  const tabs = [
+    { key: 'a', createdAt: 1 },
+    { key: 'c', createdAt: 3 },
+    { key: 'b', createdAt: 2 },
+    { key: 'd', createdAt: 4 },
+  ]
+  const keys = (order: readonly string[]) =>
+    inTabOrder(tabs, (tab) => tab.key, order).map((tab) => tab.key)
+
+  it('puts the tabs in the order they were made when none was dragged', () => {
+    expect(keys([])).toEqual(['a', 'b', 'c', 'd'])
   })
 
-  it('leaves the sessions as they are when one of those given is gone', () => {
-    expect(reorderedSessions(sessions, ['a2', 'gone', 'a1'])).toBe(sessions)
+  it('puts the tabs in the order given, and the others after them in the order they were made', () => {
+    expect(keys(['c', 'a'])).toEqual(['c', 'a', 'b', 'd'])
+    expect(keys(['gone', 'd', 'b', 'c', 'a'])).toEqual(['d', 'b', 'c', 'a'])
   })
 })

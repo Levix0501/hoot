@@ -104,17 +104,25 @@ export function relativeSession(
 }
 
 /**
- * The sessions with those of `ids` put in that order, in the places they
- * take among the sessions: a worktree's sessions after one of its tabs was
- * dragged. Unchanged when one of `ids` is not among the sessions.
+ * The key of a session's tab: the id of its saved session, whose tab stays
+ * while its agent does not run, or else its own id.
  */
-export function reorderedSessions<T extends { id: string }>(
-  sessions: readonly T[],
-  ids: readonly string[],
-): readonly T[] {
-  const moved = ids.map((id) => sessions.find((session) => session.id === id))
-  if (moved.some((session) => session === undefined)) return sessions
-  const places = new Set(ids)
-  let next = 0
-  return sessions.map((session) => (places.has(session.id) ? moved[next++]! : session))
+export function tabKey(session: { id: string; savedSessionId: string | null }): string {
+  return session.savedSessionId ?? session.id
+}
+
+/**
+ * Tabs, or the sessions of tabs, in the order of the tabs: first those whose
+ * keys `order` has, in its order, which is the order a worktree's tabs were
+ * dragged into; then the others in the order they were made, so that a new
+ * tab comes last.
+ */
+export function inTabOrder<T extends { createdAt: number }>(
+  tabs: readonly T[],
+  key: (tab: T) => string,
+  order: readonly string[],
+): T[] {
+  const places = new Map(order.map((tab, index) => [tab, index]))
+  const place = (tab: T) => places.get(key(tab)) ?? order.length
+  return tabs.toSorted((a, b) => place(a) - place(b) || a.createdAt - b.createdAt)
 }

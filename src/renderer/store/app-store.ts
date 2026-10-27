@@ -104,11 +104,12 @@ import {
 } from './page-history'
 import {
   currentAfterClosing,
+  inTabOrder,
   orderedChatSessions,
   relativeSession,
-  reorderedSessions,
   sessionsInSwitchOrder,
   sidebarOrder,
+  tabKey,
 } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
@@ -262,6 +263,13 @@ export interface AppState {
   chats: ChatInfo[]
   /** Every saved session, oldest first, as they show below their worktrees. */
   savedSessions: SavedSessionInfo[]
+  /**
+   * The order the tabs of worktrees were dragged into, by the root of the
+   * worktree, which is the project's root for its main worktree: the keys of
+   * its tabs (see `tabKey`). The tabs it does not have come after them, in
+   * the order they were made.
+   */
+  tabOrders: Readonly<Record<string, readonly string[]>>
   /**
    * A folder the user picked to add as a project, while Hoot asks whether to
    * run `git init` there or make its first commit.
@@ -513,11 +521,10 @@ export interface AppState {
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
   /**
-   * Puts sessions in the order given, in the places they take among the
-   * sessions: a worktree's sessions after one of its tabs was dragged. The
-   * sessions switch in that order.
+   * Puts the tabs of a worktree, by its root, in the order of the keys given:
+   * after one of them was dragged. Its sessions switch in that order.
    */
-  reorderSessions(ids: readonly string[]): void
+  reorderTabs(root: string, keys: readonly string[]): void
   runShortcut(shortcut: SessionShortcut): void
   runMenuCommand(command: SessionCommand): void
   /** Shows the page shown before the current one, if any. */
@@ -1132,25 +1139,34 @@ export function sessionWorktrees(
 
 /**
  * Every session in switch order: the sessions of the projects in sidebar
- * order, then the running chats in the order of the Chats group, which is
- * where chats come in the sidebar. A saved session that is not running is
- * left out, as its page may stay after an unexpected end; its row opens it.
+ * order, those of a worktree in the order of its tabs, then the running
+ * chats in the order of the Chats group, which is where chats come in the
+ * sidebar. A saved session that is not running is left out, as its page may
+ * stay after an unexpected end; its row or its tab opens it.
  */
 export function orderedSessions(
   state: Pick<
     AppState,
-    'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'savedSessions' | 'chats'
+    | 'projects'
+    | 'worktrees'
+    | 'knownWorktrees'
+    | 'sessions'
+    | 'savedSessions'
+    | 'chats'
+    | 'tabOrders'
   >,
-  /**
-   * Sessions that are being closed count too, at the place of their chat, or
-   * of their row in the sidebar for a saved session.
-   */
+  /** Sessions that are being closed count too, at the place of their chat or their tab. */
   closing: ReadonlySet<string> = new Set(),
 ): UiSession[] {
   const sessions = sidebarOrder(
     state.projects,
     sessionsInSwitchOrder(
-      state.sessions.filter((session) => session.chatId === null),
+      // No two worktrees have a tab with the same key, as the keys are ids.
+      inTabOrder(
+        state.sessions.filter((session) => session.chatId === null),
+        tabKey,
+        Object.values(state.tabOrders).flat(),
+      ),
       isSessionRunning,
       closing,
     ),
@@ -1917,6 +1933,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sessions: [],
     chats: [],
     savedSessions: [],
+    tabOrders: {},
     addProjectConfirmation: null,
     startingIssues: [],
     issueStarts: [],
@@ -2542,11 +2559,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (findSession(id)) showPage(sessionPage(id))
     },
 
-    reorderSessions(ids) {
-      set((state) => {
-        const sessions = reorderedSessions(state.sessions, ids)
-        return sessions === state.sessions ? {} : { sessions: [...sessions] }
-      })
+    reorderTabs(root, keys) {
+      set((state) => ({ tabOrders: { ...state.tabOrders, [root]: keys } }))
     },
 
     runShortcut(shortcut) {

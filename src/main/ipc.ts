@@ -832,16 +832,12 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.tuple([projectRoot, z.string().min(1), z.boolean()]).safeParse(args)
     if (!parsed.success) return { ok: false, reason: 'not-found', message: 'Invalid request.' }
     const [root, worktreePath, discard] = parsed.data
-    // Also a session in a project's worktree inside it, which deleting it would delete.
-    const running = () => deps.sessions.isRunningWithin(worktreePath)
-    if (running()) {
-      return {
-        ok: false,
-        reason: 'running',
-        message: 'End the running sessions in this worktree before deleting it.',
-      }
-    }
-    const result = await deps.worktrees.delete(root, worktreePath, discard, running)
+    // The sessions running in it end first, also those in a project's worktree
+    // inside it, which deleting it deletes: the window closes those it listed
+    // before asking, and any that started since close here.
+    const result = await deps.worktrees.delete(root, worktreePath, discard, () =>
+      deps.sessions.closeRunningWithin(worktreePath),
+    )
     // Its sessions, which have all ended, close with it, and so do its saved
     // sessions. A worktree made again at its root is expanded.
     if (result.ok) {

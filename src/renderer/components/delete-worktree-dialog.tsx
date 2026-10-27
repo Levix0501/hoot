@@ -1,10 +1,17 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   inspectionIsClean,
   type RepositoryChanges,
   type WorktreeInspection,
 } from '../../shared/worktrees'
-import { focusAfterOverlay, useAppStore, type WorktreeDeletion } from '../store/app-store'
+import {
+  focusAfterOverlay,
+  runningSessionsWithin,
+  shownSessionName,
+  useAppStore,
+  type WorktreeDeletion,
+} from '../store/app-store'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -135,7 +142,49 @@ function WhatIsLost({ inspection }: { inspection: WorktreeInspection }) {
   )
 }
 
+/**
+ * The sessions still running in the worktree, which end before it is
+ * deleted, and that it may change until they have.
+ */
+function RunningSessions({ names }: { names: readonly string[] }) {
+  const one = names.length === 1
+  return (
+    <div className="grid gap-1.5" data-testid="worktree-delete-sessions">
+      <p>
+        {one
+          ? 'This session is still running in the worktree, and will be ended first:'
+          : 'These sessions are still running in the worktree, and will be ended first:'}
+      </p>
+      <ul className="grid gap-0.5">
+        {names.map((name, index) => (
+          <li
+            key={index}
+            className="font-medium text-foreground [overflow-wrap:anywhere]"
+            data-user-text=""
+            data-testid="worktree-delete-session"
+          >
+            {name}
+          </li>
+        ))}
+      </ul>
+      <p data-testid="worktree-delete-sessions-note">
+        Until {one ? 'it ends' : 'they end'}, what is in the worktree may still change, and is
+        deleted as it is then.
+      </p>
+    </div>
+  )
+}
+
 function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
+  // While asking, the sessions running now; once confirmed, those it listed.
+  const running = useAppStore(
+    useShallow((state) =>
+      runningSessionsWithin(state, deletion.path).map((session) =>
+        shownSessionName(state, session),
+      ),
+    ),
+  )
+  const sessions = deletion.endingSessions ?? running
   if (deletion.phase === 'checking' || (!deletion.inspection && !deletion.error)) {
     return (
       <p className="flex items-center gap-2" data-testid="worktree-delete-checking">
@@ -149,6 +198,7 @@ function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
       {deletion.inspection && !inspectionIsClean(deletion.inspection) && (
         <WhatIsLost inspection={deletion.inspection} />
       )}
+      {deletion.inspection && sessions.length > 0 && <RunningSessions names={sessions} />}
       {deletion.inspection && <WhatIsDeleted inspection={deletion.inspection} />}
       {deletion.error && (
         <p
@@ -166,8 +216,9 @@ function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
 
 /**
  * Asks before a worktree is deleted, after checking it: what will be
- * deleted, that branches are kept, and, repository by repository, the
- * changes, detached commits and foreign repositories that would be lost.
+ * deleted, that branches are kept, the sessions still running in it, which
+ * end first, and, repository by repository, the changes, detached commits
+ * and foreign repositories that would be lost.
  */
 export function DeleteWorktreeDialog() {
   const deletion = useAppStore((state) => state.worktreeDeletion)

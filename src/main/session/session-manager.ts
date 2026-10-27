@@ -163,16 +163,28 @@ export class SessionManager extends EventEmitter<{
   }
 
   /**
-   * Whether a session is starting or running in a directory or below it: in
-   * a worktree with this root, say, or in a project's worktree inside it.
+   * The sessions starting or running in a directory or below it, other than
+   * chats: in a worktree with this root, say, or in a project's worktree
+   * inside it.
    */
-  isRunningWithin(directory: string): boolean {
-    return [...this.records.values()].some(
-      (record) =>
-        isRunning(record) &&
-        record.info.chatId === null &&
-        isWithin(record.info.worktreePath ?? record.info.projectRoot, directory),
-    )
+  runningIdsWithin(directory: string): string[] {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          isRunning(record) &&
+          record.info.chatId === null &&
+          isWithin(record.info.worktreePath ?? record.info.projectRoot, directory),
+      )
+      .map((record) => record.info.id)
+  }
+
+  /**
+   * Closes the sessions starting or running in a directory or below it (see
+   * `runningIdsWithin`), as before a worktree with this root is deleted:
+   * settles once their processes have ended.
+   */
+  async closeRunningWithin(directory: string): Promise<void> {
+    await Promise.all(this.runningIdsWithin(directory).map((id) => this.close(id)))
   }
 
   /**

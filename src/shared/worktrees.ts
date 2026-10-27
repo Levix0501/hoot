@@ -208,7 +208,7 @@ export type DeleteWorktreeResult =
   | {
       ok: false
       /** `changed`: changes appeared since the check; `inspection` says which. */
-      reason: 'running' | 'locked' | 'missing' | 'not-found' | 'changed' | 'failed'
+      reason: 'locked' | 'missing' | 'not-found' | 'changed' | 'failed'
       message: string
       inspection?: WorktreeInspection
     }

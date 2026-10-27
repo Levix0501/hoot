@@ -634,14 +634,15 @@ export class WorktreeService extends EventEmitter<{
    * Deletes a worktree: its inner members, deeper ones first, then its outer
    * member, with everything in its root, and then the registrations of other
    * linked worktrees that were inside the root. Branches are kept. Unless
-   * `discard` is set, a worktree with anything to lose is not deleted, and
-   * neither is one where `hasRunningSessions` reports running sessions.
+   * `discard` is set, a worktree with anything to lose is not deleted. Once
+   * nothing stops the deletion, `endSessions` ends the sessions running in
+   * the worktree, and what they change until they end is deleted with it.
    */
   async delete(
     projectRoot: string,
     worktreePath: string,
     discard: boolean,
-    hasRunningSessions: () => boolean = () => false,
+    endSessions: () => Promise<void> = async () => {},
   ): Promise<DeleteWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state)
@@ -680,14 +681,8 @@ export class WorktreeService extends EventEmitter<{
         }
       }
     }
-    // A session may have started while the worktree was checked.
-    if (hasRunningSessions()) {
-      return {
-        ok: false,
-        reason: 'running',
-        message: 'End the running sessions in this worktree before deleting it.',
-      }
-    }
+    // Also a session that started while the worktree was checked.
+    await endSessions()
     const members = await this.membersOf(context, state, entry.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
       // Only the outer member's lock, checked above, makes the worktree

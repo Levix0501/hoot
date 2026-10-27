@@ -7,6 +7,7 @@ import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
 import {
   chatAgent,
+  chatName,
   firstDetectionRunning,
   usableChatAgents,
   type ChatInfo,
@@ -60,6 +61,7 @@ import {
 } from '../../shared/launch-settings'
 import {
   isNormalExit,
+  sessionName,
   type QuitReason,
   type SessionExit,
   type SessionInfo,
@@ -70,10 +72,12 @@ import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../.
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
-import type {
-  CreateIssueWorktreeResult,
-  WorktreeInfo,
-  WorktreeInspection,
+import {
+  inspectionIsClean,
+  isWithin,
+  type CreateIssueWorktreeResult,
+  type WorktreeInfo,
+  type WorktreeInspection,
 } from '../../shared/worktrees'
 import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib/session-state'
 import { api } from '../lib/api'
@@ -235,6 +239,12 @@ export interface WorktreeDeletion {
   /** Checking what would be lost, asking for confirmation, or deleting. */
   phase: 'checking' | 'confirm' | 'deleting'
   inspection: WorktreeInspection | null
+  /**
+   * While deleting, the names of the running sessions the confirmation
+   * listed, which end first; `null` until then, while the confirmation
+   * lists those running now.
+   */
+  endingSessions: string[] | null
   /** What went wrong while checking or deleting. */
   error: string | null
 }
@@ -846,6 +856,31 @@ function whyNotDeletable(worktree: WorktreeInfo | null): string | null {
 /** True while a session is starting or running. */
 export function isSessionRunning(session: UiSession): boolean {
   return session.status !== 'exited'
+}
+
+/**
+ * The sessions starting or running in a worktree, also in a project's
+ * worktree inside it, which deleting the worktree ends; chats run elsewhere.
+ */
+export function runningSessionsWithin(
+  state: Pick<AppState, 'sessions'>,
+  worktreePath: string,
+): UiSession[] {
+  return state.sessions.filter(
+    (session) =>
+      isSessionRunning(session) &&
+      session.chatId === null &&
+      isWithin(session.worktreePath ?? session.projectRoot, worktreePath),
+  )
+}
+
+/** The name a session shows in the sidebar and on its tab: its saved session's, when it has one. */
+export function shownSessionName(
+  state: Pick<AppState, 'savedSessions'>,
+  session: UiSession,
+): string {
+  const saved = state.savedSessions.find((candidate) => candidate.id === session.savedSessionId)
+  return saved === undefined ? sessionName(session) : chatName(saved)
 }
 
 function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
@@ -1650,6 +1685,22 @@ export const useAppStore = create<AppState>()((set, get) => {
   const closeEndedSessionsIn = (path: string) => {
     const ended = get()
       .sessions.filter((session) => session.worktreePath === path && !isSessionRunning(session))
+      .map((session) => session.id)
+    if (ended.length > 0) removeSessions(ended)
+  }
+
+  /**
+   * Closes the ended sessions of a deleted worktree, also those of a
+   * project's worktree inside it, which the deletion deleted.
+   */
+  const closeEndedSessionsWithin = (path: string) => {
+    const ended = get()
+      .sessions.filter(
+        (session) =>
+          !isSessionRunning(session) &&
+          session.chatId === null &&
+          isWithin(session.worktreePath ?? session.projectRoot, path),
+      )
       .map((session) => session.id)
     if (ended.length > 0) removeSessions(ended)
   }
@@ -3119,6 +3170,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           path,
           phase: 'checking',
           inspection: null,
+          endingSessions: null,
           error: null,
         }
         set({ worktreeDeletion: deletion })
@@ -3141,11 +3193,19 @@ export const useAppStore = create<AppState>()((set, get) => {
         set({ worktreeDeletion: null })
         return
       }
-      const deleting: WorktreeDeletion = { ...deletion, phase: 'deleting' }
+      // The running sessions the confirmation listed end first, closing their
+      // tabs. What they change until then goes with the worktree without
+      // asking again; otherwise discarding is confirmed only for what the
+      // confirmation listed.
+      const running = runningSessionsWithin(get(), deletion.path)
+      const deleting: WorktreeDeletion = {
+        ...deletion,
+        phase: 'deleting',
+        endingSessions: running.map((session) => shownSessionName(get(), session)),
+      }
       set({ worktreeDeletion: deleting })
-      // Discarding is confirmed only for what the confirmation listed.
-      const discard =
-        deletion.inspection.changes.length > 0 || deletion.inspection.foreignRepositories.length > 0
+      await Promise.allSettled(running.map((session) => get().closeSession(session.id)))
+      const discard = running.length > 0 || !inspectionIsClean(deletion.inspection)
       const result = await api
         .deleteWorktree(deletion.projectRoot, deletion.path, discard)
         .catch((error: unknown) => ({
@@ -3157,7 +3217,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (get().worktreeDeletion !== deleting) return
       if (result.ok) {
         set({ worktreeDeletion: null })
-        closeEndedSessionsIn(deletion.path)
+        closeEndedSessionsWithin(deletion.path)
         forgetCollapsedWorktree(deletion.path)
         return
       }

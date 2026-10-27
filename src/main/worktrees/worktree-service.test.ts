@@ -645,15 +645,17 @@ describe('WorktreeService', () => {
     const R = created.path
     fs.writeFileSync(path.join(R, 'inner', 'deep', 'new.txt'), 'x\n')
 
-    const refused = await service.delete(project, R, false)
+    let ended = 0
+    const endSessions = async () => {
+      ended++
+    }
+    const refused = await service.delete(project, R, false, endSessions)
     expect(refused).toMatchObject({ ok: false, reason: 'changed' })
     expect(refused.ok === false && refused.inspection?.changes).toEqual([
       { repository: 'inner/deep', files: ['new.txt'], total: 1, detachedCommits: false },
     ])
-    expect(await service.delete(project, R, true, () => true)).toMatchObject({
-      ok: false,
-      reason: 'running',
-    })
+    // Its sessions end only once nothing stops the deletion.
+    expect(ended).toBe(0)
     expect(fs.existsSync(R)).toBe(true)
 
     expect(await service.delete(project, R, true)).toEqual({ ok: true })
@@ -663,6 +665,32 @@ describe('WorktreeService', () => {
       expect(branches(repository)).toContain('feat/d')
     }
     expect(await listed()).toEqual([])
+  })
+
+  it('ends the sessions running in a worktree before deleting it, with what they wrote meanwhile', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/e',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const seen: boolean[] = []
+    // As a session's agent might, as it ends.
+    const endSessions = async () => {
+      seen.push(fs.existsSync(path.join(R, 'inner')))
+      fs.writeFileSync(path.join(R, 'last-words.txt'), 'x\n')
+      fs.writeFileSync(path.join(R, 'inner', 'last-words.txt'), 'x\n')
+    }
+    expect(await service.delete(project, R, false, endSessions)).toEqual({ ok: true })
+    expect(seen).toEqual([true])
+    expect(fs.existsSync(R)).toBe(false)
+    for (const repository of [project, inner]) {
+      expect(linkedWorktrees(repository)).toEqual([])
+      expect(branches(repository)).toContain('feat/e')
+    }
   })
 
   it('does not delete a locked worktree', async () => {
@@ -675,10 +703,13 @@ describe('WorktreeService', () => {
     })
     if (!created.ok) throw new Error(created.message)
     git(project, 'worktree', 'lock', created.path)
-    expect(await service.delete(project, created.path, true)).toMatchObject({
-      ok: false,
-      reason: 'locked',
-    })
+    let ended = false
+    expect(
+      await service.delete(project, created.path, true, async () => {
+        ended = true
+      }),
+    ).toMatchObject({ ok: false, reason: 'locked' })
+    expect(ended).toBe(false)
     expect(fs.existsSync(created.path)).toBe(true)
   })
 

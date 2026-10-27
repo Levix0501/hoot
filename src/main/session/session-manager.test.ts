@@ -409,15 +409,34 @@ describe('SessionManager', () => {
     expect(session).toMatchObject({ projectRoot: '/work/project', worktreePath: '/wt/feat' })
     expect(launched).toEqual(['/wt/feat'])
     expect(host.spawned[0]).toMatchObject({ id: 'w1', cwd: '/wt/feat' })
-    expect(manager.isRunningWithin('/wt/feat')).toBe(true)
-    expect(manager.isRunningWithin('/wt')).toBe(true)
-    expect(manager.isRunningWithin('/wt/fea')).toBe(false)
-    expect(manager.isRunningWithin('/wt/feat/sub')).toBe(false)
-    expect(manager.isRunningWithin('/wt/other')).toBe(false)
+    expect(manager.runningIdsWithin('/wt/feat')).toEqual(['w1'])
+    expect(manager.runningIdsWithin('/wt')).toEqual(['w1'])
+    expect(manager.runningIdsWithin('/wt/fea')).toEqual([])
+    expect(manager.runningIdsWithin('/wt/feat/sub')).toEqual([])
+    expect(manager.runningIdsWithin('/wt/other')).toEqual([])
     // A session in a worktree belongs to its project.
     expect(manager.isRunningIn('/work/project')).toBe(true)
     host.emit('exit', 'w1', 3, 0)
-    expect(manager.isRunningWithin('/wt/feat')).toBe(false)
+    expect(manager.runningIdsWithin('/wt/feat')).toEqual([])
+  })
+
+  it('closes the sessions running in a directory or below it, other than chats, once they have ended', async () => {
+    const { manager, host } = setup()
+    await manager.start(request('m1'))
+    await manager.start(request('w1', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('w2', 'shell', '/work/project', '/wt/feat'))
+    // A project whose main worktree is inside the worktree, and a chat.
+    await manager.start(request('n1', 'shell', '/wt/feat/nested'))
+    await manager.start({ ...request('c1', 'claude', '/wt/feat'), chatId: 'chat' })
+    await manager.start(request('o1', 'shell', '/work/project', '/wt/other'))
+    host.emit('exit', 'w2', 3, 0)
+    await manager.closeRunningWithin('/wt/feat')
+    expect(host.killed).toEqual([
+      ['w1', 'SIGHUP'],
+      ['n1', 'SIGHUP'],
+    ])
+    // An ended session stays until it is closed or forgotten.
+    expect(manager.list().map((session) => session.id)).toEqual(['m1', 'w2', 'c1', 'o1'])
   })
 
   it('forgets the ended sessions of a deleted worktree only', async () => {
@@ -430,6 +449,18 @@ describe('SessionManager', () => {
     // Running sessions stay, and so do ended ones elsewhere.
     manager.forgetWorktree('/wt/feat')
     expect(manager.list().map((session) => session.id)).toEqual(['m1', 'w2', 'o1'])
+  })
+
+  it('forgets the ended sessions in a deleted worktree, also of a project inside it', async () => {
+    const { manager, host } = setup()
+    await manager.start(request('w1', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('w2', 'shell', '/work/project', '/wt/feat'))
+    await manager.start(request('n1', 'shell', '/wt/feat/nested'))
+    await manager.start({ ...request('c1', 'claude', '/wt/feat'), chatId: 'chat' })
+    await manager.start(request('o1', 'shell', '/work/project', '/wt/other'))
+    for (const id of ['w1', 'n1', 'c1', 'o1']) host.emit('exit', id, 3, 0)
+    manager.forgetWithin('/wt/feat')
+    expect(manager.list().map((session) => session.id)).toEqual(['w2', 'c1', 'o1'])
   })
 
   it('forgets the ended sessions of a removed project', async () => {

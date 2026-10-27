@@ -9,11 +9,10 @@ import {
 import type { ComponentType, ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { CodingToolId } from '../../shared/tools'
-import { isWithin } from '../../shared/worktrees'
 import { api } from '../lib/api'
 import { sessionsSummary, sessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
@@ -73,19 +72,16 @@ const contextMenuComponents: WorktreeMenuComponents = {
   SubContent: ContextMenuSubContent,
 }
 
-/** Below a menu item: why Delete is unavailable, or the lock that Remove overrides. */
-function Note({ children, testId }: { children: ReactNode; testId: string }) {
-  return (
-    <p className="max-w-64 px-1.5 pt-0.5 pb-1 text-xs text-muted-foreground" data-testid={testId}>
-      {children}
-    </p>
-  )
-}
-
-/** What the menus say about a locked worktree. */
+/**
+ * What the menus say about a locked worktree, below Delete, which the lock
+ * makes unavailable, or below Remove, which it does not stop.
+ */
 function LockNote({ worktree }: { worktree: WorktreeRow }) {
   return (
-    <Note testId="worktree-lock-note">
+    <p
+      className="max-w-64 px-1.5 pt-0.5 pb-1 text-xs text-muted-foreground"
+      data-testid="worktree-lock-note"
+    >
       This worktree is locked
       {worktree.lockReason ? (
         <>
@@ -94,7 +90,7 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
       ) : (
         '.'
       )}
-    </Note>
+    </p>
   )
 }
 
@@ -118,15 +114,6 @@ function WorktreeMenuEntries({
   const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
   const removeMissingWorktree = useAppStore((state) => state.removeMissingWorktree)
-  // A worktree cannot be deleted while a session runs in it (or in a worktree inside it).
-  const runningHere = useAppStore((state) =>
-    state.sessions.some(
-      (session) =>
-        isSessionRunning(session) &&
-        session.chatId === null &&
-        isWithin(session.worktreePath ?? session.projectRoot, worktree.path),
-    ),
-  )
   const { Item, Separator, Sub, SubTrigger, SubContent } = components
 
   const startSession = (toolId: CodingToolId) =>
@@ -135,17 +122,12 @@ function WorktreeMenuEntries({
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
   const requestDelete = () => requestDeleteWorktree(projectRoot, worktree.path)
-  const deletable = !worktree.locked && !runningHere
+  // Also while sessions run in it, which the confirmation lists and which
+  // end before it is deleted.
+  const deletable = !worktree.locked
   // A missing worktree can always be removed, also a locked one: its lock note
   // shows below Remove.
   const removable = worktree.registered
-  const deleteNote = worktree.locked ? (
-    <LockNote worktree={worktree} />
-  ) : runningHere ? (
-    <Note testId="worktree-running-note">
-      End the running sessions in this worktree before deleting it.
-    </Note>
-  ) : null
 
   if (worktree.missing) {
     return (
@@ -198,7 +180,7 @@ function WorktreeMenuEntries({
         <Trash2Icon />
         Delete
       </Item>
-      {deleteNote}
+      {worktree.locked && <LockNote worktree={worktree} />}
     </>
   )
 }

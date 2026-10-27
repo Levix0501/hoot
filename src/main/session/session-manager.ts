@@ -315,10 +315,27 @@ export class SessionManager extends EventEmitter<{
     }
   }
 
-  /** Forgets the ended sessions of a worktree that is deleted. */
+  /** Forgets the ended sessions of a worktree that is removed. */
   forgetWorktree(worktreePath: string): void {
     for (const [id, record] of this.records) {
       if (record.info.worktreePath === worktreePath && !isRunning(record)) this.records.delete(id)
+    }
+  }
+
+  /**
+   * Forgets the ended sessions in a directory or below it, other than chats,
+   * as when the worktree with this root is deleted, and with it a project's
+   * worktree inside it.
+   */
+  forgetWithin(directory: string): void {
+    for (const [id, record] of this.records) {
+      if (
+        !isRunning(record) &&
+        record.info.chatId === null &&
+        isWithin(record.info.worktreePath ?? record.info.projectRoot, directory)
+      ) {
+        this.records.delete(id)
+      }
     }
   }
 

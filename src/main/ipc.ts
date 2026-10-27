@@ -838,10 +838,11 @@ export function registerIpc(deps: IpcDependencies): void {
     const result = await deps.worktrees.delete(root, worktreePath, discard, () =>
       deps.sessions.closeRunningWithin(worktreePath),
     )
-    // Its sessions, which have all ended, close with it, and so do its saved
-    // sessions. A worktree made again at its root is expanded.
+    // Its sessions, which have all ended, close with it, also those of a
+    // project's worktree inside it, and so do its saved sessions. A worktree
+    // made again at its root is expanded.
     if (result.ok) {
-      deps.sessions.forgetWorktree(worktreePath)
+      deps.sessions.forgetWithin(worktreePath)
       deps.chats.removeForWorktree(worktreePath)
       deps.sidebar.setWorktreeCollapsed(worktreePath, false)
     }

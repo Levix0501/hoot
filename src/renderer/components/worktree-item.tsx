@@ -16,6 +16,7 @@ import { cn } from '../lib/utils'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
+import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { StateLight } from './state-light'
 import { Badge } from './ui/badge'
 import { CollapsibleTrigger } from './ui/collapsible'
@@ -213,7 +214,8 @@ function WorktreeMenuEntries({
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and right
  * of it, unless the worktree is missing, its `+`, which starts a session in
- * the worktree with the agent a new chat would start with.
+ * the worktree with an agent chosen from its menu, or with the only agent
+ * that can be used.
  */
 export function WorktreeItem({
   projectRoot,
@@ -224,7 +226,6 @@ export function WorktreeItem({
   worktree: WorktreeRow
   expanded: boolean
 }) {
-  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const states = useAppStore(
     useShallow((state) =>
       state.sessions
@@ -334,16 +335,22 @@ export function WorktreeItem({
         </DropdownMenu>
 
         {!worktree.missing && (
-          <SidebarMenuAction
-            showOnHover
-            className="hover:bg-sidebar-foreground/10"
-            aria-label={`New session in ${title}`}
-            data-user-text=""
-            onClick={() => void newWorktreeSession(projectRoot, worktree.path)}
-            data-testid="worktree-new-session-button"
+          <NewWorktreeSessionButton
+            projectRoot={projectRoot}
+            worktreePath={worktree.path}
+            testId="worktree-new-session-agent"
+            render={
+              <SidebarMenuAction
+                showOnHover
+                className="hover:bg-sidebar-foreground/10"
+                aria-label={`New session in ${title}`}
+                data-user-text=""
+                data-testid="worktree-new-session-button"
+              />
+            }
           >
             <PlusIcon />
-          </SidebarMenuAction>
+          </NewWorktreeSessionButton>
         )}
       </ContextMenuTrigger>
 

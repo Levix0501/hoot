@@ -98,6 +98,16 @@ export function chatAgent(
   return usable[0] ?? null
 }
 
+/**
+ * Whether a `+` that starts a session asks which agent to start: while more
+ * than one agent is usable, and while the agents are found for the first
+ * time, when it cannot tell yet. Otherwise it starts the one usable agent at
+ * once, or says that none is.
+ */
+export function agentChoice(tools: ToolsState, launchSettings: LaunchSettings | null): boolean {
+  return firstDetectionRunning(tools) || usableChatAgents(tools, launchSettings).length > 1
+}
+
 /** Whether the default agent is among the usable agents, which the agent menu marks Default. */
 export function defaultAgentUsable(
   tools: ToolsState,

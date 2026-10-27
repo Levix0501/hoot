@@ -6,6 +6,7 @@ import {
   withDefaultAgent,
 } from './launch-settings'
 import {
+  agentChoice,
   chatAgent,
   chatName,
   defaultAgentUsable,
@@ -62,6 +63,20 @@ describe('chats', () => {
     expect(chatAgent(tools([]), settings)).toBeNull()
     // A menu's agent that cannot be used falls back to what can.
     expect(chatAgent(tools(['codex']), settings, 'opencode')).toBe('codex')
+  })
+
+  it('asks which agent to start only while there is a choice, or none is known yet', () => {
+    const settings = defaultLaunchSettings()
+    expect(agentChoice(tools(['claude', 'codex']), settings)).toBe(true)
+    expect(agentChoice(tools(['codex']), settings)).toBe(false)
+    expect(agentChoice(tools([]), settings)).toBe(false)
+    expect(
+      agentChoice(
+        tools(['claude', 'codex']),
+        withAgentLaunchSettingsChange(settings, 'codex', { enabled: false }),
+      ),
+    ).toBe(false)
+    expect(agentChoice({ detecting: true, tools: [], error: null }, settings)).toBe(true)
   })
 
   it('marks Default only while the default agent can be used', () => {

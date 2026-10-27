@@ -5,7 +5,7 @@ import type { Project } from '../../shared/ipc'
  * list. Within a project come first the sessions in its main worktree, then
  * those of each of its worktrees in the order of the worktree rows
  * (`worktreeOrder` gives the roots of a project's worktree rows); each in
- * the order they were started.
+ * the order the sessions are given in, which is the order of their tabs.
  */
 export function sidebarOrder<T extends { projectRoot: string; worktreePath: string | null }>(
   projects: readonly Project[],
@@ -101,4 +101,20 @@ export function relativeSession(
   const index = current === null ? -1 : order.indexOf(current)
   if (index === -1) return offset === 1 ? order[0]! : order.at(-1)!
   return order[(index + offset + order.length) % order.length]!
+}
+
+/**
+ * The sessions with those of `ids` put in that order, in the places they
+ * take among the sessions: a worktree's sessions after one of its tabs was
+ * dragged. Unchanged when one of `ids` is not among the sessions.
+ */
+export function reorderedSessions<T extends { id: string }>(
+  sessions: readonly T[],
+  ids: readonly string[],
+): readonly T[] {
+  const moved = ids.map((id) => sessions.find((session) => session.id === id))
+  if (moved.some((session) => session === undefined)) return sessions
+  const places = new Set(ids)
+  let next = 0
+  return sessions.map((session) => (places.has(session.id) ? moved[next++]! : session))
 }

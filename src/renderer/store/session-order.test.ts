@@ -3,6 +3,7 @@ import {
   currentAfterClosing,
   orderedChatSessions,
   relativeSession,
+  reorderedSessions,
   sessionsInSwitchOrder,
   sidebarOrder,
 } from './session-order'
@@ -140,5 +141,36 @@ describe('relativeSession', () => {
   it('does nothing without sessions', () => {
     expect(relativeSession([], null, 1)).toBeNull()
     expect(relativeSession([], null, -1)).toBeNull()
+  })
+})
+
+describe('reorderedSessions', () => {
+  const sessions = [
+    { id: 'a1', worktree: 'a' },
+    { id: 'b1', worktree: 'b' },
+    { id: 'a2', worktree: 'a' },
+    { id: 'a3', worktree: 'a' },
+    { id: 'b2', worktree: 'b' },
+  ]
+
+  it('puts the sessions given in their new order, in the places they take', () => {
+    expect(reorderedSessions(sessions, ['a3', 'a1', 'a2']).map((session) => session.id)).toEqual([
+      'a3',
+      'b1',
+      'a1',
+      'a2',
+      'b2',
+    ])
+    expect(reorderedSessions(sessions, ['b2', 'b1']).map((session) => session.id)).toEqual([
+      'a1',
+      'b2',
+      'a2',
+      'a3',
+      'b1',
+    ])
+  })
+
+  it('leaves the sessions as they are when one of those given is gone', () => {
+    expect(reorderedSessions(sessions, ['a2', 'gone', 'a1'])).toBe(sessions)
   })
 })

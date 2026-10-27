@@ -70,7 +70,7 @@ function NoSessions({ className, testId }: { className: string; testId: string }
 
 /**
  * The sessions in a project's main worktree, below its row, in the order they
- * were started.
+ * were started, whatever the order of their tabs.
  */
 function ProjectSessions({ project }: { project: Project }) {
   const sessions = useAppStore(
@@ -80,7 +80,9 @@ function ProjectSessions({ project }: { project: Project }) {
       ),
     ),
   )
-  return sessions.map((session) => <SessionItem key={session.id} session={session} />)
+  return sessions
+    .toSorted((a, b) => a.createdAt - b.createdAt)
+    .map((session) => <SessionItem key={session.id} session={session} />)
 }
 
 /**

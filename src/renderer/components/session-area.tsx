@@ -2,7 +2,9 @@ import { FolderPlusIcon, PlayIcon, SquareTerminalIcon, XIcon } from 'lucide-reac
 import { chatName } from '../../shared/chats'
 import { describeExit, isNormalExit, sessionName } from '../../shared/session'
 import { sessionState, stateLabel } from '../lib/session-state'
+import { cn } from '../lib/utils'
 import { useAppStore, type UiSession } from '../store/app-store'
+import { SessionTabs } from './session-tabs'
 import { StateLight } from './state-light'
 import { TerminalView } from './terminal-view'
 import { ToolIcon } from './tool-icon'
@@ -68,40 +70,53 @@ export function SessionPane({ session }: { session: UiSession }) {
       data-tool={session.toolId}
     >
       {/*
-        The main area's part of the window's top row. Its blank parts drag the
-        window; the name, which shows its full text on hover, and the close
-        button do not. While the sidebar slides, its left padding changes in
-        step, keeping its content clear of the navigation. At its right end it
-        leaves room for the window's buttons on Windows.
+        The main area's part of the window's top row: the tabs of the sessions
+        in the session's worktree, or for a chat its name, state and close
+        button. Its blank parts drag the window; the tabs, the name, which
+        shows its full text on hover, and the close button do not. While the
+        sidebar slides, its left padding changes in step, keeping its content
+        clear of the navigation. At its right end it leaves room for the
+        window's buttons on Windows.
       */}
       <header
-        className="flex h-11 shrink-0 items-center gap-3 pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4 transition-[padding] duration-200 ease-linear [app-region:drag]"
+        className={cn(
+          'flex h-11 shrink-0 items-center gap-3 transition-[padding] duration-200 ease-linear [app-region:drag]',
+          session.chatId === null
+            ? 'pr-(--window-controls-width) pl-2'
+            : 'pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4',
+        )}
         style={{ paddingLeft: inset }}
       >
-        <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-1 text-sm">
-          <span
-            className="min-w-0 truncate font-medium [app-region:no-drag]"
-            title={name}
-            data-session-name=""
-            data-testid="session-name"
-          >
-            {name}
-          </span>
-        </div>
-        <StatusBadge session={session} />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="[app-region:no-drag]"
-          disabled={session.closing}
-          onClick={() => requestCloseSession(session.id)}
-          aria-label="Close Session"
-          title="Close Session"
-          data-testid="session-header-close"
-        >
-          <XIcon />
-        </Button>
+        {session.chatId === null ? (
+          <SessionTabs session={session} />
+        ) : (
+          <>
+            <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />
+            <div className="flex min-w-0 flex-1 text-sm">
+              <span
+                className="min-w-0 truncate font-medium [app-region:no-drag]"
+                title={name}
+                data-session-name=""
+                data-testid="session-name"
+              >
+                {name}
+              </span>
+            </div>
+            <StatusBadge session={session} />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="[app-region:no-drag]"
+              disabled={session.closing}
+              onClick={() => requestCloseSession(session.id)}
+              aria-label="Close Session"
+              title="Close Session"
+              data-testid="session-header-close"
+            >
+              <XIcon />
+            </Button>
+          </>
+        )}
       </header>
       <TerminalView key={session.id} sessionId={session.id} />
       {session.status === 'exited' && session.exit && (

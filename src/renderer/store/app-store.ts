@@ -106,6 +106,7 @@ import {
   currentAfterClosing,
   orderedChatSessions,
   relativeSession,
+  reorderedSessions,
   sessionsInSwitchOrder,
   sidebarOrder,
 } from './session-order'
@@ -511,6 +512,12 @@ export interface AppState {
   launchSession(id: string, cols: number, rows: number): Promise<LaunchResult>
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
+  /**
+   * Puts sessions in the order given, in the places they take among the
+   * sessions: a worktree's sessions after one of its tabs was dragged. The
+   * sessions switch in that order.
+   */
+  reorderSessions(ids: readonly string[]): void
   runShortcut(shortcut: SessionShortcut): void
   runMenuCommand(command: SessionCommand): void
   /** Shows the page shown before the current one, if any. */
@@ -2533,6 +2540,13 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     selectSession(id) {
       if (findSession(id)) showPage(sessionPage(id))
+    },
+
+    reorderSessions(ids) {
+      set((state) => {
+        const sessions = reorderedSessions(state.sessions, ids)
+        return sessions === state.sessions ? {} : { sessions: [...sessions] }
+      })
     },
 
     runShortcut(shortcut) {

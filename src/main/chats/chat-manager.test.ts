@@ -573,8 +573,8 @@ describe('ChatManager', () => {
     ])
   })
 
-  it('takes Enter after Up, which recalls a message from the agent’s history, for a message sent', async () => {
-    // A new chat whose only message the user recalled.
+  it('takes Enter after a key that recalls a message from the agent’s history for a message where it starts a conversation', async () => {
+    // A new chat whose only message the user recalled, with Up.
     const chat = await manager.create('codex')
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
@@ -601,6 +601,127 @@ describe('ChatManager', () => {
     expect(manager.list()).toEqual([
       expect.objectContaining({ id: chat.id, conversationId: 'thread-2' }),
     ])
+
+    // Codex also recalls one with Ctrl+P: in a new chat, and after /clear or /fork.
+    const recalledOnly = await manager.create('codex')
+    await manager.prepareSession(recalledOnly.id)
+    manager.opened(recalledOnly.id)
+    manager.typed(recalledOnly.id, 'session-3', '\x10\r')
+    conversations.codex = [{ id: 'thread-3', title: 'Three', createdAt: clock }]
+    manager.sessionEnded(ended(recalledOnly.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(recalledOnly.id)).toMatchObject({ conversationId: 'thread-3' })
+    let previous = 'thread-3'
+    for (const [command, next] of [
+      ['/clear', 'thread-4'],
+      ['/fork', 'thread-5'],
+    ] as const) {
+      await manager.prepareSession(recalledOnly.id)
+      manager.opened(recalledOnly.id)
+      manager.typed(recalledOnly.id, `session-${next}`, `${command}\r`)
+      manager.typed(recalledOnly.id, `session-${next}`, '\x10\r')
+      conversations.codex = [
+        { id: previous, title: previous, createdAt: 1 },
+        { id: next, title: next, createdAt: clock + 1 },
+      ]
+      manager.sessionEnded(ended(recalledOnly.id, 'codex'))
+      await manager.flush()
+      expect(manager.get(recalledOnly.id)).toMatchObject({ conversationId: next })
+      previous = next
+    }
+
+    // OpenCode, whose history Up alone recalls, after /new.
+    const openCode = await manager.create('opencode')
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-6', 'a question\r')
+    conversations.opencode = [{ id: openCode.conversationId!, title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-7', '/new\r\x1b[A\r')
+    conversations.opencode = [
+      { id: openCode.conversationId!, title: 'One', createdAt: 1 },
+      { id: 'ses_two', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    expect(manager.get(openCode.id)).toMatchObject({ conversationId: 'ses_two' })
+  })
+
+  it('takes Enter after a key that recalls a message for none where a message would not start a conversation, as on an item of a list', async () => {
+    // A new chat whose review of Codex's hooks was answered with Up, which
+    // picks its last item, and which sent no message: it goes.
+    const unused = await manager.create('codex')
+    await manager.prepareSession(unused.id)
+    manager.opened(unused.id)
+    manager.typed(unused.id, 'session-1', '\x1b[A')
+    manager.typed(unused.id, 'session-1', '\r')
+    manager.sessionEnded(ended(unused.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(unused.id)).toBeUndefined()
+
+    // A chat with a conversation whose review was answered with Up, which
+    // then left its conversation with /new and sent no message, while a
+    // conversation started out of Hoot in its folder.
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-2', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: 1 }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-3', '\x1b[A\r')
+    manager.typed(chat.id, 'session-3', '/new\r')
+    manager.typed(chat.id, 'session-3', '\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'outside', title: 'Outside', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-1' })
+
+    // A chat whose conversation Codex reported, which picked an item of a
+    // list with Up or Ctrl+P and sent no message.
+    const reported = await manager.create('codex')
+    await manager.prepareSession(reported.id)
+    manager.opened(reported.id)
+    manager.typed(reported.id, 'session-4', 'one\r')
+    manager.noteHookEvent(reported.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.sessionEnded(ended(reported.id, 'codex'))
+    await manager.flush()
+    await manager.prepareSession(reported.id)
+    manager.opened(reported.id)
+    manager.typed(reported.id, 'session-5', '/theme\r\x1b[A\r')
+    manager.typed(reported.id, 'session-5', '/model\r\x10\r')
+    conversations.codex = [
+      { id: 'thread-one', title: 'One', createdAt: 1 },
+      { id: 'outside', title: 'Outside', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(reported.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(reported.id)).toMatchObject({ conversationId: 'thread-one' })
+
+    // Ctrl+P recalls nothing in OpenCode, where it moves the selection of a dialog.
+    const openCode = await manager.create('opencode')
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-6', 'a question\r')
+    conversations.opencode = [{ id: openCode.conversationId!, title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-7', '/new\r\x10\r')
+    conversations.opencode = [
+      { id: openCode.conversationId!, title: 'One', createdAt: 1 },
+      { id: 'ses_two', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    expect(manager.get(openCode.id)).toMatchObject({ conversationId: openCode.conversationId })
   })
 
   it('takes neither Enter alone, as on an answer picked with Down, nor a command after Up for a message', async () => {

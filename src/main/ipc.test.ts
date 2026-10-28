@@ -228,7 +228,7 @@ const worktrees = Object.assign(emitter(), {
       worktreePath: string,
       discard: boolean,
       endSessions: () => Promise<void>,
-      deleteMergedBranches?: boolean,
+      deleteBranches?: readonly { relativePath: string; branch: string }[],
     ) => Promise<{ ok: boolean }>
   >(async () => ({ ok: true })),
   removeMissing: vi.fn<
@@ -773,15 +773,19 @@ describe('the messages of worktrees', () => {
   it('end the sessions running in a worktree before deleting it, and forget it once deleted', async () => {
     const at = saved.worktreePath
     expect(await invoke(IpcChannel.deleteWorktree, project.root, at, true)).toEqual({ ok: true })
-    // Its merged branches are deleted with it only when asked.
-    expect(worktrees.delete.mock.calls[0]![4]).toBe(false)
-    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, true)).toEqual({
+    // Its merged branches are deleted with it only when the confirmation named them.
+    expect(worktrees.delete.mock.calls[0]![4]).toEqual([])
+    const named = [{ relativePath: '', branch: 'fix-login-bug' }]
+    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, named)).toEqual({
       ok: true,
     })
-    expect(worktrees.delete.mock.calls[1]![4]).toBe(true)
-    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, 'yes')).toMatchObject({
+    expect(worktrees.delete.mock.calls[1]![4]).toEqual(named)
+    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, true)).toMatchObject({
       ok: false,
     })
+    expect(
+      await invoke(IpcChannel.deleteWorktree, project.root, at, false, [{ relativePath: '' }]),
+    ).toMatchObject({ ok: false })
     expect(worktrees.delete).toHaveBeenCalledTimes(2)
     const endSessions = worktrees.delete.mock.calls[0]![3]
     expect(sessionManager.closeRunningWithin).not.toHaveBeenCalled()

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { alsoDeleteLabel, branchesNote, mergedBranches, noteText } from './worktree-branches'
+import {
+  alsoDeleteLabel,
+  branchesNote,
+  branchesToDelete,
+  mergedBranches,
+  noteText,
+} from './worktree-branches'
 import type { WorktreeBranch, WorktreeInspection } from './worktrees'
 
 const branch = (
@@ -7,7 +13,13 @@ const branch = (
   name: string | null,
   merged: boolean,
   current: string | null = 'main',
-): WorktreeBranch => ({ repository, branch: name, current, merged })
+): WorktreeBranch => ({
+  repository,
+  relativePath: repository === 'app' ? '' : repository,
+  branch: name,
+  current,
+  merged,
+})
 
 /** An inspection of a worktree with these branches, and inner members for all but the first. */
 function inspection(
@@ -94,6 +106,11 @@ describe('the branches of a worktree being deleted', () => {
         { text: 'second', user: true },
         { text: '.', user: false },
       ],
+    ])
+    // What deleting it deletes too, member by member: the merged branches the note names.
+    expect(branchesToDelete(mixed)).toEqual([
+      { relativePath: '', branch: 'feature-x' },
+      { relativePath: 'inner', branch: 'other' },
     ])
     const keptElsewhere = inspection([
       branch('app', 'feature-x', true),

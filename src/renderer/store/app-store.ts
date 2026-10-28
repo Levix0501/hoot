@@ -74,7 +74,7 @@ import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../.
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
-import { mergedBranches } from '../../shared/worktree-branches'
+import { branchesToDelete } from '../../shared/worktree-branches'
 import {
   inspectionIsClean,
   isWithin,
@@ -3575,9 +3575,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ worktreeDeletion: deleting })
       await Promise.allSettled(running.map((session) => get().closeSession(session.id)))
       const discard = running.length > 0 || !inspectionIsClean(deletion.inspection)
-      // Only as the checkbox says, when it shows.
-      const deleteBranches =
-        deletion.deleteBranches && mergedBranches(deletion.inspection).length > 0
+      // Only as the checkbox says, when it shows: the branches the confirmation named.
+      const deleteBranches = deletion.deleteBranches ? branchesToDelete(deletion.inspection) : []
       const result = await api
         .deleteWorktree(deletion.projectRoot, deletion.path, discard, deleteBranches)
         .catch((error: unknown) => ({

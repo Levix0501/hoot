@@ -13,6 +13,7 @@ import {
   defaultNestedBase,
   inspectionIsClean,
   isWithin,
+  type BranchToDelete,
   type CreateIssueWorktreeResult,
   type CreateWorktreeMembersResult,
   type CreateWorktreeRequest,
@@ -874,11 +875,12 @@ export class WorktreeService extends EventEmitter<{
   /**
    * Deletes a worktree: its inner members, deeper ones first, then its outer
    * member, with everything in its root, and then the registrations of other
-   * linked worktrees that were inside the root. Branches are kept, unless
-   * `deleteMergedBranches` is set: then, once the worktree is deleted, the
-   * branch of each of its members that is merged, as it is then, into the
-   * branch checked out in the project folder in its repository is deleted
-   * too. Unless `discard` is set, a worktree with anything to lose is not
+   * linked worktrees that were inside the root. Branches are kept, except
+   * those of `deleteBranches`, which the confirmation said would be deleted:
+   * once the worktree is deleted, each of them that its member had checked
+   * out and that is merged, as it is then, into the branch checked out in
+   * the project folder in its repository is deleted too, and the others are
+   * kept. Unless `discard` is set, a worktree with anything to lose is not
    * deleted. Once nothing stops the deletion, `endSessions` ends the sessions
    * running in the worktree, and what they change until they end is deleted
    * with it.
@@ -888,7 +890,7 @@ export class WorktreeService extends EventEmitter<{
     worktreePath: string,
     discard: boolean,
     endSessions: () => Promise<void> = async () => {},
-    deleteMergedBranches = false,
+    deleteBranches: readonly BranchToDelete[] = [],
   ): Promise<DeleteWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state)
@@ -897,13 +899,7 @@ export class WorktreeService extends EventEmitter<{
     // registration while Git deletes it.
     state.busy.add(worktreePath)
     try {
-      return await this.deleteMembers(
-        state,
-        worktreePath,
-        discard,
-        endSessions,
-        deleteMergedBranches,
-      )
+      return await this.deleteMembers(state, worktreePath, discard, endSessions, deleteBranches)
     } finally {
       state.busy.delete(worktreePath)
     }
@@ -914,7 +910,7 @@ export class WorktreeService extends EventEmitter<{
     worktreePath: string,
     discard: boolean,
     endSessions: () => Promise<void>,
-    deleteMergedBranches: boolean,
+    deleteBranches: readonly BranchToDelete[],
   ): Promise<DeleteWorktreeResult> {
     // Its inner members are found as when checking it.
     await this.discover(state)
@@ -953,10 +949,18 @@ export class WorktreeService extends EventEmitter<{
     // Also a session that started while the worktree was checked.
     await endSessions()
     // The members' branches as they are once nothing changes them any more,
-    // which can only be deleted once the worktree is.
-    const branched = deleteMergedBranches
-      ? await this.memberBranches(context, state, entry.path, branchOf(entry))
-      : []
+    // which can only be deleted once the worktree is: of those the
+    // confirmation named, the ones the members still have checked out.
+    const branched =
+      deleteBranches.length > 0
+        ? (await this.memberBranches(context, state, entry.path, branchOf(entry))).filter(
+            (member) =>
+              deleteBranches.some(
+                (named) =>
+                  named.relativePath === member.relativePath && named.branch === member.branch,
+              ),
+          )
+        : []
     const members = await this.membersOf(context, state, entry.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
       // Only the outer member's lock, checked above, makes the worktree
@@ -985,9 +989,9 @@ export class WorktreeService extends EventEmitter<{
   }
 
   /**
-   * Deletes the branches of the members of a worktree just deleted that are
-   * merged now into the branch checked out in the project folder in their
-   * repository; the others stay. Returns why any could not be deleted.
+   * Deletes the branches of these members of a worktree just deleted that
+   * are merged now into the branch checked out in the project folder in
+   * their repository; the others stay. Returns why any could not be deleted.
    */
   private async deleteMergedBranches(
     context: GitContext,
@@ -1376,7 +1380,13 @@ export class WorktreeService extends EventEmitter<{
           member.branch !== null &&
           current !== null &&
           (await isMergedInto(context, member.repository, member.branch, current))
-        return { repository: member.label, branch: member.branch, current, merged }
+        return {
+          repository: member.label,
+          relativePath: member.relativePath,
+          branch: member.branch,
+          current,
+          merged,
+        }
       }),
     )
   }

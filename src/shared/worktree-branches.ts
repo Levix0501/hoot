@@ -1,4 +1,4 @@
-import type { WorktreeBranch, WorktreeInspection } from './worktrees'
+import type { BranchToDelete, WorktreeBranch, WorktreeInspection } from './worktrees'
 
 /** A part of a sentence: the dialog's own text, or text from the user's repositories. */
 export interface NotePart {
@@ -28,6 +28,20 @@ function list(names: readonly string[]): NotePart[] {
  */
 export function mergedBranches(inspection: Pick<WorktreeInspection, 'branches'>): WorktreeBranch[] {
   return inspection.branches.filter((entry) => entry.branch !== null && entry.merged)
+}
+
+/**
+ * The branches the confirmation says deleting the worktree deletes too while
+ * its checkbox is checked: the merged ones, member by member. Only those can
+ * be deleted with it, once they are still merged.
+ */
+export function branchesToDelete(
+  inspection: Pick<WorktreeInspection, 'branches'>,
+): BranchToDelete[] {
+  return mergedBranches(inspection).map((entry) => ({
+    relativePath: entry.relativePath,
+    branch: entry.branch!,
+  }))
 }
 
 /**

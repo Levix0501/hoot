@@ -113,13 +113,13 @@ const api: HootApi = {
   readWorktrees: (projectRoot) => ipcRenderer.invoke(IpcChannel.readWorktrees, projectRoot),
   inspectWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.inspectWorktree, projectRoot, worktreePath),
-  deleteWorktree: (projectRoot, worktreePath, discard, deleteMergedBranches) =>
+  deleteWorktree: (projectRoot, worktreePath, discard, deleteBranches) =>
     ipcRenderer.invoke(
       IpcChannel.deleteWorktree,
       projectRoot,
       worktreePath,
       discard,
-      deleteMergedBranches,
+      deleteBranches,
     ),
   removeWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.removeWorktree, projectRoot, worktreePath),

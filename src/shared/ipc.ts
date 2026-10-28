@@ -15,6 +15,7 @@ import type { UpdateStatus } from './updates'
 import type { WindowControls } from './window-controls'
 import type { WindowsPty } from './windows-pty'
 import type {
+  BranchToDelete,
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
   CreateWorktreeResult,
@@ -595,14 +596,15 @@ export interface HootApi {
   inspectWorktree(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult>
   /**
    * Deletes a worktree; with `discard` false, only one with nothing to lose.
-   * With `deleteMergedBranches`, then the branch of each of its members that
-   * is merged into the branch checked out in the project folder too.
+   * Then each of `deleteBranches`, the branches its confirmation said would
+   * be deleted too, that its member still had checked out and that is still
+   * merged into the branch checked out in the project folder.
    */
   deleteWorktree(
     projectRoot: string,
     worktreePath: string,
     discard: boolean,
-    deleteMergedBranches: boolean,
+    deleteBranches: BranchToDelete[],
   ): Promise<DeleteWorktreeResult>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:

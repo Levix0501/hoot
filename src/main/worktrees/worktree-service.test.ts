@@ -789,6 +789,7 @@ describe('WorktreeService', () => {
         // Made from main without commits of their own, they are merged into it.
         branches: ['project', 'inner', 'inner/deep'].map((repository) => ({
           repository,
+          relativePath: repository === 'project' ? '' : repository,
           branch: 'feat/m',
           current: 'main',
           merged: true,
@@ -878,6 +879,7 @@ describe('WorktreeService', () => {
         branch: 'feat/n',
         branches: ['project', 'inner'].map((repository) => ({
           repository,
+          relativePath: repository === 'project' ? '' : repository,
           branch: 'feat/n',
           current: 'main',
           merged: true,
@@ -1568,19 +1570,38 @@ describe('WorktreeService', () => {
     git(inner, 'merge', '-q', '--no-edit', 'feature-x')
     const inspected = await service.inspect(project, R)
     expect(inspected.ok && inspected.inspection.branches).toEqual([
-      { repository: 'project', branch: 'feature-x', current: 'main', merged: false },
-      { repository: 'inner', branch: 'feature-x', current: 'main', merged: true },
+      {
+        repository: 'project',
+        relativePath: '',
+        branch: 'feature-x',
+        current: 'main',
+        merged: false,
+      },
+      {
+        repository: 'inner',
+        relativePath: 'inner',
+        branch: 'feature-x',
+        current: 'main',
+        merged: true,
+      },
     ])
     git(inner, 'checkout', '-q', '--detach')
     git(path.join(R, 'inner'), 'checkout', '-q', '--detach')
     const detached = await service.inspect(project, R)
     expect(detached.ok && detached.inspection.branches[1]).toEqual({
       repository: 'inner',
+      relativePath: 'inner',
       branch: null,
       current: null,
       merged: false,
     })
   })
+
+  /** The branches of both members of a worktree made by `worktreeToMerge`, as a confirmation names them. */
+  const bothBranches = [
+    { relativePath: '', branch: 'feature-x' },
+    { relativePath: 'inner', branch: 'feature-x' },
+  ]
 
   it('deletes with a worktree, when asked, the branches merged into the project folder’s as they are then', async () => {
     const R = await worktreeToMerge()
@@ -1588,9 +1609,38 @@ describe('WorktreeService', () => {
     git(inner, 'merge', '-q', '--no-edit', 'feature-x')
     // A commit made since the confirmation showed: that branch is no longer merged.
     git(R, 'commit', '-q', '--allow-empty', '-m', 'late')
-    expect(await service.delete(project, R, false, async () => {}, true)).toEqual({ ok: true })
+    expect(await service.delete(project, R, false, async () => {}, bothBranches)).toEqual({
+      ok: true,
+    })
     expect(fs.existsSync(R)).toBe(false)
     expect(branches(project)).toContain('feature-x')
+    expect(branches(inner)).not.toContain('feature-x')
+  })
+
+  it('deletes with a worktree only the merged branches the confirmation named', async () => {
+    const R = await worktreeToMerge()
+    git(project, 'merge', '-q', '--no-edit', 'feature-x')
+    // Merged since the confirmation showed, which said it would be kept.
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    const outerOnly = [{ relativePath: '', branch: 'feature-x' }]
+    expect(await service.delete(project, R, false, async () => {}, outerOnly)).toEqual({
+      ok: true,
+    })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(branches(project)).not.toContain('feature-x')
+    expect(branches(inner)).toContain('feature-x')
+  })
+
+  it('keeps a merged branch the confirmation named once its member has another checked out', async () => {
+    const R = await worktreeToMerge()
+    git(project, 'merge', '-q', '--no-edit', 'feature-x')
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    // The outer member switched to a branch of its own, merged too, since the confirmation showed.
+    git(R, 'checkout', '-q', '-b', 'other')
+    expect(await service.delete(project, R, false, async () => {}, bothBranches)).toEqual({
+      ok: true,
+    })
+    expect(branches(project)).toEqual(expect.arrayContaining(['feature-x', 'other']))
     expect(branches(inner)).not.toContain('feature-x')
   })
 
@@ -1600,7 +1650,7 @@ describe('WorktreeService', () => {
     git(inner, 'merge', '-q', '--no-edit', 'feature-x')
     // Git changes no branch whose lock file is there.
     fs.writeFileSync(path.join(inner, '.git', 'refs', 'heads', 'feature-x.lock'), '')
-    const result = await service.delete(project, R, false, async () => {}, true)
+    const result = await service.delete(project, R, false, async () => {}, bothBranches)
     expect(result).toMatchObject({
       ok: true,
       warning: expect.stringContaining('Could not delete the branch feature-x in inner: '),

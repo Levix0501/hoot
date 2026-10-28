@@ -147,6 +147,10 @@ const savedSessionArguments = z.tuple([
   z.enum(CODING_TOOL_IDS),
 ])
 const mergeArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
+/** The branches a worktree's deletion confirmation said would be deleted with it. */
+const branchesToDelete = z
+  .array(z.object({ relativePath: z.string(), branch: z.string().min(1) }))
+  .max(1_000)
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -914,10 +918,10 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.deleteWorktree, async (_event, ...args): Promise<DeleteWorktreeResult> => {
     const parsed = z
-      .tuple([projectRoot, z.string().min(1), z.boolean(), z.boolean().optional()])
+      .tuple([projectRoot, z.string().min(1), z.boolean(), branchesToDelete.optional()])
       .safeParse(args)
     if (!parsed.success) return { ok: false, reason: 'not-found', message: 'Invalid request.' }
-    const [root, worktreePath, discard, deleteMergedBranches] = parsed.data
+    const [root, worktreePath, discard, deleteBranches] = parsed.data
     // The sessions running in it end first, also those in a project's worktree
     // inside it, which deleting it deletes: the window closes those it listed
     // before asking, and any that started since close here.
@@ -926,7 +930,7 @@ export function registerIpc(deps: IpcDependencies): void {
       worktreePath,
       discard,
       () => deps.sessions.closeRunningWithin(worktreePath),
-      deleteMergedBranches === true,
+      deleteBranches ?? [],
     )
     // Its sessions, which have all ended, close with it, also those of a
     // project's worktree inside it, and so do its saved sessions. A worktree

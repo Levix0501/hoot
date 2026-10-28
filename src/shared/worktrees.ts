@@ -189,6 +189,8 @@ export interface RepositoryChanges {
 export interface WorktreeBranch {
   /** The project name for the outer member, otherwise the path relative to the root. */
   repository: string
+  /** The member's path relative to the root: `''` for the outer member. */
+  relativePath: string
   /** The branch the member has checked out, or `null` when detached. */
   branch: string | null
   /**
@@ -198,6 +200,16 @@ export interface WorktreeBranch {
   current: string | null
   /** The member's branch points to `current`, or to a commit in its history. */
   merged: boolean
+}
+
+/**
+ * A branch the confirmation of a worktree's deletion said would be deleted
+ * with it: the one the member at `relativePath` (`''` for the outer member)
+ * has checked out.
+ */
+export interface BranchToDelete {
+  relativePath: string
+  branch: string
 }
 
 /** What deleting a worktree would delete, and what would be lost with it. */

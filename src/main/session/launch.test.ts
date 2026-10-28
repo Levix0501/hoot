@@ -295,16 +295,15 @@ describe('resolveLaunch', () => {
 
   it('continues a chat’s conversation, or starts the one its id names', async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    // A new Claude Code conversation gets the id Claude Code picks.
     const claudeNew = await resolveLaunch(context(loginEnv), 'claude', project, null, {
-      conversationId: 'claude-id',
+      conversationId: null,
       resume: false,
     })
     expect(claudeNew.args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
       ...hookSettings,
-      '--session-id',
-      'claude-id',
     ])
     const claudeAgain = await resolveLaunch(context(loginEnv), 'claude', project, null, {
       conversationId: 'claude-id',
@@ -355,7 +354,7 @@ describe('resolveLaunch', () => {
       codex: { extraArgs: ['-c', 'model=x'] },
     })
     const claude = await resolveLaunch(yolo, 'claude', project, null, {
-      conversationId: 'claude-id',
+      conversationId: null,
       resume: false,
       firstMessage: message,
     })
@@ -365,8 +364,6 @@ describe('resolveLaunch', () => {
       '--add-dir',
       '/extra',
       ...hookSettings,
-      '--session-id',
-      'claude-id',
       '--',
       message,
     ])
@@ -396,7 +393,7 @@ describe('resolveLaunch', () => {
     ])
     // Without one, nothing is sent.
     const plain = await resolveLaunch(yolo, 'claude', project, null, {
-      conversationId: 'claude-id',
+      conversationId: null,
       resume: false,
     })
     expect(plain.args).not.toContain('--')

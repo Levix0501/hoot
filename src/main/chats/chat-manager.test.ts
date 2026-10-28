@@ -213,7 +213,8 @@ describe('ChatManager', () => {
     }
     expect(new Set([codex.folder, opencode.folder, codexAgain.folder]).size).toBe(3)
 
-    expect(claude.conversationId).toMatch(/^[0-9a-f-]{36}$/)
+    // Claude Code and Codex pick the ids of their conversations.
+    expect(claude.conversationId).toBeNull()
     expect(opencode.conversationId).toMatch(/^ses_[0-9a-f]+$/)
     expect(codex.conversationId).toBeNull()
     expect(manager.list().map((chat) => chat.id)).toEqual([
@@ -267,13 +268,13 @@ describe('ChatManager', () => {
 
     const claude = await manager.create('claude')
     expect(await manager.prepareSession(claude.id)).toMatchObject({
-      launch: { conversationId: claude.conversationId, resume: false },
+      launch: { conversationId: null, resume: false },
     })
   })
 
   it('goes on in the conversation Claude Code went to at /clear once a message is sent there, adding no chat', async () => {
     const chat = await manager.create('claude')
-    const first = chat.conversationId!
+    const first = 'first-conversation'
     manager.setTitle(chat.id, '✳ Fix the login')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
     await manager.flush()
@@ -307,7 +308,7 @@ describe('ChatManager', () => {
   it('names a chat after the title Claude Code gives the conversation it went on to', async () => {
     const chat = await manager.create('claude')
     manager.setTitle(chat.id, '✳ Old conversation')
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     await manager.flush()
 
     // The title of the next conversation comes in before the hook that tells
@@ -332,7 +333,7 @@ describe('ChatManager', () => {
   it('keeps the name the user gave a chat that goes on to another conversation', async () => {
     const chat = await manager.create('claude')
     manager.rename(chat.id, 'My task')
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     manager.typed(chat.id, 'session-1', '/clear\r')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'next', null, 2_000))
     await manager.flush()
@@ -341,7 +342,7 @@ describe('ChatManager', () => {
 
   it('keeps a Claude Code chat in its conversation when the next one gets no message', async () => {
     const chat = await manager.create('claude')
-    const first = chat.conversationId!
+    const first = 'first-conversation'
     manager.setTitle(chat.id, '✳ Old conversation')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
     await manager.flush()
@@ -369,8 +370,8 @@ describe('ChatManager', () => {
   it('goes on in the conversation Claude Code resumes or branches to, another chat’s too', async () => {
     const one = await manager.create('claude')
     const two = await manager.create('claude')
-    const theirs = two.conversationId!
-    manager.noteHookEvent(one.id, hook('UserPromptSubmit', one.conversationId!))
+    const theirs = 'their-conversation'
+    manager.noteHookEvent(one.id, hook('UserPromptSubmit', 'own-conversation'))
     manager.noteHookEvent(two.id, hook('UserPromptSubmit', theirs))
     await manager.flush()
 
@@ -392,7 +393,7 @@ describe('ChatManager', () => {
 
   it('leaves a chat in the conversation it went on to when a message of the one it left is told late', async () => {
     const chat = await manager.create('claude')
-    const first = chat.conversationId!
+    const first = 'first-conversation'
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first, null, 1_000))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'next', null, 3_000))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first, null, 2_000))
@@ -402,15 +403,100 @@ describe('ChatManager', () => {
 
   it('does not change the conversation of a Claude Code chat that compacts it', async () => {
     const chat = await manager.create('claude')
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     await manager.flush()
     manager.typed(chat.id, 'session-1', '/compact\r')
-    manager.noteHookEvent(chat.id, hook('SessionStart', chat.conversationId, 'compact', 2_000))
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId, null, 3_000))
+    manager.noteHookEvent(chat.id, hook('SessionStart', 'first-conversation', 'compact', 2_000))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation', null, 3_000))
     await manager.flush()
     expect(manager.list()).toEqual([
-      expect.objectContaining({ conversationId: chat.conversationId, hasMessages: true }),
+      expect.objectContaining({ conversationId: 'first-conversation', hasMessages: true }),
     ])
+  })
+
+  it('removes a Claude Code chat whose agent told of no conversation with a message, as with its hooks off', async () => {
+    const chat = await manager.create('claude')
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', 'one\r')
+    // Claude Code tells of the conversation it starts before any message.
+    manager.noteHookEvent(chat.id, hook('SessionStart', 'unsent', 'startup'))
+    conversations.claude = true
+    manager.sessionEnded(ended(chat.id, 'claude'))
+    await manager.flush()
+    expect(manager.list()).toEqual([])
+
+    // So does one left without a conversation when Hoot starts again.
+    const left = await manager.create('claude')
+    const again = await restarted()
+    expect(again.get(left.id)).toBeUndefined()
+  })
+
+  it('keeps a Claude Code chat in its conversation while its agent tells of none', async () => {
+    const chat = await manager.create('claude')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))
+    await manager.flush()
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-2', '/clear\r')
+    manager.typed(chat.id, 'session-2', 'two\r')
+    manager.sessionEnded(ended(chat.id, 'claude'))
+    await manager.flush()
+    expect((await manager.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: 'conversation-1',
+      resume: true,
+    })
+  })
+
+  it('opens a Claude Code chat made by an earlier version of Hoot on its own conversation', async () => {
+    const store = new ChatStore(db)
+    const at = ++clock
+    const chat = {
+      id: 'earlier-chat',
+      toolId: 'claude' as const,
+      folder: path.join(chatsRoot(), 'claude-code'),
+      projectRoot: null,
+      worktreePath: null,
+      conversationId: '0f6e2c1a-8a51-4a39-9d61-7c2f3b1e4d5a',
+      title: '✳ Earlier work',
+      customName: null,
+      hasMessages: true,
+      createdAt: at,
+      lastOpenedAt: at,
+    }
+    store.insert(chat)
+    // One whose conversation Hoot had not yet seen a message of, which the
+    // agent recorded one in.
+    store.insert({
+      ...chat,
+      id: 'unseen',
+      conversationId: 'unseen-conversation',
+      hasMessages: false,
+    })
+    conversations.claude = true
+
+    const again = new ChatManager({ db, conversations, home: path.join(root, 'home') })
+    expect((await again.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: chat.conversationId,
+      resume: true,
+    })
+    await again.reconcileAll()
+    expect(again.get('unseen')).toMatchObject({ hasMessages: true })
+
+    // And one whose conversation never got one, which starts anew.
+    store.insert({
+      ...chat,
+      id: 'unused',
+      conversationId: 'unused-conversation',
+      hasMessages: false,
+    })
+    conversations.claude = false
+    expect((await again.prepareSession('unused'))?.launch).toMatchObject({ resume: false })
+    again.opened('unused')
+    again.sessionEnded(ended('unused', 'claude'))
+    await again.flush()
+    expect(again.get('unused')).toBeUndefined()
+    expect(again.get(chat.id)).toMatchObject({ conversationId: chat.conversationId })
   })
 
   it('goes on in the newest Codex conversation when the process ends, listing no other', async () => {
@@ -613,7 +699,7 @@ describe('ChatManager', () => {
       worktreePath: worktree,
       hasMessages: false,
     })
-    expect(saved.conversationId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(saved.conversationId).toBeNull()
     expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([saved.id, later.id])
     expect(manager.list().map((entry) => entry.id)).toEqual([])
     // It starts in the worktree, and Hoot makes nothing in it.
@@ -659,14 +745,17 @@ describe('ChatManager', () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
     const saved = manager.createSavedSession('/work/project', worktree, 'claude')
-    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', saved.conversationId))
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'conversation-1'))
     await manager.flush()
 
-    expect(manager.get(saved.id)).toMatchObject({ hasMessages: true })
+    expect(manager.get(saved.id)).toMatchObject({
+      conversationId: 'conversation-1',
+      hasMessages: true,
+    })
     const prepared = await manager.prepareSession(saved.id)
     expect(prepared).toEqual({
       folder: worktree,
-      launch: { conversationId: saved.conversationId, resume: true },
+      launch: { conversationId: 'conversation-1', resume: true },
     })
   })
 
@@ -700,10 +789,10 @@ describe('ChatManager', () => {
 
     // Nor is a first message sent to a conversation that is continued, nor kept for one deleted.
     const other = manager.createSavedSession(project, null, 'claude', { firstMessage: 'Hi.' })
-    manager.noteHookEvent(other.id, hook('UserPromptSubmit', other.conversationId))
+    manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'conversation-1'))
     await manager.flush()
     expect((await manager.prepareSession(other.id))?.launch).toEqual({
-      conversationId: other.conversationId,
+      conversationId: 'conversation-1',
       resume: true,
     })
     const gone = manager.createSavedSession(project, null, 'opencode', { firstMessage: 'Hi.' })
@@ -734,7 +823,8 @@ describe('ChatManager', () => {
     const chat = await manager.create('claude')
     const other = await manager.create('claude')
     fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))
+    manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'conversation-2'))
     await manager.flush()
     conversations.claude = true
 
@@ -1052,7 +1142,7 @@ describe('ChatManager', () => {
     const folder = projectFolder()
     const local = manager.createSavedSession(folder, null, 'claude')
     manager.opened(local.id)
-    manager.noteHookEvent(local.id, hook('UserPromptSubmit', local.conversationId))
+    manager.noteHookEvent(local.id, hook('UserPromptSubmit', 'conversation-1'))
     conversations.claude = true
     manager.sessionEnded(endedLocal(local.id, folder, 'claude'))
     await manager.flush()
@@ -1063,7 +1153,7 @@ describe('ChatManager', () => {
     ])
     expect(await again.prepareSession(local.id)).toEqual({
       folder,
-      launch: { conversationId: local.conversationId, resume: true },
+      launch: { conversationId: 'conversation-1', resume: true },
     })
   })
 
@@ -1387,8 +1477,8 @@ describe('visibleInput', () => {
 })
 
 describe('newConversationId', () => {
-  it('picks an id Claude Code and OpenCode accept, and none for Codex', () => {
-    expect(newConversationId('claude', makeId)).toBe('ABC-123')
+  it('picks an id OpenCode accepts, and none for Claude Code and Codex', () => {
+    expect(newConversationId('claude', makeId)).toBeNull()
     expect(newConversationId('opencode', makeId)).toBe('ses_ABC123')
     expect(newConversationId('codex', makeId)).toBeNull()
   })

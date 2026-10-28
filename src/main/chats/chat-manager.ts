@@ -88,8 +88,11 @@ interface EndedRun {
  * A chat is in one conversation at a time. When its agent leaves it for
  * another, as with `/clear` or `/new`, the chat goes on in the next one once a
  * message is sent there, and the one it left is no longer listed: the agent's
- * own records keep it. Claude Code tells of the conversation each message
- * goes to through its hooks. For Codex and OpenCode, Hoot reads the agent's
+ * own records keep it. Claude Code picks the id of each conversation it
+ * starts, and tells of the conversation each message goes to through its
+ * hooks: a Claude Code chat is in no conversation until it told of one, and
+ * one that never did goes once its agent ends, as when the user turned off
+ * Claude Code's hooks. For Codex and OpenCode, Hoot reads the agent's
  * own records when a chat's process ends, and when Hoot starts, to tell
  * whether the chat's conversation got a message and which conversation a
  * chat went on to; it never lists a conversation it finds there as a chat of
@@ -271,8 +274,10 @@ export class ChatManager extends EventEmitter<{
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
     if (chat.projectRoot === null) await this.ensureFolder(chat)
+    // OpenCode is given the id of the conversation it starts; Claude Code and
+    // Codex pick their own.
     let conversationId = chat.conversationId
-    if (conversationId === null && chat.toolId !== 'codex') {
+    if (conversationId === null && chat.toolId === 'opencode') {
       conversationId = newConversationId(chat.toolId, this.newId)
       if (conversationId !== null) this.chats.update(id, { conversationId })
     }
@@ -511,22 +516,24 @@ export class ChatManager extends EventEmitter<{
     let chat = this.chats.get(chatId)
     if (!chat) return
     if (chat.toolId === 'claude') {
-      const exists =
-        chat.conversationId !== null
-          ? await this.conversations.claudeConversation(chat.folder, chat.conversationId)
-          : false
+      // A Claude Code chat is in the conversation its agent reported a
+      // message in: one in none goes, and Hoot does not look for one.
+      if (chat.conversationId === null) {
+        await this.removeChat(chat)
+        return
+      }
+      if (chat.hasMessages) return
+      // A conversation Hoot gave the agent before it reported its own, which
+      // got a message unless the agent recorded none.
+      const exists = await this.conversations.claudeConversation(chat.folder, chat.conversationId)
       chat = this.chats.get(chatId)
       if (!chat) return
       if (!exists) {
-        // A message the agent did not record, as when it failed, still keeps
-        // the chat; one never sent removes it.
-        if (!chat.hasMessages) await this.removeChat(chat)
+        await this.removeChat(chat)
         return
       }
-      if (!chat.hasMessages) {
-        this.chats.update(chatId, { hasMessages: true })
-        this.emitChanged()
-      }
+      this.chats.update(chatId, { hasMessages: true })
+      this.emitChanged()
       return
     }
 
@@ -774,20 +781,19 @@ export function ownConversations(
 }
 
 /**
- * The id of a new conversation an agent starts with: a UUID Claude Code can
- * be given, a session id OpenCode accepts, or `null` for Codex, which picks
- * its own and Hoot learns later.
+ * The id of a new conversation an agent starts with: a session id OpenCode
+ * accepts, or `null` for Claude Code and Codex, which pick their own and tell
+ * Hoot, or leave it to their records.
  */
 export function newConversationId(
   toolId: CodingToolId,
   makeId: () => string = randomUUID,
 ): string | null {
   switch (toolId) {
-    case 'claude':
-      return makeId()
     case 'opencode':
       // OpenCode's session ids start with `ses`.
       return `ses_${makeId().replaceAll('-', '')}`
+    case 'claude':
     case 'codex':
       return null
   }

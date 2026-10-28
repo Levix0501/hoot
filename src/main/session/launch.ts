@@ -39,9 +39,9 @@ export interface LaunchContext {
 /**
  * The conversation a chat's session continues: the id its agent knows it by,
  * and whether it has a conversation to continue, rather than one to start.
- * The id is `null` for a new Codex conversation, whose id Hoot learns later.
- * A conversation to start can have a first message, which the agent is sent
- * as it starts.
+ * The id is `null` for a new Claude Code or Codex conversation, whose id the
+ * agent picks and Hoot learns later. A conversation to start can have a
+ * first message, which the agent is sent as it starts.
  */
 export interface ChatLaunch {
   conversationId: string | null
@@ -179,11 +179,11 @@ async function checkFolder(cwd: string): Promise<void> {
 }
 
 /**
- * The arguments that continue a chat's conversation, or start the one its id
- * names when it has none yet: Claude Code's `--session-id` or `--resume`,
- * OpenCode's `-s` for either, and Codex's `resume` subcommand. A new Codex
- * conversation starts as any other session does, and Hoot learns its id from
- * Codex's records.
+ * The arguments that continue a chat's conversation, or for OpenCode start
+ * the one its id names when it has none yet: Claude Code's `--resume`,
+ * OpenCode's `-s` for either, and Codex's `resume` subcommand. A new Claude
+ * Code or Codex conversation starts as any other session does, with an id
+ * the agent picks.
  */
 export function chatLaunchArguments(
   tool: CodingToolId,
@@ -193,7 +193,7 @@ export function chatLaunchArguments(
   const id = chat.conversationId
   switch (tool) {
     case 'claude':
-      return { before: [], after: [chat.resume ? '--resume' : '--session-id', id] }
+      return chat.resume ? { before: [], after: ['--resume', id] } : { before: [], after: [] }
     case 'opencode':
       return { before: [], after: ['-s', id] }
     case 'codex':

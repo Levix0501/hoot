@@ -71,9 +71,9 @@ function NoSessions({ className, testId }: { className: string; testId: string }
 
 /**
  * A worktree's sessions, below its row, or with a `path` of `null`, those in
- * the project's own folder, below its Local row; in the order they were made
- * or split off: the saved sessions, and the sessions started there that Hoot
- * does not keep, such as those of an issue; or a line saying there are none.
+ * the project's own folder, below its Local row; in the order they were
+ * made: the saved sessions, and the sessions started there that Hoot does not
+ * keep, such as those of an issue; or a line saying there are none.
  */
 function WorktreeSessions({ projectRoot, path }: { projectRoot: string; path: string | null }) {
   const sessions = useAppStore(

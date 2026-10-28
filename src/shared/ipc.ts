@@ -476,7 +476,10 @@ export interface HootApi {
    * Trash unless another chat runs in it. Settles once it is deleted.
    */
   deleteChat(id: string): Promise<DeleteChatResult>
-  /** The chats changed: one was made, opened, renamed, split off, removed or deleted. */
+  /**
+   * The chats changed: one was made, opened, renamed, removed or deleted, or
+   * went on in another conversation.
+   */
   onChatsChanged(listener: (chats: ChatInfo[]) => void): () => void
   /**
    * Every saved session, oldest first, as they show below their worktrees and
@@ -498,7 +501,10 @@ export interface HootApi {
   setSavedSessionTitle(id: string, title: string): void
   /** Deletes a saved session for good, once its agent has ended; settles once it is deleted. */
   deleteSavedSession(id: string): Promise<DeleteChatResult>
-  /** The saved sessions changed: one was made, renamed, split off, removed or deleted. */
+  /**
+   * The saved sessions changed: one was made, renamed, removed or deleted, or
+   * went on in another conversation.
+   */
   onSavedSessionsChanged(listener: (sessions: SavedSessionInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */

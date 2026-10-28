@@ -107,8 +107,8 @@ export interface ChatChanges {
  * a saved session has one, and a worktree of it, or none for one in the
  * project's own folder. The chats come in the order of the sidebar's Chats
  * group, by when they were last opened, newest first; the saved sessions come
- * by when they were made or split off, oldest first, as they show below their
- * worktree or their project's Local row. Those the user deleted are in
+ * by when they were made, oldest first, as they show below their worktree or
+ * their project's Local row. Those the user deleted are in
  * neither list, but are kept with their conversations.
  */
 export class ChatStore {

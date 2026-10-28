@@ -707,8 +707,8 @@ export function registerIpc(deps: IpcDependencies): void {
       if (!prepared) return { ok: false, message: 'The saved session no longer exists.' }
       try {
         const session = await deps.sessions.start(request, null, prepared.launch)
-        // It goes to the end of its worktree's or Local row's sessions when
-        // split off; opening it again does not move its row.
+        // Opening it again does not move its row: saved sessions stay in the
+        // order they were made.
         deps.chats.opened(saved.id)
         return { ok: true, session }
       } catch (error) {

@@ -56,6 +56,13 @@ export function visibleInput(data: string): string {
     .replace(/\x1b[()][0-9A-Za-z]/g, '')
     .replace(/\x1b./g, '')
 }
+
+/**
+ * Up, as a terminal sends it in either cursor key mode, with which the user
+ * puts a message sent before, from the agent's history, in its empty input
+ * box: Hoot does not see that message.
+ */
+const HISTORY_KEY = /\x1b[[O]A/
 // oxlint-enable no-control-regex
 
 /**
@@ -72,7 +79,10 @@ const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
 interface EndedRun {
   /** When Hoot began to start the agent, if it did. */
   startedAt: number | null
-  /** Whether Hoot saw a message sent in it: one typed, or the first message it started with. */
+  /**
+   * Whether Hoot saw a message sent in it: one typed or recalled from the
+   * agent's history, or the first message it started with.
+   */
   messaged: boolean
   /** Whether the agent told of a conversation it sent a message in. */
   reported: boolean
@@ -128,6 +138,11 @@ export class ChatManager extends EventEmitter<{
   private readonly running = new Set<string>()
   /** The line being typed in each chat's session, for the commands that start another conversation. */
   private readonly typing = new Map<string, string>()
+  /**
+   * The sessions whose line being typed may hold a message recalled from the
+   * agent's history since the last Enter, which Hoot does not see.
+   */
+  private readonly recalled = new Set<string>()
   /**
    * The title each chat had when its agent was last told to leave its
    * conversation for another, until a message there takes the chat with it.
@@ -407,43 +422,53 @@ export class ChatManager extends EventEmitter<{
   /**
    * Notes what the user types in a chat: the messages the user sends, which
    * a Codex or OpenCode chat's conversation has from then on, and the
-   * commands that leave the conversation for another.
+   * commands that leave the conversation for another. Enter after Up sends a
+   * message, unless the line typed is a command: Up recalls one from the
+   * agent's history, whose text Hoot does not see.
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
     if (!chat || chat.deleted) return
     let line = this.typing.get(sessionId) ?? ''
-    for (const character of visibleInput(data)) {
-      if (character === '\r' || character === '\n') {
-        const command = line.trim()
-        line = ''
-        if (command === '') continue
-        if (command.startsWith('/')) {
-          const name = command.split(/\s/, 1)[0] ?? ''
-          if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
+    let recalled = this.recalled.has(sessionId)
+    for (const [index, part] of data.split(HISTORY_KEY).entries()) {
+      if (index > 0) recalled = true
+      for (const character of visibleInput(part)) {
+        if (character === '\r' || character === '\n') {
+          const command = line.trim()
+          const sent = command !== '' || recalled
+          line = ''
+          recalled = false
+          if (command.startsWith('/')) {
+            const name = command.split(/\s/, 1)[0] ?? ''
+            if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
+            continue
+          }
+          if (!sent) continue
+          if (!this.messaged.has(chatId)) {
+            this.messaged.add(chatId)
+            const run = this.chats.get(chatId)?.unreportedRun
+            if (run && !run.messaged) {
+              this.chats.update(chatId, { unreportedRun: { ...run, messaged: true } })
+            }
+          }
+          // Claude Code tells of its messages through its hooks.
+          if (chat.toolId !== 'claude') this.markMessages(chatId)
           continue
         }
-        if (!this.messaged.has(chatId)) {
-          this.messaged.add(chatId)
-          const run = this.chats.get(chatId)?.unreportedRun
-          if (run && !run.messaged) {
-            this.chats.update(chatId, { unreportedRun: { ...run, messaged: true } })
-          }
+        if (character === '\x7f' || character === '\b') {
+          line = line.slice(0, -1)
+          continue
         }
-        // Claude Code tells of its messages through its hooks.
-        if (chat.toolId !== 'claude') this.markMessages(chatId)
-        continue
+        // Escape sequences and other control characters are not part of a command.
+        if ((character.codePointAt(0) ?? 0) < 32) continue
+        line += character
+        if (line.length > 10_000) line = ''
       }
-      if (character === '\x7f' || character === '\b') {
-        line = line.slice(0, -1)
-        continue
-      }
-      // Escape sequences and other control characters are not part of a command.
-      if ((character.codePointAt(0) ?? 0) < 32) continue
-      line += character
-      if (line.length > 10_000) line = ''
     }
     this.typing.set(sessionId, line)
+    if (recalled) this.recalled.add(sessionId)
+    else this.recalled.delete(sessionId)
   }
 
   /** Notes that the user sent a message in the chat, which its conversation now has. */
@@ -462,6 +487,7 @@ export class ChatManager extends EventEmitter<{
     if (id === null || session.status !== 'exited') return
     this.running.delete(id)
     this.typing.delete(session.id)
+    this.recalled.delete(session.id)
     const run: EndedRun = {
       startedAt: this.runStartedAt.get(id) ?? null,
       messaged: this.messaged.has(id),

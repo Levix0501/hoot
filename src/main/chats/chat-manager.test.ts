@@ -573,6 +573,60 @@ describe('ChatManager', () => {
     ])
   })
 
+  it('takes Enter after Up, which recalls a message from the agent’s history, for a message sent', async () => {
+    // A new chat whose only message the user recalled.
+    const chat = await manager.create('codex')
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', '\x1b[A')
+    manager.typed(chat.id, 'session-1', '\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'thread-1', hasMessages: true }),
+    ])
+
+    // A recalled message after /new, with Up as in application cursor key mode.
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-2', '/new\r')
+    manager.typed(chat.id, 'session-2', '\x1bOA\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'thread-2', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'thread-2' }),
+    ])
+  })
+
+  it('takes neither Enter alone, as on an answer picked with Down, nor a command after Up for a message', async () => {
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-1', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: 1 }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-2', '\x1b[B')
+    manager.typed(chat.id, 'session-2', '\x1b[B\r')
+    manager.typed(chat.id, 'session-2', '\x1b[A/new\r\r')
+    manager.typed(chat.id, 'session-2', '\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'thread-2', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'thread-1' }),
+    ])
+  })
+
   it('goes on to no conversation that started before its agent did', async () => {
     const folder = worktreeFolder('fix-login-bug')
     const saved = manager.createSavedSession('/work/project', folder, 'codex')

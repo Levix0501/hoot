@@ -1728,7 +1728,7 @@ describe('ownConversations', () => {
     expect(
       ownConversations({ ...local, conversationId: null }, recorded, 30).map((entry) => entry.id),
     ).toEqual(['new'])
-    // Nor any from before it was made, as for one split off since.
+    // Nor any from before it was made, when that is later.
     expect(
       ownConversations({ ...local, createdAt: 45, conversationId: 'kept' }, recorded, 30).map(
         (entry) => entry.id,

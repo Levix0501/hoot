@@ -322,6 +322,16 @@ describe('the upgrade to dependencies', () => {
   })
 })
 
+/**
+ * The columns an upgrade from before version 9 adds to a chat, as they are
+ * for one whose agent reported no conversation, in no run Hoot did not see end.
+ */
+const REPORT_COLUMNS = {
+  conversation_reported: 0,
+  unreported_run_started_at: null,
+  unreported_run_messaged: 0,
+}
+
 describe('the upgrade to labels', () => {
   it('drops the records of the workflows and keeps everything else, no issue with a label', () => {
     let db = openDatabase(file, MIGRATIONS.slice(0, 4))
@@ -381,12 +391,12 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats ORDER BY id').all()).toEqual(
-      before.map((row) => ({ ...row, deleted_at: null, conversation_reported: 0 })),
+      before.map((row) => ({ ...row, deleted_at: null, ...REPORT_COLUMNS })),
     )
     db.close()
   })
 
-  it('keeps the chats of the version before, with no conversation an agent reported', () => {
+  it('keeps the chats of an earlier version, with no conversation an agent reported', () => {
     let db = openDatabase(file, MIGRATIONS.slice(0, 8))
     db.exec(`
       INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
@@ -399,11 +409,36 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({ ...row, conversation_reported: 0 })),
+      before.map((row) => ({ ...row, ...REPORT_COLUMNS })),
     )
     expect(() => db.exec("UPDATE chats SET conversation_reported = 2 WHERE id = 'chat'")).toThrow(
       /CHECK constraint/,
     )
+    db.close()
+  })
+
+  it('keeps the chats of the version before, with no run Hoot did not see end', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 9))
+    db.exec(`
+      INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
+          created_at, opened_at, project_root, worktree_path, deleted_at, conversation_reported)
+        VALUES ('saved', 'codex', '/work/wt', 'thread', 'T', NULL, 1, 1, 2, '/work/project',
+          '/work/wt', NULL, 1);
+    `)
+    const before = db.prepare('SELECT * FROM chats').all()
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
+    expect(db.prepare('SELECT * FROM chats').all()).toEqual(
+      before.map((row) => ({
+        ...row,
+        unreported_run_started_at: null,
+        unreported_run_messaged: 0,
+      })),
+    )
+    expect(() =>
+      db.exec("UPDATE chats SET unreported_run_messaged = 2 WHERE id = 'saved'"),
+    ).toThrow(/CHECK constraint/)
     db.close()
   })
 

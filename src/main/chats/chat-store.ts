@@ -16,11 +16,23 @@ interface ChatRow {
   opened_at: number
   deleted_at: number | null
   conversation_reported: number
+  unreported_run_started_at: number | null
+  unreported_run_messaged: number
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
                  custom_name, has_messages, created_at, opened_at, deleted_at,
-                 conversation_reported`
+                 conversation_reported, unreported_run_started_at, unreported_run_messaged`
+
+/**
+ * A run of a Codex chat's agent that Hoot began and has not seen end, while
+ * Codex reported no conversation in it: when Hoot began to start the agent,
+ * and whether Hoot saw a message sent in it.
+ */
+export interface UnreportedRun {
+  startedAt: number
+  messaged: boolean
+}
 
 /**
  * A chat or saved session as the database keeps it: also one the user
@@ -34,6 +46,12 @@ export interface StoredChat extends ChatInfo {
    * then does not change by what the agent recorded in its folder.
    */
   conversationReported: boolean
+  /**
+   * The run of its agent that Hoot began and has not seen end, while Codex
+   * reported no conversation in it, if any: what Hoot reads when it starts
+   * again after quitting without seeing that run end.
+   */
+  unreportedRun: UnreportedRun | null
 }
 
 function chatFromRow(row: ChatRow): ChatInfo {
@@ -57,6 +75,13 @@ function storedFromRow(row: ChatRow): StoredChat {
     ...chatFromRow(row),
     deleted: row.deleted_at !== null,
     conversationReported: row.conversation_reported === 1,
+    unreportedRun:
+      row.unreported_run_started_at === null
+        ? null
+        : {
+            startedAt: row.unreported_run_started_at,
+            messaged: row.unreported_run_messaged === 1,
+          },
   }
 }
 
@@ -70,6 +95,7 @@ function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
 export interface ChatChanges {
   conversationId?: string | null
   conversationReported?: boolean
+  unreportedRun?: UnreportedRun | null
   title?: string
   customName?: string | null
   hasMessages?: boolean
@@ -117,8 +143,9 @@ export class ChatStore {
       ),
       update: db.prepare(
         `UPDATE chats
-         SET conversation_id = ?, conversation_reported = ?, title = ?, custom_name = ?,
-             has_messages = ?, opened_at = ?
+         SET conversation_id = ?, conversation_reported = ?, unreported_run_started_at = ?,
+             unreported_run_messaged = ?, title = ?, custom_name = ?, has_messages = ?,
+             opened_at = ?
          WHERE id = ?`,
       ),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
@@ -178,9 +205,13 @@ export class ChatStore {
   update(id: string, changes: ChatChanges): boolean {
     const chat = this.get(id)
     if (!chat) return false
+    const unreportedRun =
+      changes.unreportedRun === undefined ? chat.unreportedRun : changes.unreportedRun
     this.statements.update.run(
       changes.conversationId === undefined ? chat.conversationId : changes.conversationId,
       (changes.conversationReported ?? chat.conversationReported) ? 1 : 0,
+      unreportedRun?.startedAt ?? null,
+      unreportedRun?.messaged ? 1 : 0,
       changes.title ?? chat.title,
       changes.customName === undefined ? chat.customName : changes.customName,
       (changes.hasMessages ?? chat.hasMessages) ? 1 : 0,

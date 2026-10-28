@@ -1550,6 +1550,80 @@ describe('ChatManager', () => {
     expect(again.get(saved.id)?.conversationId).toBe('thread-two')
   })
 
+  it('reads at its next start what a run of a Codex session Hoot did not see end did, when Codex reported nothing in it', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    await start(saved.id)
+    manager.typed(saved.id, 'session-1', 'one\r')
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+
+    // Its hook no longer runs, and Hoot quits without seeing the run end.
+    await start(saved.id)
+    manager.typed(saved.id, 'session-2', '/new\r')
+    manager.typed(saved.id, 'session-2', 'two\r')
+    conversations.codex = [
+      { id: 'thread-one', title: 'One', createdAt: 1 },
+      { id: 'thread-two', title: 'Two', createdAt: ++clock },
+    ]
+    const again = await restarted()
+    expect(again.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: saved.id, conversationId: 'thread-two', title: 'Two' }),
+    ])
+  })
+
+  it('keeps at its next start the conversation of a Codex session whose run Hoot did not see end, when Codex reported one or no message was sent', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    await start(saved.id)
+    manager.typed(saved.id, 'session-1', 'one\r')
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+    conversations.codex = [{ id: 'thread-one', title: 'One', createdAt: 1 }]
+    const started = () => clock
+
+    // A run that sends no message, while a conversation starts out of Hoot.
+    await start(saved.id)
+    conversations.codex.push({ id: 'outside-1', title: 'Outside', createdAt: ++clock })
+    let again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+
+    // A run in which Codex reports the conversation, then Hoot quits.
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    again.typed(saved.id, 'session-3', 'more\r')
+    again.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    await again.flush()
+    conversations.codex.push({ id: 'outside-2', title: 'Outside', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+
+    // A run whose report never came, in the conversation it was in: read once.
+    const runStart = started()
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    again.typed(saved.id, 'session-4', 'again\r')
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+    conversations.codex.push({ id: 'outside-3', title: 'Outside', createdAt: runStart + 100 })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+
+    // One whose report never came that Hoot saw end: read when it ended only.
+    clock += 1_000
+    const lastStart = started()
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    again.typed(saved.id, 'session-5', 'last\r')
+    again.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await again.flush()
+    conversations.codex.push({ id: 'outside-4', title: 'Outside', createdAt: lastStart + 100 })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+  })
+
   it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside

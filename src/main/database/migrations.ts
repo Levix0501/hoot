@@ -237,4 +237,16 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE chats ADD COLUMN conversation_reported INTEGER NOT NULL DEFAULT 0
     CHECK (conversation_reported IN (0, 1));
   `,
+  // 10: the runs of Codex chats that reported no conversation.
+  `
+  -- The run of the agent of a Codex chat or saved session that Hoot began
+  -- and has not seen end, while Codex reported no conversation in it, so
+  -- that Hoot reads what it did when it starts again after quitting without
+  -- seeing it end: when Hoot began to start the agent, in milliseconds since
+  -- the Unix epoch, NULL when there is no such run; and whether Hoot saw a
+  -- message sent in it, 1 when it did.
+  ALTER TABLE chats ADD COLUMN unreported_run_started_at INTEGER;
+  ALTER TABLE chats ADD COLUMN unreported_run_messaged INTEGER NOT NULL DEFAULT 0
+    CHECK (unreported_run_messaged IN (0, 1));
+  `,
 ]

@@ -175,7 +175,12 @@ export class ChatManager extends EventEmitter<{
   get(id: string): ChatInfo | undefined {
     const chat = this.chats.get(id)
     if (!chat || chat.deleted) return undefined
-    const { deleted: _deleted, conversationReported: _reported, ...info } = chat
+    const {
+      deleted: _deleted,
+      conversationReported: _reported,
+      unreportedRun: _unreportedRun,
+      ...info
+    } = chat
     return info
   }
 
@@ -278,7 +283,8 @@ export class ChatManager extends EventEmitter<{
     this.messageReportedAt.delete(id)
     this.messaged.delete(id)
     this.reported.delete(id)
-    this.runStartedAt.set(id, this.now())
+    const startedAt = this.now()
+    this.runStartedAt.set(id, startedAt)
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
     if (chat.projectRoot === null) await this.ensureFolder(chat)
@@ -292,6 +298,11 @@ export class ChatManager extends EventEmitter<{
     const resume = chat.hasMessages && conversationId !== null
     const firstMessage = this.firstMessages.get(id)
     if (firstMessage !== undefined && !resume) this.messaged.add(id)
+    // Kept until Codex reports a conversation in the run, or Hoot sees it end:
+    // what Hoot reads when it starts again after quitting without that.
+    if (chat.toolId === 'codex') {
+      this.chats.update(id, { unreportedRun: { startedAt, messaged: this.messaged.has(id) } })
+    }
     return {
       folder: chat.folder,
       launch: {
@@ -354,8 +365,10 @@ export class ChatManager extends EventEmitter<{
       return
     }
     if (report.event !== 'UserPromptSubmit') return
-    // Known at once, for the end of the run, which may be read before this is.
+    // Known at once, for the end of the run, which may be read before this is,
+    // and for Hoot's next start, should it quit without seeing the run end.
     this.reported.add(chatId)
+    if (this.chats.get(chatId)?.unreportedRun) this.chats.update(chatId, { unreportedRun: null })
     void this.enqueue(chatId, async () => {
       const chat = this.chats.get(chatId)
       if (!chat || chat.deleted) return
@@ -410,7 +423,13 @@ export class ChatManager extends EventEmitter<{
           if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
           continue
         }
-        this.messaged.add(chatId)
+        if (!this.messaged.has(chatId)) {
+          this.messaged.add(chatId)
+          const run = this.chats.get(chatId)?.unreportedRun
+          if (run && !run.messaged) {
+            this.chats.update(chatId, { unreportedRun: { ...run, messaged: true } })
+          }
+        }
         // Claude Code tells of its messages through its hooks.
         if (chat.toolId !== 'claude') this.markMessages(chatId)
         continue
@@ -453,22 +472,48 @@ export class ChatManager extends EventEmitter<{
     this.messaged.delete(id)
     this.reported.delete(id)
     this.titlesAtSwitch.delete(id)
-    void this.enqueue(id, () => this.reconcileChat(id, run))
+    void this.enqueue(id, async () => {
+      await this.reconcileChat(id, run)
+      if (run.startedAt !== null) this.endUnreportedRun(id, run.startedAt)
+    })
+  }
+
+  /**
+   * Forgets the run of a chat's agent that began at `startedAt`, once Hoot
+   * read what it did, unless another run began since.
+   */
+  private endUnreportedRun(id: string, startedAt: number): void {
+    if (this.chats.get(id)?.unreportedRun?.startedAt === startedAt) {
+      this.chats.update(id, { unreportedRun: null })
+    }
   }
 
   /**
    * Reads the records of every chat's and saved session's agent, as when Hoot
    * starts: first for those the user deleted before Hoot learned which
-   * conversation they were in, so that no other takes it up.
+   * conversation they were in, so that no other takes it up. A Codex chat
+   * whose conversation Codex reported is read only for a run of its agent
+   * that Hoot did not see end, as when Hoot quit without ending it, and in
+   * which Codex reported no conversation: as Hoot reads such a run when it
+   * ends.
    */
   reconcileAll(): Promise<void> {
     return this.enqueue('*', async () => {
-      for (const chat of [
+      // As Hoot left them, before any session of this start began.
+      const chats = [
         ...this.chats.deletedWithoutConversation(),
         ...this.list(),
         ...this.listSavedSessions(),
-      ]) {
-        await this.reconcileChat(chat.id)
+      ].flatMap((chat) => this.chats.get(chat.id) ?? [])
+      for (const chat of chats) {
+        const run = chat.unreportedRun
+        await this.reconcileChat(
+          chat.id,
+          run && chat.conversationReported
+            ? { ...run, reported: false, titleAtSwitch: undefined }
+            : null,
+        )
+        if (run) this.endUnreportedRun(chat.id, run.startedAt)
       }
     })
   }
@@ -523,7 +568,8 @@ export class ChatManager extends EventEmitter<{
    * chat's conversation never got a message, the chat goes. A conversation
    * the agent reported stays the chat's: Hoot reads the records again only
    * once a later run of the agent ended without reporting one. `run` is how
-   * the run of the agent whose process just ended went, if one did.
+   * the run of the agent whose process just ended went, if one did, or one
+   * Hoot did not see end, read when Hoot starts.
    */
   private async reconcileChat(chatId: string, run: EndedRun | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.

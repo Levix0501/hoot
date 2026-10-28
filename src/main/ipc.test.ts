@@ -13,6 +13,7 @@ import type { ProjectFolderInfo } from '../shared/project-folders'
 import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
+import { mergeInstruction } from './worktrees/merge'
 
 type Listener = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
@@ -233,6 +234,9 @@ const worktrees = Object.assign(emitter(), {
   removeMissing: vi.fn<
     (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
   >(async () => ({ ok: true })),
+  planMerge: vi.fn<
+    (root: string, worktreePath: string, runningSessions: () => number) => Promise<unknown>
+  >(async () => ({ ok: false, reason: 'blocked', message: 'The worktree is locked.' })),
 })
 const sidebar = {
   setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
@@ -253,6 +257,7 @@ const sessionManager = Object.assign(emitter(), {
   closeOf: vi.fn<(chatId: string) => Promise<void>>(async () => {}),
   closeIn: vi.fn<(root: string, worktreePath: string) => Promise<void>>(async () => {}),
   closeRunningWithin: vi.fn<(directory: string) => Promise<void>>(async () => {}),
+  runningIdsWithin: vi.fn<(directory: string) => string[]>(() => []),
   forgetWorktree: vi.fn<(worktreePath: string) => void>(),
   forgetWithin: vi.fn<(directory: string) => void>(),
   start: vi.fn<(request: StartSessionRequest) => Promise<SessionInfo>>(async (request) => ({
@@ -785,6 +790,50 @@ describe('the messages of worktrees', () => {
     expect(sessionManager.forgetWithin).toHaveBeenCalledWith(at)
     expect(chats.removeForWorktree).toHaveBeenCalledWith(at)
     expect(sidebar.setWorktreeCollapsed).toHaveBeenCalledWith(at, false)
+  })
+
+  it('start a merge in the project folder, named after the worktree, once nothing stops it', async () => {
+    const at = saved.worktreePath!
+    // What stops it is said, and nothing is made.
+    expect(await invoke(IpcChannel.startMerge, project.root, at, 'codex')).toEqual({
+      ok: false,
+      reason: 'blocked',
+      message: 'The worktree is locked.',
+    })
+    expect(chats.createSavedSession).not.toHaveBeenCalled()
+    // Sessions running in the worktree count, as they are once the rest is checked.
+    const runningSessions = worktrees.planMerge.mock.calls[0]![2]
+    sessionManager.runningIdsWithin.mockReturnValueOnce(['one', 'two'])
+    expect(runningSessions()).toBe(2)
+    expect(sessionManager.runningIdsWithin).toHaveBeenCalledWith(at)
+
+    const plan = {
+      worktreeName: 'Fix login bug',
+      worktreePath: at,
+      projectFolder: project.root,
+      repositories: [
+        { label: 'project', path: project.root, branch: 'fix-login-bug', into: 'main' },
+      ],
+    }
+    worktrees.planMerge.mockResolvedValueOnce({ ok: true, plan })
+    expect(await invoke(IpcChannel.startMerge, project.root, at, 'codex')).toEqual({
+      ok: true,
+      session: local,
+    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex', {
+      name: 'Merge Fix login bug',
+      firstMessage: mergeInstruction(plan),
+    })
+
+    vi.clearAllMocks()
+    expect(await invoke(IpcChannel.startMerge, '/work/other', at, 'codex')).toMatchObject({
+      ok: false,
+      message: 'The project is not in the list.',
+    })
+    expect(await invoke(IpcChannel.startMerge, project.root, at, 'shell')).toMatchObject({
+      ok: false,
+    })
+    expect(worktrees.planMerge).not.toHaveBeenCalled()
   })
 
   it('close the open sessions of a missing worktree before removing it, and forget it once removed', async () => {

@@ -123,6 +123,8 @@ const api: HootApi = {
     ),
   removeWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.removeWorktree, projectRoot, worktreePath),
+  startMerge: (projectRoot, worktreePath, toolId) =>
+    ipcRenderer.invoke(IpcChannel.startMerge, projectRoot, worktreePath, toolId),
   revealWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>

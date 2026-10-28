@@ -576,6 +576,47 @@ describe('ChatManager', () => {
     })
   })
 
+  it('makes a saved session with a name, and sends its first message only until its agent has started', async () => {
+    const project = path.join(root, 'project')
+    fs.mkdirSync(project)
+    const saved = manager.createSavedSession(project, null, 'codex', {
+      name: 'Merge feature-x',
+      firstMessage: 'Merge it.',
+    })
+    expect(saved).toMatchObject({ customName: 'Merge feature-x', worktreePath: null })
+    expect(manager.listSavedSessions()).toMatchObject([
+      { id: saved.id, customName: 'Merge feature-x' },
+    ])
+    // A start that did not go ahead sends it the next time.
+    expect(await manager.prepareSession(saved.id)).toEqual({
+      folder: project,
+      launch: { conversationId: null, resume: false, firstMessage: 'Merge it.' },
+    })
+    expect(await manager.prepareSession(saved.id)).toMatchObject({
+      launch: { firstMessage: 'Merge it.' },
+    })
+    manager.opened(saved.id)
+    expect(await manager.prepareSession(saved.id)).toEqual({
+      folder: project,
+      launch: { conversationId: null, resume: false },
+    })
+    // It can be renamed as any other.
+    manager.rename(saved.id, 'Mine')
+    expect(manager.get(saved.id)).toMatchObject({ customName: 'Mine' })
+
+    // Nor is a first message sent to a conversation that is continued, nor kept for one deleted.
+    const other = manager.createSavedSession(project, null, 'claude', { firstMessage: 'Hi.' })
+    manager.noteHookEvent(other.id, hook('UserPromptSubmit', other.conversationId))
+    await manager.flush()
+    expect((await manager.prepareSession(other.id))?.launch).toEqual({
+      conversationId: other.conversationId,
+      resume: true,
+    })
+    const gone = manager.createSavedSession(project, null, 'opencode', { firstMessage: 'Hi.' })
+    await manager.delete(gone.id)
+    expect(await manager.prepareSession(gone.id)).toBeNull()
+  })
+
   it('splits a saved session’s conversation off below the same worktree, after it', async () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })

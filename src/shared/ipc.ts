@@ -22,6 +22,7 @@ import type {
   InspectWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  StartMergeResult,
   WorktreeInfo,
 } from './worktrees'
 
@@ -317,6 +318,7 @@ export const IpcChannel = {
   inspectWorktree: 'worktrees:inspect',
   deleteWorktree: 'worktrees:delete',
   removeWorktree: 'worktrees:remove',
+  startMerge: 'worktrees:start-merge',
   revealWorktree: 'worktrees:reveal',
   copyWorktreePath: 'worktrees:copy-path',
   listProjectFolders: 'project-folders:list',
@@ -607,6 +609,17 @@ export interface HootApi {
    * its registrations, and what Hoot keeps of it, such as its saved sessions.
    */
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
+  /**
+   * Checks whether a worktree can be merged into the project's own folder,
+   * and if so makes the saved session there that has an agent merge it,
+   * named after the worktree, which is sent how to merge it when it first
+   * starts.
+   */
+  startMerge(
+    projectRoot: string,
+    worktreePath: string,
+    toolId: CodingToolId,
+  ): Promise<StartMergeResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void
   /**

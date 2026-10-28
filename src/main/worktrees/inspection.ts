@@ -13,18 +13,29 @@ const CHECK_OUTPUT = 512 * 1024 * 1024
 
 export class InspectionError extends Error {}
 
-/** The changed paths in `git status --porcelain=v1 -z` output, one per changed file. */
-export function parseStatus(output: string): string[] {
+/** A changed path in `git status --porcelain=v1` output, with its two-letter status. */
+export interface StatusEntry {
+  status: string
+  file: string
+}
+
+/** The entries of `git status --porcelain=v1 -z` output, one per changed file. */
+export function parseStatusEntries(output: string): StatusEntry[] {
   const fields = output.split('\0')
-  const files: string[] = []
+  const entries: StatusEntry[] = []
   for (let index = 0; index < fields.length; index++) {
     const field = fields[index]!
     if (field.length < 4) continue
-    files.push(field.slice(3))
+    entries.push({ status: field.slice(0, 2), file: field.slice(3) })
     // A rename or copy is followed by the path it came from.
     if (/[RC]/.test(field.slice(0, 2))) index++
   }
-  return files
+  return entries
+}
+
+/** The changed paths in `git status --porcelain=v1 -z` output, one per changed file. */
+export function parseStatus(output: string): string[] {
+  return parseStatusEntries(output).map((entry) => entry.file)
 }
 
 /** Whether a path is one of the given directories or inside one. */
@@ -45,15 +56,19 @@ export interface MemberToCheck {
 }
 
 /**
- * The uncommitted changes of a member: modified, deleted and staged tracked
- * files and untracked files that are not ignored, in the member and its
- * populated submodules, leaving out the paths of inner members inside it.
+ * The paths of the inner repositories, or inner members, that are inside the
+ * one at `relativePath`, relative to it; all of them for the outer one, at ''.
  */
-async function uncommittedChanges(
-  context: GitContext,
-  member: MemberToCheck,
-  innerMembers: readonly string[],
-): Promise<string[]> {
+export function nestedBelow(relativePath: string, inner: readonly string[]): string[] {
+  const prefix = relativePath === '' ? '' : `${relativePath}/`
+  return inner
+    .filter((candidate) => prefix === '' || candidate.startsWith(prefix))
+    .map((candidate) => candidate.slice(prefix.length))
+    .filter((candidate) => candidate !== '')
+}
+
+/** `git status` of a working directory, as entries, or why it could not be read. */
+async function statusOf(context: GitContext, member: MemberToCheck): Promise<StatusEntry[]> {
   const result = await runGit(
     context.git,
     [
@@ -71,12 +86,45 @@ async function uncommittedChanges(
   if (result.code !== 0) {
     throw new InspectionError(`Could not check ${member.label}: ${gitErrorMessage(result)}`)
   }
-  const prefix = member.relativePath === '' ? '' : `${member.relativePath}/`
-  const nested = innerMembers
-    .filter((relativePath) => prefix === '' || relativePath.startsWith(prefix))
-    .map((relativePath) => relativePath.slice(prefix.length))
-    .filter((relativePath) => relativePath !== '')
-  return parseStatus(result.stdout).filter((file) => !isWithin(file, nested))
+  return parseStatusEntries(result.stdout)
+}
+
+/**
+ * The uncommitted changes of a member: modified, deleted and staged tracked
+ * files and untracked files that are not ignored, in the member and its
+ * populated submodules, leaving out the paths of inner members inside it.
+ */
+async function uncommittedChanges(
+  context: GitContext,
+  member: MemberToCheck,
+  innerMembers: readonly string[],
+): Promise<string[]> {
+  const nested = nestedBelow(member.relativePath, innerMembers)
+  return (await statusOf(context, member))
+    .map((entry) => entry.file)
+    .filter((file) => !isWithin(file, nested))
+}
+
+/**
+ * The uncommitted changes of a working directory, as a merge must not find
+ * them: modified, deleted and staged tracked files and untracked files that
+ * are not ignored, in it and its populated submodules, leaving out what is in
+ * another Git repository inside it, such as an inner repository at one of the
+ * `nested` paths, relative to it, or one Git lists as an untracked folder.
+ * Throws an `InspectionError` when Git cannot tell.
+ */
+export async function changesBeforeMerge(
+  context: GitContext,
+  directory: MemberToCheck,
+  nested: readonly string[],
+): Promise<string[]> {
+  return (
+    (await statusOf(context, directory))
+      // Git lists a repository inside, and only that, as an untracked folder.
+      .filter((entry) => !(entry.status === '??' && entry.file.endsWith('/')))
+      .map((entry) => entry.file)
+      .filter((file) => !isWithin(file, nested))
+  )
 }
 
 /**

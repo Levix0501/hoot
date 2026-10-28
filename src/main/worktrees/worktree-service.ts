@@ -32,9 +32,23 @@ import {
   type GitResult,
   type WorktreeEntry,
 } from '../git/git'
-import { InspectionError, inspectMembers, type MemberToCheck } from './inspection'
+import {
+  changesBeforeMerge,
+  InspectionError,
+  inspectMembers,
+  nestedBelow,
+  type MemberToCheck,
+} from './inspection'
 import type { WorktreeLayout } from './layout'
-import { checkedOutBranch, isMergedInto } from './merge'
+import {
+  checkedOutBranch,
+  describeMergeFindings,
+  hasUnfinishedMerge,
+  isMergedInto,
+  noFindings,
+  nothingToMerge,
+  type MergePlan,
+} from './merge'
 import {
   findInnerRepositories,
   forgetLinkedWorktree,
@@ -174,6 +188,21 @@ interface Member {
 /** A member of a worktree with the branch it has checked out, `null` when detached. */
 interface MemberBranch extends Member {
   branch: string | null
+}
+
+/**
+ * What the checks before merging a worktree came to: what the merge session
+ * is to merge, or why there is no merge to make. `nothing-to-merge`: the
+ * worktree's branches are merged already; `blocked`: something stops the
+ * merge, which the message says.
+ */
+export type MergePlanResult =
+  | { ok: true; plan: MergePlan }
+  | { ok: false; reason: 'blocked' | 'nothing-to-merge'; message: string }
+
+/** What the checks before a merge come to when something stops it. */
+function blocked(message: string): MergePlanResult {
+  return { ok: false, reason: 'blocked', message }
 }
 
 /** Deeper relative paths first, as worktree members are deleted. */
@@ -726,6 +755,118 @@ export class WorktreeService extends EventEmitter<{
       return { ok: true, inspection: await this.inspectEntry(context, state, entry) }
     } catch (error) {
       if (error instanceof InspectionError) return { ok: false, message: error.message }
+      throw error
+    }
+  }
+
+  /**
+   * Checks whether a worktree can be merged into the project folder now, and
+   * what a merge session is to merge then: the worktree's branch in each of
+   * its repositories, into the branch checked out there in the project
+   * folder. Nothing is to be merged when the project folder is gone, Git no
+   * longer lists the worktree or its folder is gone; when a repository in the
+   * project folder, the project repository or any inner repository (also one
+   * the worktree has no member of), is on no branch, has uncommitted changes,
+   * or has a merge or rebase under way; when a member of the worktree has
+   * uncommitted changes or is on no branch; while sessions run in it, as
+   * `runningSessions` counts them once the rest is checked; or while it is
+   * locked. Nor, with nothing else in the way, when the worktree's branch is
+   * merged already in every repository of it.
+   */
+  async planMerge(
+    projectRoot: string,
+    worktreePath: string,
+    runningSessions: () => number,
+  ): Promise<MergePlanResult> {
+    const state = this.projects.get(projectRoot)
+    if (!state) return blocked('The project is not in the list.')
+    if (!(await isDirectory(state.root))) {
+      return blocked(`The project folder is missing: ${state.root}`)
+    }
+    // The inner repositories there are now, every one of which is checked.
+    await this.discover(state)
+    // As Git lists it now, which the sidebar then shows.
+    const worktree = await this.currentWorktree(projectRoot, worktreePath)
+    if (!worktree || worktree.missing) {
+      // One whose folder is gone may have been cleaned up as it was read.
+      return blocked(
+        worktree?.missing || (await absent(worktreePath))
+          ? `The folder of the worktree is missing: ${worktreePath}`
+          : `The worktree no longer exists: ${worktreePath}`,
+      )
+    }
+    const context = await this.options.gitContext()
+    const findings = noFindings()
+    const inner = state.inner ?? []
+    const innerPaths = inner.map((repository) => repository.relativePath)
+    const repositories: MemberToCheck[] = [
+      { label: state.name, path: state.root, relativePath: '' },
+      ...inner.map((repository) => ({
+        label: repository.relativePath,
+        path: repository.path,
+        relativePath: repository.relativePath,
+      })),
+    ]
+    try {
+      const current = new Map<string, string | null>()
+      for (const repository of repositories) {
+        const branch = await checkedOutBranch(context, repository.path)
+        current.set(repository.path, branch)
+        if (branch === null) findings.detachedInFolder.push(repository.label)
+        const nested = nestedBelow(repository.relativePath, innerPaths)
+        if ((await changesBeforeMerge(context, repository, nested)).length > 0) {
+          findings.changedInFolder.push(repository.label)
+        }
+        if (await hasUnfinishedMerge(context, repository.path)) {
+          findings.unfinishedInFolder.push(repository.label)
+        }
+      }
+      const members = await this.memberBranches(context, state, worktree.path, worktree.branch)
+      const memberPaths = members
+        .map((member) => member.relativePath)
+        .filter((relativePath) => relativePath !== '')
+      for (const member of members) {
+        // An inner member whose folder is gone has nothing left uncommitted.
+        if (await isDirectory(member.path)) {
+          const nested = nestedBelow(member.relativePath, memberPaths)
+          if ((await changesBeforeMerge(context, member, nested)).length > 0) {
+            findings.changedInWorktree.push(member.label)
+          }
+        }
+        if (member.branch === null) findings.detachedInWorktree.push(member.label)
+      }
+      findings.runningSessions = runningSessions()
+      findings.locked = worktree.locked ? { reason: worktree.lockReason } : null
+      const problems = describeMergeFindings(findings)
+      if (problems.length > 0) return blocked(problems.join(' '))
+
+      // With nothing in the way, every member and repository is on a branch.
+      const plan: MergePlan = {
+        worktreeName: worktree.name ?? worktree.displayName,
+        worktreePath: worktree.path,
+        projectFolder: state.root,
+        repositories: members.map((member) => ({
+          label: member.label,
+          path: member.repository,
+          branch: member.branch!,
+          into: current.get(member.repository)!,
+        })),
+      }
+      for (const repository of plan.repositories) {
+        if (!(await isMergedInto(context, repository.path, repository.branch, repository.into))) {
+          return { ok: true, plan }
+        }
+      }
+      return {
+        ok: false,
+        reason: 'nothing-to-merge',
+        message: nothingToMerge(
+          plan.worktreeName,
+          plan.repositories.map((repository) => repository.into),
+        ),
+      }
+    } catch (error) {
+      if (error instanceof InspectionError) return blocked(error.message)
       throw error
     }
   }

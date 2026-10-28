@@ -781,6 +781,16 @@ export interface AppState {
   setDeleteWorktreeBranches(checked: boolean): void
   answerDeleteWorktree(confirmed: boolean): Promise<void>
   /**
+   * Merges a worktree into the project's own folder with an agent, as its
+   * Merge menu does. While the merge session it last opened for the worktree
+   * has its agent running, as it has since it started, that session shows,
+   * and nothing else happens. Otherwise, unless the main process finds the
+   * worktree cannot be merged now and Hoot says why, it opens a new Local
+   * session of the agent, named after the worktree, which is told how to
+   * merge it.
+   */
+  mergeWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
+  /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
    * its registrations and what Hoot keeps of it, such as its saved
    * sessions. While some of its sessions are open, asks first whether to
@@ -946,6 +956,11 @@ function deletionAmong(
     !savedSessions.some((saved) => saved.id === id)
     ? null
     : id
+}
+
+/** What Hoot keeps the merge of a worktree of a project by. */
+function mergeKey(projectRoot: string, worktreePath: string): string {
+  return JSON.stringify([projectRoot, worktreePath])
 }
 
 /** True while a session is starting or running. */
@@ -1832,6 +1847,15 @@ export const useAppStore = create<AppState>()((set, get) => {
   /** Whether Delete was chosen and the worktree is being read again before it is checked. */
   let preparingDeletion = false
 
+  /** The worktrees being checked before a merge, by `mergeKey`. */
+  const mergesStarting = new Set<string>()
+  /**
+   * The session of the merge session Hoot last opened for each worktree, by
+   * `mergeKey`, which shows again while its agent runs, as it has since it
+   * started.
+   */
+  const mergeSessions = new Map<string, string>()
+
   /** Closes the ended sessions of a worktree that is gone, as its deletion does. */
   const closeEndedSessionsIn = (path: string) => {
     const ended = get()
@@ -2642,6 +2666,63 @@ export const useAppStore = create<AppState>()((set, get) => {
           : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
       }))
       get().openSavedSession(result.session.id)
+    },
+
+    async mergeWorktree(projectRoot, worktreePath, toolId) {
+      const key = mergeKey(projectRoot, worktreePath)
+      const shown = mergeSessions.get(key)
+      const running = get().sessions.find(
+        (session) => session.id === shown && isSessionRunning(session),
+      )
+      if (running) {
+        get().selectSession(running.id)
+        return
+      }
+      mergeSessions.delete(key)
+      // As for a new session: an agent turned off since the menu showed starts nothing.
+      const { tools, launchSettings } = get()
+      if (firstDetectionRunning(tools)) return
+      if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
+        toast.error('Could not start a session.', {
+          description: 'Install an agent or turn one on in the Agents page first.',
+        })
+        get().showSettings('agents')
+        return
+      }
+      // Chosen again while the first choice is being checked.
+      if (mergesStarting.has(key)) return
+      mergesStarting.add(key)
+      const result = await api
+        .startMerge(projectRoot, worktreePath, toolId)
+        .catch((error: unknown) => ({
+          ok: false as const,
+          reason: 'blocked' as const,
+          message: errorMessage(error),
+        }))
+        .finally(() => mergesStarting.delete(key))
+      if (!result.ok) {
+        const worktree = projectWorktreeRows(get(), projectRoot).find(
+          (row) => row.path === worktreePath,
+        )
+        const name = worktree ? (worktree.name ?? worktree.displayName) : worktreePath
+        if (result.reason === 'nothing-to-merge') {
+          toast.info('Nothing to merge.', { description: result.message })
+        } else {
+          toast.error(`Could not merge ${name}.`, { description: result.message })
+        }
+        return
+      }
+      // The change event may have shown it already.
+      set((state) => ({
+        savedSessions: state.savedSessions.some((saved) => saved.id === result.session.id)
+          ? state.savedSessions
+          : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
+      }))
+      get().openSavedSession(result.session.id)
+      const opened = get().sessions.find(
+        (session) => session.savedSessionId === result.session.id && isSessionRunning(session),
+      )
+      if (opened) mergeSessions.set(key, opened.id)
     },
 
     openCreatedSession(session) {

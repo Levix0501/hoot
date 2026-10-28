@@ -55,6 +55,7 @@ import type {
   DeleteWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  StartMergeResult,
 } from '../shared/worktrees'
 import type { AgentService } from './agents/agent-service'
 import type { ChatManager } from './chats/chat-manager'
@@ -74,6 +75,7 @@ import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
 import type { UpdateService } from './updates/update-service'
 import type { WorkflowExecutor } from './workflows/workflow-executor'
+import { mergeInstruction } from './worktrees/merge'
 import type { WorktreeService } from './worktrees/worktree-service'
 
 export interface IpcDependencies {
@@ -144,6 +146,7 @@ const savedSessionArguments = z.tuple([
   z.string().min(1).nullable(),
   z.enum(CODING_TOOL_IDS),
 ])
+const mergeArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -952,6 +955,31 @@ export function registerIpc(deps: IpcDependencies): void {
       deps.sidebar.setWorktreeCollapsed(worktreePath, false)
     }
     return result
+  })
+
+  handle(IpcChannel.startMerge, async (_event, ...args): Promise<StartMergeResult> => {
+    const parsed = mergeArguments.safeParse(args)
+    if (!parsed.success) return { ok: false, reason: 'blocked', message: 'Invalid request.' }
+    const [root, worktreePath, toolId] = parsed.data
+    if (!deps.projects.find(root)) {
+      return { ok: false, reason: 'blocked', message: 'The project is not in the list.' }
+    }
+    // Sessions running in it, which may still change it, stop the merge;
+    // those in the project folder do not.
+    const planned = await deps.worktrees.planMerge(
+      root,
+      worktreePath,
+      () => deps.sessions.runningIdsWithin(worktreePath).length,
+    )
+    if (!planned.ok) return planned
+    // A session in the project's own folder, named after the worktree, whose
+    // agent is told how to merge it as it first starts. Hoot follows the
+    // merge no further: the agent says when it is done.
+    const session = deps.chats.createSavedSession(root, null, toolId, {
+      name: `Merge ${planned.plan.worktreeName}`,
+      firstMessage: mergeInstruction(planned.plan),
+    })
+    return { ok: true, session }
   })
 
   on(IpcChannel.revealWorktree, (...args) => {

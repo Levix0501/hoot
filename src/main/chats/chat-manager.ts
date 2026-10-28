@@ -12,6 +12,17 @@ import type { ChatLaunch } from '../session/launch'
 import { ChatStore, type StoredChat } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
+/** What a saved session is made with, besides its folder and its agent. */
+export interface SavedSessionOptions {
+  /** The name it shows, as one the user gave it with Rename… would be. */
+  name?: string
+  /**
+   * The first message of its conversation, which its agent is sent when it
+   * first starts, and never again.
+   */
+  firstMessage?: string
+}
+
 /** What a chat session runs: the folder its agent runs in, and how to continue its conversation. */
 export interface PreparedChatSession {
   folder: string
@@ -93,6 +104,8 @@ export class ChatManager extends EventEmitter<{
   private readonly conversationStartedAt = new Map<string, number>()
   /** When Hoot last began to start each chat's agent, before its process ran. */
   private readonly runStartedAt = new Map<string, number>()
+  /** The first messages of the saved sessions whose agents have not started yet. */
+  private readonly firstMessages = new Map<string, string>()
 
   constructor(options: ChatManagerOptions) {
     super()
@@ -167,12 +180,14 @@ export class ChatManager extends EventEmitter<{
   /**
    * Makes a saved session of an agent, in a worktree of a project, or with
    * `null` for the worktree, in the project's own folder: the agent runs in
-   * that folder, which Hoot keeps as it is.
+   * that folder, which Hoot keeps as it is. It can be made with a name, and
+   * with a first message, which Hoot keeps only until its agent has started.
    */
   createSavedSession(
     projectRoot: string,
     worktreePath: string | null,
     toolId: CodingToolId,
+    options: SavedSessionOptions = {},
   ): SavedSessionInfo {
     const at = this.now()
     const session = {
@@ -183,12 +198,13 @@ export class ChatManager extends EventEmitter<{
       worktreePath,
       conversationId: newConversationId(toolId, this.newId),
       title: '',
-      customName: null,
+      customName: options.name ?? null,
       hasMessages: false,
       createdAt: at,
       lastOpenedAt: at,
     }
     this.chats.insert(session)
+    if (options.firstMessage !== undefined) this.firstMessages.set(session.id, options.firstMessage)
     this.emitChanged()
     return session
   }
@@ -214,8 +230,9 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * What starting the chat's agent takes: its folder, made when missing, and
-   * the conversation to continue, fresh when it never got a message.
+   * What starting the chat's agent takes: its folder, made when missing, the
+   * conversation to continue, fresh when it never got a message, and the
+   * first message of a saved session whose agent has not started yet.
    */
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
     const chat = this.chats.get(id)
@@ -231,17 +248,25 @@ export class ChatManager extends EventEmitter<{
       conversationId = newConversationId(chat.toolId, this.newId)
       if (conversationId !== null) this.chats.update(id, { conversationId })
     }
+    const resume = chat.hasMessages && conversationId !== null
+    const firstMessage = this.firstMessages.get(id)
     return {
       folder: chat.folder,
       launch: {
         conversationId,
-        resume: chat.hasMessages && conversationId !== null,
+        resume,
+        ...(firstMessage === undefined || resume ? {} : { firstMessage }),
       },
     }
   }
 
-  /** Notes that the chat's agent started, which moves the chat to the top of Chats. */
+  /**
+   * Notes that the chat's agent started, which moves the chat to the top of
+   * Chats; it was sent its first message, if it had one, which it is not sent
+   * again.
+   */
   opened(id: string): void {
+    this.firstMessages.delete(id)
     if (this.chats.get(id)?.deleted !== false) return
     this.chats.update(id, { lastOpenedAt: this.now() })
     this.running.add(id)
@@ -431,6 +456,7 @@ export class ChatManager extends EventEmitter<{
    * stays as it is.
    */
   delete(id: string): Promise<void> {
+    this.firstMessages.delete(id)
     return this.enqueue(id, async () => {
       const chat = this.chats.get(id)
       if (!chat || chat.deleted) return

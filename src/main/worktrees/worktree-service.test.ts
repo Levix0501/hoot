@@ -1445,6 +1445,124 @@ describe('WorktreeService', () => {
     return created.path
   }
 
+  /** Why the worktree cannot be merged now, with no session running in it; `null` when it can. */
+  async function mergeBlocked(worktreePath: string, running = 0): Promise<string | null> {
+    const planned = await service.planMerge(project, worktreePath, () => running)
+    return planned.ok ? null : planned.message
+  }
+
+  it('plans a merge: the branch of each repository of the worktree, into the one checked out in the project folder', async () => {
+    const R = await worktreeToMerge()
+    expect(await service.planMerge(project, R, () => 0)).toEqual({
+      ok: true,
+      plan: {
+        worktreeName: 'Feature X',
+        worktreePath: R,
+        projectFolder: project,
+        repositories: [
+          { label: 'project', path: project, branch: 'feature-x', into: 'main' },
+          { label: 'inner', path: inner, branch: 'feature-x', into: 'main' },
+        ],
+      },
+    })
+    // Merged in one repository only, it still has something to merge.
+    git(project, 'merge', '-q', '--no-edit', 'feature-x')
+    expect(await mergeBlocked(R)).toBeNull()
+    // Merged in every one, it has nothing left to merge, and can be deleted.
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    expect(await service.planMerge(project, R, () => 0)).toEqual({
+      ok: false,
+      reason: 'nothing-to-merge',
+      message:
+        'Feature X has no new commits to merge into main. You can delete the worktree with Delete.',
+    })
+  })
+
+  it('merges nothing while a repository in the project folder is on no branch, changed or mid-merge, also one the worktree has no member of', async () => {
+    const R = await worktreeToMerge()
+    git(deep, 'checkout', '-q', '--detach')
+    expect(await mergeBlocked(R)).toBe(
+      'inner/deep has no branch checked out in the project folder.',
+    )
+    git(deep, 'checkout', '-q', 'main')
+
+    fs.appendFileSync(path.join(project, 'README.md'), 'more\n')
+    fs.writeFileSync(path.join(deep, 'new.txt'), 'x\n')
+    expect(await mergeBlocked(R)).toBe(
+      'project and inner/deep have uncommitted changes in the project folder: commit or stash them first.',
+    )
+    git(project, 'checkout', '--', 'README.md')
+    fs.rmSync(path.join(deep, 'new.txt'))
+
+    // Neither ignored files nor the folders of inner repositories it does not ignore are changes.
+    fs.writeFileSync(path.join(project, '.gitignore'), '*.log\n')
+    git(project, 'commit', '-q', '-am', 'track no inner repository')
+    fs.writeFileSync(path.join(project, 'debug.log'), 'x\n')
+    expect(git(project, 'status', '--porcelain')).toBe('?? inner/')
+    expect(await mergeBlocked(R)).toBeNull()
+
+    // A rebase stopped in the middle, with nothing uncommitted, which leaves HEAD on no branch.
+    fs.writeFileSync(path.join(deep, 'second.txt'), 'x\n')
+    git(deep, 'add', '.')
+    git(deep, 'commit', '-q', '-m', 'second')
+    expect(() => git(deep, 'rebase', '--exec', 'false', 'HEAD~1')).toThrow('Command failed')
+    expect(await mergeBlocked(R)).toBe(
+      'inner/deep has no branch checked out in the project folder. inner/deep has a merge or rebase in progress in the project folder: finish or abort it first.',
+    )
+    git(deep, 'rebase', '--abort')
+
+    // A merge stopped at a conflict.
+    addBranch(project, 'clash')
+    fs.writeFileSync(path.join(project, 'clash.txt'), 'main\n')
+    git(project, 'add', '.')
+    git(project, 'commit', '-q', '-m', 'clash on main')
+    expect(() => git(project, 'merge', 'clash')).toThrow('Command failed')
+    expect(await mergeBlocked(R)).toBe(
+      'project has uncommitted changes in the project folder: commit or stash them first. project has a merge or rebase in progress in the project folder: finish or abort it first.',
+    )
+    git(project, 'merge', '--abort')
+    expect(await mergeBlocked(R)).toBeNull()
+  })
+
+  it('merges nothing while the worktree has uncommitted changes, running sessions, a lock or no branch', async () => {
+    const R = await worktreeToMerge()
+    fs.appendFileSync(path.join(R, 'work.txt'), 'more\n')
+    fs.writeFileSync(path.join(R, 'inner', 'new.txt'), 'x\n')
+    expect(await mergeBlocked(R)).toBe(
+      'project and inner have uncommitted changes in the worktree: commit them first.',
+    )
+    git(R, 'checkout', '--', 'work.txt')
+    fs.rmSync(path.join(R, 'inner', 'new.txt'))
+    // A repository of its own inside the worktree is none of its changes.
+    git(R, 'init', '-q', 'scratch')
+    expect(await mergeBlocked(R)).toBeNull()
+
+    expect(await mergeBlocked(R, 1)).toBe(
+      'A session is still running in the worktree: close it first.',
+    )
+    git(project, 'worktree', 'lock', '--reason', 'kept', R)
+    expect(await mergeBlocked(R)).toBe('The worktree is locked: kept.')
+    git(project, 'worktree', 'unlock', R)
+    git(path.join(R, 'inner'), 'checkout', '-q', '--detach')
+    expect(await mergeBlocked(R)).toBe('inner has no branch checked out in the worktree.')
+  })
+
+  it('merges nothing when the project folder, the worktree or its folder is gone', async () => {
+    const R = await worktreeToMerge()
+    expect(await service.planMerge('/elsewhere', R, () => 0)).toMatchObject({
+      ok: false,
+      message: 'The project is not in the list.',
+    })
+    fs.renameSync(project, `${project}-moved`)
+    expect(await mergeBlocked(R)).toBe(`The project folder is missing: ${project}`)
+    fs.renameSync(`${project}-moved`, project)
+    // Gone, the worktree is cleaned up as it is read, and its folder is missing still.
+    fs.renameSync(R, `${R}-moved`)
+    expect(await mergeBlocked(R)).toBe(`The folder of the worktree is missing: ${R}`)
+    fs.renameSync(`${R}-moved`, R)
+    expect(await mergeBlocked(R)).toBe(`The worktree no longer exists: ${R}`)
+  })
+
   it('tells which branches of a worktree are merged into the ones checked out in the project folder', async () => {
     const R = await worktreeToMerge()
     git(inner, 'merge', '-q', '--no-edit', 'feature-x')

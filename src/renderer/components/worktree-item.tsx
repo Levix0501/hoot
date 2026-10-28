@@ -2,6 +2,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   FolderOpenIcon,
+  GitMergeIcon,
   MoreHorizontalIcon,
   PlusIcon,
   Trash2Icon,
@@ -47,8 +48,12 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
 
 /**
  * What a worktree's `⋯` menu and its context menu hold, the same in both: the
- * agents to start a session with in the worktree, Reveal in Finder (File
- * Explorer on Windows), Copy Path and Delete; for a missing worktree, Remove.
+ * agents to start a session with in the worktree; the agents to merge it with
+ * into the branch checked out in the project folder, which the item names
+ * (only "Merge" while the folder is on no branch), always available, as what
+ * could stop a merge is checked once an agent is chosen; Reveal in Finder
+ * (File Explorer on Windows), Copy Path and Delete; for a missing worktree,
+ * Remove.
  */
 function WorktreeMenuEntries({
   components,
@@ -63,12 +68,15 @@ function WorktreeMenuEntries({
   testId: string
 }) {
   const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
+  const mergeWorktree = useAppStore((state) => state.mergeWorktree)
+  const into = useAppStore((state) => state.projectFolders[projectRoot]?.branch ?? null)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
   const removeMissingWorktree = useAppStore((state) => state.removeMissingWorktree)
   const { Item, Separator, Sub, SubTrigger, SubContent } = components
 
   const startSession = (toolId: CodingToolId) =>
     void newWorktreeSession(projectRoot, worktree.path, toolId)
+  const merge = (toolId: CodingToolId) => void mergeWorktree(projectRoot, worktree.path, toolId)
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
@@ -104,6 +112,27 @@ function WorktreeMenuEntries({
             components={components}
             onSelect={startSession}
             testId="worktree-agent"
+            failure="Could not start a session."
+          />
+        </SubContent>
+      </Sub>
+      <Sub>
+        <SubTrigger data-testid={`${testId}-merge`}>
+          <GitMergeIcon />
+          {into === null ? (
+            'Merge'
+          ) : (
+            // A long branch name widens the menu only so far.
+            <span className="max-w-80 min-w-0 truncate">
+              Merge into <span data-user-text="">{into}</span>
+            </span>
+          )}
+        </SubTrigger>
+        <SubContent className="w-auto min-w-56">
+          <ChatAgentMenuEntries
+            components={components}
+            onSelect={merge}
+            testId="worktree-merge-agent"
             failure="Could not start a session."
           />
         </SubContent>

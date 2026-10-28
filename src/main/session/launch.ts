@@ -40,10 +40,13 @@ export interface LaunchContext {
  * The conversation a chat's session continues: the id its agent knows it by,
  * and whether it has a conversation to continue, rather than one to start.
  * The id is `null` for a new Codex conversation, whose id Hoot learns later.
+ * A conversation to start can have a first message, which the agent is sent
+ * as it starts.
  */
 export interface ChatLaunch {
   conversationId: string | null
   resume: boolean
+  firstMessage?: string
 }
 
 /**
@@ -199,6 +202,25 @@ export function chatLaunchArguments(
 }
 
 /**
+ * The arguments that send an agent the first message of a conversation it
+ * starts, after all its others, without its NUL characters: for Claude Code
+ * and Codex the message after `--`, which ends the options, so that one
+ * starting with `-` is still the message, and for OpenCode the value of its
+ * `--prompt`, given with `=`, as one argument. Each agent sends it as soon as
+ * it is ready, without the user typing anything.
+ */
+export function firstMessageArguments(tool: CodingToolId, message: string): string[] {
+  const text = withoutNul(message)
+  switch (tool) {
+    case 'claude':
+    case 'codex':
+      return ['--', text]
+    case 'opencode':
+      return [`--prompt=${text}`]
+  }
+}
+
+/**
  * Decides what a session runs in its working directory (the project root, or
  * the root of one of the project's worktrees). A Shell session runs the
  * default shell with its arguments, as a login shell outside Windows,
@@ -212,8 +234,9 @@ export function chatLaunchArguments(
  * extra arguments, and, for Claude Code, its hooks and, when it is sent an
  * issue, the arguments that send it, once the issue's files are written; the
  * launch's cleanup removes their folder. A chat's session also gets the
- * arguments that continue its conversation. Either environment also has what
- * hoot needs to run in the session.
+ * arguments that continue its conversation, and those that send the first
+ * message of one it starts with one. Either environment also has what hoot
+ * needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -274,6 +297,7 @@ export async function resolveLaunch(
           : null,
     }),
     ...chatArguments.after,
+    ...(chat?.firstMessage === undefined ? [] : firstMessageArguments(tool.id, chat.firstMessage)),
   ]
   if (issue === null) return { file: program.file, args, env }
   // Written last, so that a launch that fails leaves no folder of its own behind.

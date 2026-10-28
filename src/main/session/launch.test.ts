@@ -13,6 +13,7 @@ import type { WorkflowStep } from '../../shared/workflows'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import {
   claudeCodeHookSettings,
+  firstMessageArguments,
   issueFileText,
   resolveLaunch,
   sentIssueArgs,
@@ -345,6 +346,62 @@ describe('resolveLaunch', () => {
     expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto', '-s', 'ses_one'])
   })
 
+  it('sends the first message of a conversation it starts after every other argument', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    const message = 'Merge the worktree feature-x.\n\n- Do not push.'
+    const yolo = context(loginEnv, {
+      claude: { extraArgs: ['--add-dir', '/extra'] },
+      codex: { extraArgs: ['-c', 'model=x'] },
+    })
+    const claude = await resolveLaunch(yolo, 'claude', project, null, {
+      conversationId: 'claude-id',
+      resume: false,
+      firstMessage: message,
+    })
+    expect(claude.args).toEqual([
+      ...program(bin, 'claude').args,
+      '--dangerously-skip-permissions',
+      '--add-dir',
+      '/extra',
+      ...hookSettings,
+      '--session-id',
+      'claude-id',
+      '--',
+      message,
+    ])
+    const codex = await resolveLaunch(yolo, 'codex', project, null, {
+      conversationId: null,
+      resume: false,
+      firstMessage: message,
+    })
+    expect(codex.args).toEqual([
+      ...program(bin, 'codex').args,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '-c',
+      'model=x',
+      '--',
+      message,
+    ])
+    const opencode = await resolveLaunch(context(loginEnv, {}, false), 'opencode', project, null, {
+      conversationId: 'ses_one',
+      resume: false,
+      firstMessage: message,
+    })
+    expect(opencode.args).toEqual([
+      ...program(bin, 'opencode').args,
+      '-s',
+      'ses_one',
+      `--prompt=${message}`,
+    ])
+    // Without one, nothing is sent.
+    const plain = await resolveLaunch(yolo, 'claude', project, null, {
+      conversationId: 'claude-id',
+      resume: false,
+    })
+    expect(plain.args).not.toContain('--')
+  })
+
   it('gives a resumed chat the agent’s extra arguments too', async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const launch = await resolveLaunch(
@@ -554,6 +611,14 @@ describe('resolveLaunch', () => {
     await expect(
       resolveLaunch(context({ PATH: bin }), 'shell', path.join(root, 'gone')),
     ).rejects.toBeInstanceOf(SessionError)
+  })
+})
+
+describe('firstMessageArguments', () => {
+  it('ends the options before the message, or gives it as the value of --prompt, without NUL characters', () => {
+    expect(firstMessageArguments('claude', '-a\0b')).toEqual(['--', '-ab'])
+    expect(firstMessageArguments('codex', '-a\0b')).toEqual(['--', '-ab'])
+    expect(firstMessageArguments('opencode', '-a\0b')).toEqual(['--prompt=-ab'])
   })
 })
 

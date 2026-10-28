@@ -113,26 +113,25 @@ export interface AgentLaunchArgumentsInput {
   tool: CodingToolId
   yoloMode: boolean
   settings: AgentLaunchSettings
-  /** What Hoot gives Claude Code with `--settings`; `null` for the others. */
-  hookSettings: string | null
+  /** The arguments that give the agent the hooks Hoot adds for itself, if any. */
+  hookArguments: readonly string[]
 }
 
 /**
  * The arguments of a new session, after those that run its command: the YOLO
  * arguments while YOLO mode is on and the extra arguments do not set
  * permissions, then the chosen model and effort, the extra arguments, and
- * Claude Code's hooks.
+ * the hooks Hoot adds.
  */
 export function agentLaunchArguments(input: AgentLaunchArgumentsInput): string[] {
-  const { tool, yoloMode, settings, hookSettings } = input
+  const { tool, yoloMode, settings, hookArguments } = input
   const kinds = extraArgumentKinds(tool, settings.extraArgs)
   const args: string[] = []
   if (yoloMode && !kinds.permission) args.push(...YOLO_ARGUMENTS[tool])
   if (settings.model !== null && !kinds.model) args.push(...modelArguments(tool, settings.model))
   if (settings.effort !== null && !kinds.effort)
     args.push(...effortArguments(tool, settings.effort))
-  args.push(...settings.extraArgs)
-  if (tool === 'claude' && hookSettings !== null) args.push('--settings', hookSettings)
+  args.push(...settings.extraArgs, ...hookArguments)
   return args
 }
 
@@ -181,8 +180,8 @@ export function displayCommand(segments: readonly CommandSegment[]): string {
  * A command as the Agents page shows it: the program, a locked segment for
  * YOLO mode, the chosen model and effort, and every extra argument. Where the
  * extra arguments set the permissions, the model or the effort, they alone
- * show it: the segment that would is left out. Claude Code's hooks, which
- * Hoot adds for itself, are not shown.
+ * show it: the segment that would is left out. The hooks Hoot adds for
+ * itself are not shown.
  */
 export function commandSegments(input: {
   tool: CodingToolId

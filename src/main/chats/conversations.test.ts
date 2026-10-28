@@ -63,6 +63,26 @@ describe('localChatConversations', () => {
     ])
   })
 
+  it('leaves out a Codex conversation whose file holds its first line alone, as one that never got a message', async () => {
+    rollout('thread-one', folder, 'First work', 1)
+    const directory = path.join(home, '.codex', 'sessions', '2026', '10', '21')
+    const meta = (id: string, extra: object = {}) =>
+      JSON.stringify({
+        type: 'session_meta',
+        payload: { id, cwd: folder, timestamp: '2026-10-21T10:05:00.000Z', ...extra },
+      })
+    fs.writeFileSync(path.join(directory, 'rollout-empty.jsonl'), `${meta('thread-empty')}\n`)
+    fs.writeFileSync(path.join(directory, 'rollout-empty-crlf.jsonl'), `${meta('thread-crlf')}\r\n`)
+    // A first line longer than one read, with more after it.
+    fs.writeFileSync(
+      path.join(directory, 'rollout-long.jsonl'),
+      `${meta('thread-long', { instructions: 'x'.repeat(200_000) })}\n{"type":"event_msg"}\n`,
+    )
+    expect(
+      (await conversations().codexConversations(folder))?.map((conversation) => conversation.id),
+    ).toEqual(['thread-one', 'thread-long'])
+  })
+
   it('gives no Codex conversations, rather than an error, when Codex wrote none', async () => {
     expect(await conversations().codexConversations(folder)).toEqual([])
   })

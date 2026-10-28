@@ -252,11 +252,11 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 }
 
 /**
- * The event of a Claude Code hook whose input is `input`, the JSON Claude
- * Code gives a hook on standard input, when it is one Hoot takes, whether a
- * subagent met it (the input names the agent), the turn it belongs to, and
- * the conversation it belongs to with why a session started or ended;
- * `null` for any other input.
+ * The event of a Claude Code or Codex hook whose input is `input`, the JSON
+ * the agent gives a hook on standard input, when it is one Hoot takes,
+ * whether a subagent met it (the input names the agent), the turn it belongs
+ * to, and the conversation it belongs to with why a session started or
+ * ended; `null` for any other input.
  */
 export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
@@ -776,20 +776,21 @@ export function hootProgram(io: CliIo): Command {
       io.write(`${worktreePath}\n`)
     })
 
-  // Not for people: the command of the hooks Hoot adds to its Claude Code sessions.
+  // Not for people: the command of the hooks Hoot adds to its Claude Code and
+  // Codex sessions.
   program
     .command('hook', { hidden: true })
     .description(
-      "Report the event of a Claude Code hook, from the hook's input on standard input, to Hoot, " +
-        'which shows what the session is doing. It prints nothing and always succeeds, so that ' +
-        'it never changes what Claude Code does.',
+      "Report the event of a Claude Code or Codex hook, from the hook's input on standard " +
+        'input, to Hoot, which shows what the session is doing and which conversation it is in. ' +
+        'It prints nothing and always succeeds, so that it never changes what the agent does.',
     )
     .action(async () => {
       try {
         const hook = hookEventOf(await io.readStdin())
         if (hook !== null) await connect().reportHookEvent({ ...hook, startedAt: io.startedAt })
       } catch {
-        // Hoot shows less of what the session is doing; Claude Code goes on as it would.
+        // Hoot shows less of what the session is doing; the agent goes on as it would.
       }
     })
 

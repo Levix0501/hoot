@@ -1822,6 +1822,32 @@ describe('hoot hook', () => {
     ])
   })
 
+  it('reports the conversation of each message Codex tells its hook of', async () => {
+    const stdin = JSON.stringify({
+      session_id: '01a18187-0974-7a80-8bbb-1dbed37c649a',
+      turn_id: '01a18187-0aa7-7351-866b-c0cd61e2a78e',
+      transcript_path: '/home/.codex/sessions/2026/10/28/rollout-2026-10-28T16-01-13.jsonl',
+      cwd: '/work/gamma',
+      hook_event_name: 'UserPromptSubmit',
+      model: 'gpt-5',
+      permission_mode: 'default',
+      prompt: 'one',
+    })
+    expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })
+    expect(hoot.hookEvents).toEqual([
+      {
+        sessionId: 'gamma-session',
+        event: 'UserPromptSubmit',
+        startedAt: STARTED_AT,
+        subagent: false,
+        turn: null,
+        conversationId: '01a18187-0974-7a80-8bbb-1dbed37c649a',
+        source: null,
+        reason: null,
+      },
+    ])
+  })
+
   it('reports nothing for any other input, and still succeeds without a word', async () => {
     for (const stdin of [hookInput('Notification'), '', 'not JSON', '[]', 'null', '{}']) {
       expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })

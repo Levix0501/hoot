@@ -74,6 +74,8 @@ interface EndedRun {
   startedAt: number | null
   /** Whether Hoot saw a message sent in it: one typed, or the first message it started with. */
   messaged: boolean
+  /** Whether the agent told of a conversation it sent a message in. */
+  reported: boolean
   /** The title the chat had when its agent was told to leave its conversation, if it was. */
   titleAtSwitch: string | undefined
 }
@@ -92,15 +94,18 @@ interface EndedRun {
  * starts, and tells of the conversation each message goes to through its
  * hooks: a Claude Code chat is in no conversation until it told of one, and
  * one that never did goes once its agent ends, as when the user turned off
- * Claude Code's hooks. For Codex and OpenCode, Hoot reads the agent's
- * own records when a chat's process ends, and when Hoot starts, to tell
- * whether the chat's conversation got a message and which conversation a
- * chat went on to; it never lists a conversation it finds there as a chat of
- * its own. A project's own folder may hold conversations from before Hoot ran
- * an agent there: a saved session in it never takes up one that started
- * before the session was made; once its agent ends, not one that started
- * before Hoot began to start that agent either, which may be another
- * session's there.
+ * Claude Code's hooks. Codex tells of the conversation each message goes to
+ * through the hook Hoot gives it, once the user trusted that hook; the
+ * conversation it tells of stays the chat's whatever Codex records in the
+ * chat's folder. Otherwise, as for OpenCode, Hoot reads the agent's own
+ * records when a chat's process ends, and when Hoot starts, to tell whether
+ * the chat's conversation got a message and which conversation a chat went
+ * on to, leaving out a Codex conversation that never got one; it never lists
+ * a conversation it finds there as a chat of its own. A project's own folder
+ * may hold conversations from before Hoot ran an agent there: a saved
+ * session in it never takes up one that started before the session was
+ * made; once its agent ends, not one that started before Hoot began to start
+ * that agent either, which may be another session's there.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -134,6 +139,8 @@ export class ChatManager extends EventEmitter<{
   private readonly runStartedAt = new Map<string, number>()
   /** The chats whose agent Hoot saw sent a message since it began to start it. */
   private readonly messaged = new Set<string>()
+  /** The chats whose agent told of a conversation it sent a message in since Hoot began to start it. */
+  private readonly reported = new Set<string>()
   /** The first messages of the saved sessions whose agents have not started yet. */
   private readonly firstMessages = new Map<string, string>()
 
@@ -168,7 +175,7 @@ export class ChatManager extends EventEmitter<{
   get(id: string): ChatInfo | undefined {
     const chat = this.chats.get(id)
     if (!chat || chat.deleted) return undefined
-    const { deleted: _deleted, ...info } = chat
+    const { deleted: _deleted, conversationReported: _reported, ...info } = chat
     return info
   }
 
@@ -270,6 +277,7 @@ export class ChatManager extends EventEmitter<{
     this.titlesAtSwitch.delete(id)
     this.messageReportedAt.delete(id)
     this.messaged.delete(id)
+    this.reported.delete(id)
     this.runStartedAt.set(id, this.now())
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
@@ -327,12 +335,12 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * Notes an event of a Claude Code hook of a chat's session: a message sent
-   * in a conversation, which the chat goes on in from then on, or the
-   * conversation Claude Code goes to as it leaves the one the chat is in,
-   * which the chat does not go on in before a message is sent there. A hook
-   * that ran before the one that told of the chat's latest message tells of
-   * a conversation the chat may have left since.
+   * Notes an event of a Claude Code or Codex hook of a chat's session: a
+   * message sent in a conversation, which the chat goes on in from then on,
+   * or the conversation Claude Code goes to as it leaves the one the chat is
+   * in, which the chat does not go on in before a message is sent there. A
+   * hook that ran before the one that told of the chat's latest message
+   * tells of a conversation the chat may have left since.
    */
   noteHookEvent(chatId: string, report: HookEventReport): void {
     const reported = report.conversationId ?? null
@@ -346,14 +354,16 @@ export class ChatManager extends EventEmitter<{
       return
     }
     if (report.event !== 'UserPromptSubmit') return
+    // Known at once, for the end of the run, which may be read before this is.
+    this.reported.add(chatId)
     void this.enqueue(chatId, async () => {
       const chat = this.chats.get(chatId)
       if (!chat || chat.deleted) return
       if (report.startedAt < (this.messageReportedAt.get(chatId) ?? 0)) return
       this.messageReportedAt.set(chatId, report.startedAt)
       if (reported === chat.conversationId) {
-        if (!chat.hasMessages) {
-          this.chats.update(chatId, { hasMessages: true })
+        if (!chat.hasMessages || !chat.conversationReported) {
+          this.chats.update(chatId, { hasMessages: true, conversationReported: true })
           this.emitChanged()
         }
         return
@@ -362,6 +372,7 @@ export class ChatManager extends EventEmitter<{
       this.titlesAtSwitch.delete(chatId)
       this.chats.update(chatId, {
         conversationId: reported,
+        conversationReported: true,
         hasMessages: true,
         title:
           chat.conversationId === null ? chat.title : titleAfterSwitch(chat, titleAtSwitch, null),
@@ -435,10 +446,12 @@ export class ChatManager extends EventEmitter<{
     const run: EndedRun = {
       startedAt: this.runStartedAt.get(id) ?? null,
       messaged: this.messaged.has(id),
+      reported: this.reported.has(id),
       titleAtSwitch: this.titlesAtSwitch.get(id),
     }
     this.runStartedAt.delete(id)
     this.messaged.delete(id)
+    this.reported.delete(id)
     this.titlesAtSwitch.delete(id)
     void this.enqueue(id, () => this.reconcileChat(id, run))
   }
@@ -507,8 +520,10 @@ export class ChatManager extends EventEmitter<{
    * when it is the chat opened last in its folder; a conversation either
    * leaves is no longer the chat's, nor any other's. A run in which Hoot saw
    * no message sent leaves the chat in the conversation it was in. When the
-   * chat's conversation never got a message, the chat goes. `run` is how the
-   * run of the agent whose process just ended went, if one did.
+   * chat's conversation never got a message, the chat goes. A conversation
+   * the agent reported stays the chat's: Hoot reads the records again only
+   * once a later run of the agent ended without reporting one. `run` is how
+   * the run of the agent whose process just ended went, if one did.
    */
   private async reconcileChat(chatId: string, run: EndedRun | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.
@@ -537,6 +552,7 @@ export class ChatManager extends EventEmitter<{
       return
     }
 
+    if (run === null ? chat.conversationReported : run.reported) return
     const recorded =
       chat.toolId === 'codex'
         ? await this.conversations.codexConversations(chat.folder)
@@ -582,6 +598,7 @@ export class ChatManager extends EventEmitter<{
       if (next) {
         this.chats.update(chatId, {
           conversationId: next.id,
+          conversationReported: false,
           hasMessages: true,
           ...(conversationId === null
             ? {}
@@ -605,6 +622,7 @@ export class ChatManager extends EventEmitter<{
     if (next && !chat.deleted && this.isActiveChat(chat)) {
       this.chats.update(chatId, {
         conversationId: next.id,
+        conversationReported: false,
         hasMessages: true,
         title: titleAfterSwitch(chat, run?.titleAtSwitch, next.title),
       })
@@ -665,6 +683,7 @@ export class ChatManager extends EventEmitter<{
     this.messageReportedAt.delete(id)
     this.runStartedAt.delete(id)
     this.messaged.delete(id)
+    this.reported.delete(id)
   }
 
   /**

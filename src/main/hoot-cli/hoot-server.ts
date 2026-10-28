@@ -181,7 +181,7 @@ export interface HootServerOptions {
    * it has started, or could not.
    */
   startSession(issueId: number, prompt: string | null): Promise<StartedSession>
-  /** Called with each event of a hook of a session's Claude Code that hoot reports. */
+  /** Called with each event of a hook of a session's Claude Code or Codex that hoot reports. */
   hookEvent(sessionId: string, report: HookEventReport): void
 }
 
@@ -262,10 +262,10 @@ function hootLabel(label: NamedLabel): HootLabel {
  * session's project, creates issues in it, alone or as sub-issues of an issue
  * all at once, changes their parents, sub-issues, dependencies and labels,
  * reads, creates, changes and deletes labels, starts sessions for the
- * issues, and takes the events of the hooks Hoot adds to the sessions' Claude
- * Code. It listens only where the sessions' environment tells hoot to
- * connect, through a Unix domain socket that only the user can connect to, or
- * on Windows a named pipe.
+ * issues, and takes the events of the hooks Hoot adds to the sessions'
+ * Claude Code and Codex. It listens only where the sessions' environment
+ * tells hoot to connect, through a Unix domain socket that only the user can
+ * connect to, or on Windows a named pipe.
  */
 export class HootServer {
   private readonly server = http.createServer(
@@ -422,8 +422,8 @@ export class HootServer {
       return failure(400, 'The request does not say which session it comes from.')
     }
     const { pathname } = new URL(request.url ?? '/', 'http://hoot')
-    // A chat's session has no project, but its Claude Code's hooks still tell
-    // Hoot when it starts a new conversation.
+    // A chat's session has no project, but its agent's hooks still tell Hoot
+    // which conversation it is in.
     if (pathname === '/hook-events' && request.method === 'POST') {
       if (!this.options.hasSession(sessionId)) return failure(404, 'No such session.')
       const parsed = hookEventReport.safeParse(await readJson(request))

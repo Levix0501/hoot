@@ -1,12 +1,14 @@
 import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { gte } from 'semver'
 import { quote } from 'shell-quote'
 import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
+import { readVersion } from '../agents/version'
 import type { Env } from '../env/env'
 import {
   buildSessionEnv,
@@ -102,6 +104,47 @@ export function claudeCodeHookSettings(hoot: string): string {
   return JSON.stringify({
     hooks: Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [hook] }]])),
   })
+}
+
+/** The first version of Codex that runs a hook in the background, rather than skipping it. */
+export const CODEX_BACKGROUND_HOOKS_VERSION = '0.148.0'
+
+/** How long Hoot waits for Codex to say its version before a session starts. */
+const CODEX_VERSION_TIMEOUT_MS = 10_000
+
+/**
+ * The setting Hoot adds to every Codex session it starts with
+ * `CODEX_BACKGROUND_HOOKS_VERSION` or later, with `-c`, on top of the user's
+ * own: a hook on each message the user submits, which runs hoot's `hook`
+ * command, as the command `hoot` the session's PATH finds first, with the
+ * hook's input, so that the session's hoot reports the conversation the
+ * message went to. It runs in the background, so that it neither delays nor
+ * shows anything in Codex; it prints nothing and always succeeds, so that it
+ * decides nothing. Codex runs it once the user trusted it, which Codex asks
+ * about the first time, naming it by its status message: a change to any of
+ * it, that message included, makes Codex ask again. The user's own hooks
+ * run as well, and a user who turned off Codex's hooks turns off this one
+ * too.
+ */
+export const CODEX_HOOK_SETTING =
+  'hooks.UserPromptSubmit=[{hooks=[{type="command",command="hoot hook",async=true,' +
+  'statusMessage="Let Hoot know which conversation this is"}]}]'
+
+/**
+ * Whether the Codex a session starts runs Hoot's hook: whether its command
+ * says a version of `CODEX_BACKGROUND_HOOKS_VERSION` or later when run with
+ * `--version`, read before each session, as the user may change Codex
+ * while Hoot runs.
+ */
+async function codexRunsHook(command: string, env: Env, cwd: string): Promise<boolean> {
+  const { version } = await readVersion(
+    command,
+    env,
+    cwd,
+    process.platform,
+    CODEX_VERSION_TIMEOUT_MS,
+  )
+  return version !== null && gte(version, CODEX_BACKGROUND_HOOKS_VERSION)
 }
 
 /**
@@ -230,13 +273,13 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
  * Windows, where the command that npm or pnpm makes is a batch file, the tool
  * runs what that points to instead (see `commandProgram`). It runs with the
  * login shell environment and with the arguments the Agents page shows: the
- * YOLO arguments while YOLO mode is on, the chosen model and effort, the
- * extra arguments, and, for Claude Code, its hooks and, when it is sent an
- * issue, the arguments that send it, once the issue's files are written; the
- * launch's cleanup removes their folder. A chat's session also gets the
- * arguments that continue its conversation, and those that send the first
- * message of one it starts with one. Either environment also has what hoot
- * needs to run in the session.
+ * YOLO arguments while YOLO mode is on, the chosen model and effort, and the
+ * extra arguments; then the hooks Hoot adds, to Claude Code and to a Codex
+ * that runs them, and, when Claude Code is sent an issue, the arguments that
+ * send it, once the issue's files are written; the launch's cleanup removes
+ * their folder. A chat's session also gets the arguments that continue its
+ * conversation, and those that send the first message of one it starts with
+ * one. Either environment also has what hoot needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -284,6 +327,15 @@ export async function resolveLaunch(
     hoot: context.hoot,
   })
   const chatArguments = chatLaunchArguments(tool.id, chat)
+  let hookArguments: string[] = []
+  if (tool.id === 'claude') {
+    hookArguments = [
+      '--settings',
+      claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot')),
+    ]
+  } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
+    hookArguments = ['-c', CODEX_HOOK_SETTING]
+  }
   const args = [
     ...program.args,
     ...chatArguments.before,
@@ -291,10 +343,7 @@ export async function resolveLaunch(
       tool: tool.id,
       yoloMode: launch.yoloMode,
       settings: launch.agent,
-      hookSettings:
-        tool.id === 'claude'
-          ? claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot'))
-          : null,
+      hookArguments,
     }),
     ...chatArguments.after,
     ...(chat?.firstMessage === undefined ? [] : firstMessageArguments(tool.id, chat.firstMessage)),

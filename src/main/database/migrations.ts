@@ -228,4 +228,13 @@ export const MIGRATIONS: readonly string[] = [
   -- was, in milliseconds since the Unix epoch.
   ALTER TABLE chats ADD COLUMN deleted_at INTEGER;
   `,
+  // 9: the conversations agents reported.
+  `
+  -- Whether the agent itself reported the conversation the chat or saved
+  -- session is in, which Hoot then does not change by what the agent
+  -- recorded in its folder: 1 when it did, 0 when Hoot read the
+  -- conversation from those records or gave the agent its id.
+  ALTER TABLE chats ADD COLUMN conversation_reported INTEGER NOT NULL DEFAULT 0
+    CHECK (conversation_reported IN (0, 1));
+  `,
 ]

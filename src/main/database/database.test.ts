@@ -368,7 +368,7 @@ describe('the upgrade to labels', () => {
     db.close()
   })
 
-  it('keeps the chats and saved sessions of the version before, none of them deleted', () => {
+  it('keeps the chats and saved sessions of an earlier version, none of them deleted', () => {
     let db = openDatabase(file, MIGRATIONS.slice(0, 7))
     db.exec(`
       INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
@@ -381,7 +381,28 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats ORDER BY id').all()).toEqual(
-      before.map((row) => ({ ...row, deleted_at: null })),
+      before.map((row) => ({ ...row, deleted_at: null, conversation_reported: 0 })),
+    )
+    db.close()
+  })
+
+  it('keeps the chats of the version before, with no conversation an agent reported', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 8))
+    db.exec(`
+      INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
+          created_at, opened_at, project_root, worktree_path, deleted_at)
+        VALUES ('chat', 'codex', '/home/.hoot/chats/codex-1', 'thread', 'T', NULL, 1, 1, 2, NULL,
+          NULL, 5);
+    `)
+    const before = db.prepare('SELECT * FROM chats').all()
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
+    expect(db.prepare('SELECT * FROM chats').all()).toEqual(
+      before.map((row) => ({ ...row, conversation_reported: 0 })),
+    )
+    expect(() => db.exec("UPDATE chats SET conversation_reported = 2 WHERE id = 'chat'")).toThrow(
+      /CHECK constraint/,
     )
     db.close()
   })

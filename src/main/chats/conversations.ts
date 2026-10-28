@@ -51,14 +51,35 @@ function milliseconds(value: unknown): number {
   return Number.NaN
 }
 
-/** The first line of a file, read without reading the rest. */
-async function firstLine(file: string): Promise<string | null> {
+/** The most of a file's first line Hoot reads. */
+const FIRST_LINE_LIMIT = 1024 * 1024
+
+/**
+ * The first line of a file, up to `FIRST_LINE_LIMIT` bytes of it, and
+ * whether more lines follow it, read without reading the rest.
+ */
+async function firstLine(file: string): Promise<{ line: string; more: boolean }> {
   const handle = await fs.open(file, 'r')
   try {
-    const buffer = Buffer.alloc(64 * 1024)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    const end = buffer.subarray(0, bytesRead).indexOf(10)
-    return buffer.subarray(0, end === -1 ? bytesRead : end).toString('utf8')
+    const { size } = await handle.stat()
+    const chunks: Buffer[] = []
+    let length = 0
+    while (length < Math.min(size, FIRST_LINE_LIMIT)) {
+      const buffer = Buffer.alloc(64 * 1024)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, length)
+      if (bytesRead === 0) break
+      const read = buffer.subarray(0, bytesRead)
+      const end = read.indexOf(10)
+      if (end !== -1) {
+        chunks.push(read.subarray(0, end))
+        length += end
+        break
+      }
+      chunks.push(read)
+      length += bytesRead
+    }
+    // The line, its line break, and perhaps a carriage return before it.
+    return { line: Buffer.concat(chunks).toString('utf8'), more: size > length + 2 }
   } finally {
     await handle.close()
   }
@@ -154,7 +175,9 @@ async function codexTitles(home: string): Promise<Map<string, string>> {
  * The conversations Codex recorded in a folder, from the session files it
  * writes there: each starts with the folder and id of its conversation. A
  * conversation starts with its first message, so a folder without one holds
- * none. `null` when the files cannot be read.
+ * none; a file that holds that first line alone, as Codex's shared
+ * background server leaves for a conversation that never got a message,
+ * is none either. `null` when the files cannot be read.
  */
 async function codexConversations(
   home: string,
@@ -172,13 +195,14 @@ async function codexConversations(
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue
     const file = path.join(entry.parentPath, entry.name)
-    let line: string | null
+    let start: { line: string; more: boolean }
     try {
-      line = await firstLine(file)
+      start = await firstLine(file)
     } catch {
       return null
     }
-    const record = line === null ? null : objectLine(line)
+    if (!start.more) continue
+    const record = objectLine(start.line)
     if (!record || record.type !== 'session_meta') continue
     const payload = record.payload
     if (typeof payload !== 'object' || payload === null) continue

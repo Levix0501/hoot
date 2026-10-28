@@ -1386,6 +1386,170 @@ describe('ChatManager', () => {
     })
   }
 
+  /** Starts a session's agent as Hoot does. */
+  const start = async (id: string) => {
+    await manager.prepareSession(id)
+    manager.opened(id)
+  }
+
+  for (const order of ['first', 'second'] as const) {
+    it(`keeps Codex sessions side by side in a worktree on the conversations Codex reported, closing the ${order} first`, async () => {
+      const folder = worktreeFolder('fix-login-bug')
+      const one = manager.createSavedSession('/work/project', folder, 'codex')
+      const two = manager.createSavedSession('/work/project', folder, 'codex')
+      await start(one.id)
+      await start(two.id)
+      manager.typed(one.id, 'session-one', 'one\r')
+      manager.noteHookEvent(one.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+      manager.typed(two.id, 'session-two', 'two\r')
+      manager.noteHookEvent(two.id, hook('UserPromptSubmit', 'thread-two', null, ++clock))
+      // And one out of Hoot, after both.
+      conversations.codex = [
+        { id: 'thread-one', title: 'One', createdAt: clock - 1 },
+        { id: 'thread-two', title: 'Two', createdAt: clock },
+        { id: 'outside', title: 'Outside', createdAt: ++clock },
+      ]
+
+      for (const saved of order === 'first' ? [one, two] : [two, one]) {
+        manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+        await manager.flush()
+      }
+      const expected = [
+        [one.id, 'thread-one'],
+        [two.id, 'thread-two'],
+      ]
+      expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+      const again = await restarted()
+      expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+    })
+  }
+
+  it('keeps a Codex session on the conversation Codex reported when another of its worktree is deleted', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const one = manager.createSavedSession('/work/project', folder, 'codex')
+    const two = manager.createSavedSession('/work/project', folder, 'codex')
+    await start(one.id)
+    await start(two.id)
+    manager.typed(one.id, 'session-one', 'one\r')
+    manager.noteHookEvent(one.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.typed(two.id, 'session-two', 'two\r')
+    manager.noteHookEvent(two.id, hook('UserPromptSubmit', 'thread-two', null, ++clock))
+    await manager.flush()
+    conversations.codex = [
+      { id: 'thread-one', title: 'One', createdAt: clock - 1 },
+      { id: 'thread-two', title: 'Two', createdAt: clock },
+    ]
+
+    manager.sessionEnded(endedSaved(one.id, folder, 'codex'))
+    await manager.delete(one.id)
+    manager.sessionEnded(endedSaved(two.id, folder, 'codex'))
+    await manager.flush()
+
+    expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [two.id, 'thread-two'],
+    ])
+    const again = await restarted()
+    expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [two.id, 'thread-two'],
+    ])
+  })
+
+  it('keeps a Codex session of the project folder on the conversation Codex reported, whatever starts out of Hoot', async () => {
+    const folder = projectFolder()
+    const local = manager.createSavedSession(folder, null, 'codex')
+    await start(local.id)
+    manager.typed(local.id, 'session-local', 'one\r')
+    manager.noteHookEvent(local.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    conversations.codex = [
+      { id: 'thread-one', title: 'One', createdAt: clock },
+      { id: 'outside', title: 'Outside', createdAt: ++clock },
+    ]
+    manager.sessionEnded(endedLocal(local.id, folder, 'codex'))
+    await manager.flush()
+    manager.opened(local.id)
+    const again = await restarted()
+    expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [local.id, 'thread-one'],
+    ])
+
+    // Opened again, it reads nothing of its folder while it sends no message.
+    await again.prepareSession(local.id)
+    again.opened(local.id)
+    conversations.codex.push({ id: 'outside-later', title: 'Outside', createdAt: ++clock })
+    again.sessionEnded(endedLocal(local.id, folder, 'codex'))
+    await again.flush()
+    expect(again.get(local.id)?.conversationId).toBe('thread-one')
+  })
+
+  it('goes on in the conversation Codex reports a message in after /new, /resume or /fork', async () => {
+    const chat = await manager.create('codex')
+    const other = await manager.create('codex')
+    await start(chat.id)
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'thread-theirs', null, ++clock))
+    await manager.flush()
+
+    manager.typed(chat.id, 'session-1', '/new\r')
+    await manager.flush()
+    expect(manager.get(chat.id)?.conversationId).toBe('thread-one')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'thread-two', null, ++clock))
+    await manager.flush()
+    expect(manager.get(chat.id)?.conversationId).toBe('thread-two')
+
+    manager.typed(chat.id, 'session-1', '/resume\r')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'thread-theirs', null, ++clock))
+    await manager.flush()
+    expect(manager.list().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [chat.id, 'thread-theirs'],
+      [other.id, 'thread-theirs'],
+    ])
+
+    manager.typed(chat.id, 'session-1', '/fork\r')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'thread-fork', null, ++clock))
+    // Its agent ends, as it reported, whatever its folder records.
+    conversations.codex = [{ id: 'thread-later', title: 'Later', createdAt: ++clock }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.list().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [chat.id, 'thread-fork'],
+      [other.id, 'thread-theirs'],
+    ])
+    expect((await manager.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: 'thread-fork',
+      resume: true,
+    })
+  })
+
+  it('reads the folder of a Codex session whose later run reported no conversation', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    await start(saved.id)
+    manager.typed(saved.id, 'session-1', 'one\r')
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+
+    // Its hook no longer runs, as when the user took back their trust in it.
+    await start(saved.id)
+    manager.typed(saved.id, 'session-2', '/new\r')
+    manager.typed(saved.id, 'session-2', 'two\r')
+    conversations.codex = [
+      { id: 'thread-one', title: 'One', createdAt: 1 },
+      { id: 'thread-two', title: 'Two', createdAt: ++clock },
+    ]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: saved.id, conversationId: 'thread-two', title: 'Two' }),
+    ])
+    const again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-two')
+  })
+
   it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside

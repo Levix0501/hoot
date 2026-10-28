@@ -483,8 +483,8 @@ function startWithDatabase(database: DatabaseSync): void {
   })
 
   // The chats follow the events of their agents' sessions: the conversation
-  // Claude Code sends a message in, and what an ended process left in the
-  // agent's records.
+  // Claude Code or Codex sends a message in, and what an ended process left
+  // in the agent's records.
   sessions.on('hook-event', (id, report) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)

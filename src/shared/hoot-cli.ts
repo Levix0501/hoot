@@ -19,7 +19,7 @@
  * - `POST /sessions`: starts a session for an issue of the project, from a
  *   `SessionRequest`.
  * - `POST /hook-events`: reports an event of a hook Hoot adds to the
- *   session's Claude Code, from a `HookEventReport`.
+ *   session's Claude Code or Codex, from a `HookEventReport`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
  * answer is a JSON `HootAnswer`.
@@ -187,14 +187,16 @@ export interface SessionRequest {
 
 /**
  * The events of the hooks Hoot adds to every Claude Code session it starts,
- * which hoot reports to Hoot to show what the session is doing: a session
- * started or resumed, or a new conversation started in it (`SessionStart`);
- * a session ended (`SessionEnd`); Claude Code asks the user to approve a tool
- * call or a plan, or to answer a question (`PermissionRequest`); an MCP
- * server asks the user for input (`Elicitation`); a turn starts, on a message
- * of the user's or the notification that a background agent is done
+ * which hoot reports to Hoot to show what the session is doing and which
+ * conversation it is in: a session started or resumed, or a new
+ * conversation started in it (`SessionStart`); a session ended
+ * (`SessionEnd`); Claude Code asks the user to approve a tool call or a
+ * plan, or to answer a question (`PermissionRequest`); an MCP server asks
+ * the user for input (`Elicitation`); a turn starts, on a message of the
+ * user's or the notification that a background agent is done
  * (`UserPromptSubmit`); a turn ends (`Stop`); and a turn stops on an API
- * error (`StopFailure`).
+ * error (`StopFailure`). The hook Hoot adds to Codex is on `UserPromptSubmit`
+ * alone, for the conversation of each message.
  */
 export const HOOK_EVENTS = [
   'SessionStart',
@@ -208,13 +210,13 @@ export const HOOK_EVENTS = [
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
-/** An event of a hook of the session's Claude Code, as hoot reports it. */
+/** An event of a hook of the session's Claude Code or Codex, as hoot reports it. */
 export interface HookEventReport {
-  /** The event, by the name Claude Code gives it. */
+  /** The event, by the name the agent gives it. */
   event: HookEvent
   /**
    * When the hook's hoot started, in milliseconds since the Unix epoch: just
-   * after Claude Code ran the hook, while the report can arrive much later.
+   * after the agent ran the hook, while the report can arrive much later.
    */
   startedAt: number
   /**
@@ -228,8 +230,8 @@ export interface HookEventReport {
    */
   turn: string | null
   /**
-   * The conversation the event belongs to, by the id Claude Code gives it
-   * (the hook's `session_id`), which changes when `/clear` starts another.
+   * The conversation the event belongs to, by the id the agent gives it (the
+   * hook's `session_id`), which changes when `/clear` starts another.
    */
   conversationId?: string | null
   /** Why a `SessionStart` happened: `startup`, `resume`, `clear`, `compact` or `fork`. */

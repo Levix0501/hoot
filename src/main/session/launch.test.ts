@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { quote } from 'shell-quote'
+import { parse as parseToml } from 'smol-toml'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
@@ -12,6 +13,7 @@ import { firstMessage, workflowFileText } from '../../shared/workflow-text'
 import type { WorkflowStep } from '../../shared/workflows'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import {
+  CODEX_HOOK_SETTING,
   claudeCodeHookSettings,
   firstMessageArguments,
   issueFileText,
@@ -442,6 +444,82 @@ describe('resolveLaunch', () => {
     // A folder with a space in its path is still one word of the command.
     expect(JSON.parse(claudeCodeHookSettings('/Users/me/My Apps/Hoot/bin/hoot'))).toMatchObject({
       hooks: { Stop: [{ hooks: [{ command: "'/Users/me/My Apps/Hoot/bin/hoot' hook" }] }] },
+    })
+  })
+
+  it('gives a Codex that runs hooks in the background, and only such a Codex, the hook that reports its conversations', async () => {
+    const folder = path.join(root, 'codex-versions')
+    const loginEnv = { PATH: onPath(folder, '/usr/bin') }
+    const codex = program(folder, 'codex')
+    /** Makes the stand-in Codex say `text` when asked its version. */
+    const says = (text: string) =>
+      writeNodeCommand(
+        path.join(folder, 'codex'),
+        `if (process.argv.includes('--version')) console.log(${JSON.stringify(text)})\n`,
+      )
+    const hookArguments = ['-c', CODEX_HOOK_SETTING]
+    const agents = { codex: { effort: 'high', extraArgs: ['--search'] } }
+    const message = 'Merge the worktree feature-x.'
+
+    // Read again for each session, as Codex may change while Hoot runs.
+    for (const version of ['codex-cli 0.163.0', 'codex-cli 0.148.0', 'codex-cli 0.149.0-alpha.1']) {
+      await says(version)
+      expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
+        ...codex.args,
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'model_reasoning_effort=high',
+        '--search',
+        ...hookArguments,
+      ])
+    }
+    const resumed = await resolveLaunch(context(loginEnv), 'codex', project, null, {
+      conversationId: 'thread-id',
+      resume: true,
+    })
+    expect(resumed.args).toEqual([
+      ...codex.args,
+      'resume',
+      'thread-id',
+      '--dangerously-bypass-approvals-and-sandbox',
+      ...hookArguments,
+    ])
+    const merging = await resolveLaunch(context(loginEnv, {}, false), 'codex', project, null, {
+      conversationId: null,
+      resume: false,
+      firstMessage: message,
+    })
+    expect(merging.args).toEqual([...codex.args, ...hookArguments, '--', message])
+
+    // An older Codex, or one whose version cannot be read, starts as it did.
+    for (const version of ['codex-cli 0.147.0', 'codex-cli 0.148.0-alpha.2', 'codex-cli']) {
+      await says(version)
+      expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
+        ...codex.args,
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'model_reasoning_effort=high',
+        '--search',
+      ])
+    }
+  })
+
+  it('names the hook Codex asks the user to trust, which runs hoot in the background', () => {
+    const separator = CODEX_HOOK_SETTING.indexOf('=')
+    expect(CODEX_HOOK_SETTING.slice(0, separator)).toBe('hooks.UserPromptSubmit')
+    expect(parseToml(`value = ${CODEX_HOOK_SETTING.slice(separator + 1)}`)).toEqual({
+      value: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: 'hoot hook',
+              async: true,
+              statusMessage: 'Let Hoot know which conversation this is',
+            },
+          ],
+        },
+      ],
     })
   })
 

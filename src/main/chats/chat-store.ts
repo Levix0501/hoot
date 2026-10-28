@@ -15,10 +15,12 @@ interface ChatRow {
   created_at: number
   opened_at: number
   deleted_at: number | null
+  conversation_reported: number
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
-                 custom_name, has_messages, created_at, opened_at, deleted_at`
+                 custom_name, has_messages, created_at, opened_at, deleted_at,
+                 conversation_reported`
 
 /**
  * A chat or saved session as the database keeps it: also one the user
@@ -27,6 +29,11 @@ const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_
 export interface StoredChat extends ChatInfo {
   /** Whether the user deleted it, which leaves it out of the sidebar for good. */
   deleted: boolean
+  /**
+   * Whether the agent itself reported the conversation it is in, which Hoot
+   * then does not change by what the agent recorded in its folder.
+   */
+  conversationReported: boolean
 }
 
 function chatFromRow(row: ChatRow): ChatInfo {
@@ -46,7 +53,11 @@ function chatFromRow(row: ChatRow): ChatInfo {
 }
 
 function storedFromRow(row: ChatRow): StoredChat {
-  return { ...chatFromRow(row), deleted: row.deleted_at !== null }
+  return {
+    ...chatFromRow(row),
+    deleted: row.deleted_at !== null,
+    conversationReported: row.conversation_reported === 1,
+  }
 }
 
 function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
@@ -58,6 +69,7 @@ function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
 /** What can change about a chat; what is left out stays as it is. */
 export interface ChatChanges {
   conversationId?: string | null
+  conversationReported?: boolean
   title?: string
   customName?: string | null
   hasMessages?: boolean
@@ -105,7 +117,8 @@ export class ChatStore {
       ),
       update: db.prepare(
         `UPDATE chats
-         SET conversation_id = ?, title = ?, custom_name = ?, has_messages = ?, opened_at = ?
+         SET conversation_id = ?, conversation_reported = ?, title = ?, custom_name = ?,
+             has_messages = ?, opened_at = ?
          WHERE id = ?`,
       ),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
@@ -167,6 +180,7 @@ export class ChatStore {
     if (!chat) return false
     this.statements.update.run(
       changes.conversationId === undefined ? chat.conversationId : changes.conversationId,
+      (changes.conversationReported ?? chat.conversationReported) ? 1 : 0,
       changes.title ?? chat.title,
       changes.customName === undefined ? chat.customName : changes.customName,
       (changes.hasMessages ?? chat.hasMessages) ? 1 : 0,

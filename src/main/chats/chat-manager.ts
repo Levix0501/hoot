@@ -164,6 +164,11 @@ export class ChatManager extends EventEmitter<{
   /** The sessions whose agent was told to leave its conversation for a new one. */
   private readonly leftForNew = new Set<string>()
   /**
+   * The sessions in which the user typed Enter or a character of the line:
+   * in a Codex session, the digits typed first are not one.
+   */
+  private readonly typedInput = new Set<string>()
+  /**
    * The title each chat had when its agent was last told to leave its
    * conversation for another, until a message there takes the chat with it.
    */
@@ -448,7 +453,9 @@ export class ChatManager extends EventEmitter<{
    * pick an item of a list. It is taken for a message only where a message
    * starts a conversation, which Hoot then finds in the agent's records: in
    * a chat without a conversation yet, and once the agent was told to leave
-   * its conversation for a new one.
+   * its conversation for a new one. Digits typed first in a Codex session
+   * may answer Codex's review of its hooks, which shows before its input box
+   * and takes a digit with no Enter after it: they are not part of the line.
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
@@ -460,6 +467,12 @@ export class ChatManager extends EventEmitter<{
     for (const [index, part] of parts.entries()) {
       if (index > 0) recalled = true
       for (const character of visibleInput(part)) {
+        if (!this.typedInput.has(sessionId)) {
+          if (chat.toolId === 'codex' && /^[1-9]$/.test(character)) continue
+          if (character === '\r' || character === '\n' || character >= ' ') {
+            this.typedInput.add(sessionId)
+          }
+        }
         if (character === '\r' || character === '\n') {
           const command = line.trim()
           const startsConversation = chat.conversationId === null || this.leftForNew.has(sessionId)
@@ -520,6 +533,7 @@ export class ChatManager extends EventEmitter<{
     this.typing.delete(session.id)
     this.recalled.delete(session.id)
     this.leftForNew.delete(session.id)
+    this.typedInput.delete(session.id)
     const run: EndedRun = {
       startedAt: this.runStartedAt.get(id) ?? null,
       messaged: this.messaged.has(id),

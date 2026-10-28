@@ -748,6 +748,72 @@ describe('ChatManager', () => {
     ])
   })
 
+  it('leaves out of what is typed the digits typed first in a Codex session, which may answer its review of hooks', async () => {
+    // A new chat whose review was answered with 3, then Enter alone: it goes.
+    const unused = await manager.create('codex')
+    await manager.prepareSession(unused.id)
+    manager.opened(unused.id)
+    manager.typed(unused.id, 'session-1', '\x1b[I3')
+    manager.typed(unused.id, 'session-1', '\r')
+    manager.sessionEnded(ended(unused.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(unused.id)).toBeUndefined()
+
+    // A chat with a conversation whose review was answered with 3, which then
+    // left its conversation with /new and sent no message, while a
+    // conversation started out of Hoot in its folder.
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-2', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: 1 }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.setTitle(chat.id, 'One')
+    manager.typed(chat.id, 'session-3', '3')
+    manager.typed(chat.id, 'session-3', '/new\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'outside', title: 'Outside', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-1' })
+
+    // Opened again, its /new after 3 is a command: the chat goes on in the
+    // next conversation once a message is sent there, recalled here, with the
+    // title Codex set for that one.
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-4', '3/new\r')
+    manager.setTitle(chat.id, 'Topic two')
+    manager.typed(chat.id, 'session-4', '\x1b[A\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'thread-2', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-2', title: 'Topic two' })
+
+    // Digits typed later are typed, as are those of a message after other keys.
+    const counted = await manager.create('codex')
+    await manager.prepareSession(counted.id)
+    manager.opened(counted.id)
+    manager.typed(counted.id, 'session-5', '\r3\r')
+    manager.sessionEnded(ended(counted.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(counted.id)).toMatchObject({ hasMessages: true })
+
+    // OpenCode shows no such review: a digit typed first is typed.
+    const openCode = await manager.create('opencode')
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-6', '3\r')
+    await manager.flush()
+    expect(manager.get(openCode.id)).toMatchObject({ hasMessages: true })
+  })
+
   it('goes on to no conversation that started before its agent did', async () => {
     const folder = worktreeFolder('fix-login-bug')
     const saved = manager.createSavedSession('/work/project', folder, 'codex')

@@ -20,6 +20,7 @@ import {
   type InspectWorktreeResult,
   type NewWorktreeOptionsResult,
   type RemoveWorktreeResult,
+  type WorktreeBranch,
   type WorktreeInfo,
   type WorktreeInspection,
 } from '../../shared/worktrees'
@@ -33,6 +34,7 @@ import {
 } from '../git/git'
 import { InspectionError, inspectMembers, type MemberToCheck } from './inspection'
 import type { WorktreeLayout } from './layout'
+import { checkedOutBranch, isMergedInto } from './merge'
 import {
   findInnerRepositories,
   forgetLinkedWorktree,
@@ -167,6 +169,11 @@ interface Member {
   /** Relative to the worktree root; empty for the outer member. */
   relativePath: string
   label: string
+}
+
+/** A member of a worktree with the branch it has checked out, `null` when detached. */
+interface MemberBranch extends Member {
+  branch: string | null
 }
 
 /** Deeper relative paths first, as worktree members are deleted. */
@@ -726,16 +733,21 @@ export class WorktreeService extends EventEmitter<{
   /**
    * Deletes a worktree: its inner members, deeper ones first, then its outer
    * member, with everything in its root, and then the registrations of other
-   * linked worktrees that were inside the root. Branches are kept. Unless
-   * `discard` is set, a worktree with anything to lose is not deleted. Once
-   * nothing stops the deletion, `endSessions` ends the sessions running in
-   * the worktree, and what they change until they end is deleted with it.
+   * linked worktrees that were inside the root. Branches are kept, unless
+   * `deleteMergedBranches` is set: then, once the worktree is deleted, the
+   * branch of each of its members that is merged, as it is then, into the
+   * branch checked out in the project folder in its repository is deleted
+   * too. Unless `discard` is set, a worktree with anything to lose is not
+   * deleted. Once nothing stops the deletion, `endSessions` ends the sessions
+   * running in the worktree, and what they change until they end is deleted
+   * with it.
    */
   async delete(
     projectRoot: string,
     worktreePath: string,
     discard: boolean,
     endSessions: () => Promise<void> = async () => {},
+    deleteMergedBranches = false,
   ): Promise<DeleteWorktreeResult> {
     const state = this.projects.get(projectRoot)
     if (!state)
@@ -744,7 +756,13 @@ export class WorktreeService extends EventEmitter<{
     // registration while Git deletes it.
     state.busy.add(worktreePath)
     try {
-      return await this.deleteMembers(state, worktreePath, discard, endSessions)
+      return await this.deleteMembers(
+        state,
+        worktreePath,
+        discard,
+        endSessions,
+        deleteMergedBranches,
+      )
     } finally {
       state.busy.delete(worktreePath)
     }
@@ -755,6 +773,7 @@ export class WorktreeService extends EventEmitter<{
     worktreePath: string,
     discard: boolean,
     endSessions: () => Promise<void>,
+    deleteMergedBranches: boolean,
   ): Promise<DeleteWorktreeResult> {
     // Its inner members are found as when checking it.
     await this.discover(state)
@@ -792,6 +811,11 @@ export class WorktreeService extends EventEmitter<{
     }
     // Also a session that started while the worktree was checked.
     await endSessions()
+    // The members' branches as they are once nothing changes them any more,
+    // which can only be deleted once the worktree is.
+    const branched = deleteMergedBranches
+      ? await this.memberBranches(context, state, entry.path, branchOf(entry))
+      : []
     const members = await this.membersOf(context, state, entry.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
       // Only the outer member's lock, checked above, makes the worktree
@@ -814,8 +838,36 @@ export class WorktreeService extends EventEmitter<{
     }
     await this.clearRegistrationsWithin(context, state, entry.path)
     this.options.records.remove(entry.path)
+    const problems = await this.deleteMergedBranches(context, branched)
     await this.refresh(state)
-    return { ok: true }
+    return problems.length > 0 ? { ok: true, warning: problems.join('\n\n') } : { ok: true }
+  }
+
+  /**
+   * Deletes the branches of the members of a worktree just deleted that are
+   * merged now into the branch checked out in the project folder in their
+   * repository; the others stay. Returns why any could not be deleted.
+   */
+  private async deleteMergedBranches(
+    context: GitContext,
+    members: readonly MemberBranch[],
+  ): Promise<string[]> {
+    const problems: string[] = []
+    for (const member of members) {
+      if (member.branch === null) continue
+      const current = await checkedOutBranch(context, member.repository)
+      if (current === null) continue
+      if (!(await isMergedInto(context, member.repository, member.branch, current))) continue
+      // Forced, as it was just found merged into the branch checked out:
+      // without, Git would compare it with its upstream instead, if it has one.
+      const result = await git(context, ['-C', member.repository, 'branch', '-D', member.branch])
+      if (result.code !== 0) {
+        problems.push(
+          `Could not delete the branch ${member.branch} in ${member.label}: ${gitErrorMessage(result)}`,
+        )
+      }
+    }
+    return problems
   }
 
   /**
@@ -1118,6 +1170,76 @@ export class WorktreeService extends EventEmitter<{
     }
   }
 
+  /**
+   * The members of the worktree at a root, the outer member first, with the
+   * branch each has checked out, as Git lists them in their repositories,
+   * also an inner member whose folder is gone.
+   */
+  private async memberBranches(
+    context: GitContext,
+    state: ProjectState,
+    root: string,
+    outerBranch: string | null,
+  ): Promise<MemberBranch[]> {
+    const members: MemberBranch[] = [
+      {
+        repository: state.root,
+        path: root,
+        relativePath: '',
+        label: state.name,
+        branch: outerBranch,
+      },
+    ]
+    for (const repository of state.inner ?? []) {
+      const memberPath = path.join(root, repository.relativePath)
+      const result = await git(context, [
+        '-C',
+        repository.path,
+        'worktree',
+        'list',
+        '--porcelain',
+        '-z',
+      ])
+      if (result.code !== 0) continue
+      const entry = parseWorktreeList(result.stdout)
+        .slice(1)
+        .find((candidate) => candidate.path === memberPath)
+      if (!entry) continue
+      members.push({
+        repository: repository.path,
+        path: memberPath,
+        relativePath: repository.relativePath,
+        label: repository.relativePath,
+        branch: branchOf(entry),
+      })
+    }
+    return members
+  }
+
+  /**
+   * The branches of the members of the worktree at a root, each with the
+   * branch checked out in the project folder in its repository, and whether
+   * it is merged into that one.
+   */
+  private async branchesOf(
+    context: GitContext,
+    state: ProjectState,
+    root: string,
+    outerBranch: string | null,
+  ): Promise<WorktreeBranch[]> {
+    const members = await this.memberBranches(context, state, root, outerBranch)
+    return Promise.all(
+      members.map(async (member): Promise<WorktreeBranch> => {
+        const current = await checkedOutBranch(context, member.repository)
+        const merged =
+          member.branch !== null &&
+          current !== null &&
+          (await isMergedInto(context, member.repository, member.branch, current))
+        return { repository: member.label, branch: member.branch, current, merged }
+      }),
+    )
+  }
+
   private async inspectEntry(
     context: GitContext,
     state: ProjectState,
@@ -1133,7 +1255,8 @@ export class WorktreeService extends EventEmitter<{
     return {
       root: entry.path,
       innerMembers: present.map((member) => member.path),
-      branch: entry.branch ? shortBranchName(entry.branch) : null,
+      branch: branchOf(entry),
+      branches: await this.branchesOf(context, state, entry.path, branchOf(entry)),
       changes,
       foreignRepositories,
     }
@@ -1288,6 +1411,11 @@ export class WorktreeService extends EventEmitter<{
       })
     return state.discovering
   }
+}
+
+/** The branch a worktree entry has checked out, without `refs/heads/`; `null` when detached. */
+function branchOf(entry: WorktreeEntry): string | null {
+  return entry.branch ? shortBranchName(entry.branch) : null
 }
 
 /** Git's output for a member, introduced by its name. */

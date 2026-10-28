@@ -591,11 +591,16 @@ export interface HootApi {
   readWorktrees(projectRoot: string): Promise<WorktreeInfo[] | null>
   /** Checks what deleting a worktree would delete and lose. */
   inspectWorktree(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult>
-  /** Deletes a worktree; with `discard` false, only one with nothing to lose. */
+  /**
+   * Deletes a worktree; with `discard` false, only one with nothing to lose.
+   * With `deleteMergedBranches`, then the branch of each of its members that
+   * is merged into the branch checked out in the project folder too.
+   */
   deleteWorktree(
     projectRoot: string,
     worktreePath: string,
     discard: boolean,
+    deleteMergedBranches: boolean,
   ): Promise<DeleteWorktreeResult>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:

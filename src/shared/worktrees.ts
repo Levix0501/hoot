@@ -182,6 +182,24 @@ export interface RepositoryChanges {
   detachedCommits: boolean
 }
 
+/**
+ * The branch a member of a worktree has checked out, and whether it is merged
+ * into the branch checked out in the project folder in the member's repository.
+ */
+export interface WorktreeBranch {
+  /** The project name for the outer member, otherwise the path relative to the root. */
+  repository: string
+  /** The branch the member has checked out, or `null` when detached. */
+  branch: string | null
+  /**
+   * The branch checked out in the repository's working directory in the
+   * project folder, or `null` when its HEAD is on no branch.
+   */
+  current: string | null
+  /** The member's branch points to `current`, or to a commit in its history. */
+  merged: boolean
+}
+
 /** What deleting a worktree would delete, and what would be lost with it. */
 export interface WorktreeInspection {
   root: string
@@ -189,6 +207,8 @@ export interface WorktreeInspection {
   innerMembers: string[]
   /** The branch of the outer member, which is kept, or `null` when detached. */
   branch: string | null
+  /** The branches of the outer member and of every inner member, in that order. */
+  branches: WorktreeBranch[]
   /** The repositories that have uncommitted changes or detached commits. */
   changes: RepositoryChanges[]
   /** Repositories inside the root that are not part of the worktree, relative to the root. */
@@ -204,7 +224,11 @@ export type InspectWorktreeResult =
   | { ok: false; message: string }
 
 export type DeleteWorktreeResult =
-  | { ok: true }
+  | {
+      ok: true
+      /** Set when a merged branch that was to be deleted with the worktree could not be. */
+      warning?: string
+    }
   | {
       ok: false
       /** `changed`: changes appeared since the check; `inspection` says which. */

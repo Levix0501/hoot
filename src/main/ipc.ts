@@ -910,14 +910,20 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle(IpcChannel.deleteWorktree, async (_event, ...args): Promise<DeleteWorktreeResult> => {
-    const parsed = z.tuple([projectRoot, z.string().min(1), z.boolean()]).safeParse(args)
+    const parsed = z
+      .tuple([projectRoot, z.string().min(1), z.boolean(), z.boolean().optional()])
+      .safeParse(args)
     if (!parsed.success) return { ok: false, reason: 'not-found', message: 'Invalid request.' }
-    const [root, worktreePath, discard] = parsed.data
+    const [root, worktreePath, discard, deleteMergedBranches] = parsed.data
     // The sessions running in it end first, also those in a project's worktree
     // inside it, which deleting it deletes: the window closes those it listed
     // before asking, and any that started since close here.
-    const result = await deps.worktrees.delete(root, worktreePath, discard, () =>
-      deps.sessions.closeRunningWithin(worktreePath),
+    const result = await deps.worktrees.delete(
+      root,
+      worktreePath,
+      discard,
+      () => deps.sessions.closeRunningWithin(worktreePath),
+      deleteMergedBranches === true,
     )
     // Its sessions, which have all ended, close with it, also those of a
     // project's worktree inside it, and so do its saved sessions. A worktree

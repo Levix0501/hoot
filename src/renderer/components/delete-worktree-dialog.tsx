@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { alsoDeleteLabel, branchesNote, type NotePart } from '../../shared/worktree-branches'
 import {
   inspectionIsClean,
   type RepositoryChanges,
@@ -22,14 +23,42 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog'
+import { Checkbox } from './ui/checkbox'
+import { Label } from './ui/label'
 import { Spinner } from './ui/spinner'
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-/** The folders that deleting the worktree deletes, and the branches it keeps. */
-function WhatIsDeleted({ inspection }: { inspection: WorktreeInspection }) {
+/** Text of the dialog, with the names from the user's repositories marked as theirs. */
+function Note({ parts }: { parts: readonly NotePart[] }) {
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.user ? (
+          <span key={index} data-user-text="">
+            {part.text}
+          </span>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  )
+}
+
+/**
+ * The folders that deleting the worktree deletes, and what becomes of the
+ * branches: kept, unless the merged ones are to be deleted with it.
+ */
+function WhatIsDeleted({
+  inspection,
+  deleteBranches,
+}: {
+  inspection: WorktreeInspection
+  deleteBranches: boolean
+}) {
   const folders = [inspection.root, ...inspection.innerMembers]
   return (
     <div className="grid gap-1.5">
@@ -49,14 +78,12 @@ function WhatIsDeleted({ inspection }: { inspection: WorktreeInspection }) {
         ))}
       </ul>
       <p data-testid="worktree-delete-branches">
-        {inspection.branch === null ? (
-          'No branch will be deleted.'
-        ) : (
-          <>
-            The branch <span data-user-text="">{inspection.branch}</span> will be kept
-            {inspection.innerMembers.length > 0 ? ' in every repository.' : '.'}
-          </>
-        )}
+        {branchesNote(inspection, deleteBranches).map((sentence, index) => (
+          <span key={index}>
+            {index > 0 && ' '}
+            <Note parts={sentence} />
+          </span>
+        ))}
       </p>
     </div>
   )
@@ -199,7 +226,9 @@ function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
         <WhatIsLost inspection={deletion.inspection} />
       )}
       {deletion.inspection && sessions.length > 0 && <RunningSessions names={sessions} />}
-      {deletion.inspection && <WhatIsDeleted inspection={deletion.inspection} />}
+      {deletion.inspection && (
+        <WhatIsDeleted inspection={deletion.inspection} deleteBranches={deletion.deleteBranches} />
+      )}
       {deletion.error && (
         <p
           className="font-mono text-xs whitespace-pre-wrap text-destructive"
@@ -216,13 +245,17 @@ function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
 
 /**
  * Asks before a worktree is deleted, after checking it: what will be
- * deleted, that branches are kept, the sessions still running in it, which
- * end first, and, repository by repository, the changes, detached commits
- * and foreign repositories that would be lost.
+ * deleted, what becomes of its branches, the sessions still running in it,
+ * which end first, and, repository by repository, the changes, detached
+ * commits and foreign repositories that would be lost. While the branch of
+ * any repository of it is merged into the one checked out in the project
+ * folder, a checkbox, checked each time the dialog opens, deletes the merged
+ * branches with it; the others are kept.
  */
 export function DeleteWorktreeDialog() {
   const deletion = useAppStore((state) => state.worktreeDeletion)
   const answer = useAppStore((state) => state.answerDeleteWorktree)
+  const setDeleteBranches = useAppStore((state) => state.setDeleteWorktreeBranches)
   // Kept while the dialog fades out after the answer.
   const [shown, setShown] = useState<WorktreeDeletion | null>(null)
   if (deletion !== null && deletion !== shown) setShown(deletion)
@@ -230,6 +263,8 @@ export function DeleteWorktreeDialog() {
   const dirty = current?.inspection ? !inspectionIsClean(current.inspection) : false
   const deleting = current?.phase === 'deleting'
   const ready = current?.phase === 'confirm' && current.inspection !== null
+  const alsoDelete =
+    current?.inspection && current.phase !== 'checking' ? alsoDeleteLabel(current.inspection) : null
 
   return (
     <AlertDialog
@@ -253,6 +288,19 @@ export function DeleteWorktreeDialog() {
             {current && <DeletionBody deletion={current} />}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {current && alsoDelete !== null && (
+          <Label className="font-normal [overflow-wrap:anywhere]">
+            <Checkbox
+              checked={current.deleteBranches}
+              onCheckedChange={setDeleteBranches}
+              disabled={deleting}
+              data-testid="worktree-delete-branches-checkbox"
+            />
+            <span>
+              <Note parts={alsoDelete} />
+            </span>
+          </Label>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={deleting} data-testid="worktree-delete-cancel">
             Cancel

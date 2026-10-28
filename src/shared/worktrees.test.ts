@@ -54,7 +54,14 @@ describe('isWithin', () => {
 
 describe('inspectionIsClean', () => {
   it('is clean without changes and without foreign repositories', () => {
-    const base = { root: '/r', innerMembers: [], branch: 'b', changes: [], foreignRepositories: [] }
+    const base = {
+      root: '/r',
+      innerMembers: [],
+      branch: 'b',
+      branches: [],
+      changes: [],
+      foreignRepositories: [],
+    }
     expect(inspectionIsClean(base)).toBe(true)
     expect(inspectionIsClean({ ...base, foreignRepositories: ['x'] })).toBe(false)
     expect(

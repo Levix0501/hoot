@@ -786,6 +786,13 @@ describe('WorktreeService', () => {
         root: R,
         innerMembers: [path.join(R, 'inner')],
         branch: 'feat/m',
+        // Made from main without commits of their own, they are merged into it.
+        branches: ['project', 'inner', 'inner/deep'].map((repository) => ({
+          repository,
+          branch: 'feat/m',
+          current: 'main',
+          merged: true,
+        })),
         changes: [],
         foreignRepositories: [],
       },
@@ -869,6 +876,12 @@ describe('WorktreeService', () => {
         root: R,
         innerMembers: [path.join(R, 'inner')],
         branch: 'feat/n',
+        branches: ['project', 'inner'].map((repository) => ({
+          repository,
+          branch: 'feat/n',
+          current: 'main',
+          merged: true,
+        })),
         changes: [{ repository: 'inner', files: ['work.txt'], total: 1, detachedCommits: false }],
         foreignRepositories: [],
       },
@@ -1408,5 +1421,74 @@ describe('WorktreeService', () => {
     expect(await service.submodules(project, [{ relativePath: 'inner', base: 'develop' }])).toEqual(
       [],
     )
+  })
+
+  /**
+   * A worktree named Feature X, on the branch feature-x, with a member in
+   * inner, whose members each have a commit main does not have.
+   */
+  async function worktreeToMerge(): Promise<string> {
+    await start()
+    const created = await service.createNamed({
+      projectRoot: project,
+      name: 'Feature X',
+      toolId: 'claude',
+      base: 'main',
+      nested: [{ relativePath: 'inner', base: 'main' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    for (const member of [created.path, path.join(created.path, 'inner')]) {
+      fs.writeFileSync(path.join(member, 'work.txt'), 'work\n')
+      git(member, 'add', '.')
+      git(member, 'commit', '-q', '-m', 'work')
+    }
+    return created.path
+  }
+
+  it('tells which branches of a worktree are merged into the ones checked out in the project folder', async () => {
+    const R = await worktreeToMerge()
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    const inspected = await service.inspect(project, R)
+    expect(inspected.ok && inspected.inspection.branches).toEqual([
+      { repository: 'project', branch: 'feature-x', current: 'main', merged: false },
+      { repository: 'inner', branch: 'feature-x', current: 'main', merged: true },
+    ])
+    git(inner, 'checkout', '-q', '--detach')
+    git(path.join(R, 'inner'), 'checkout', '-q', '--detach')
+    const detached = await service.inspect(project, R)
+    expect(detached.ok && detached.inspection.branches[1]).toEqual({
+      repository: 'inner',
+      branch: null,
+      current: null,
+      merged: false,
+    })
+  })
+
+  it('deletes with a worktree, when asked, the branches merged into the project folder’s as they are then', async () => {
+    const R = await worktreeToMerge()
+    git(project, 'merge', '-q', '--no-edit', 'feature-x')
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    // A commit made since the confirmation showed: that branch is no longer merged.
+    git(R, 'commit', '-q', '--allow-empty', '-m', 'late')
+    expect(await service.delete(project, R, false, async () => {}, true)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(branches(project)).toContain('feature-x')
+    expect(branches(inner)).not.toContain('feature-x')
+  })
+
+  it('says which merged branch it could not delete with the worktree, which is deleted', async () => {
+    const R = await worktreeToMerge()
+    git(project, 'merge', '-q', '--no-edit', 'feature-x')
+    git(inner, 'merge', '-q', '--no-edit', 'feature-x')
+    // Git changes no branch whose lock file is there.
+    fs.writeFileSync(path.join(inner, '.git', 'refs', 'heads', 'feature-x.lock'), '')
+    const result = await service.delete(project, R, false, async () => {}, true)
+    expect(result).toMatchObject({
+      ok: true,
+      warning: expect.stringContaining('Could not delete the branch feature-x in inner: '),
+    })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(branches(project)).not.toContain('feature-x')
+    expect(branches(inner)).toContain('feature-x')
   })
 })

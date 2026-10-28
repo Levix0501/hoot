@@ -74,6 +74,7 @@ import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../.
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
+import { mergedBranches } from '../../shared/worktree-branches'
 import {
   inspectionIsClean,
   isWithin,
@@ -255,6 +256,12 @@ export interface WorktreeDeletion {
   endingSessions: string[] | null
   /** What went wrong while checking or deleting. */
   error: string | null
+  /**
+   * Whether the branches merged into the project folder's are to be deleted
+   * with the worktree, as its checkbox says, checked each time the dialog
+   * opens; it shows only while one is merged.
+   */
+  deleteBranches: boolean
 }
 
 /**
@@ -770,6 +777,8 @@ export interface AppState {
    * deleting it.
    */
   requestDeleteWorktree(projectRoot: string, path: string): void
+  /** Checks or unchecks deleting the merged branches with the worktree asked about. */
+  setDeleteWorktreeBranches(checked: boolean): void
   answerDeleteWorktree(confirmed: boolean): Promise<void>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
@@ -3444,6 +3453,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           inspection: null,
           endingSessions: null,
           error: null,
+          deleteBranches: true,
         }
         set({ worktreeDeletion: deletion })
         const result = await api
@@ -3456,6 +3466,12 @@ export const useAppStore = create<AppState>()((set, get) => {
             : { ...deletion, phase: 'confirm', error: result.message },
         })
       })()
+    },
+
+    setDeleteWorktreeBranches(checked) {
+      const deletion = get().worktreeDeletion
+      if (deletion === null || deletion.phase !== 'confirm') return
+      set({ worktreeDeletion: { ...deletion, deleteBranches: checked } })
     },
 
     async answerDeleteWorktree(confirmed) {
@@ -3478,8 +3494,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ worktreeDeletion: deleting })
       await Promise.allSettled(running.map((session) => get().closeSession(session.id)))
       const discard = running.length > 0 || !inspectionIsClean(deletion.inspection)
+      // Only as the checkbox says, when it shows.
+      const deleteBranches =
+        deletion.deleteBranches && mergedBranches(deletion.inspection).length > 0
       const result = await api
-        .deleteWorktree(deletion.projectRoot, deletion.path, discard)
+        .deleteWorktree(deletion.projectRoot, deletion.path, discard, deleteBranches)
         .catch((error: unknown) => ({
           ok: false as const,
           reason: 'failed' as const,
@@ -3491,6 +3510,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         set({ worktreeDeletion: null })
         closeEndedSessionsWithin(deletion.path)
         forgetCollapsedWorktree(deletion.path)
+        if (result.warning !== undefined) {
+          toast.warning('The worktree was deleted, but not every branch.', {
+            description: result.warning,
+          })
+        }
         return
       }
       // Something to lose appeared since the check: ask again, listing it.

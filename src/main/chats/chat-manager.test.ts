@@ -7,6 +7,7 @@ import type { HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import { openDatabase } from '../database/database'
 import { ChatManager, newConversationId, ownConversations, visibleInput } from './chat-manager'
+import { ChatStore } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
 class FakeConversations implements ChatConversations {
@@ -31,9 +32,10 @@ const hook = (
   event: HookEventReport['event'],
   conversationId: string | null,
   source: string | null = null,
+  startedAt = 1_000,
 ): HookEventReport => ({
   event,
-  startedAt: 1_000,
+  startedAt,
   subagent: false,
   turn: null,
   conversationId,
@@ -138,6 +140,25 @@ describe('ChatManager', () => {
     return again
   }
 
+  /**
+   * Adds a chat that an earlier version of Hoot split off from a chat, in the
+   * same folder, with a conversation of its own, and returns its id.
+   */
+  const splitOff = (chatId: string, conversationId: string): string => {
+    const chat = manager.get(chatId)!
+    const id = `split-${conversationId}`
+    new ChatStore(db).insert({
+      ...chat,
+      id,
+      conversationId,
+      title: '',
+      customName: null,
+      hasMessages: true,
+      createdAt: ++clock,
+    })
+    return id
+  }
+
   /** A worktree's folder, with a file in it. */
   const worktreeFolder = (name: string): string => {
     const folder = path.join(root, 'worktrees', name)
@@ -236,7 +257,8 @@ describe('ChatManager', () => {
       launch: { conversationId: null, resume: false },
     })
 
-    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: 1 }]
+    manager.typed(codex.id, 'session-1', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
     manager.sessionEnded(ended(codex.id, 'codex'))
     await manager.flush()
     expect(await manager.prepareSession(codex.id)).toMatchObject({
@@ -249,89 +271,153 @@ describe('ChatManager', () => {
     })
   })
 
-  it('splits off the conversation Claude Code left at /clear, named by its title', async () => {
+  it('goes on in the conversation Claude Code went to at /clear once a message is sent there, adding no chat', async () => {
     const chat = await manager.create('claude')
+    const first = chat.conversationId!
     manager.setTitle(chat.id, '✳ Fix the login')
-    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
     await manager.flush()
     expect(manager.get(chat.id)?.hasMessages).toBe(true)
 
-    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear'))
+    manager.typed(chat.id, 'session-1', '/clear\r')
+    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear', 2_000))
     await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({
+        id: chat.id,
+        conversationId: first,
+        hasMessages: true,
+        title: '✳ Fix the login',
+      }),
+    ])
 
-    const chats = manager.list()
-    expect(chats).toHaveLength(2)
-    expect(manager.get(chat.id)).toMatchObject({
-      conversationId: 'new-conversation',
-      hasMessages: false,
-      title: '',
-      customName: null,
-    })
-    const split = chats.find((entry) => entry.id !== chat.id)!
-    expect(split).toMatchObject({
-      conversationId: chat.conversationId,
-      title: '✳ Fix the login',
-      folder: chat.folder,
-      hasMessages: true,
-    })
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'new-conversation', null, 3_000))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({
+        id: chat.id,
+        conversationId: 'new-conversation',
+        hasMessages: true,
+        title: '',
+        customName: null,
+      }),
+    ])
   })
 
-  it('names the conversation Claude Code leaves at /clear by its title at that moment', async () => {
+  it('names a chat after the title Claude Code gives the conversation it went on to', async () => {
     const chat = await manager.create('claude')
     manager.setTitle(chat.id, '✳ Old conversation')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
     await manager.flush()
 
-    // The title of the next conversation comes in before the hook that tells of it,
-    // and the terminal's answers to its queries are part of the input too.
+    // The title of the next conversation comes in before the hook that tells
+    // of its message, and the terminal's answers to its queries are part of
+    // the input too.
     manager.typed(chat.id, 'session-1', '\x1b[?1;2c\x1b[<35;56;20M/clear\r')
+    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear', 2_000))
     manager.setTitle(chat.id, '✳ New conversation')
-    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear'))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'new-conversation', null, 3_000))
     await manager.flush()
-
     expect(manager.get(chat.id)?.title).toBe('✳ New conversation')
-    const split = manager.list().find((entry) => entry.id !== chat.id)!
-    expect(split.title).toBe('✳ Old conversation')
+
+    // A title that only shows Claude Code at work on the conversation it left
+    // is not the next one's.
+    manager.typed(chat.id, 'session-1', '/clear\r')
+    manager.setTitle(chat.id, '◐ New conversation')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'third-conversation', null, 4_000))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'third-conversation', title: '' })
   })
 
-  it('leaves only the conversation a Claude Code chat left when /clear gets no message', async () => {
+  it('keeps the name the user gave a chat that goes on to another conversation', async () => {
     const chat = await manager.create('claude')
-    manager.setTitle(chat.id, '✳ Old conversation')
+    manager.rename(chat.id, 'My task')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
+    manager.typed(chat.id, 'session-1', '/clear\r')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'next', null, 2_000))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'next', customName: 'My task' })
+  })
+
+  it('keeps a Claude Code chat in its conversation when the next one gets no message', async () => {
+    const chat = await manager.create('claude')
+    const first = chat.conversationId!
+    manager.setTitle(chat.id, '✳ Old conversation')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
     await manager.flush()
     manager.typed(chat.id, 'session-1', '/clear\r')
-    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear'))
+    manager.noteHookEvent(chat.id, hook('SessionStart', 'new-conversation', 'clear', 2_000))
     await manager.flush()
-    expect(manager.list()).toHaveLength(2)
 
-    // The new conversation never got a message: the chat goes, its split stays.
-    conversations.claude = false
+    conversations.claude = true
     manager.sessionEnded(ended(chat.id, 'claude'))
     await manager.flush()
-    const chats = manager.list()
-    expect(chats).toHaveLength(1)
-    expect(chats[0]).toMatchObject({
-      conversationId: chat.conversationId,
-      title: '✳ Old conversation',
-      hasMessages: true,
+    expect(manager.list()).toEqual([
+      expect.objectContaining({
+        id: chat.id,
+        conversationId: first,
+        title: '✳ Old conversation',
+        hasMessages: true,
+      }),
+    ])
+    expect((await manager.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: first,
+      resume: true,
     })
   })
 
-  it('does not split the conversation a Claude Code chat compacts', async () => {
+  it('goes on in the conversation Claude Code resumes or branches to, another chat’s too', async () => {
+    const one = await manager.create('claude')
+    const two = await manager.create('claude')
+    const theirs = two.conversationId!
+    manager.noteHookEvent(one.id, hook('UserPromptSubmit', one.conversationId!))
+    manager.noteHookEvent(two.id, hook('UserPromptSubmit', theirs))
+    await manager.flush()
+
+    manager.typed(one.id, 'session-1', '/resume\r')
+    manager.noteHookEvent(one.id, hook('SessionStart', theirs, 'resume', 2_000))
+    manager.noteHookEvent(one.id, hook('UserPromptSubmit', theirs, null, 3_000))
+    await manager.flush()
+    expect(manager.list().map((chat) => [chat.id, chat.conversationId])).toEqual([
+      [two.id, theirs],
+      [one.id, theirs],
+    ])
+
+    manager.noteHookEvent(one.id, hook('SessionStart', 'branch', 'fork', 4_000))
+    manager.noteHookEvent(one.id, hook('UserPromptSubmit', 'branch', null, 5_000))
+    await manager.flush()
+    expect(manager.get(one.id)?.conversationId).toBe('branch')
+    expect(manager.get(two.id)?.conversationId).toBe(theirs)
+  })
+
+  it('leaves a chat in the conversation it went on to when a message of the one it left is told late', async () => {
+    const chat = await manager.create('claude')
+    const first = chat.conversationId!
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first, null, 1_000))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'next', null, 3_000))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first, null, 2_000))
+    await manager.flush()
+    expect(manager.get(chat.id)?.conversationId).toBe('next')
+  })
+
+  it('does not change the conversation of a Claude Code chat that compacts it', async () => {
     const chat = await manager.create('claude')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId!))
     await manager.flush()
-    manager.noteHookEvent(chat.id, hook('SessionStart', chat.conversationId, 'compact'))
+    manager.typed(chat.id, 'session-1', '/compact\r')
+    manager.noteHookEvent(chat.id, hook('SessionStart', chat.conversationId, 'compact', 2_000))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', chat.conversationId, null, 3_000))
     await manager.flush()
-    expect(manager.list()).toHaveLength(1)
-    expect(manager.get(chat.id)).toMatchObject({
-      conversationId: chat.conversationId,
-      hasMessages: true,
-    })
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ conversationId: chat.conversationId, hasMessages: true }),
+    ])
   })
 
-  it('splits off an earlier Codex conversation when the process ends', async () => {
+  it('goes on in the newest Codex conversation when the process ends, listing no other', async () => {
     const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-1', 'first question\r')
+    manager.typed(chat.id, 'session-1', '/new\r')
+    manager.typed(chat.id, 'session-1', 'second question\r')
     conversations.codex = [
       { id: 'thread-old', title: 'Old work', createdAt: 1 },
       { id: 'thread-new', title: 'New work', createdAt: 2 },
@@ -339,72 +425,94 @@ describe('ChatManager', () => {
     manager.sessionEnded(ended(chat.id, 'codex'))
     await manager.flush()
 
-    const chats = manager.list()
-    expect(chats).toHaveLength(2)
-    expect(manager.get(chat.id)).toMatchObject({
-      conversationId: 'thread-new',
-      hasMessages: true,
-    })
-    const split = chats.find((entry) => entry.id !== chat.id)!
-    expect(split).toMatchObject({
-      conversationId: 'thread-old',
-      title: 'Old work',
-      folder: chat.folder,
-      hasMessages: true,
-    })
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'thread-new', hasMessages: true }),
+    ])
   })
 
-  it('splits an OpenCode chat at /new even when the new conversation gets no message', async () => {
+  it('keeps an OpenCode chat in its conversation after /new until a message is sent in the next one', async () => {
     const chat = await manager.create('opencode')
     const old = chat.conversationId!
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
     manager.typed(chat.id, 'session-1', 'first question\r')
-    await manager.flush()
-    expect(manager.get(chat.id)?.hasMessages).toBe(true)
-
     manager.typed(chat.id, 'session-1', '/new\r')
     await manager.flush()
-    expect(manager.get(chat.id)).toMatchObject({
-      conversationId: null,
-      hasMessages: false,
-      title: '',
-    })
-    expect(manager.list()).toHaveLength(2)
-
-    // No conversation was started after `/new`: the chat goes, and the one it
-    // left stays.
-    conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: old, hasMessages: true }),
+    ])
+    conversations.opencode = [{ id: old, title: 'First', createdAt: clock }]
     manager.sessionEnded(ended(chat.id, 'opencode'))
     await manager.flush()
-    expect(manager.list()).toHaveLength(1)
-    expect(manager.list()[0]).toMatchObject({ conversationId: old, title: 'First' })
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: old, hasMessages: true }),
+    ])
+
+    // Opened again, it goes on to the conversation `/new` started there once
+    // that got a message, named by the title OpenCode recorded for it.
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.setTitle(chat.id, 'First')
+    manager.typed(chat.id, 'session-2', '/new\r')
+    manager.typed(chat.id, 'session-2', 'second question\r')
+    conversations.opencode = [
+      { id: old, title: 'First', createdAt: 1 },
+      { id: 'ses_second', title: 'Second', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'opencode'))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'ses_second', title: 'Second' }),
+    ])
   })
 
-  it('does not keep a chat whose agent ignored `/new` and stayed in the conversation', async () => {
-    const chat = await manager.create('opencode')
-    const old = chat.conversationId!
-    manager.typed(chat.id, 'session-1', 'first question\r')
+  it('leaves a chat in its conversation when its run sent no message', async () => {
+    const chat = await manager.create('codex')
+    manager.typed(chat.id, 'session-1', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: 1 }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
     await manager.flush()
-    manager.typed(chat.id, 'session-1', '/new\r')
-    await manager.flush()
-    manager.typed(chat.id, 'session-1', 'second question\r')
-    await manager.flush()
-    expect(manager.list()).toHaveLength(2)
 
-    // The agent ignored `/new`: its records hold the first conversation only,
-    // which the split chat keeps; the chat that went on is the leftover.
-    conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
-    const again = new ChatManager({ db, conversations, home: path.join(root, 'home') })
-    await again.reconcileAll()
-    const chats = again.list()
-    expect(chats).toHaveLength(1)
-    expect(chats[0]).toMatchObject({
-      conversationId: old,
-      title: 'First',
-      hasMessages: true,
-    })
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-2', '/new\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'thread-2', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'thread-1' }),
+    ])
   })
 
-  it('keeps a chat whose agent only ran other slash commands without a message', async () => {
+  it('goes on to no conversation that started before its agent did', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    await manager.prepareSession(saved.id)
+    manager.opened(saved.id)
+    manager.typed(saved.id, 'session-1', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+
+    // Another conversation in the worktree, out of Hoot, before it is opened again.
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: clock - 1 },
+      { id: 'outside', title: 'Outside', createdAt: ++clock },
+    ]
+    await manager.prepareSession(saved.id)
+    manager.opened(saved.id)
+    manager.typed(saved.id, 'session-2', 'another question\r')
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: saved.id, conversationId: 'thread-1' }),
+    ])
+  })
+
+  it('removes a chat whose agent only ran slash commands, without a message', async () => {
     const chat = await manager.create('codex')
     manager.typed(chat.id, 'session-1', '/model\r')
     await manager.flush()
@@ -414,6 +522,7 @@ describe('ChatManager', () => {
     await manager.flush()
     expect(manager.list()).toEqual([])
   })
+
   it('keeps a chat whose message the agent did not record, as when a request failed', async () => {
     const chat = await manager.create('codex')
     manager.typed(chat.id, 'session-1', 'Reply with the single word: ok\r')
@@ -452,33 +561,27 @@ describe('ChatManager', () => {
     expect(fs.statSync(claude.folder).isDirectory()).toBe(true)
   })
 
-  it('lets only the chat opened last take a conversation no chat has', async () => {
-    const chat = await manager.create('opencode')
-    const first = chat.conversationId!
-    conversations.opencode = [
-      { id: first, title: 'First', createdAt: 1 },
-      { id: 'ses_second', title: 'Second', createdAt: 2 },
-    ]
-    await manager.reconcileAll()
-    const split = manager.list().find((entry) => entry.id !== chat.id)!
-
-    // A third conversation no chat has, as a /new whose chat did not say so.
-    conversations.opencode = [
-      { id: first, title: 'First', createdAt: 1 },
-      { id: 'ses_second', title: 'Second', createdAt: 2 },
+  it('lets only the session opened last go on to a conversation no session has', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const { first, second, firstConversation, secondConversation, record } = await twoSavedSessions(
+      'opencode',
+      folder,
+    )
+    record([
+      { id: firstConversation, title: 'First', createdAt: 1 },
+      { id: secondConversation, title: 'Second', createdAt: 2 },
       { id: 'ses_third', title: 'Third', createdAt: 3 },
-    ]
+    ])
     await manager.reconcileAll()
 
-    expect(manager.list()).toHaveLength(3)
-    expect(manager.get(chat.id)?.conversationId).toBe('ses_third')
-    expect(manager.get(split.id)?.conversationId).toBe(first)
-    expect(manager.list().filter((entry) => entry.conversationId === 'ses_third')).toHaveLength(1)
+    expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [first.id, firstConversation],
+      [second.id, 'ses_third'],
+    ])
   })
 
   it('reads what happened while Hoot was not running when it starts', async () => {
     const chat = await manager.create('opencode')
-    const folder = chat.folder
     const first = chat.conversationId!
     conversations.opencode = [
       { id: first, title: 'First', createdAt: 1 },
@@ -486,24 +589,15 @@ describe('ChatManager', () => {
     ]
 
     await manager.reconcileAll()
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'ses_second', hasMessages: true }),
+    ])
 
-    const chats = manager.list()
-    expect(chats).toHaveLength(2)
-    expect(manager.get(chat.id)).toMatchObject({
-      conversationId: 'ses_second',
-      hasMessages: true,
-    })
-    expect(chats.find((entry) => entry.id !== chat.id)).toMatchObject({
-      conversationId: first,
-      title: 'First',
-      folder,
-    })
-
-    // Reading again does not split the same conversation twice.
+    // Reading again changes nothing.
     await manager.reconcileAll()
-    expect(manager.list()).toHaveLength(2)
-    expect(manager.get(chat.id)?.conversationId).toBe('ses_second')
-    expect(manager.list().find((entry) => entry.id !== chat.id)?.conversationId).toBe(first)
+    expect(manager.list()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'ses_second' }),
+    ])
   })
 
   it('keeps a saved session of a worktree apart from the chats, with its folder as it is', () => {
@@ -617,7 +711,7 @@ describe('ChatManager', () => {
     expect(await manager.prepareSession(gone.id)).toBeNull()
   })
 
-  it('splits a saved session’s conversation off below the same worktree, after it', async () => {
+  it('goes on in a saved session’s next conversation, adding no session below its worktree', async () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
     const saved = manager.createSavedSession('/work/project', worktree, 'codex')
@@ -625,32 +719,15 @@ describe('ChatManager', () => {
       { id: 'first', title: 'First', createdAt: 1 },
       { id: 'second', title: 'Second', createdAt: 2 },
     ]
-    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', null, null))
+    manager.typed(saved.id, 'session-1', 'first question\r')
     manager.typed(saved.id, 'session-1', '/new\r')
-    manager.sessionEnded({
-      id: 'session-1',
-      projectRoot: '/work/project',
-      worktreePath: worktree,
-      chatId: null,
-      savedSessionId: saved.id,
-      toolId: 'codex',
-      issueId: null,
-      status: 'exited',
-      exit: { code: 0, signal: null, abnormal: false },
-    })
+    manager.typed(saved.id, 'session-1', 'second question\r')
+    manager.sessionEnded(endedSaved(saved.id, worktree, 'codex'))
     await manager.flush()
 
-    const split = manager.listSavedSessions()
-    expect(split).toHaveLength(2)
-    expect(split[0]!.id).toBe(saved.id)
-    expect(split[1]).toMatchObject({
-      folder: worktree,
-      projectRoot: '/work/project',
-      worktreePath: worktree,
-      toolId: 'codex',
-      conversationId: 'first',
-    })
-    expect(manager.get(saved.id)?.conversationId).toBe('second')
+    expect(manager.listSavedSessions()).toEqual([
+      expect.objectContaining({ id: saved.id, conversationId: 'second' }),
+    ])
   })
 
   it('deletes a Claude Code chat for good, leaving the shared folder and what is in it', async () => {
@@ -736,6 +813,7 @@ describe('ChatManager', () => {
     const first = manager.createSavedSession('/work/project', folder, 'codex')
     conversations.codex = [{ id: 'thread-1', title: 'First', createdAt: 1 }]
     manager.opened(first.id)
+    manager.typed(first.id, 'session-first', 'first question\r')
     manager.sessionEnded(endedSaved(first.id, folder, 'codex'))
     await manager.flush()
     const second = manager.createSavedSession('/work/project', folder, 'codex')
@@ -775,75 +853,18 @@ describe('ChatManager', () => {
     ])
   })
 
-  it('keeps the conversation a deleted Codex chat went on to after /new from the chat it split off', async () => {
-    const chat = await manager.create('codex')
-    manager.opened(chat.id)
-    manager.typed(chat.id, 'session-1', 'first question\r')
-    manager.typed(chat.id, 'session-1', '/new\r')
-    manager.typed(chat.id, 'session-1', 'second question\r')
-    conversations.codex = [
-      { id: 'thread-1', title: 'First', createdAt: 1 },
-      { id: 'thread-2', title: 'Second', createdAt: 2 },
-    ]
-    manager.sessionEnded(ended(chat.id, 'codex'))
-    await manager.flush()
-    const split = manager.list().find((entry) => entry.id !== chat.id)!
-    expect(split.conversationId).toBe('thread-1')
-    expect(manager.get(chat.id)?.conversationId).toBe('thread-2')
-    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
-
-    await manager.delete(chat.id)
-
-    // The folder stays while the other chat runs in it.
-    expect(trashed).toEqual([])
-    expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
-    manager.opened(split.id)
-    const again = await restarted()
-    expect(again.list()).toEqual([
-      expect.objectContaining({ id: split.id, conversationId: 'thread-1' }),
-    ])
-  })
-
-  it('keeps the conversation a deleted OpenCode chat went on to after /new from the chat it left', async () => {
-    const chat = await manager.create('opencode')
-    const old = chat.conversationId!
-    manager.opened(chat.id)
-    manager.typed(chat.id, 'session-1', 'first question\r')
-    manager.typed(chat.id, 'session-1', '/new\r')
-    manager.typed(chat.id, 'session-1', 'second question\r')
-    await manager.flush()
-    const split = manager.list().find((entry) => entry.id !== chat.id)!
-    expect(split.conversationId).toBe(old)
-
-    // Deleted while it still ran, before Hoot learned the conversation it went on to.
-    conversations.opencode = [
-      { id: old, title: 'First', createdAt: 1 },
-      { id: 'ses_second', title: 'Second', createdAt: 2 },
-    ]
-    manager.sessionEnded(ended(chat.id, 'opencode'))
-    await manager.delete(chat.id)
-
-    manager.opened(split.id)
-    const again = await restarted()
-    expect(again.list()).toEqual([expect.objectContaining({ id: split.id, conversationId: old })])
-  })
-
   it('moves the folder of a deleted chat to the Trash with what is in it, once no other chat runs in it', async () => {
     const chat = await manager.create('opencode')
     const old = chat.conversationId!
     manager.typed(chat.id, 'session-1', 'first question\r')
-    manager.typed(chat.id, 'session-1', '/new\r')
-    manager.typed(chat.id, 'session-1', 'second question\r')
-    conversations.opencode = [
-      { id: old, title: 'First', createdAt: 1 },
-      { id: 'ses_second', title: 'Second', createdAt: 2 },
-    ]
+    conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
     manager.sessionEnded(ended(chat.id, 'opencode'))
     await manager.flush()
-    const split = manager.list().find((entry) => entry.id !== chat.id)!
+    // A chat an earlier version of Hoot split off from it, in the same folder.
+    const split = splitOff(chat.id, 'ses_earlier')
     fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
 
-    await manager.delete(split.id)
+    await manager.delete(split)
     expect(trashed).toEqual([])
     expect(fs.readdirSync(chat.folder)).toEqual(['notes.txt'])
     expect(manager.list().map((entry) => entry.id)).toEqual([chat.id])
@@ -893,58 +914,6 @@ describe('ChatManager', () => {
       before.saved.filter((entry) => entry.id !== first.id),
     )
   })
-
-  for (const toolId of ['codex', 'opencode'] as const) {
-    for (const kind of ['saved session', 'chat'] as const) {
-      it(`leaves the conversation a running ${toolId} ${kind} went on to after /new to it when the one split off is deleted`, async () => {
-        const folder = worktreeFolder('fix-login-bug')
-        const made =
-          kind === 'chat'
-            ? await manager.create(toolId)
-            : manager.createSavedSession('/work/project', folder, toolId)
-        const listed = (from: ChatManager) =>
-          kind === 'chat' ? from.list() : from.listSavedSessions()
-        const end = () =>
-          manager.sessionEnded(
-            kind === 'chat' ? ended(made.id, toolId) : endedSaved(made.id, folder, toolId),
-          )
-        const record = (list: AgentConversation[]) => {
-          if (toolId === 'codex') conversations.codex = list
-          else conversations.opencode = list
-        }
-        const first = made.conversationId ?? 'thread-1'
-        manager.opened(made.id)
-        manager.typed(made.id, 'session-1', 'first question\r')
-        record([{ id: first, title: 'First', createdAt: 1 }])
-        end()
-        await manager.flush()
-        // Opened again, it starts another conversation, whose id Hoot learns
-        // once its agent ends.
-        manager.opened(made.id)
-        manager.typed(made.id, 'session-2', '/new\r')
-        manager.typed(made.id, 'session-2', 'second question\r')
-        await manager.flush()
-        const split = listed(manager).find((entry) => entry.id !== made.id)!
-        expect(split.conversationId).toBe(first)
-        record([
-          { id: first, title: 'First', createdAt: 1 },
-          { id: 'second', title: 'Second', createdAt: 2 },
-        ])
-
-        await manager.delete(split.id)
-        end()
-        await manager.flush()
-
-        expect(listed(manager)).toEqual([
-          expect.objectContaining({ id: made.id, conversationId: 'second' }),
-        ])
-        const again = await restarted()
-        expect(listed(again)).toEqual([
-          expect.objectContaining({ id: made.id, conversationId: 'second' }),
-        ])
-      })
-    }
-  }
 
   it('leaves the conversation a running session started to it when a session without one is deleted', async () => {
     const folder = worktreeFolder('fix-login-bug')
@@ -1143,7 +1112,7 @@ describe('ChatManager', () => {
       ])
     })
 
-    it(`splits off what a ${toolId} session of the project folder left at /new, and nothing older`, async () => {
+    it(`goes on in what a ${toolId} session of the project folder went on to at /new, and nothing older`, async () => {
       const folder = projectFolder()
       record(outside)
       const local = manager.createSavedSession(folder, null, toolId)
@@ -1160,18 +1129,11 @@ describe('ChatManager', () => {
       manager.sessionEnded(endedLocal(local.id, folder, toolId))
       await manager.flush()
 
-      const listed = manager.listSavedSessions()
-      expect(listed.map((entry) => [entry.id === local.id, entry.conversationId])).toEqual([
-        [true, 'thread-2'],
-        [false, first],
+      expect(manager.listSavedSessions()).toEqual([
+        expect.objectContaining({ id: local.id, conversationId: 'thread-2', worktreePath: null }),
       ])
-      expect(listed[1]).toMatchObject({ folder, projectRoot: folder, worktreePath: null })
-      // The one split off keeps its conversation, which began before it was split off.
       const again = await restarted()
-      expect(again.listSavedSessions().map((entry) => entry.conversationId)).toEqual([
-        'thread-2',
-        first,
-      ])
+      expect(again.listSavedSessions().map((entry) => entry.conversationId)).toEqual(['thread-2'])
     })
 
     it(`gives a new ${toolId} session of the project folder nothing from before it, once the others are deleted`, async () => {
@@ -1279,7 +1241,7 @@ describe('ChatManager', () => {
       // The conversation the later one started is not the earlier one's.
       expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
         [earlier.id, own],
-        [later.id, null],
+        [later.id, later.conversationId],
       ])
 
       manager.sessionEnded(endedLocal(later.id, folder, toolId))
@@ -1318,7 +1280,7 @@ describe('ChatManager', () => {
       }
     })
 
-    it(`removes a ${toolId} session of the project folder left empty at /new while another runs, and nothing else`, async () => {
+    it(`keeps a ${toolId} session of the project folder on its conversation after /new without a message while another runs`, async () => {
       const folder = projectFolder()
       const { earlier, own, later } = await sideBySide(folder)
       manager.typed(earlier.id, 'session-earlier-2', '/new\r')
@@ -1327,17 +1289,14 @@ describe('ChatManager', () => {
       manager.sessionEnded(endedLocal(earlier.id, folder, toolId))
       manager.sessionEnded(endedLocal(later.id, folder, toolId))
       await manager.flush()
-      // The conversation it left stays as a session of its own.
-      const listed = manager.listSavedSessions()
-      expect(listed.map((entry) => entry.id)).not.toContain(earlier.id)
-      expect(listed.map((entry) => [entry.id === later.id, entry.conversationId])).toEqual([
-        [true, 'thread-later'],
-        [false, own],
+      expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+        [earlier.id, own],
+        [later.id, 'thread-later'],
       ])
     })
   }
 
-  it('still splits off every earlier conversation of a worktree for a saved session there', async () => {
+  it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside
     const saved = manager.createSavedSession('/work/project', folder, 'codex')
@@ -1347,11 +1306,9 @@ describe('ChatManager', () => {
     manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
     await manager.flush()
 
-    expect(manager.listSavedSessions().map((entry) => entry.conversationId)).toEqual([
-      'own',
-      'outside-1',
-      'outside-2',
-    ])
+    expect(manager.listSavedSessions().map((entry) => entry.conversationId)).toEqual(['own'])
+    const again = await restarted()
+    expect(again.listSavedSessions().map((entry) => entry.conversationId)).toEqual(['own'])
   })
 })
 

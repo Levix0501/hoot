@@ -6,10 +6,10 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { inProjectFolder, type ChatInfo, type SavedSessionInfo } from '../../shared/chats'
 import type { HookEventReport } from '../../shared/hoot-cli'
-import type { SessionInfo } from '../../shared/session'
+import { defaultSessionName, type SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
 import type { ChatLaunch } from '../session/launch'
-import { ChatStore, type StoredChat } from './chat-store'
+import { ChatStore } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
 /** What a saved session is made with, besides its folder and its agent. */
@@ -59,21 +59,45 @@ export function visibleInput(data: string): string {
 // oxlint-enable no-control-regex
 
 /**
+ * The commands with which an agent leaves its conversation for another in a
+ * session: a new one, one it had before, or a branch of the one it is in.
+ */
+const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
+  claude: ['/clear', '/resume', '/branch'],
+  codex: ['/new', '/clear', '/resume', '/fork'],
+  opencode: ['/new', '/clear'],
+}
+
+/** How a run of a chat's agent went, as Hoot saw it, once its process ended. */
+interface EndedRun {
+  /** When Hoot began to start the agent, if it did. */
+  startedAt: number | null
+  /** Whether Hoot saw a message sent in it: one typed, or the first message it started with. */
+  messaged: boolean
+  /** The title the chat had when its agent was told to leave its conversation, if it was. */
+  titleAtSwitch: string | undefined
+}
+
+/**
  * The chats Hoot lists in the sidebar, and the saved sessions it lists below
  * their worktrees and their projects' Local rows, and what running them
  * takes: the folder each agent runs in (a chat's own under `~/.hoot/chats`,
- * for a saved session a worktree's root or its project's own folder), the
- * conversation its agent continues, and the new conversation an agent starts
- * with `/clear` or `/new`.
+ * for a saved session a worktree's root or its project's own folder), and the
+ * conversation its agent continues.
  *
- * It reads the agent's own records when a chat's process ends, and when Hoot
- * starts, to tell whether the chat's conversation got a message, to learn the
- * ids of the conversations an agent started since, and to split off the
- * conversations that came before them as chats of their own. A project's own
- * folder may hold conversations from before Hoot ran an agent there: a saved
- * session in it never takes up, nor splits off, one that started before the
- * session was made; once its agent ends, not one that started before Hoot
- * began to start that agent either, which may be another session's there.
+ * A chat is in one conversation at a time. When its agent leaves it for
+ * another, as with `/clear` or `/new`, the chat goes on in the next one once a
+ * message is sent there, and the one it left is no longer listed: the agent's
+ * own records keep it. Claude Code tells of the conversation each message
+ * goes to through its hooks. For Codex and OpenCode, Hoot reads the agent's
+ * own records when a chat's process ends, and when Hoot starts, to tell
+ * whether the chat's conversation got a message and which conversation a
+ * chat went on to; it never lists a conversation it finds there as a chat of
+ * its own. A project's own folder may hold conversations from before Hoot ran
+ * an agent there: a saved session in it never takes up one that started
+ * before the session was made; once its agent ends, not one that started
+ * before Hoot began to start that agent either, which may be another
+ * session's there.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -96,14 +120,17 @@ export class ChatManager extends EventEmitter<{
   private readonly running = new Set<string>()
   /** The line being typed in each chat's session, for the commands that start another conversation. */
   private readonly typing = new Map<string, string>()
-  /** The title a Claude Code chat had when `/clear` was typed, for the chat its conversation leaves. */
-  private readonly clearTitles = new Map<string, string>()
-  /** The title each chat had before the last one its agent set. */
-  private readonly previousTitles = new Map<string, string>()
-  /** When the conversation a Claude Code chat is in started, by the hook that told of it. */
-  private readonly conversationStartedAt = new Map<string, number>()
+  /**
+   * The title each chat had when its agent was last told to leave its
+   * conversation for another, until a message there takes the chat with it.
+   */
+  private readonly titlesAtSwitch = new Map<string, string>()
+  /** When the hook that told of the latest message of each chat's conversation ran. */
+  private readonly messageReportedAt = new Map<string, number>()
   /** When Hoot last began to start each chat's agent, before its process ran. */
   private readonly runStartedAt = new Map<string, number>()
+  /** The chats whose agent Hoot saw sent a message since it began to start it. */
+  private readonly messaged = new Set<string>()
   /** The first messages of the saved sessions whose agents have not started yet. */
   private readonly firstMessages = new Map<string, string>()
 
@@ -237,8 +264,9 @@ export class ChatManager extends EventEmitter<{
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
     const chat = this.chats.get(id)
     if (!chat || chat.deleted) return null
-    this.clearTitles.delete(id)
-    this.conversationStartedAt.delete(id)
+    this.titlesAtSwitch.delete(id)
+    this.messageReportedAt.delete(id)
+    this.messaged.delete(id)
     this.runStartedAt.set(id, this.now())
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
@@ -250,6 +278,7 @@ export class ChatManager extends EventEmitter<{
     }
     const resume = chat.hasMessages && conversationId !== null
     const firstMessage = this.firstMessages.get(id)
+    if (firstMessage !== undefined && !resume) this.messaged.add(id)
     return {
       folder: chat.folder,
       launch: {
@@ -288,72 +317,68 @@ export class ChatManager extends EventEmitter<{
     // A program clears its title when it ends; the last title it set stays,
     // so that the chat's name does not change when it exits.
     if (title === '') return
-    this.previousTitles.set(id, chat.title)
     this.chats.update(id, { title })
     this.emitChanged()
   }
 
   /**
-   * Notes an event of a Claude Code hook of a chat's session: its first
-   * message, or the new conversation `/clear` starts. A conversation that
-   * had messages and is left for another stays as a chat of its own.
+   * Notes an event of a Claude Code hook of a chat's session: a message sent
+   * in a conversation, which the chat goes on in from then on, or the
+   * conversation Claude Code goes to as it leaves the one the chat is in,
+   * which the chat does not go on in before a message is sent there. A hook
+   * that ran before the one that told of the chat's latest message tells of
+   * a conversation the chat may have left since.
    */
   noteHookEvent(chatId: string, report: HookEventReport): void {
-    if (report.event !== 'SessionStart' && report.event !== 'UserPromptSubmit') return
-    const started = report.conversationId ?? null
+    const reported = report.conversationId ?? null
+    if (reported === null) return
+    if (report.event === 'SessionStart') {
+      void this.enqueue(chatId, async () => {
+        const chat = this.chats.get(chatId)
+        if (!chat || chat.deleted || chat.conversationId === null) return
+        if (reported !== chat.conversationId) this.noteSwitch(chatId, chat.title)
+      })
+      return
+    }
+    if (report.event !== 'UserPromptSubmit') return
     void this.enqueue(chatId, async () => {
       const chat = this.chats.get(chatId)
       if (!chat || chat.deleted) return
-      if (started === null) {
-        if (report.event === 'UserPromptSubmit' && !chat.hasMessages) {
+      if (report.startedAt < (this.messageReportedAt.get(chatId) ?? 0)) return
+      this.messageReportedAt.set(chatId, report.startedAt)
+      if (reported === chat.conversationId) {
+        if (!chat.hasMessages) {
           this.chats.update(chatId, { hasMessages: true })
           this.emitChanged()
         }
         return
       }
-      if (started !== chat.conversationId) {
-        // A message submitted before the conversation it belongs to changed
-        // is not a message of the next one.
-        if (
-          report.event === 'UserPromptSubmit' &&
-          report.startedAt < (this.conversationStartedAt.get(chatId) ?? 0)
-        ) {
-          return
-        }
-        this.conversationStartedAt.set(chatId, report.startedAt)
-        const before = this.clearTitles.get(chatId)
-        if (chat.conversationId !== null && chat.hasMessages) {
-          // The title the conversation had when `/clear` was typed, before
-          // Claude Code set the next one, if the title came in meanwhile; or
-          // the title before the latest one.
-          const previous = this.previousTitles.get(chatId)
-          const title = before ?? (previous ? previous : chat.title)
-          this.insertSplit(chat, {
-            id: chat.conversationId,
-            title: title === '' ? null : title,
-            createdAt: chat.createdAt,
-          })
-        }
-        this.clearTitles.delete(chatId)
-        this.chats.update(chatId, {
-          conversationId: started,
-          hasMessages: report.event === 'UserPromptSubmit',
-          // A title Claude Code already set for the new conversation stays.
-          title: before !== undefined && chat.title !== before ? chat.title : '',
-        })
-        this.emitChanged()
-        return
-      }
-      if (report.event === 'UserPromptSubmit' && !chat.hasMessages) {
-        this.chats.update(chatId, { hasMessages: true })
-        this.emitChanged()
-      }
+      const titleAtSwitch = this.titlesAtSwitch.get(chatId)
+      this.titlesAtSwitch.delete(chatId)
+      this.chats.update(chatId, {
+        conversationId: reported,
+        hasMessages: true,
+        title:
+          chat.conversationId === null ? chat.title : titleAfterSwitch(chat, titleAtSwitch, null),
+      })
+      this.emitChanged()
     })
   }
 
   /**
-   * Notes what the user types in a chat, which a Codex or OpenCode agent can
-   * start another conversation with, or that in Claude Code `/clear` does.
+   * Notes that the chat's agent was told to leave its conversation for
+   * another, with the title the chat had then, the one its agent gave the
+   * conversation it leaves: once the chat goes on in the next one, a title
+   * the agent sets after this one is that conversation's.
+   */
+  private noteSwitch(chatId: string, title: string): void {
+    if (!this.titlesAtSwitch.has(chatId)) this.titlesAtSwitch.set(chatId, title)
+  }
+
+  /**
+   * Notes what the user types in a chat: the messages the user sends, which
+   * a Codex or OpenCode chat's conversation has from then on, and the
+   * commands that leave the conversation for another.
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
@@ -363,15 +388,15 @@ export class ChatManager extends EventEmitter<{
       if (character === '\r' || character === '\n') {
         const command = line.trim()
         line = ''
-        if (chat.toolId === 'claude') {
-          // Claude Code reports `/clear` through its hooks; the title it had
-          // before it started the next conversation names the one it leaves.
-          if (command === '/clear') this.clearTitles.set(chatId, chat.title)
-        } else if (command === '/new' || command === '/clear') {
-          this.resetConversation(chatId, chat.title)
-        } else if (command !== '' && !command.startsWith('/')) {
-          this.markMessages(chatId)
+        if (command === '') continue
+        if (command.startsWith('/')) {
+          const name = command.split(/\s/, 1)[0] ?? ''
+          if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
+          continue
         }
+        this.messaged.add(chatId)
+        // Claude Code tells of its messages through its hooks.
+        if (chat.toolId !== 'claude') this.markMessages(chatId)
         continue
       }
       if (character === '\x7f' || character === '\b') {
@@ -384,23 +409,6 @@ export class ChatManager extends EventEmitter<{
       if (line.length > 10_000) line = ''
     }
     this.typing.set(sessionId, line)
-  }
-
-  /** Starts a conversation anew in the chat, keeping the one it had as a chat of its own. */
-  private resetConversation(chatId: string, title: string): void {
-    void this.enqueue(chatId, async () => {
-      const chat = this.chats.get(chatId)
-      if (!chat) return
-      if (chat.conversationId !== null && chat.hasMessages) {
-        this.insertSplit(chat, {
-          id: chat.conversationId,
-          title: title === '' ? null : title,
-          createdAt: chat.createdAt,
-        })
-      }
-      this.chats.update(chatId, { conversationId: null, hasMessages: false, title: '' })
-      this.emitChanged()
-    })
   }
 
   /** Notes that the user sent a message in the chat, which its conversation now has. */
@@ -419,10 +427,15 @@ export class ChatManager extends EventEmitter<{
     if (id === null || session.status !== 'exited') return
     this.running.delete(id)
     this.typing.delete(session.id)
-    // The conversations its agent started, started once Hoot began to start it.
-    const since = this.runStartedAt.get(id) ?? null
+    const run: EndedRun = {
+      startedAt: this.runStartedAt.get(id) ?? null,
+      messaged: this.messaged.has(id),
+      titleAtSwitch: this.titlesAtSwitch.get(id),
+    }
     this.runStartedAt.delete(id)
-    void this.enqueue(id, () => this.reconcileChat(id, since))
+    this.messaged.delete(id)
+    this.titlesAtSwitch.delete(id)
+    void this.enqueue(id, () => this.reconcileChat(id, run))
   }
 
   /**
@@ -483,13 +496,16 @@ export class ChatManager extends EventEmitter<{
 
   /**
    * Reads what the chat's agent recorded: whether its conversation got a
-   * message, and which conversations it holds. When the agent left the chat's
-   * conversation for a later one, the conversation it left becomes a chat of
-   * its own, and the chat continues the newest; when its conversation never
-   * got a message, the chat goes. `runStartedAt` is when Hoot began to start
-   * the agent whose process just ended, if it did.
+   * message, and which conversation the chat went on to. A Codex or OpenCode
+   * chat without a conversation takes up the newest one no other chat has,
+   * and one with a conversation goes on to the newest that came after it,
+   * when it is the chat opened last in its folder; a conversation either
+   * leaves is no longer the chat's, nor any other's. A run in which Hoot saw
+   * no message sent leaves the chat in the conversation it was in. When the
+   * chat's conversation never got a message, the chat goes. `run` is how the
+   * run of the agent whose process just ended went, if one did.
    */
-  private async reconcileChat(chatId: string, runStartedAt: number | null = null): Promise<void> {
+  private async reconcileChat(chatId: string, run: EndedRun | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.
     if (this.running.has(chatId)) return
     let chat = this.chats.get(chatId)
@@ -514,8 +530,6 @@ export class ChatManager extends EventEmitter<{
       return
     }
 
-    chat = this.chats.get(chatId)
-    if (!chat) return
     const recorded =
       chat.toolId === 'codex'
         ? await this.conversations.codexConversations(chat.folder)
@@ -524,62 +538,69 @@ export class ChatManager extends EventEmitter<{
     if (recorded === null) return
     chat = this.chats.get(chatId)
     if (!chat) return
-    const conversations = ownConversations(chat, recorded, runStartedAt)
-    // The conversations that already belong to a chat of their own: those
-    // this chat leaves for another stay as chats, and are not taken again.
+    const conversations = ownConversations(chat, recorded, run?.startedAt ?? null)
+    const conversationId = chat.conversationId
+    const current = conversations.findIndex((conversation) => conversation.id === conversationId)
+    if (run !== null && !run.messaged) {
+      // The agent went on to no other conversation without a message; a
+      // conversation that never got one leaves the chat with none.
+      if (current !== -1 && !chat.hasMessages) {
+        this.chats.update(chatId, { hasMessages: true })
+        this.emitChanged()
+      } else if (current === -1 && !chat.hasMessages) {
+        await this.removeChat(chat)
+      }
+      return
+    }
+    // The conversations other chats are in, which this one does not take up.
     const claimed = new Set(
       this.chats
         .inFolder(chat.folder)
         .filter((other) => other.id !== chat.id)
         .flatMap((other) => (other.conversationId === null ? [] : [other.conversationId])),
     )
-    const conversationId = chat.conversationId
-    if (conversationId === null) {
-      // The chat continues the newest conversation no other chat has, as a
-      // first conversation, or one `/new` or `/clear` started.
-      const unclaimed = conversations.filter((conversation) => !claimed.has(conversation.id))
-      const newest = unclaimed.at(-1)
-      if (!newest) {
-        // It never got a message, as after `/clear` and none; a message the
-        // agent did not record keeps the chat. A chat in a folder where
-        // another chat holds a conversation is the one a command such as
-        // `/new` left, whose agent stayed in that conversation or started one
-        // that left no record: the conversation it had is the other chat's,
-        // so it goes rather than becoming a chat with none.
-        if (!chat.hasMessages || this.hasConversationSibling(chat)) {
-          for (const conversation of conversations) this.insertSplit(chat, conversation)
-          await this.removeChat(chat)
-        }
+    // The newest conversation the chat can have gone on to: after its own, in
+    // no other chat, and once its agent ended, one that started in its run.
+    const since = run?.startedAt ?? null
+    const next = conversations
+      .slice(current + 1)
+      .filter(
+        (conversation) =>
+          !claimed.has(conversation.id) && (since === null || conversation.createdAt >= since),
+      )
+      .at(-1)
+    if (conversationId === null || current === -1) {
+      // The chat had no conversation yet, or one that never got a message,
+      // as one OpenCode was to start when another took its place.
+      if (next) {
+        this.chats.update(chatId, {
+          conversationId: next.id,
+          hasMessages: true,
+          ...(conversationId === null
+            ? {}
+            : { title: titleAfterSwitch(chat, run?.titleAtSwitch, next.title) }),
+        })
+        this.emitChanged()
         return
       }
-      // Any conversations before it came from conversations the agent started and left.
-      for (const conversation of unclaimed.slice(0, -1)) {
-        this.insertSplit(chat, conversation)
-      }
-      this.chats.update(chatId, { conversationId: newest.id, hasMessages: true })
-      this.emitChanged()
+      // A message the agent did not record keeps the chat. A chat without a
+      // conversation in a folder where another chat holds one may have sent
+      // its message there, and goes rather than becoming a chat with none.
+      const gone =
+        conversationId === null
+          ? !chat.hasMessages || this.hasConversationSibling(chat)
+          : !chat.hasMessages
+      if (gone) await this.removeChat(chat)
       return
     }
-    const current = conversations.findIndex((conversation) => conversation.id === conversationId)
-    if (current === -1) {
-      // The conversation never got a message, as when `/clear` was followed by
-      // none; one whose message the agent did not record keeps the chat.
-      if (!chat.hasMessages) await this.removeChat(chat)
-      return
-    }
-    const after = conversations
-      .slice(current + 1)
-      .filter((conversation) => !claimed.has(conversation.id))
     // A deleted chat keeps the conversation it was in: one after it may be
     // that of another chat in its folder.
-    if (after.length > 0 && !chat.deleted && this.isActiveChat(chat)) {
-      // The chat left its conversation for the newest one no other chat has,
-      // as when the agent started another; the conversation it left stays as
-      // a chat of its own, and so does any between them.
-      const newest = after.at(-1)!
-      this.insertSplit(chat, conversations[current]!)
-      for (const conversation of after.slice(0, -1)) this.insertSplit(chat, conversation)
-      this.chats.update(chatId, { conversationId: newest.id, hasMessages: true })
+    if (next && !chat.deleted && this.isActiveChat(chat)) {
+      this.chats.update(chatId, {
+        conversationId: next.id,
+        hasMessages: true,
+        title: titleAfterSwitch(chat, run?.titleAtSwitch, next.title),
+      })
       this.emitChanged()
       return
     }
@@ -589,12 +610,7 @@ export class ChatManager extends EventEmitter<{
     }
   }
 
-  /**
-   * Whether another chat in the folder holds a conversation. A chat with no
-   * conversation of its own and a message the agent did not record is then
-   * what a command such as `/new` left when the agent stayed in its
-   * conversation, which that other chat already keeps.
-   */
+  /** Whether another chat in the folder holds a conversation. */
   private hasConversationSibling(chat: ChatInfo): boolean {
     return this.chats
       .inFolder(chat.folder)
@@ -627,50 +643,6 @@ export class ChatManager extends EventEmitter<{
     return active.id === chat.id
   }
 
-  /**
-   * Adds a chat for a conversation the agent started and left, unless one has
-   * it already: deleted, when the user deleted the chat it comes from.
-   */
-  private insertSplit(
-    chat: StoredChat,
-    conversation: Pick<AgentConversation, 'id' | 'title' | 'createdAt'>,
-  ): void {
-    const existing = this.chats
-      .inFolder(chat.folder)
-      .find((other) => other.id !== chat.id && other.conversationId === conversation.id)
-    if (existing) {
-      // The agent may have recorded the title of the conversation after the
-      // chat was split off, as Codex and OpenCode do when they end.
-      if (existing.customName === null && existing.title === '' && conversation.title !== null) {
-        this.chats.update(existing.id, { title: conversation.title })
-      }
-      return
-    }
-    this.chats.insert(
-      {
-        id: this.newId(),
-        toolId: chat.toolId,
-        folder: chat.folder,
-        projectRoot: chat.projectRoot,
-        worktreePath: chat.worktreePath,
-        conversationId: conversation.id,
-        title: conversation.title ?? '',
-        customName: null,
-        hasMessages: true,
-        // A saved session split off shows where it was split off, after the
-        // sessions made before it; a chat comes in the order of Chats.
-        createdAt:
-          chat.projectRoot === null
-            ? conversation.createdAt === 0
-              ? this.now()
-              : conversation.createdAt
-            : this.now(),
-        lastOpenedAt: chat.lastOpenedAt,
-      },
-      chat.deleted ? this.now() : null,
-    )
-  }
-
   /** Removes a chat whose conversation never got a message, with its folder when nothing else uses it. */
   private async removeChat(chat: ChatInfo): Promise<void> {
     // A saved session's worktree or project folder stays as it is.
@@ -682,17 +654,17 @@ export class ChatManager extends EventEmitter<{
 
   /** Forgets what Hoot noted of a chat while its agent ran. */
   private forget(id: string): void {
-    this.clearTitles.delete(id)
-    this.conversationStartedAt.delete(id)
-    this.previousTitles.delete(id)
+    this.titlesAtSwitch.delete(id)
+    this.messageReportedAt.delete(id)
     this.runStartedAt.delete(id)
+    this.messaged.delete(id)
   }
 
   /**
    * Whether a chat runs in a folder Hoot made for it alone: one under
-   * `~/.hoot/chats` for a Codex or OpenCode chat, which the chats split off
-   * from it share. Claude Code's shared folder, and a saved session's
-   * worktree or project folder, are not.
+   * `~/.hoot/chats` for a Codex or OpenCode chat, which chats that earlier
+   * versions of Hoot split off from it share. Claude Code's shared folder,
+   * and a saved session's worktree or project folder, are not.
    */
   private ownsFolder(chat: ChatInfo): boolean {
     if (chat.projectRoot !== null) return false
@@ -758,13 +730,33 @@ export class ChatManager extends EventEmitter<{
 }
 
 /**
+ * The title a chat shows once it went on to the next conversation: one its
+ * agent set since it was told to leave the conversation it was in, while
+ * that title was `titleAtSwitch`, or else the title the agent recorded for
+ * the next conversation, if any. Without one, it shows the agent's name.
+ */
+function titleAfterSwitch(
+  chat: Pick<ChatInfo, 'toolId' | 'title'>,
+  titleAtSwitch: string | undefined,
+  recorded: string | null,
+): string {
+  if (
+    titleAtSwitch !== undefined &&
+    defaultSessionName(chat.toolId, chat.title) !== defaultSessionName(chat.toolId, titleAtSwitch)
+  ) {
+    return chat.title
+  }
+  return recorded ?? ''
+}
+
+/**
  * The conversations of a chat's folder, oldest first, that can be the chat's
  * own: all of them, except in a project's own folder, which may hold
  * conversations the agent had there before Hoot ran it there, in Hoot or out
  * of it. A saved session there never takes up one that started before Hoot
- * made the session, nor splits one off as a session of its own: only the one
- * it is in, which a session split off had before it was made, and those that
- * started since. Once its agent's process ends, those that started since Hoot
+ * made the session: only the one it is in, which a session that an earlier
+ * version of Hoot split off had before it was made, and those that started
+ * since. Once its agent's process ends, those that started since Hoot
  * began to start that agent (`runStartedAt`): one that started before is not
  * one that process started, and may be that of another session there whose
  * agent runs, or ended since and is still to be read.

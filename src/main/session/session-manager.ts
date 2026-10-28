@@ -317,9 +317,8 @@ export class SessionManager extends EventEmitter<{
     const record = this.records.get(id)
     if (record && !record.starting && record.info.status === 'running') {
       this.options.host.write(id, data, binary)
-      // What the user types, for a chat or saved session whose agent starts
-      // another conversation with a command such as `/new`, which leaves no
-      // record before a message.
+      // What the user types, for a chat or saved session: the messages it
+      // sends, and the commands that leave its conversation for another.
       if (!binary && (record.info.chatId !== null || record.info.savedSessionId !== null)) {
         this.emit('input', id, data)
       }

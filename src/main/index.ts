@@ -482,14 +482,15 @@ function startWithDatabase(database: DatabaseSync): void {
     },
   })
 
-  // The chats follow the events of their agents' sessions: a new conversation
-  // in Claude Code, and what an ended process left in the agent's records.
+  // The chats follow the events of their agents' sessions: the conversation
+  // Claude Code sends a message in, and what an ended process left in the
+  // agent's records.
   sessions.on('hook-event', (id, report) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)
   })
-  // `/new` and `/clear` of Codex and OpenCode start another conversation
-  // without a record of it until its first message.
+  // The messages the user sends, and the commands that leave a conversation
+  // for another, such as `/new`.
   sessions.on('input', (id, data) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.typed(chatId, id, data)

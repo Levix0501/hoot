@@ -1,0 +1,5 @@
+{
+  "name": "hoot-opencode-plugin",
+  "private": true,
+  "type": "module"
+}

@@ -156,6 +156,9 @@ importers:
       get-east-asian-width:
         specifier: ^1.7.0
         version: 1.7.0
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       lucide-react:
         specifier: ^1.53.0
         version: 1.53.0(@types/react@19.3.0)(react@19.3.0)

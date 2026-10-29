@@ -5,11 +5,11 @@ import { gte } from 'semver'
 import { quote } from 'shell-quote'
 import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
-import { HOOK_EVENTS } from '../../shared/hoot-cli'
+import { HOOK_EVENTS, HOOT_ENV } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import { readVersion } from '../agents/version'
-import type { Env } from '../env/env'
+import { setEnvVariable, type Env } from '../env/env'
 import {
   buildSessionEnv,
   type HootCliEnvOptions,
@@ -20,6 +20,7 @@ import type { SessionShell } from '../tools/default-shell'
 import { findCommand } from '../tools/find-command'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
+import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
 import { SessionError, type SessionLaunch } from './session-manager'
 
 export interface LaunchContext {
@@ -36,6 +37,8 @@ export interface LaunchContext {
   }
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
+  /** The folder of the plugin Hoot gives OpenCode (see `openCodePluginFolder`). */
+  openCodePlugin: string
 }
 
 /**
@@ -277,9 +280,12 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
  * extra arguments; then the hooks Hoot adds, to Claude Code and to a Codex
  * that runs them, and, when Claude Code is sent an issue, the arguments that
  * send it, once the issue's files are written; the launch's cleanup removes
- * their folder. A chat's session also gets the arguments that continue its
- * conversation, and those that send the first message of one it starts with
- * one. Either environment also has what hoot needs to run in the session.
+ * their folder. OpenCode gets Hoot's plugin instead, in its environment (see
+ * `openCodeCliConfig`), with no argument for it: it still runs with its
+ * background server. A chat's session also gets the arguments that continue
+ * its conversation, and those that send the first message of one it starts
+ * with one. Either environment also has what hoot needs to run in the
+ * session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -326,6 +332,15 @@ export async function resolveLaunch(
     cwd,
     hoot: context.hoot,
   })
+  if (tool.id === 'opencode') {
+    const settings = await openCodeCliConfig({
+      env: login.env,
+      cwd,
+      plugin: context.openCodePlugin,
+    })
+    setEnvVariable(env, OPENCODE_CLI_CONFIG, settings)
+    env[HOOT_ENV.openCodePlugin] = '1'
+  }
   const chatArguments = chatLaunchArguments(tool.id, chat)
   let hookArguments: string[] = []
   if (tool.id === 'claude') {

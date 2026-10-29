@@ -15,6 +15,7 @@
     "types": ["node"]
   },
   "include": [
+    "resources/opencode-plugin",
     "src/cli",
     "src/main",
     "src/preload",

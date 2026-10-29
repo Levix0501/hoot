@@ -75,6 +75,16 @@ function settings(overrides: Partial<AgentLaunchSettings> = {}): AgentLaunchSett
   return { enabled: true, model: null, effort: null, extraArgs: [], ...overrides }
 }
 
+/** The folder of the plugin Hoot gives OpenCode, as a packaged Hoot has it. */
+const openCodePlugin = path.join(
+  path.sep,
+  'Applications',
+  'Hoot.app',
+  'Contents',
+  'Resources',
+  'opencode-plugin',
+)
+
 const hoot = {
   binDirectory: '/Applications/Hoot.app/Contents/Resources/bin',
   node: '/Applications/Hoot.app/Contents/MacOS/Hoot',
@@ -95,6 +105,7 @@ function context(
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     hoot,
+    openCodePlugin,
   }
 }
 
@@ -422,6 +433,37 @@ describe('resolveLaunch', () => {
     expect(launch.args).toContain('--verbose')
     expect(launch.args).toContain('--resume')
     expect(launch.args).toContain('claude-id')
+  })
+
+  it("gives OpenCode, and only OpenCode, Hoot's plugin in its environment, with its tab strip off, and no argument for it", async () => {
+    const configFolder = path.join(root, 'opencode-settings')
+    fs.mkdirSync(configFolder, { recursive: true })
+    fs.writeFileSync(path.join(configFolder, 'cli.json'), '{ "plugins": ["/plugins/u", "-hoot"] }')
+    const loginEnv = { PATH: onPath(bin, '/usr/bin'), OPENCODE_CONFIG_DIR: configFolder }
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    const opencode = await resolveLaunch(context(loginEnv), 'opencode', project)
+    expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto'])
+    expect(JSON.parse(opencode.env.OPENCODE_CLI_CONFIG_CONTENT!)).toEqual({
+      tabs: { mode: 'off', enabled: false },
+      plugins: [openCodePlugin, '/plugins/u', '-hoot'],
+    })
+    expect(opencode.env).toMatchObject({ HOOT_OPENCODE_PLUGIN: '1', ...hootVariables })
+    // Over the user's own settings in that variable.
+    const own = await resolveLaunch(
+      context({ ...loginEnv, OPENCODE_CLI_CONFIG_CONTENT: '{ "theme": { "name": "nord" } }' }),
+      'opencode',
+      project,
+    )
+    expect(JSON.parse(own.env.OPENCODE_CLI_CONFIG_CONTENT!)).toEqual({
+      theme: { name: 'nord' },
+      tabs: { mode: 'off', enabled: false },
+      plugins: [openCodePlugin, '/plugins/u', '-hoot'],
+    })
+    for (const tool of ['claude', 'codex', 'shell'] as const) {
+      const launch = await resolveLaunch(context(loginEnv), tool, project)
+      expect(launch.env).not.toHaveProperty('OPENCODE_CLI_CONFIG_CONTENT')
+      expect(launch.env).not.toHaveProperty('HOOT_OPENCODE_PLUGIN')
+    }
   })
 
   it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {

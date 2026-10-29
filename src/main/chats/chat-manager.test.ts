@@ -1744,6 +1744,189 @@ describe('ChatManager', () => {
     expect(again.get(saved.id)?.conversationId).toBe('thread-two')
   })
 
+  /** A report of a message OpenCode sent in a conversation of a folder, as Hoot's plugin gives it. */
+  const openCodeMessage = (conversationId: string, folder: string): HookEventReport => ({
+    ...hook('UserPromptSubmit', conversationId, null, ++clock),
+    folder,
+  })
+
+  for (const order of ['first', 'second'] as const) {
+    it(`keeps OpenCode sessions side by side in a worktree on the conversations OpenCode reported, closing the ${order} first`, async () => {
+      const folder = worktreeFolder('fix-login-bug')
+      const one = manager.createSavedSession('/work/project', folder, 'opencode')
+      const two = manager.createSavedSession('/work/project', folder, 'opencode')
+      await start(one.id)
+      await start(two.id)
+      manager.noteHookEvent(one.id, openCodeMessage('ses_one', folder))
+      manager.noteHookEvent(two.id, openCodeMessage('ses_two', folder))
+      // Both go on to a new conversation, the second first.
+      manager.typed(two.id, 'session-two', '/new\r')
+      manager.noteHookEvent(two.id, openCodeMessage('ses_three', folder))
+      manager.typed(one.id, 'session-one', '/new\r')
+      manager.noteHookEvent(one.id, openCodeMessage('ses_four', folder))
+      // And one out of Hoot, after all of them.
+      conversations.opencode = [
+        { id: 'ses_one', title: 'One', createdAt: clock - 3 },
+        { id: 'ses_two', title: 'Two', createdAt: clock - 2 },
+        { id: 'ses_three', title: 'Three', createdAt: clock - 1 },
+        { id: 'ses_four', title: 'Four', createdAt: clock },
+        { id: 'ses_outside', title: 'Outside', createdAt: ++clock },
+      ]
+
+      for (const saved of order === 'first' ? [one, two] : [two, one]) {
+        manager.sessionEnded(endedSaved(saved.id, folder, 'opencode'))
+        await manager.flush()
+      }
+      const expected = [
+        [one.id, 'ses_four'],
+        [two.id, 'ses_three'],
+      ]
+      expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+      const again = await restarted()
+      expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual(
+        expected,
+      )
+    })
+  }
+
+  it('keeps an OpenCode session on the conversation OpenCode reported when another of its worktree is deleted', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const one = manager.createSavedSession('/work/project', folder, 'opencode')
+    const two = manager.createSavedSession('/work/project', folder, 'opencode')
+    await start(one.id)
+    await start(two.id)
+    manager.noteHookEvent(one.id, openCodeMessage('ses_one', folder))
+    manager.noteHookEvent(two.id, openCodeMessage('ses_two', folder))
+    manager.noteHookEvent(two.id, openCodeMessage('ses_three', folder))
+    await manager.flush()
+    conversations.opencode = [
+      { id: 'ses_one', title: 'One', createdAt: clock - 2 },
+      { id: 'ses_two', title: 'Two', createdAt: clock - 1 },
+      { id: 'ses_three', title: 'Three', createdAt: clock },
+    ]
+
+    // As deleting a running session does: its agent ends first.
+    manager.sessionEnded(endedSaved(one.id, folder, 'opencode'))
+    await manager.delete(one.id)
+    manager.sessionEnded(endedSaved(two.id, folder, 'opencode'))
+    await manager.flush()
+
+    expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [two.id, 'ses_three'],
+    ])
+    const again = await restarted()
+    expect(again.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [two.id, 'ses_three'],
+    ])
+  })
+
+  it('goes on only in a conversation OpenCode reports in the session’s folder, or in a folder in it', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const sub = path.join(folder, 'sub')
+    fs.mkdirSync(sub)
+    const elsewhere = worktreeFolder('another-project')
+    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    await start(saved.id)
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_one', folder))
+    await manager.flush()
+    expect(manager.get(saved.id)).toMatchObject({ conversationId: 'ses_one', hasMessages: true })
+
+    // A conversation of another folder, picked from all of OpenCode's.
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_elsewhere', elsewhere))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_one')
+    // One of a folder in it, however its path is written.
+    manager.noteHookEvent(
+      saved.id,
+      openCodeMessage('ses_sub', [folder, '..', 'fix-login-bug', 'sub'].join(path.sep)),
+    )
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_sub')
+    const link = path.join(root, 'linked')
+    fs.symlinkSync(folder, link, 'junction')
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_linked', link))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_linked')
+    // Its folder unknown, as OpenCode may leave it out.
+    manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'ses_unknown', null, ++clock))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_unknown')
+
+    // A run whose messages all went to another folder's conversation reported
+    // one all the same: Hoot does not read the session's folder then.
+    await start(saved.id)
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_elsewhere', elsewhere))
+    conversations.opencode = [
+      { id: 'ses_unknown', title: 'Unknown', createdAt: 1 },
+      { id: 'ses_outside', title: 'Outside', createdAt: ++clock },
+    ]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'opencode'))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_unknown')
+    const again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('ses_unknown')
+  })
+
+  it('keeps an OpenCode session in the conversation OpenCode reported after later runs that reported none', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    await start(saved.id)
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_one', folder))
+    manager.sessionEnded(endedSaved(saved.id, folder, 'opencode'))
+    await manager.flush()
+
+    // Hoot's plugin no longer runs, as when the user turned it off: a message
+    // after /new, and OpenCode records the conversation it started.
+    await start(saved.id)
+    manager.typed(saved.id, 'session-2', '/new\r')
+    manager.typed(saved.id, 'session-2', 'two\r')
+    conversations.opencode = [
+      { id: 'ses_one', title: 'One', createdAt: 1 },
+      { id: 'ses_two', title: 'Two', createdAt: ++clock },
+    ]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'opencode'))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('ses_one')
+    let again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('ses_one')
+
+    // The same in a run Hoot did not see end.
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    conversations.opencode.push({ id: 'ses_three', title: 'Three', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('ses_one')
+
+    // A run in which it reports, which Hoot does not see end either.
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    again.noteHookEvent(saved.id, openCodeMessage('ses_four', folder))
+    await again.flush()
+    conversations.opencode.push({ id: 'ses_five', title: 'Five', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('ses_four')
+  })
+
+  it('learns from OpenCode that a conversation an earlier version of Hoot gave it the id of got a message', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    new ChatStore(db).update(saved.id, { conversationId: 'ses_given' })
+    expect((await manager.prepareSession(saved.id))?.launch).toEqual({
+      conversationId: 'ses_given',
+      resume: false,
+    })
+    manager.opened(saved.id)
+    manager.noteHookEvent(saved.id, openCodeMessage('ses_given', folder))
+    await manager.flush()
+    expect(manager.get(saved.id)).toMatchObject({ conversationId: 'ses_given', hasMessages: true })
+    expect((await manager.prepareSession(saved.id))?.launch).toEqual({
+      conversationId: 'ses_given',
+      resume: true,
+    })
+  })
+
   it('reads at its next start only the runs of an OpenCode session that Hoot did not see end', async () => {
     const folder = worktreeFolder('fix-login-bug')
     const saved = manager.createSavedSession('/work/project', folder, 'opencode')

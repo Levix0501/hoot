@@ -82,10 +82,11 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
 
 /**
  * Tracks every session Hoot runs: starting each one, routing its input and
- * output and the events of the hooks of its Claude Code or Codex, ending its
- * process when it is closed or Hoot quits, and marking the running ones ended
- * when the pty host stops. `closed` reports a session that started once it is
- * gone: closed, or forgotten with its worktree or project.
+ * output and the events of the hooks of its Claude Code or Codex, or of the
+ * plugin of its OpenCode, ending its process when it is closed or Hoot quits,
+ * and marking the running ones ended when the pty host stops. `closed`
+ * reports a session that started once it is gone: closed, or forgotten with
+ * its worktree or project.
  */
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
@@ -298,8 +299,10 @@ export class SessionManager extends EventEmitter<{
 
   /**
    * Passes on an event of a hook of a running Claude Code or Codex session,
-   * in order with its output: from what the session wrote before the event
-   * was reported, and before what it writes after.
+   * or of the plugin Hoot gives a running OpenCode session, in order with its
+   * output: from what the session wrote before the event was reported, and
+   * before what it writes after. A Shell session's are none: an OpenCode
+   * started there is not Hoot's.
    */
   reportHookEvent(id: string, report: HookEventReport): void {
     const record = this.records.get(id)
@@ -307,7 +310,7 @@ export class SessionManager extends EventEmitter<{
       record &&
       !record.starting &&
       record.info.status === 'running' &&
-      (record.info.toolId === 'claude' || record.info.toolId === 'codex')
+      record.info.toolId !== 'shell'
     ) {
       this.emit('hook-event', id, report)
     }

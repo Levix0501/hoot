@@ -8,6 +8,7 @@ import { inProjectFolder, type ChatInfo, type SavedSessionInfo } from '../../sha
 import type { HookEventReport } from '../../shared/hoot-cli'
 import { defaultSessionName, type SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
+import { isWithin } from '../../shared/worktrees'
 import type { ChatLaunch } from '../session/launch'
 import { ChatStore, type StoredChat } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
@@ -68,7 +69,7 @@ export function visibleInput(data: string): string {
 const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
   claude: ['/clear', '/resume', '/branch'],
   codex: ['/new', '/clear', '/resume', '/fork'],
-  opencode: ['/new', '/clear'],
+  opencode: ['/new', '/clear', '/sessions', '/resume', '/continue', '/fork'],
 }
 
 /** How a run of a chat's agent went, as Hoot saw it, once its process ended. */
@@ -95,12 +96,15 @@ interface EndedRun {
  * of one, and one that never did goes once its agent ends, as when the user
  * turned off Claude Code's hooks. Codex tells of the conversation each
  * message goes to through the hook Hoot gives it, once the user trusted that
- * hook: a Codex chat in a conversation Codex told of goes on in another only
- * when Codex tells of that one, whatever Codex records in the chat's folder
- * and however a later run went. For any other Codex chat, and for OpenCode,
- * Hoot reads the agent's own records to tell whether the chat's conversation
- * got a message and which conversation a chat went on to, as before Hoot
- * learned conversations from Codex. When a chat's process ends, and when
+ * hook, and OpenCode 2.0.6 and later through the plugin Hoot gives it, unless
+ * the user turned that off: a Codex or OpenCode chat in a conversation its
+ * agent told of goes on in another only when the agent tells of that one,
+ * whatever the agent records in the chat's folder and however a later run
+ * went. An OpenCode chat goes on only in a conversation in its folder, or in
+ * a folder in it. For any other Codex or OpenCode chat, Hoot reads the
+ * agent's own records to tell whether the chat's conversation got a message
+ * and which conversation a chat went on to, as before Hoot learned
+ * conversations from the agents. When a chat's process ends, and when
  * Hoot starts for a run it did not see end, the chat can go on only to one
  * that started in that run and got a message. When Hoot starts, it also
  * reads each Codex chat in no conversation and without such a run, and each
@@ -348,12 +352,15 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * Notes an event of a Claude Code or Codex hook of a chat's session: a
-   * message sent in a conversation, which the chat goes on in from then on,
-   * or the conversation Claude Code goes to as it leaves the one the chat is
-   * in, which the chat does not go on in before a message is sent there. A
-   * hook that ran before the one that told of the chat's latest message
-   * tells of a conversation the chat may have left since.
+   * Notes an event of a Claude Code or Codex hook of a chat's session, or of
+   * the plugin Hoot gives its OpenCode: a message sent in a conversation,
+   * which the chat goes on in from then on, or the conversation Claude Code
+   * goes to as it leaves the one the chat is in, which the chat does not go
+   * on in before a message is sent there. A hook that ran before the one that
+   * told of the chat's latest message tells of a conversation the chat may
+   * have left since. An OpenCode chat goes on only in a conversation in its
+   * folder, or in a folder in it: OpenCode can send a message in one of any
+   * folder, as one picked from all its folders' conversations.
    */
   noteHookEvent(chatId: string, report: HookEventReport): void {
     const reported = report.conversationId ?? null
@@ -372,6 +379,9 @@ export class ChatManager extends EventEmitter<{
     this.reported.add(chatId)
     if (this.chats.get(chatId)?.unreportedRun) this.chats.update(chatId, { unreportedRun: null })
     void this.enqueue(chatId, async () => {
+      const toolId = this.chats.get(chatId)?.toolId
+      const folder = report.folder ?? null
+      if (toolId === 'opencode' && folder !== null && !(await this.holds(chatId, folder))) return
       const chat = this.chats.get(chatId)
       if (!chat || chat.deleted) return
       if (report.startedAt < (this.messageReportedAt.get(chatId) ?? 0)) return
@@ -393,6 +403,19 @@ export class ChatManager extends EventEmitter<{
       })
       this.emitChanged()
     })
+  }
+
+  /**
+   * Whether a folder is the chat's folder or in it, by where both are on
+   * disk, however their paths are written.
+   */
+  private async holds(chatId: string, folder: string): Promise<boolean> {
+    const chat = this.chats.get(chatId)
+    if (!chat) return false
+    const [inner, outer] = await Promise.all([realFolder(folder), realFolder(chat.folder)])
+    return process.platform === 'win32'
+      ? isWithin(inner.toLowerCase(), outer.toLowerCase())
+      : isWithin(inner, outer)
   }
 
   /**
@@ -548,10 +571,11 @@ export class ChatManager extends EventEmitter<{
    * agent records one only once a message was sent in it, so a run that sent
    * none leaves the chat as it was, unless one started in its folder out of
    * Hoot or by another chat's agent. When the chat's conversation never got
-   * a message, the chat goes. A conversation Codex reported stays the chat's
-   * for good: Hoot does not read the records for it. `run` is how the run of
-   * the agent whose process just ended went, if one did, or one Hoot did not
-   * see end, read when Hoot starts.
+   * a message, the chat goes. A conversation the agent reported stays the
+   * chat's for good, and so does the chat's conversation after a run in which
+   * the agent reported one: Hoot does not read the records for them. `run` is
+   * how the run of the agent whose process just ended went, if one did, or
+   * one Hoot did not see end, read when Hoot starts.
    */
   private async reconcileChat(chatId: string, run: EndedRun | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.
@@ -768,6 +792,11 @@ export class ChatManager extends EventEmitter<{
     })
     return run
   }
+}
+
+/** Where a folder is on disk, or where its path points when it is not there. */
+async function realFolder(folder: string): Promise<string> {
+  return fs.realpath(folder).catch(() => path.resolve(folder))
 }
 
 /**

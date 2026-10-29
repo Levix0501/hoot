@@ -245,7 +245,7 @@ describe('SessionManager', () => {
     expect(inputs).toEqual([['c1', 'hello\r']])
   })
 
-  it('passes on the events of the hooks of a running Claude Code or Codex session, in order with its output', async () => {
+  it('passes on the events of the hooks of a running Claude Code or Codex session, or of the plugin of an OpenCode one, in order with its output', async () => {
     const { promise: launched, resolve: release } = Promise.withResolvers<void>()
     const { manager, host } = setup({
       resolveLaunch: async (toolId, _cwd, _issue, _chat, sessionId) => {
@@ -266,8 +266,10 @@ describe('SessionManager', () => {
     manager.reportHookEvent('c1', report('PermissionRequest', true))
     manager.reportHookEvent('c2', report('Stop'))
     manager.reportHookEvent('x1', report('UserPromptSubmit'))
-    // Only Claude Code and Codex have these hooks, and only a running session reports them.
     manager.reportHookEvent('o1', report('UserPromptSubmit'))
+    // A Shell session has none, as its OpenCode is not Hoot's, and only a
+    // running session reports them.
+    manager.reportHookEvent('s1', report('UserPromptSubmit'))
     manager.reportHookEvent('s1', report('Stop'))
     manager.reportHookEvent('c3', report('Stop'))
     manager.reportHookEvent('unknown', report('Stop'))
@@ -278,6 +280,7 @@ describe('SessionManager', () => {
       ['c1', report('PermissionRequest', true)],
       ['c2', report('Stop')],
       ['x1', report('UserPromptSubmit')],
+      ['o1', report('UserPromptSubmit')],
     ])
     release()
     await starting

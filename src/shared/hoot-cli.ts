@@ -19,14 +19,18 @@
  * - `POST /sessions`: starts a session for an issue of the project, from a
  *   `SessionRequest`.
  * - `POST /hook-events`: reports an event of a hook Hoot adds to the
- *   session's Claude Code or Codex, from a `HookEventReport`.
+ *   session's Claude Code or Codex, or a message the plugin Hoot gives the
+ *   session's OpenCode tells of, from a `HookEventReport`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
  * answer is a JSON `HootAnswer`.
  */
 import type { Issue, IssuePriority, IssueStatus } from './issues'
 
-/** The variables Hoot adds to the environment of every session's process for hoot. */
+/**
+ * The variables Hoot adds to the environment of every session's process for
+ * hoot, and of an OpenCode session's for the plugin Hoot gives OpenCode.
+ */
 export const HOOT_ENV = {
   /** The socket, or on Windows the named pipe, of the Hoot that started the session. */
   socket: 'HOOT_SOCKET',
@@ -36,6 +40,12 @@ export const HOOT_ENV = {
   node: 'HOOT_NODE',
   /** hoot's script. */
   script: 'HOOT_CLI',
+  /**
+   * `1` in an OpenCode session Hoot starts, and in no other session, for the
+   * plugin Hoot gives OpenCode there: run by any other OpenCode, as one
+   * started in a Shell session, it reports nothing.
+   */
+  openCodePlugin: 'HOOT_OPENCODE_PLUGIN',
 } as const
 
 /** The header that names the session a request comes from. */
@@ -196,7 +206,9 @@ export interface SessionRequest {
  * user's or the notification that a background agent is done
  * (`UserPromptSubmit`); a turn ends (`Stop`); and a turn stops on an API
  * error (`StopFailure`). The hook Hoot adds to Codex is on `UserPromptSubmit`
- * alone, for the conversation of each message.
+ * alone, for the conversation of each message, and the plugin Hoot gives
+ * OpenCode reports a `UserPromptSubmit` of the same kind for each message the
+ * user sends.
  */
 export const HOOK_EVENTS = [
   'SessionStart',
@@ -210,7 +222,10 @@ export const HOOK_EVENTS = [
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
 
-/** An event of a hook of the session's Claude Code or Codex, as hoot reports it. */
+/**
+ * An event of a hook of the session's Claude Code or Codex, or of the plugin
+ * Hoot gives its OpenCode, as hoot reports it.
+ */
 export interface HookEventReport {
   /** The event, by the name the agent gives it. */
   event: HookEvent
@@ -238,6 +253,12 @@ export interface HookEventReport {
   source?: string | null
   /** Why a `SessionEnd` happened, such as `clear` or `exit`. */
   reason?: string | null
+  /**
+   * The folder the agent works in for the conversation the event belongs to
+   * (the hook's `cwd`): for OpenCode, the one it records the conversation in,
+   * which can be another than the session's.
+   */
+  folder?: string | null
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */

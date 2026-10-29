@@ -253,10 +253,11 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
 
 /**
  * The event of a Claude Code or Codex hook whose input is `input`, the JSON
- * the agent gives a hook on standard input, when it is one Hoot takes,
- * whether a subagent met it (the input names the agent), the turn it belongs
- * to, and the conversation it belongs to with why a session started or
- * ended; `null` for any other input.
+ * the agent gives a hook on standard input, or the plugin Hoot gives OpenCode
+ * gives in the same form, when it is one Hoot takes, whether a subagent met
+ * it (the input names the agent), the turn it belongs to, and the
+ * conversation it belongs to, with the folder the agent works in for it and
+ * why a session started or ended; `null` for any other input.
  */
 export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
@@ -273,6 +274,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     session_id: conversation,
     source,
     reason,
+    cwd: folder,
   } = value as {
     hook_event_name?: unknown
     agent_id?: unknown
@@ -280,6 +282,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     session_id?: unknown
     source?: unknown
     reason?: unknown
+    cwd?: unknown
   }
   const event = HOOK_EVENTS.find((candidate) => candidate === name)
   if (event === undefined) return null
@@ -290,6 +293,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     conversationId: typeof conversation === 'string' && conversation !== '' ? conversation : null,
     source: typeof source === 'string' && source !== '' ? source : null,
     reason: typeof reason === 'string' && reason !== '' ? reason : null,
+    folder: typeof folder === 'string' && folder !== '' ? folder : null,
   }
 }
 
@@ -777,13 +781,14 @@ export function hootProgram(io: CliIo): Command {
     })
 
   // Not for people: the command of the hooks Hoot adds to its Claude Code and
-  // Codex sessions.
+  // Codex sessions, and of the plugin it gives its OpenCode sessions.
   program
     .command('hook', { hidden: true })
     .description(
-      "Report the event of a Claude Code or Codex hook, from the hook's input on standard " +
-        'input, to Hoot, which shows what the session is doing and which conversation it is in. ' +
-        'It prints nothing and always succeeds, so that it never changes what the agent does.',
+      "Report the event of a Claude Code or Codex hook, or of Hoot's OpenCode plugin, from the " +
+        "hook's input on standard input, to Hoot, which shows what the session is doing and " +
+        'which conversation it is in. It prints nothing and always succeeds, so that it never ' +
+        'changes what the agent does.',
     )
     .action(async () => {
       try {

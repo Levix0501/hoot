@@ -37,6 +37,7 @@ import { ProjectStore } from './projects/project-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
 import { resolveLaunch } from './session/launch'
+import { openCodePluginFolder } from './session/opencode-plugin'
 import { SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
@@ -72,6 +73,12 @@ const hootCli = hootCliSetup({
   appPath: app.getAppPath(),
   executable: process.execPath,
   mainDirectory: import.meta.dirname,
+})
+// The plugin Hoot gives OpenCode, which OpenCode loads from its folder.
+const openCodePlugin = openCodePluginFolder({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
 })
 const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
@@ -121,6 +128,7 @@ const sessions = new SessionManager({
           agent: launchSettings.agent(tool),
         }),
         hoot: { ...hootCli, sessionId },
+        openCodePlugin,
       },
       toolId,
       cwd,
@@ -483,8 +491,8 @@ function startWithDatabase(database: DatabaseSync): void {
   })
 
   // The chats follow the events of their agents' sessions: the conversation
-  // Claude Code or Codex sends a message in, and what an ended process left
-  // in the agent's records.
+  // Claude Code, Codex or OpenCode sends a message in, and what an ended
+  // process left in the agent's records.
   sessions.on('hook-event', (id, report) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)

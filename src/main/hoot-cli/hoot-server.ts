@@ -130,6 +130,7 @@ const hookEventReport = z.strictObject({
   conversationId: z.string().min(1).nullable().optional(),
   source: z.string().min(1).nullable().optional(),
   reason: z.string().min(1).nullable().optional(),
+  folder: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<HookEventReport>
 
 /** The project a session runs for, or why there is none. */
@@ -181,7 +182,10 @@ export interface HootServerOptions {
    * it has started, or could not.
    */
   startSession(issueId: number, prompt: string | null): Promise<StartedSession>
-  /** Called with each event of a hook of a session's Claude Code or Codex that hoot reports. */
+  /**
+   * Called with each event of a hook of a session's Claude Code or Codex, or
+   * of the plugin Hoot gives its OpenCode, that hoot reports.
+   */
   hookEvent(sessionId: string, report: HookEventReport): void
 }
 
@@ -263,9 +267,10 @@ function hootLabel(label: NamedLabel): HootLabel {
  * all at once, changes their parents, sub-issues, dependencies and labels,
  * reads, creates, changes and deletes labels, starts sessions for the
  * issues, and takes the events of the hooks Hoot adds to the sessions'
- * Claude Code and Codex. It listens only where the sessions' environment
- * tells hoot to connect, through a Unix domain socket that only the user can
- * connect to, or on Windows a named pipe.
+ * Claude Code and Codex and of the plugin it gives their OpenCode. It listens
+ * only where the sessions' environment tells hoot to connect, through a Unix
+ * domain socket that only the user can connect to, or on Windows a named
+ * pipe.
  */
 export class HootServer {
   private readonly server = http.createServer(

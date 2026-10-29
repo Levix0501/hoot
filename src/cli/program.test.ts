@@ -1778,6 +1778,7 @@ const reported = (
   conversationId: SESSION,
   source: null,
   reason: null,
+  folder: '/work/gamma',
 })
 
 describe('hoot hook', () => {
@@ -1844,6 +1845,29 @@ describe('hoot hook', () => {
         conversationId: '01a18187-0974-7a80-8bbb-1dbed37c649a',
         source: null,
         reason: null,
+        folder: '/work/gamma',
+      },
+    ])
+  })
+
+  it("reports the conversation of each message Hoot's OpenCode plugin tells of, with its folder", async () => {
+    const stdin = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'ses_e787565c5ffeQnbr6YzPcEKIem',
+      cwd: '/work/gamma/sub',
+    })
+    expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })
+    expect(hoot.hookEvents).toEqual([
+      {
+        sessionId: 'gamma-session',
+        event: 'UserPromptSubmit',
+        startedAt: STARTED_AT,
+        subagent: false,
+        turn: null,
+        conversationId: 'ses_e787565c5ffeQnbr6YzPcEKIem',
+        source: null,
+        reason: null,
+        folder: '/work/gamma/sub',
       },
     ])
   })
@@ -1860,6 +1884,7 @@ describe('hoot hook', () => {
       conversationId: SESSION,
       source: null,
       reason: null,
+      folder: '/work/gamma',
     })
     expect(hookEventOf(Buffer.from(hookInput('Elicitation', 'a1')))).toEqual({
       event: 'Elicitation',
@@ -1868,6 +1893,7 @@ describe('hoot hook', () => {
       conversationId: SESSION,
       source: null,
       reason: null,
+      folder: '/work/gamma',
     })
     expect(hookEventOf(Buffer.from(hookInput('Stop', '', '')))).toEqual({
       event: 'Stop',
@@ -1876,9 +1902,10 @@ describe('hoot hook', () => {
       conversationId: SESSION,
       source: null,
       reason: null,
+      folder: '/work/gamma',
     })
     expect(
-      hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 'Stop', prompt_id: 7 }))),
+      hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 'Stop', prompt_id: 7, cwd: 7 }))),
     ).toEqual({
       event: 'Stop',
       subagent: false,
@@ -1886,6 +1913,7 @@ describe('hoot hook', () => {
       conversationId: null,
       source: null,
       reason: null,
+      folder: null,
     })
     expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
   })

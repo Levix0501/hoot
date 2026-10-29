@@ -301,7 +301,7 @@ describe('HootServer', () => {
     }
   })
 
-  it("takes the events of the hooks of a session's Claude Code, and nothing else", async () => {
+  it("takes the events of the hooks of a session's Claude Code or Codex, or of its OpenCode's plugin, and nothing else", async () => {
     for (const event of [
       'PermissionRequest',
       'Elicitation',
@@ -327,6 +327,16 @@ describe('HootServer', () => {
         body: JSON.stringify(report('StopFailure', false, null)),
       }),
     ).toMatchObject({ status: 200, answer: { ok: true } })
+    // A message OpenCode sent in a conversation of a folder.
+    const message = {
+      ...report('UserPromptSubmit', false, null),
+      conversationId: 'ses_one',
+      folder: '/work/gamma/sub',
+    }
+    expect(await request('POST', '/hook-events', { body: JSON.stringify(message) })).toMatchObject({
+      status: 200,
+      answer: { ok: true },
+    })
     for (const body of [
       JSON.stringify(report('Notification')),
       JSON.stringify({ ...report('Stop'), extra: true }),
@@ -336,6 +346,8 @@ describe('HootServer', () => {
       JSON.stringify({ event: 'Stop', startedAt: 1_000, subagent: 'no', turn: 't1' }),
       JSON.stringify({ event: 'Stop', startedAt: 1_000, subagent: false, turn: '' }),
       JSON.stringify({ event: 'Stop', startedAt: 1_000, subagent: false, turn: 7 }),
+      JSON.stringify({ ...report('UserPromptSubmit'), folder: '' }),
+      JSON.stringify({ ...report('UserPromptSubmit'), folder: 7 }),
       JSON.stringify({}),
     ]) {
       expect(await request('POST', '/hook-events', { body })).toEqual({
@@ -369,6 +381,7 @@ describe('HootServer', () => {
       { sessionId: 'gamma-session', ...report('StopFailure') },
       { sessionId: 'hotel-session', ...report('PermissionRequest', true) },
       { sessionId: 'gamma-session', ...report('StopFailure', false, null) },
+      { sessionId: 'gamma-session', ...message },
       { sessionId: 'chat-session', ...report('SessionStart', false, null) },
     ])
   })

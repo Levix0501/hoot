@@ -1,19 +1,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { Env } from '../env/env'
+import { envVariable, type Env } from '../env/env'
 import { pathFolders } from './find-command'
 
 /** The shell that Shell sessions run: its program, and the arguments it starts with. */
 export interface SessionShell {
   file: string
   args: string[]
-}
-
-/** A variable of the environment by its name in any case, as Windows reads it. */
-function windowsVariable(env: Env, name: string): string | undefined {
-  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name.toUpperCase())
-  return key === undefined ? undefined : env[key]
 }
 
 /**
@@ -32,7 +26,7 @@ export function defaultShell(env: Env, platform: NodeJS.Platform = process.platf
       .map((folder) => path.join(folder, 'pwsh.exe'))
       .find((file) => fs.existsSync(file))
     const windowsPowerShell = path.win32.join(
-      windowsVariable(env, 'SystemRoot') ?? 'C:\\Windows',
+      envVariable(env, 'SystemRoot', platform) ?? 'C:\\Windows',
       'System32',
       'WindowsPowerShell',
       'v1.0',

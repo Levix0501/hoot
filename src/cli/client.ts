@@ -129,7 +129,10 @@ export class HootClient {
     )
   }
 
-  /** Reports an event of a hook that Hoot added to the session's Claude Code. */
+  /**
+   * Reports an event of a hook that Hoot added to the session's Claude Code
+   * or Codex, or of the plugin Hoot gave its OpenCode.
+   */
   reportHookEvent(report: HookEventReport): Promise<HookEventAnswer> {
     return this.ask('POST', '/hook-events', report, HOOK_EVENT_TIMEOUT_MS)
   }

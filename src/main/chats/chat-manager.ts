@@ -98,8 +98,8 @@ interface EndedRun {
   startedAt: number | null
   /**
    * Whether Hoot saw a message sent in it: one typed, the first message it
-   * started with, or one recalled from the agent's history that started a
-   * conversation.
+   * started with, or one whose text Hoot does not see, as one recalled from
+   * the agent's history, that started a conversation.
    */
   messaged: boolean
   /** Whether the agent told of a conversation it sent a message in. */
@@ -157,10 +157,11 @@ export class ChatManager extends EventEmitter<{
   /** The line being typed in each chat's session, for the commands that start another conversation. */
   private readonly typing = new Map<string, string>()
   /**
-   * The sessions whose line being typed may hold a message recalled from the
-   * agent's history since the last Enter, which Hoot does not see.
+   * The sessions whose line being typed may hold a message Hoot does not see
+   * since the last Enter: one recalled from the agent's history, or one made
+   * of the digits typed first in a Codex session.
    */
-  private readonly recalled = new Set<string>()
+  private readonly unseen = new Set<string>()
   /** The sessions whose agent was told to leave its conversation for a new one. */
   private readonly leftForNew = new Set<string>()
   /**
@@ -450,25 +451,30 @@ export class ChatManager extends EventEmitter<{
    * commands that leave the conversation for another. Enter on a line with
    * nothing typed, after a key that recalls a message from the agent's
    * history, may send that message, whose text Hoot does not see, or may
-   * pick an item of a list. It is taken for a message only where a message
-   * starts a conversation, which Hoot then finds in the agent's records: in
-   * a chat without a conversation yet, and once the agent was told to leave
-   * its conversation for a new one. Digits typed first in a Codex session
-   * may answer Codex's review of its hooks, which shows before its input box
-   * and takes a digit with no Enter after it: they are not part of the line.
+   * pick an item of a list. Digits typed first in a Codex session may answer
+   * Codex's review of its hooks, which shows before its input box and takes
+   * a digit with no Enter after it, or may be a message: they are not part
+   * of the line, which may then hold a message Hoot does not see. Enter on a
+   * line that may hold one, with nothing else typed, is taken for a message
+   * only where a message starts a conversation, which Hoot then finds in the
+   * agent's records: in a chat without a conversation yet, and once the
+   * agent was told to leave its conversation for a new one.
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
     if (!chat || chat.deleted) return
     let line = this.typing.get(sessionId) ?? ''
-    let recalled = this.recalled.has(sessionId)
+    let unseen = this.unseen.has(sessionId)
     const historyKeys = HISTORY_KEYS[chat.toolId]
     const parts = historyKeys === null ? [data] : data.split(historyKeys)
     for (const [index, part] of parts.entries()) {
-      if (index > 0) recalled = true
+      if (index > 0) unseen = true
       for (const character of visibleInput(part)) {
         if (!this.typedInput.has(sessionId)) {
-          if (chat.toolId === 'codex' && /^[1-9]$/.test(character)) continue
+          if (chat.toolId === 'codex' && /^[1-9]$/.test(character)) {
+            unseen = true
+            continue
+          }
           if (character === '\r' || character === '\n' || character >= ' ') {
             this.typedInput.add(sessionId)
           }
@@ -476,9 +482,9 @@ export class ChatManager extends EventEmitter<{
         if (character === '\r' || character === '\n') {
           const command = line.trim()
           const startsConversation = chat.conversationId === null || this.leftForNew.has(sessionId)
-          const sent = command !== '' || (recalled && startsConversation)
+          const sent = command !== '' || (unseen && startsConversation)
           line = ''
-          recalled = false
+          unseen = false
           if (command.startsWith('/')) {
             const name = command.split(/\s/, 1)[0] ?? ''
             if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
@@ -496,7 +502,8 @@ export class ChatManager extends EventEmitter<{
             }
           }
           // Claude Code tells of its messages through its hooks. A message
-          // recalled may have been an item picked: the agent's records tell.
+          // Hoot did not see may have been an item picked or an answer to the
+          // review: the agent's records tell.
           if (chat.toolId !== 'claude' && command !== '') this.markMessages(chatId)
           continue
         }
@@ -511,8 +518,8 @@ export class ChatManager extends EventEmitter<{
       }
     }
     this.typing.set(sessionId, line)
-    if (recalled) this.recalled.add(sessionId)
-    else this.recalled.delete(sessionId)
+    if (unseen) this.unseen.add(sessionId)
+    else this.unseen.delete(sessionId)
   }
 
   /** Notes that the user sent a message in the chat, which its conversation now has. */
@@ -531,7 +538,7 @@ export class ChatManager extends EventEmitter<{
     if (id === null || session.status !== 'exited') return
     this.running.delete(id)
     this.typing.delete(session.id)
-    this.recalled.delete(session.id)
+    this.unseen.delete(session.id)
     this.leftForNew.delete(session.id)
     this.typedInput.delete(session.id)
     const run: EndedRun = {

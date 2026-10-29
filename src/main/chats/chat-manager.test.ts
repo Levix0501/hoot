@@ -759,6 +759,23 @@ describe('ChatManager', () => {
     await manager.flush()
     expect(manager.get(unused.id)).toBeUndefined()
 
+    // A new chat whose first message is digits alone, as without a review to
+    // answer, or after 3 answered it: the agent's records tell it was one.
+    for (const [index, typed] of ['42\r', '342\r'].entries()) {
+      const digits = await manager.create('codex')
+      await manager.prepareSession(digits.id)
+      manager.opened(digits.id)
+      manager.typed(digits.id, `session-digits-${index}`, typed)
+      conversations.codex = [{ id: `thread-42-${index}`, title: '42', createdAt: clock }]
+      manager.sessionEnded(ended(digits.id, 'codex'))
+      await manager.flush()
+      expect(manager.get(digits.id)).toMatchObject({
+        conversationId: `thread-42-${index}`,
+        hasMessages: true,
+      })
+    }
+    conversations.codex = []
+
     // A chat with a conversation whose review was answered with 3, which then
     // left its conversation with /new and sent no message, while a
     // conversation started out of Hoot in its folder.

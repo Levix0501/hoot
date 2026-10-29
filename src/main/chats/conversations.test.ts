@@ -5,6 +5,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { onPath, writeNodeCommand } from '../tools/test-support'
 import { localChatConversations } from './conversations'
 
+/** A line of a Codex session file that records a message the user sent, as Codex 0.148 and later write it. */
+const userMessage = (text: string, timestamp = '2026-10-21T10:00:00.000Z') =>
+  JSON.stringify({
+    timestamp,
+    type: 'event_msg',
+    payload: {
+      type: 'item_completed',
+      item: { type: 'UserMessage', content: [{ type: 'text', text }] },
+    },
+  })
+
+/** A time on the day of the session files of these tests, at a second after 10:05. */
+const at = (seconds: number) => `2026-10-21T10:05:${String(seconds).padStart(2, '0')}.000Z`
+
 describe('localChatConversations', () => {
   let home: string
   let folder: string
@@ -23,7 +37,7 @@ describe('localChatConversations', () => {
       getLoginEnvironment: async () => ({ env, error: null }),
     })
 
-  /** A Codex session file for a conversation in a folder, whose first line is its metadata. */
+  /** A Codex session file for a conversation in a folder, whose first line is its metadata, with a message. */
   function rollout(id: string, cwd: string, title?: string, minute = 0): void {
     const directory = path.join(home, '.codex', 'sessions', '2026', '10', '21')
     fs.mkdirSync(directory, { recursive: true })
@@ -38,7 +52,7 @@ describe('localChatConversations', () => {
     }
     fs.writeFileSync(
       path.join(directory, `rollout-2026-10-21T10-00-00-${id}.jsonl`),
-      `${JSON.stringify(meta)}\n{"type":"event_msg"}\n`,
+      `${JSON.stringify(meta)}\n{"type":"event_msg","payload":{"type":"task_started"}}\n${userMessage('Fix it')}\n`,
     )
     if (title !== undefined) {
       const index = path.join(home, '.codex', 'session_index.jsonl')
@@ -63,24 +77,76 @@ describe('localChatConversations', () => {
     ])
   })
 
-  it('leaves out a Codex conversation whose file holds its first line alone, as one that never got a message', async () => {
+  it('leaves out a Codex conversation whose file records no message, as one that never got one', async () => {
     rollout('thread-one', folder, 'First work', 1)
     const directory = path.join(home, '.codex', 'sessions', '2026', '10', '21')
     const meta = (id: string, extra: object = {}) =>
       JSON.stringify({
+        timestamp: '2026-10-21T10:05:00.000Z',
         type: 'session_meta',
         payload: { id, cwd: folder, timestamp: '2026-10-21T10:05:00.000Z', ...extra },
       })
-    fs.writeFileSync(path.join(directory, 'rollout-empty.jsonl'), `${meta('thread-empty')}\n`)
+    const write = (name: string, lines: string[]) =>
+      fs.writeFileSync(path.join(directory, name), lines.map((line) => `${line}\n`).join(''))
+    // Codex's shared background server leaves the first line alone.
+    write('rollout-empty.jsonl', [meta('thread-empty')])
     fs.writeFileSync(path.join(directory, 'rollout-empty-crlf.jsonl'), `${meta('thread-crlf')}\r\n`)
-    // A first line longer than one read, with more after it.
-    fs.writeFileSync(
-      path.join(directory, 'rollout-long.jsonl'),
-      `${meta('thread-long', { instructions: 'x'.repeat(200_000) })}\n{"type":"event_msg"}\n`,
-    )
+    // Lines that are no message, as Codex writes for a conversation forked
+    // from another before a message is sent in it.
+    write('rollout-fork.jsonl', [
+      meta('thread-fork', { forked_from_id: 'thread-one' }),
+      '{"type":"event_msg","payload":{"type":"thread_settings_applied"}}',
+    ])
+    // A first line longer than one read, with a message after it.
+    write('rollout-long.jsonl', [
+      meta('thread-long', { instructions: 'x'.repeat(200_000) }),
+      userMessage('Fix it'),
+    ])
+    // A message as Codex before 0.148 writes it.
+    write('rollout-earlier.jsonl', [
+      meta('thread-earlier'),
+      '{"type":"event_msg","payload":{"type":"user_message","message":"Fix it"}}',
+    ])
+    expect(
+      (await conversations().codexConversations(folder))
+        ?.map((conversation) => conversation.id)
+        .toSorted(),
+    ).toEqual(['thread-earlier', 'thread-long', 'thread-one'])
+  })
+
+  it('counts no message of the copy an earlier Codex makes of a conversation it forks from, only one sent since', async () => {
+    const directory = path.join(home, '.codex', 'sessions', '2026', '10', '21')
+    fs.mkdirSync(directory, { recursive: true })
+    const meta = (id: string, timestamp: string, extra: object = {}) =>
+      JSON.stringify({
+        timestamp: at(0),
+        type: 'session_meta',
+        payload: { id, cwd: folder, timestamp, ...extra },
+      })
+    const copy = (id: string) => [
+      meta(id, at(0), { forked_from_id: 'thread-one' }),
+      meta('thread-one', '2026-10-21T10:01:00.000Z'),
+      JSON.stringify({ timestamp: at(0), type: 'turn_context', payload: {} }),
+      JSON.stringify({
+        timestamp: at(0),
+        type: 'event_msg',
+        payload: { type: 'user_message', message: 'Fix it' },
+      }),
+    ]
+    const write = (name: string, lines: string[]) =>
+      fs.writeFileSync(path.join(directory, name), lines.map((line) => `${line}\n`).join(''))
+    write('rollout-copy.jsonl', copy('thread-copy'))
+    write('rollout-copy-then-message.jsonl', [
+      ...copy('thread-copy-message'),
+      JSON.stringify({
+        timestamp: at(9),
+        type: 'event_msg',
+        payload: { type: 'user_message', message: 'And now this' },
+      }),
+    ])
     expect(
       (await conversations().codexConversations(folder))?.map((conversation) => conversation.id),
-    ).toEqual(['thread-one', 'thread-long'])
+    ).toEqual(['thread-copy-message'])
   })
 
   it('gives no Codex conversations, rather than an error, when Codex wrote none', async () => {

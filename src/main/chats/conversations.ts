@@ -54,17 +54,13 @@ function milliseconds(value: unknown): number {
 /** The most of a file's first line Hoot reads. */
 const FIRST_LINE_LIMIT = 1024 * 1024
 
-/**
- * The first line of a file, up to `FIRST_LINE_LIMIT` bytes of it, and
- * whether more lines follow it, read without reading the rest.
- */
-async function firstLine(file: string): Promise<{ line: string; more: boolean }> {
+/** The first line of a file, up to `FIRST_LINE_LIMIT` bytes of it, read without reading the rest. */
+async function firstLine(file: string): Promise<string> {
   const handle = await fs.open(file, 'r')
   try {
-    const { size } = await handle.stat()
     const chunks: Buffer[] = []
     let length = 0
-    while (length < Math.min(size, FIRST_LINE_LIMIT)) {
+    while (length < FIRST_LINE_LIMIT) {
       const buffer = Buffer.alloc(64 * 1024)
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, length)
       if (bytesRead === 0) break
@@ -72,14 +68,12 @@ async function firstLine(file: string): Promise<{ line: string; more: boolean }>
       const end = read.indexOf(10)
       if (end !== -1) {
         chunks.push(read.subarray(0, end))
-        length += end
         break
       }
       chunks.push(read)
       length += bytesRead
     }
-    // The line, its line break, and perhaps a carriage return before it.
-    return { line: Buffer.concat(chunks).toString('utf8'), more: size > length + 2 }
+    return Buffer.concat(chunks).toString('utf8')
   } finally {
     await handle.close()
   }
@@ -172,12 +166,77 @@ async function codexTitles(home: string): Promise<Map<string, string>> {
 }
 
 /**
+ * How long after the first line of a session file that starts with a copy of
+ * the conversation it was forked from Codex may still be writing that copy,
+ * in milliseconds: a message it writes later is one sent in the fork.
+ */
+const FORK_COPY_MS = 1000
+
+/**
+ * Whether a line of a Codex session file records a message the user sent,
+ * as earlier versions of Codex name it (`user_message`) or later ones do (a
+ * completed `UserMessage` item).
+ */
+function codexUserMessage(record: Record<string, unknown>): boolean {
+  if (record.type !== 'event_msg') return false
+  const payload = record.payload
+  if (typeof payload !== 'object' || payload === null) return false
+  const { type, item } = payload as { type?: unknown; item?: unknown }
+  if (type === 'user_message') return true
+  return (
+    type === 'item_completed' &&
+    typeof item === 'object' &&
+    item !== null &&
+    (item as { type?: unknown }).type === 'UserMessage'
+  )
+}
+
+/**
+ * Whether a Codex session file records a message sent in its conversation.
+ * The file of a conversation forked from another starts with the first line
+ * of the fork alone, in later versions of Codex, and in earlier ones with a
+ * copy of the conversation it was forked from, the first line of each
+ * conversation the copy holds after its own: a message in the copy was not
+ * sent in the fork, which Codex writes in one go as it forks.
+ */
+async function codexMessageSent(file: string): Promise<boolean> {
+  const input = createReadStream(file)
+  const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY })
+  try {
+    let index = 0
+    let startedAt = Number.NaN
+    let copy = false
+    for await (const line of lines) {
+      const at = index
+      index += 1
+      if (at === 0) {
+        startedAt = milliseconds(objectLine(line)?.timestamp)
+        continue
+      }
+      if (at > 1 && !line.includes('user_message') && !line.includes('UserMessage')) continue
+      const record = objectLine(line)
+      if (record === null) continue
+      if (at === 1 && record.type === 'session_meta') copy = true
+      if (!codexUserMessage(record)) continue
+      if (!copy) return true
+      const writtenAt = milliseconds(record.timestamp)
+      if (Number.isNaN(startedAt) || Number.isNaN(writtenAt)) return true
+      if (writtenAt - startedAt > FORK_COPY_MS) return true
+    }
+    return false
+  } finally {
+    lines.close()
+    input.destroy()
+  }
+}
+
+/**
  * The conversations Codex recorded in a folder, from the session files it
- * writes there: each starts with the folder and id of its conversation. A
- * conversation starts with its first message, so a folder without one holds
- * none; a file that holds that first line alone, as Codex's shared
- * background server leaves for a conversation that never got a message,
- * is none either. `null` when the files cannot be read.
+ * writes there: each starts with the folder and id of its conversation.
+ * Only those in which a message was sent are conversations here: a file of
+ * one that never got a message, as Codex's shared background server leaves,
+ * or of one forked from another with no message since, is none. `null` when
+ * the files cannot be read.
  */
 async function codexConversations(
   home: string,
@@ -195,14 +254,13 @@ async function codexConversations(
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue
     const file = path.join(entry.parentPath, entry.name)
-    let start: { line: string; more: boolean }
+    let line: string
     try {
-      start = await firstLine(file)
+      line = await firstLine(file)
     } catch {
       return null
     }
-    if (!start.more) continue
-    const record = objectLine(start.line)
+    const record = objectLine(line)
     if (!record || record.type !== 'session_meta') continue
     const payload = record.payload
     if (typeof payload !== 'object' || payload === null) continue
@@ -210,6 +268,11 @@ async function codexConversations(
     const cwd = meta.cwd
     const id = typeof meta.id === 'string' ? meta.id : meta.session_id
     if (typeof cwd !== 'string' || typeof id !== 'string' || !sameFolder(cwd, folder)) continue
+    try {
+      if (!(await codexMessageSent(file))) continue
+    } catch {
+      return null
+    }
     const at = milliseconds(meta.timestamp)
     const known = found.get(id)
     const createdAt = Number.isNaN(at) ? 0 : at

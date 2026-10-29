@@ -97,9 +97,12 @@ interface EndedRun {
   /** When Hoot began to start the agent, if it did. */
   startedAt: number | null
   /**
-   * Whether Hoot saw a message sent in it: one typed, the first message it
-   * started with, or one whose text Hoot does not see, as one recalled from
-   * the agent's history, that started a conversation.
+   * Whether Hoot saw a message sent in it that the chat may have gone on
+   * with: one typed, the first message it started with, or one whose text
+   * Hoot does not see, as one recalled from the agent's history, that started
+   * a conversation. In a chat that was in a conversation, those sent before
+   * its agent was first told to leave it for another went there, and do not
+   * count.
    */
   messaged: boolean
   /** Whether the agent told of a conversation it sent a message in. */
@@ -129,11 +132,13 @@ interface EndedRun {
  * records when a chat's process ends, and when Hoot starts, to tell whether
  * the chat's conversation got a message and which conversation a chat went
  * on to, leaving out a Codex conversation that never got one; it never lists
- * a conversation it finds there as a chat of its own. A project's own folder
- * may hold conversations from before Hoot ran an agent there: a saved
- * session in it never takes up one that started before the session was
- * made; once its agent ends, not one that started before Hoot began to start
- * that agent either, which may be another session's there.
+ * a conversation it finds there as a chat of its own. A chat stays in its
+ * conversation after a run in which its agent was told to leave it for
+ * another and sent no message since. A project's own folder may hold
+ * conversations from before Hoot ran an agent there: a saved session in it
+ * never takes up one that started before the session was made; once its
+ * agent ends, not one that started before Hoot began to start that agent
+ * either, which may be another session's there.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -178,8 +183,16 @@ export class ChatManager extends EventEmitter<{
   private readonly messageReportedAt = new Map<string, number>()
   /** When Hoot last began to start each chat's agent, before its process ran. */
   private readonly runStartedAt = new Map<string, number>()
-  /** The chats whose agent Hoot saw sent a message since it began to start it. */
+  /**
+   * The chats whose agent Hoot saw sent a message since it began to start it
+   * that the chat may have gone on with, as `EndedRun.messaged` says.
+   */
   private readonly messaged = new Set<string>()
+  /**
+   * The chats whose agent the user told, as Hoot saw, to leave its
+   * conversation for another since Hoot began to start it.
+   */
+  private readonly switched = new Set<string>()
   /** The chats whose agent told of a conversation it sent a message in since Hoot began to start it. */
   private readonly reported = new Set<string>()
   /** The first messages of the saved sessions whose agents have not started yet. */
@@ -323,6 +336,7 @@ export class ChatManager extends EventEmitter<{
     this.titlesAtSwitch.delete(id)
     this.messageReportedAt.delete(id)
     this.messaged.delete(id)
+    this.switched.delete(id)
     this.reported.delete(id)
     const startedAt = this.now()
     this.runStartedAt.set(id, startedAt)
@@ -446,6 +460,21 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
+   * Notes that the user told the chat's agent to leave the conversation the
+   * chat is in for another. The messages Hoot saw before the first time in a
+   * run went to that conversation, which the chat stays in unless a message
+   * is sent after: they no longer count as messages the chat may have gone
+   * on with. A chat in no conversation yet started one with them.
+   */
+  private noteLeft(chat: ChatInfo): void {
+    if (this.switched.has(chat.id)) return
+    this.switched.add(chat.id)
+    if (chat.conversationId === null || !this.messaged.delete(chat.id)) return
+    const run = this.chats.get(chat.id)?.unreportedRun
+    if (run?.messaged) this.chats.update(chat.id, { unreportedRun: { ...run, messaged: false } })
+  }
+
+  /**
    * Notes what the user types in a chat: the messages the user sends, which
    * a Codex or OpenCode chat's conversation has from then on, and the
    * commands that leave the conversation for another. Enter on a line with
@@ -487,7 +516,10 @@ export class ChatManager extends EventEmitter<{
           unseen = false
           if (command.startsWith('/')) {
             const name = command.split(/\s/, 1)[0] ?? ''
-            if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
+            if (SWITCH_COMMANDS[chat.toolId].includes(name)) {
+              this.noteSwitch(chatId, chat.title)
+              this.noteLeft(chat)
+            }
             if (NEW_CONVERSATION_COMMANDS[chat.toolId].includes(name)) {
               this.leftForNew.add(sessionId)
             }
@@ -549,6 +581,7 @@ export class ChatManager extends EventEmitter<{
     }
     this.runStartedAt.delete(id)
     this.messaged.delete(id)
+    this.switched.delete(id)
     this.reported.delete(id)
     this.titlesAtSwitch.delete(id)
     void this.enqueue(id, async () => {
@@ -643,8 +676,10 @@ export class ChatManager extends EventEmitter<{
    * and one with a conversation goes on to the newest that came after it,
    * when it is the chat opened last in its folder; a conversation either
    * leaves is no longer the chat's, nor any other's. A run in which Hoot saw
-   * no message sent leaves the chat in the conversation it was in. When the
-   * chat's conversation never got a message, the chat goes. A conversation
+   * no message sent that the chat may have gone on with, as one in which the
+   * agent was told to leave the chat's conversation and sent none since,
+   * leaves the chat in the conversation it was in. When the chat's
+   * conversation never got a message, the chat goes. A conversation
    * the agent reported stays the chat's: Hoot reads the records again only
    * once a later run of the agent ended without reporting one. `run` is how
    * the run of the agent whose process just ended went, if one did, or one
@@ -808,6 +843,7 @@ export class ChatManager extends EventEmitter<{
     this.messageReportedAt.delete(id)
     this.runStartedAt.delete(id)
     this.messaged.delete(id)
+    this.switched.delete(id)
     this.reported.delete(id)
   }
 

@@ -27,7 +27,9 @@ const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_
 /**
  * A run of a Codex chat's agent that Hoot began and has not seen end, while
  * Codex reported no conversation in it: when Hoot began to start the agent,
- * and whether Hoot saw a message sent in it.
+ * and whether Hoot saw a message sent in it that the chat may have gone on
+ * with, not one sent before the agent was told to leave the chat's
+ * conversation.
  */
 export interface UnreportedRun {
   startedAt: number

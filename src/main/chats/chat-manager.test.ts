@@ -573,6 +573,85 @@ describe('ChatManager', () => {
     ])
   })
 
+  it('leaves a chat in its conversation when its agent was told to leave it and sent no message since', async () => {
+    const chat = await manager.create('codex')
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', 'a question\r')
+    conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-1' })
+
+    // A message in its conversation, then a command that leaves it and no
+    // message, while a conversation starts out of Hoot in its folder.
+    for (const command of ['/new', '/clear', '/fork', '/resume']) {
+      await manager.prepareSession(chat.id)
+      manager.opened(chat.id)
+      manager.typed(chat.id, `session${command}`, 'more\r')
+      manager.typed(chat.id, `session${command}`, `${command}\r`)
+      conversations.codex = [
+        { id: 'thread-1', title: 'One', createdAt: 1 },
+        { id: `outside${command}`, title: 'Outside', createdAt: clock + 1 },
+      ]
+      manager.sessionEnded(ended(chat.id, 'codex'))
+      await manager.flush()
+      expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-1' })
+    }
+
+    // A message after the command takes the chat to the next conversation,
+    // and so does one before a later command with none after it.
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-2', 'more\r/new\rtwo\r')
+    conversations.codex = [
+      { id: 'thread-1', title: 'One', createdAt: 1 },
+      { id: 'thread-2', title: 'Two', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-2' })
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-3', '/new\rthree\r/new\r')
+    conversations.codex = [
+      { id: 'thread-2', title: 'Two', createdAt: 1 },
+      { id: 'thread-3', title: 'Three', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(chat.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'thread-3' })
+
+    // A new chat in no conversation yet started one with its message.
+    const fresh = await manager.create('codex')
+    await manager.prepareSession(fresh.id)
+    manager.opened(fresh.id)
+    manager.typed(fresh.id, 'session-4', 'one\r/new\r')
+    conversations.codex = [{ id: 'thread-fresh', title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(fresh.id, 'codex'))
+    await manager.flush()
+    expect(manager.get(fresh.id)).toMatchObject({ conversationId: 'thread-fresh' })
+
+    // An OpenCode chat, whose agent left its conversation the same way.
+    const openCode = await manager.create('opencode')
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-5', 'one\r')
+    conversations.opencode = [{ id: openCode.conversationId!, title: 'One', createdAt: clock }]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    await manager.prepareSession(openCode.id)
+    manager.opened(openCode.id)
+    manager.typed(openCode.id, 'session-6', 'more\r/new\r')
+    conversations.opencode = [
+      { id: openCode.conversationId!, title: 'One', createdAt: 1 },
+      { id: 'ses_outside', title: 'Outside', createdAt: clock + 1 },
+    ]
+    manager.sessionEnded(ended(openCode.id, 'opencode'))
+    await manager.flush()
+    expect(manager.get(openCode.id)).toMatchObject({ conversationId: openCode.conversationId })
+  })
+
   it('takes Enter after a key that recalls a message from the agent’s history for a message where it starts a conversation', async () => {
     // A new chat whose only message the user recalled, with Up.
     const chat = await manager.create('codex')

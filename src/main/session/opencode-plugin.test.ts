@@ -170,7 +170,12 @@ describe('openCodeCliConfig', () => {
 
   it('leaves aside settings OpenCode would leave aside', async () => {
     const folder = settingsFolder('broken', '{ "plugins": "not a list" }')
-    for (const own of ['not JSON', '[]', '{ "plugins": [7] }', '{ "tabs": "off" }']) {
+    for (const own of [
+      'not JSON',
+      '[]',
+      '{ "theme": { "name": "nord" }, "plugins": [7] }',
+      '{ "theme": { "name": "nord" }, "tabs": "off" }',
+    ]) {
       expect(await config({ OPENCODE_CONFIG_DIR: folder, [OPENCODE_CLI_CONFIG]: own })).toEqual({
         tabs: { mode: 'off', enabled: false },
         plugins: [pluginFolder],

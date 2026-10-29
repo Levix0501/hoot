@@ -284,7 +284,13 @@ async function codexConversations(
     .toSorted((a, b) => a.createdAt - b.createdAt)
 }
 
-/** The conversations OpenCode recorded in a folder, as its session list gives them. */
+/**
+ * The conversations OpenCode recorded in a folder, as its session list gives
+ * them. Only those in which a message was sent are conversations here: one
+ * forked from another, which OpenCode lists with a copy of the other's
+ * messages as soon as it forks, is none until it was changed since, as a
+ * message sent in it does.
+ */
 async function openCodeConversations(
   folder: string,
   env: Env,
@@ -309,6 +315,7 @@ async function openCodeConversations(
       const directory = session.directory
       if (typeof directory === 'string' && !sameFolder(directory, folder)) continue
       const createdAt = milliseconds(session.created)
+      if (milliseconds(session.updated) <= createdAt) continue
       conversations.push({
         id: session.id,
         title: typeof session.title === 'string' && session.title !== '' ? session.title : null,

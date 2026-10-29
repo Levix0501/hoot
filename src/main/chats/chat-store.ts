@@ -24,9 +24,9 @@ const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_
                  conversation_reported, unreported_run_started_at`
 
 /**
- * A run of the agent of a Codex chat whose conversation Codex did not report,
- * which Hoot began and has not seen end, while Codex reported no conversation
- * in it: when Hoot began to start the agent.
+ * A run of the agent of a Codex or OpenCode chat whose conversation its agent
+ * did not report, which Hoot began and has not seen end, while the agent
+ * reported no conversation in it: when Hoot began to start the agent.
  */
 export interface UnreportedRun {
   startedAt: number
@@ -45,9 +45,9 @@ export interface StoredChat extends ChatInfo {
    */
   conversationReported: boolean
   /**
-   * The run of its agent that Hoot began and has not seen end, while Codex
-   * reported no conversation in it, if any: what Hoot reads when it starts
-   * again after quitting without seeing that run end.
+   * The run of its agent that Hoot began and has not seen end, while the
+   * agent reported no conversation in it, if any: what Hoot reads when it
+   * starts again after quitting without seeing that run end.
    */
   unreportedRun: UnreportedRun | null
 }

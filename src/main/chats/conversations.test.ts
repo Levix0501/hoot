@@ -217,9 +217,20 @@ describe('localChatConversations', () => {
   it('reads the conversations OpenCode lists for a folder', async () => {
     const bin = path.join(home, 'bin')
     const sessions = [
-      { id: 'ses_one', title: 'One', created: 1_000, directory: folder },
-      { id: 'ses_two', title: '', created: 2_000, directory: folder },
-      { id: 'ses_other', title: 'Other', created: 3_000, directory: path.join(home, 'else') },
+      { id: 'ses_one', title: 'One', updated: 1_500, created: 1_000, directory: folder },
+      { id: 'ses_two', title: '', updated: 2_500, created: 2_000, directory: folder },
+      {
+        id: 'ses_other',
+        title: 'Other',
+        updated: 3_500,
+        created: 3_000,
+        directory: path.join(home, 'else'),
+      },
+      // A fork no message was sent in, which OpenCode lists with the
+      // messages of the conversation it was forked from.
+      { id: 'ses_fork', title: 'One (fork #1)', updated: 4_000, created: 4_000, directory: folder },
+      // One whose list gives no time it was changed, as an earlier one may.
+      { id: 'ses_three', title: 'Three', created: 5_000, directory: folder },
     ]
     await writeNodeCommand(
       path.join(bin, 'opencode'),
@@ -230,6 +241,7 @@ describe('localChatConversations', () => {
     ).toEqual([
       { id: 'ses_one', title: 'One', createdAt: 1_000 },
       { id: 'ses_two', title: null, createdAt: 2_000 },
+      { id: 'ses_three', title: 'Three', createdAt: 5_000 },
     ])
   })
 

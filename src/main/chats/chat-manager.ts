@@ -9,7 +9,7 @@ import type { HookEventReport } from '../../shared/hoot-cli'
 import { defaultSessionName, type SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
 import type { ChatLaunch } from '../session/launch'
-import { ChatStore } from './chat-store'
+import { ChatStore, type StoredChat } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
 /** What a saved session is made with, besides its folder and its agent. */
@@ -36,7 +36,7 @@ export interface ChatManagerOptions {
   home?: string
   /** The time to record, in milliseconds since the Unix epoch. */
   now?: () => number
-  /** Makes the ids of chats and of the conversations Hoot starts. */
+  /** Makes the ids of chats. */
   newId?: () => string
   /**
    * Moves a folder, with what is in it, to the Trash (the Recycle Bin on
@@ -86,30 +86,31 @@ interface EndedRun {
  * for a saved session a worktree's root or its project's own folder), and the
  * conversation its agent continues.
  *
- * A chat is in one conversation at a time. When its agent leaves it for
- * another, as with `/clear` or `/new`, the chat goes on in the next one once a
- * message is sent there, and the one it left is no longer listed: the agent's
- * own records keep it. Claude Code picks the id of each conversation it
- * starts, and tells of the conversation each message goes to through its
- * hooks: a Claude Code chat is in no conversation until it told of one, and
- * one that never did goes once its agent ends, as when the user turned off
- * Claude Code's hooks. Codex tells of the conversation each message goes to
- * through the hook Hoot gives it, once the user trusted that hook: a Codex
- * chat in a conversation Codex told of goes on in another only when Codex
- * tells of that one, whatever Codex records in the chat's folder and however
- * a later run went. For any other Codex chat, and for OpenCode, Hoot reads
- * the agent's own records to tell whether the chat's conversation got a
- * message and which conversation a chat went on to, as before Hoot learned
- * conversations from Codex. When a chat's process ends, and when Hoot starts
- * for a Codex run it did not see end, the chat can go on only to one that
- * started in that run and got a message. When Hoot starts, it also reads
- * each OpenCode chat, and each Codex chat in no conversation and without
- * such a run, with no run to go by: such a chat may take up, or go on to,
- * one that started at any time and got a message. It tells that from those
- * records alone, and from the chats and runs it noted, never from what the
- * user typed: a chat may go on to one started in its folder out of Hoot, or
- * by another chat's agent. It never lists a conversation it finds there as
- * a chat of its own.
+ * A chat is in one conversation at a time, and its agent picks the id of each
+ * conversation it starts. When its agent leaves it for another, as with
+ * `/clear` or `/new`, the chat goes on in the next one once a message is sent
+ * there, and the one it left is no longer listed: the agent's own records
+ * keep it. Claude Code tells of the conversation each message goes to
+ * through its hooks: a Claude Code chat is in no conversation until it told
+ * of one, and one that never did goes once its agent ends, as when the user
+ * turned off Claude Code's hooks. Codex tells of the conversation each
+ * message goes to through the hook Hoot gives it, once the user trusted that
+ * hook: a Codex chat in a conversation Codex told of goes on in another only
+ * when Codex tells of that one, whatever Codex records in the chat's folder
+ * and however a later run went. For any other Codex chat, and for OpenCode,
+ * Hoot reads the agent's own records to tell whether the chat's conversation
+ * got a message and which conversation a chat went on to, as before Hoot
+ * learned conversations from Codex. When a chat's process ends, and when
+ * Hoot starts for a run it did not see end, the chat can go on only to one
+ * that started in that run and got a message. When Hoot starts, it also
+ * reads each Codex chat in no conversation and without such a run, and each
+ * OpenCode chat in a conversation an earlier version of Hoot gave OpenCode
+ * the id of and had not seen get a message, with no run to go by: such a
+ * chat may take up, or go on to, one that started at any time and got a
+ * message. It tells that from those records alone, and from the chats and
+ * runs it noted, never from what the user typed: a chat may go on to one
+ * started in its folder out of Hoot, or by another chat's agent. It never
+ * lists a conversation it finds there as a chat of its own.
  * A project's own folder may hold conversations from before Hoot ran an
  * agent there: a saved session in it never takes up one that started before
  * the session was made.
@@ -212,7 +213,8 @@ export class ChatManager extends EventEmitter<{
       folder,
       projectRoot: null,
       worktreePath: null,
-      conversationId: newConversationId(toolId, this.newId),
+      // Its agent picks the id of the conversation it starts.
+      conversationId: null,
       title: '',
       customName: null,
       hasMessages: false,
@@ -243,7 +245,7 @@ export class ChatManager extends EventEmitter<{
       folder: worktreePath ?? projectRoot,
       projectRoot,
       worktreePath,
-      conversationId: newConversationId(toolId, this.newId),
+      conversationId: null,
       title: '',
       customName: options.name ?? null,
       hasMessages: false,
@@ -278,8 +280,9 @@ export class ChatManager extends EventEmitter<{
 
   /**
    * What starting the chat's agent takes: its folder, made when missing, the
-   * conversation to continue, fresh when it never got a message, and the
-   * first message of a saved session whose agent has not started yet.
+   * conversation to continue, none when it never got a message, so that the
+   * agent starts one and picks its id, and the first message of a saved
+   * session whose agent has not started yet.
    */
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
     const chat = this.chats.get(id)
@@ -292,19 +295,14 @@ export class ChatManager extends EventEmitter<{
     // A saved session's folder is its worktree or its project's folder, which
     // Hoot does not make.
     if (chat.projectRoot === null) await this.ensureFolder(chat)
-    // OpenCode is given the id of the conversation it starts; Claude Code and
-    // Codex pick their own.
-    let conversationId = chat.conversationId
-    if (conversationId === null && chat.toolId === 'opencode') {
-      conversationId = newConversationId(chat.toolId, this.newId)
-      if (conversationId !== null) this.chats.update(id, { conversationId })
-    }
+    const conversationId = chat.conversationId
     const resume = chat.hasMessages && conversationId !== null
     const firstMessage = this.firstMessages.get(id)
-    // Kept until Codex reports a conversation in the run, or Hoot sees it end:
-    // what Hoot reads when it starts again after quitting without that. A
-    // conversation Codex reported is not read again.
-    if (chat.toolId === 'codex' && !chat.conversationReported) {
+    // Kept until the agent of a Codex or OpenCode chat reports a conversation
+    // in the run, or Hoot sees it end: what Hoot reads when it starts again
+    // after quitting without that. A conversation its agent reported is not
+    // read again.
+    if (chat.toolId !== 'claude' && !chat.conversationReported) {
       this.chats.update(id, { unreportedRun: { startedAt } })
     }
     return {
@@ -468,11 +466,14 @@ export class ChatManager extends EventEmitter<{
    * Reads the records of every chat's and saved session's agent, as when Hoot
    * starts: first for those the user deleted before Hoot learned which
    * conversation they were in, so that no other takes it up. A run of a
-   * Codex chat's agent that Hoot did not see end, as when Hoot quit without
-   * ending it, and in which Codex reported no conversation, is read as Hoot
-   * reads such a run when it ends. A Codex chat in a conversation is read for
-   * no other: Hoot read each run it saw end when it ended, and does not read
-   * one whose conversation Codex reported at all.
+   * Codex or OpenCode chat's agent that Hoot did not see end, as when Hoot
+   * quit without ending it, and in which the agent reported no conversation,
+   * is read as Hoot reads such a run when it ends. A Codex chat in a
+   * conversation, or an OpenCode chat, is read for no other: Hoot read each
+   * run it saw end when it ended, and does not read one whose conversation
+   * its agent reported at all. An OpenCode chat in a conversation an earlier
+   * version of Hoot gave OpenCode the id of, which Hoot had not seen get a
+   * message, is read all the same: OpenCode may have recorded one in it since.
    */
   reconcileAll(): Promise<void> {
     return this.enqueue('*', async () => {
@@ -485,6 +486,9 @@ export class ChatManager extends EventEmitter<{
       for (const chat of chats) {
         const run = chat.unreportedRun
         if (chat.toolId === 'codex' && chat.conversationId !== null && run === null) continue
+        if (chat.toolId === 'opencode' && run === null && !chat.deleted && !givenByHoot(chat)) {
+          continue
+        }
         await this.reconcileChat(
           chat.id,
           run ? { startedAt: run.startedAt, reported: false } : null,
@@ -607,7 +611,7 @@ export class ChatManager extends EventEmitter<{
       .at(-1)
     if (conversationId === null || current === -1) {
       // The chat had no conversation yet, or one that never got a message,
-      // as one OpenCode was to start when another took its place.
+      // as one an earlier version of Hoot gave OpenCode the id of.
       if (next) {
         this.chats.update(chatId, {
           conversationId: next.id,
@@ -809,20 +813,16 @@ export function ownConversations(
 }
 
 /**
- * The id of a new conversation an agent starts with: a session id OpenCode
- * accepts, or `null` for Claude Code and Codex, which pick their own and tell
- * Hoot, or leave it to their records.
+ * Whether an OpenCode chat is in a conversation an earlier version of Hoot
+ * gave OpenCode the id of as it started it, which Hoot has not seen get a
+ * message: OpenCode picks the ids of its conversations now, and Hoot learns
+ * a chat's conversation from a message in it.
  */
-export function newConversationId(
-  toolId: CodingToolId,
-  makeId: () => string = randomUUID,
-): string | null {
-  switch (toolId) {
-    case 'opencode':
-      // OpenCode's session ids start with `ses`.
-      return `ses_${makeId().replaceAll('-', '')}`
-    case 'claude':
-    case 'codex':
-      return null
-  }
+function givenByHoot(chat: StoredChat): boolean {
+  return (
+    chat.toolId === 'opencode' &&
+    chat.conversationId !== null &&
+    !chat.hasMessages &&
+    !chat.conversationReported
+  )
 }

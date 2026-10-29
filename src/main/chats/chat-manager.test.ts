@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import { openDatabase } from '../database/database'
-import { ChatManager, newConversationId, ownConversations, visibleInput } from './chat-manager'
+import { ChatManager, ownConversations, visibleInput } from './chat-manager'
 import { ChatStore } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
@@ -213,9 +213,9 @@ describe('ChatManager', () => {
     }
     expect(new Set([codex.folder, opencode.folder, codexAgain.folder]).size).toBe(3)
 
-    // Claude Code and Codex pick the ids of their conversations.
+    // The agents pick the ids of their conversations.
     expect(claude.conversationId).toBeNull()
-    expect(opencode.conversationId).toMatch(/^ses_[0-9a-f]+$/)
+    expect(opencode.conversationId).toBeNull()
     expect(codex.conversationId).toBeNull()
     expect(manager.list().map((chat) => chat.id)).toEqual([
       codexAgain.id,
@@ -518,7 +518,7 @@ describe('ChatManager', () => {
 
   it('keeps an OpenCode chat in its conversation after /new until a message is sent in the next one', async () => {
     const chat = await manager.create('opencode')
-    const old = chat.conversationId!
+    const old = 'ses_first'
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
     manager.typed(chat.id, 'session-1', 'first question\r')
@@ -581,7 +581,7 @@ describe('ChatManager', () => {
     const openCode = await manager.create('opencode')
     await manager.prepareSession(openCode.id)
     manager.opened(openCode.id)
-    conversations.opencode = [{ id: openCode.conversationId!, title: 'One', createdAt: clock }]
+    conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
     manager.sessionEnded(ended(openCode.id, 'opencode'))
     await manager.flush()
     await manager.prepareSession(openCode.id)
@@ -589,7 +589,7 @@ describe('ChatManager', () => {
     manager.typed(openCode.id, 'session-oc', 'more\r/new\r')
     manager.sessionEnded(ended(openCode.id, 'opencode'))
     await manager.flush()
-    expect(manager.get(openCode.id)).toMatchObject({ conversationId: openCode.conversationId })
+    expect(manager.get(openCode.id)).toMatchObject({ conversationId: 'ses_one' })
   })
 
   it('goes on to a conversation that started in its folder in the run, whatever was typed', async () => {
@@ -635,14 +635,14 @@ describe('ChatManager', () => {
     const openCode = await manager.create('opencode')
     await manager.prepareSession(openCode.id)
     manager.opened(openCode.id)
-    conversations.opencode = [{ id: openCode.conversationId!, title: 'One', createdAt: clock }]
+    conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
     manager.sessionEnded(ended(openCode.id, 'opencode'))
     await manager.flush()
     await manager.prepareSession(openCode.id)
     manager.opened(openCode.id)
     manager.typed(openCode.id, 'session-oc', '/new\r')
     conversations.opencode = [
-      { id: openCode.conversationId!, title: 'One', createdAt: 1 },
+      { id: 'ses_one', title: 'One', createdAt: 1 },
       { id: 'ses_outside', title: 'Outside', createdAt: clock + 1 },
     ]
     manager.sessionEnded(ended(openCode.id, 'opencode'))
@@ -733,12 +733,17 @@ describe('ChatManager', () => {
       'opencode',
       folder,
     )
+    // Both run again, and Hoot quits without seeing them end.
+    for (const saved of [first, second]) {
+      await manager.prepareSession(saved.id)
+      manager.opened(saved.id)
+    }
     record([
       { id: firstConversation, title: 'First', createdAt: 1 },
       { id: secondConversation, title: 'Second', createdAt: 2 },
-      { id: 'ses_third', title: 'Third', createdAt: 3 },
+      { id: 'ses_third', title: 'Third', createdAt: ++clock },
     ])
-    await manager.reconcileAll()
+    manager = await restarted()
 
     expect(manager.listSavedSessions().map((entry) => [entry.id, entry.conversationId])).toEqual([
       [first.id, firstConversation],
@@ -746,23 +751,29 @@ describe('ChatManager', () => {
     ])
   })
 
-  it('reads what happened while Hoot was not running when it starts', async () => {
+  it('reads when it starts an OpenCode chat in a conversation an earlier version of Hoot gave OpenCode the id of', async () => {
     const chat = await manager.create('opencode')
-    const first = chat.conversationId!
+    // As an earlier version of Hoot made it, which saw no message yet.
+    new ChatStore(db).update(chat.id, { conversationId: 'ses_given' })
     conversations.opencode = [
-      { id: first, title: 'First', createdAt: 1 },
+      { id: 'ses_given', title: 'First', createdAt: 1 },
       { id: 'ses_second', title: 'Second', createdAt: 2 },
     ]
+    // And one made since, which never ran.
+    const fresh = await manager.create('opencode')
 
     await manager.reconcileAll()
     expect(manager.list()).toEqual([
+      expect.objectContaining({ id: fresh.id, conversationId: null, hasMessages: false }),
       expect.objectContaining({ id: chat.id, conversationId: 'ses_second', hasMessages: true }),
     ])
 
-    // Reading again changes nothing.
+    // Reading again changes nothing: no run of theirs was left to read.
+    conversations.opencode.push({ id: 'ses_third', title: 'Third', createdAt: 3 })
     await manager.reconcileAll()
-    expect(manager.list()).toEqual([
-      expect.objectContaining({ id: chat.id, conversationId: 'ses_second' }),
+    expect(manager.list().map((entry) => [entry.id, entry.conversationId])).toEqual([
+      [fresh.id, null],
+      [chat.id, 'ses_second'],
     ])
   })
 
@@ -1025,7 +1036,7 @@ describe('ChatManager', () => {
 
   it('moves the folder of a deleted chat to the Trash with what is in it, once no other chat runs in it', async () => {
     const chat = await manager.create('opencode')
-    const old = chat.conversationId!
+    const old = 'ses_first'
     manager.typed(chat.id, 'session-1', 'first question\r')
     conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
     manager.sessionEnded(ended(chat.id, 'opencode'))
@@ -1155,7 +1166,6 @@ describe('ChatManager', () => {
         [other, 'second question\r'],
       ] as const) {
         manager.opened(saved.id)
-        if (toolId === 'opencode') manager.typed(saved.id, `session-${saved.id}`, '/new\r')
         manager.typed(saved.id, `session-${saved.id}`, message)
       }
       const recorded = [
@@ -1347,7 +1357,6 @@ describe('ChatManager', () => {
         [second, 'second question\r'],
       ] as const) {
         manager.opened(saved.id)
-        if (toolId === 'opencode') manager.typed(saved.id, `session-${saved.id}`, '/new\r')
         manager.typed(saved.id, `session-${saved.id}`, message)
       }
       record([
@@ -1391,7 +1400,6 @@ describe('ChatManager', () => {
 
       const later = manager.createSavedSession(folder, null, toolId)
       await start(later.id)
-      if (toolId === 'opencode') manager.typed(later.id, 'session-later', '/new\r')
       manager.typed(later.id, 'session-later', 'another question\r')
       recorded.push({ id: 'thread-later', title: 'Later', createdAt: ++clock })
       record(recorded)
@@ -1736,6 +1744,28 @@ describe('ChatManager', () => {
     expect(again.get(saved.id)?.conversationId).toBe('thread-two')
   })
 
+  it('reads at its next start only the runs of an OpenCode session that Hoot did not see end', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    // Its first run, which Hoot does not see end, starts a conversation.
+    await start(saved.id)
+    conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
+    let again = await restarted()
+    expect(again.get(saved.id)).toMatchObject({ conversationId: 'ses_one', hasMessages: true })
+
+    // One starts out of Hoot in the worktree, while no run of it is left to read.
+    conversations.opencode.push({ id: 'ses_outside', title: 'Outside', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('ses_one')
+
+    // A run Hoot did not see end, in which one started, goes on to it.
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    conversations.opencode.push({ id: 'ses_two', title: 'Two', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)).toMatchObject({ conversationId: 'ses_two', title: 'Two' })
+  })
+
   it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside
@@ -1812,8 +1842,6 @@ describe('ownConversations', () => {
   })
 })
 
-const makeId = () => 'ABC-123'
-
 describe('visibleInput', () => {
   it('leaves what the user typed, without the answers a terminal gives or escape sequences', () => {
     expect(
@@ -1823,13 +1851,5 @@ describe('visibleInput', () => {
     ).toBe('Reply with one word')
     expect(visibleInput('\x1b[<0;1;1M/clear')).toBe('/clear')
     expect(visibleInput('\x1bP>|xterm.js(6.1.0)\x1b\\hello')).toBe('hello')
-  })
-})
-
-describe('newConversationId', () => {
-  it('picks an id OpenCode accepts, and none for Claude Code and Codex', () => {
-    expect(newConversationId('claude', makeId)).toBeNull()
-    expect(newConversationId('opencode', makeId)).toBe('ses_ABC123')
-    expect(newConversationId('codex', makeId)).toBeNull()
   })
 })

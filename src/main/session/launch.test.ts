@@ -295,7 +295,7 @@ describe('resolveLaunch', () => {
     ])
   })
 
-  it('continues a chat’s conversation, or starts the one its id names', async () => {
+  it('continues a chat’s conversation, or starts a new one whose id the agent picks', async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     // A new Claude Code conversation gets the id Claude Code picks.
     const claudeNew = await resolveLaunch(context(loginEnv), 'claude', project, null, {
@@ -345,6 +345,20 @@ describe('resolveLaunch', () => {
       resume: true,
     })
     expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto', '-s', 'ses_one'])
+    // OpenCode picks the id of a new one too, which OpenCode 1.x needs: it
+    // takes `-s` for a conversation to continue alone.
+    const opencodeNew = await resolveLaunch(context(loginEnv), 'opencode', project, null, {
+      conversationId: null,
+      resume: false,
+    })
+    expect(opencodeNew.args).toEqual([...program(bin, 'opencode').args, '--auto'])
+    // Nor is one that never got a message continued, as one an earlier
+    // version of Hoot gave OpenCode the id of.
+    const opencodeUnused = await resolveLaunch(context(loginEnv), 'opencode', project, null, {
+      conversationId: 'ses_unused',
+      resume: false,
+    })
+    expect(opencodeUnused.args).toEqual([...program(bin, 'opencode').args, '--auto'])
   })
 
   it('sends the first message of a conversation it starts after every other argument', async () => {
@@ -383,16 +397,11 @@ describe('resolveLaunch', () => {
       message,
     ])
     const opencode = await resolveLaunch(context(loginEnv, {}, false), 'opencode', project, null, {
-      conversationId: 'ses_one',
+      conversationId: null,
       resume: false,
       firstMessage: message,
     })
-    expect(opencode.args).toEqual([
-      ...program(bin, 'opencode').args,
-      '-s',
-      'ses_one',
-      `--prompt=${message}`,
-    ])
+    expect(opencode.args).toEqual([...program(bin, 'opencode').args, `--prompt=${message}`])
     // Without one, nothing is sent.
     const plain = await resolveLaunch(yolo, 'claude', project, null, {
       conversationId: null,

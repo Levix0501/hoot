@@ -127,6 +127,18 @@ describe('openCodeCliConfig', () => {
     expect(fs.readdirSync(folder)).toEqual(['cli.json'])
   })
 
+  it('reads a cli.json that starts with a byte order mark, as OpenCode does', async () => {
+    // As Windows PowerShell 5.1 writes a UTF-8 file.
+    const folder = settingsFolder('bom', '\uFEFF{ "plugins": ["./plugins/status", "-hoot"] }\r\n')
+    expect(fs.readFileSync(path.join(folder, 'cli.json')).subarray(0, 3)).toEqual(
+      Buffer.from([0xef, 0xbb, 0xbf]),
+    )
+    expect(await config({ OPENCODE_CONFIG_DIR: folder })).toEqual({
+      tabs: { mode: 'off', enabled: false },
+      plugins: [pluginFolder, './plugins/status', '-hoot'],
+    })
+  })
+
   it('gives no other entry for Hoot’s plugin when the user’s own already names it', async () => {
     for (const named of [
       pluginFolder,

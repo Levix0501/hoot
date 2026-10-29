@@ -104,16 +104,18 @@ function takenByOpenCode(settings: Record<string, unknown>): boolean {
 
 /**
  * The plugins the user's cli.json lists, in its folder; none when it cannot
- * be read, or OpenCode would leave it aside.
+ * be read, or OpenCode would leave it aside. It is decoded as OpenCode
+ * decodes it, without the byte order mark that Windows PowerShell 5.1 and
+ * older versions of Notepad put at the start of a UTF-8 file.
  */
 async function cliJsonPlugins(configFolder: string): Promise<PluginEntry[]> {
-  let text: string
+  let bytes: Uint8Array
   try {
-    text = await fs.readFile(path.join(configFolder, 'cli.json'), 'utf8')
+    bytes = await fs.readFile(path.join(configFolder, 'cli.json'))
   } catch {
     return []
   }
-  const settings = settingsObject(text)
+  const settings = settingsObject(new TextDecoder().decode(bytes))
   if (settings === undefined || !takenByOpenCode(settings)) return []
   return pluginsOf(settings) ?? []
 }

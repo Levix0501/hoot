@@ -134,11 +134,12 @@ interface EndedRun {
  * on to, leaving out a Codex conversation that never got one; it never lists
  * a conversation it finds there as a chat of its own. A chat stays in its
  * conversation after a run in which its agent was told to leave it for
- * another and sent no message since. A project's own folder may hold
- * conversations from before Hoot ran an agent there: a saved session in it
- * never takes up one that started before the session was made; once its
- * agent ends, not one that started before Hoot began to start that agent
- * either, which may be another session's there.
+ * another and sent no message since. When Hoot starts, it reads a Codex
+ * chat in a conversation only for a run it did not see end. A project's own
+ * folder may hold conversations from before Hoot ran an agent there: a saved
+ * session in it never takes up one that started before the session was
+ * made; once its agent ends, not one that started before Hoot began to start
+ * that agent either, which may be another session's there.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -603,11 +604,12 @@ export class ChatManager extends EventEmitter<{
   /**
    * Reads the records of every chat's and saved session's agent, as when Hoot
    * starts: first for those the user deleted before Hoot learned which
-   * conversation they were in, so that no other takes it up. A Codex chat
-   * whose conversation Codex reported is read only for a run of its agent
-   * that Hoot did not see end, as when Hoot quit without ending it, and in
-   * which Codex reported no conversation: as Hoot reads such a run when it
-   * ends.
+   * conversation they were in, so that no other takes it up. A run of a
+   * Codex chat's agent that Hoot did not see end, as when Hoot quit without
+   * ending it, and in which Codex reported no conversation, is read as Hoot
+   * reads such a run when it ends. A Codex chat in a conversation, whether
+   * Codex reported it or not, is read for no other: Hoot read each run it
+   * saw end when it ended.
    */
   reconcileAll(): Promise<void> {
     return this.enqueue('*', async () => {
@@ -619,11 +621,10 @@ export class ChatManager extends EventEmitter<{
       ].flatMap((chat) => this.chats.get(chat.id) ?? [])
       for (const chat of chats) {
         const run = chat.unreportedRun
+        if (chat.toolId === 'codex' && chat.conversationId !== null && run === null) continue
         await this.reconcileChat(
           chat.id,
-          run && chat.conversationReported
-            ? { ...run, reported: false, titleAtSwitch: undefined }
-            : null,
+          run ? { ...run, reported: false, titleAtSwitch: undefined } : null,
         )
         if (run) this.endUnreportedRun(chat.id, run.startedAt)
       }

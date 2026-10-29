@@ -1961,6 +1961,51 @@ describe('ChatManager', () => {
     expect(again.get(saved.id)?.conversationId).toBe('thread-one')
   })
 
+  it('reads at its next start only the runs of a Codex session in a conversation that Hoot did not see end', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    await start(saved.id)
+    manager.typed(saved.id, 'session-1', 'one\r')
+    conversations.codex = [{ id: 'thread-one', title: 'One', createdAt: clock }]
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('thread-one')
+
+    // Codex reports nothing, as while its hook is not trusted. A run that
+    // left the conversation with /new and sent no message, while one started
+    // out of Hoot in the worktree, keeps it when it ends and when Hoot starts.
+    await start(saved.id)
+    manager.typed(saved.id, 'session-2', '/new\r')
+    conversations.codex.push({ id: 'outside-1', title: 'Outside', createdAt: ++clock })
+    manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
+    await manager.flush()
+    expect(manager.get(saved.id)?.conversationId).toBe('thread-one')
+    let again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+
+    // The same in a run Hoot did not see end, also with a message before /new.
+    for (const [index, typed] of ['/new\r', 'more\r/new\r'].entries()) {
+      await again.prepareSession(saved.id)
+      again.opened(saved.id)
+      again.typed(saved.id, `session-crash-${index}`, typed)
+      conversations.codex.push({
+        id: `outside-crash-${index}`,
+        title: 'Outside',
+        createdAt: ++clock,
+      })
+      again = await restarted()
+      expect(again.get(saved.id)?.conversationId).toBe('thread-one')
+    }
+
+    // A message after /new in a run Hoot did not see end takes it on.
+    await again.prepareSession(saved.id)
+    again.opened(saved.id)
+    again.typed(saved.id, 'session-3', '/new\rtwo\r')
+    conversations.codex.push({ id: 'thread-two', title: 'Two', createdAt: ++clock })
+    again = await restarted()
+    expect(again.get(saved.id)?.conversationId).toBe('thread-two')
+  })
+
   it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside

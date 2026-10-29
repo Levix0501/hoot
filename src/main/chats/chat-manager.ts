@@ -98,14 +98,18 @@ interface EndedRun {
  * chat in a conversation Codex told of goes on in another only when Codex
  * tells of that one, whatever Codex records in the chat's folder and however
  * a later run went. For any other Codex chat, and for OpenCode, Hoot reads
- * the agent's own records when a chat's process ends, or when Hoot starts
- * for a Codex run it did not see end, to tell whether the chat's
- * conversation got a message and which conversation a chat went on to, as
- * before Hoot learned conversations from Codex, but only to one that started
- * in that run and got a message. It tells that from those records alone, and
- * from the chats and runs it noted, never from what the user typed: a chat
- * may go on to one started in its folder out of Hoot, or by another chat's
- * agent. It never lists a conversation it finds there as a chat of its own.
+ * the agent's own records to tell whether the chat's conversation got a
+ * message and which conversation a chat went on to, as before Hoot learned
+ * conversations from Codex. When a chat's process ends, and when Hoot starts
+ * for a Codex run it did not see end, the chat can go on only to one that
+ * started in that run and got a message. When Hoot starts, it also reads
+ * each OpenCode chat, and each Codex chat in no conversation and without
+ * such a run, with no run to go by: such a chat may take up, or go on to,
+ * one that started at any time and got a message. It tells that from those
+ * records alone, and from the chats and runs it noted, never from what the
+ * user typed: a chat may go on to one started in its folder out of Hoot, or
+ * by another chat's agent. It never lists a conversation it finds there as
+ * a chat of its own.
  * A project's own folder may hold conversations from before Hoot ran an
  * agent there: a saved session in it never takes up one that started before
  * the session was made.

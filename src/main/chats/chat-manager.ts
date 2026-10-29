@@ -56,25 +56,14 @@ export function visibleInput(data: string): string {
     .replace(/\x1b[()][0-9A-Za-z]/g, '')
     .replace(/\x1b./g, '')
 }
-
-/**
- * The keys, as a terminal sends them, with which the user puts a message sent
- * before, from the agent's history, in its empty input box, which Hoot does
- * not see: Up in either cursor key mode, and Ctrl+P for Codex as well. They
- * also move the selection in the agent's lists, such as Codex's review of
- * its hooks, where Enter sends nothing. Claude Code tells of its messages
- * through its hooks.
- */
-const HISTORY_KEYS: Readonly<Record<CodingToolId, RegExp | null>> = {
-  claude: null,
-  codex: /\x1b[[O]A|\x10/,
-  opencode: /\x1b[[O]A/,
-}
 // oxlint-enable no-control-regex
 
 /**
  * The commands with which an agent leaves its conversation for another in a
  * session: a new one, one it had before, or a branch of the one it is in.
+ * Hoot notes the title the chat had then, for the name it shows once the
+ * agent reports the next conversation; it does not tell from them, or from
+ * anything else typed, which conversation a chat is in.
  */
 const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
   claude: ['/clear', '/resume', '/branch'],
@@ -82,33 +71,12 @@ const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
   opencode: ['/new', '/clear'],
 }
 
-/**
- * The commands with which a Codex or OpenCode agent leaves its conversation
- * for a new one, which the next message starts.
- */
-const NEW_CONVERSATION_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
-  claude: [],
-  codex: ['/new', '/clear', '/fork'],
-  opencode: ['/new', '/clear'],
-}
-
 /** How a run of a chat's agent went, as Hoot saw it, once its process ended. */
 interface EndedRun {
   /** When Hoot began to start the agent, if it did. */
   startedAt: number | null
-  /**
-   * Whether Hoot saw a message sent in it that the chat may have gone on
-   * with: one typed, the first message it started with, or one whose text
-   * Hoot does not see, as one recalled from the agent's history, that started
-   * a conversation. In a chat that was in a conversation, those sent before
-   * its agent was first told to leave it for another went there, and do not
-   * count.
-   */
-  messaged: boolean
   /** Whether the agent told of a conversation it sent a message in. */
   reported: boolean
-  /** The title the chat had when its agent was told to leave its conversation, if it was. */
-  titleAtSwitch: string | undefined
 }
 
 /**
@@ -126,20 +94,21 @@ interface EndedRun {
  * hooks: a Claude Code chat is in no conversation until it told of one, and
  * one that never did goes once its agent ends, as when the user turned off
  * Claude Code's hooks. Codex tells of the conversation each message goes to
- * through the hook Hoot gives it, once the user trusted that hook; the
- * conversation it tells of stays the chat's whatever Codex records in the
- * chat's folder. Otherwise, as for OpenCode, Hoot reads the agent's own
- * records when a chat's process ends, and when Hoot starts, to tell whether
- * the chat's conversation got a message and which conversation a chat went
- * on to, leaving out a Codex conversation that never got one; it never lists
- * a conversation it finds there as a chat of its own. A chat stays in its
- * conversation after a run in which its agent was told to leave it for
- * another and sent no message since. When Hoot starts, it reads a Codex
- * chat in a conversation only for a run it did not see end. A project's own
- * folder may hold conversations from before Hoot ran an agent there: a saved
- * session in it never takes up one that started before the session was
- * made; once its agent ends, not one that started before Hoot began to start
- * that agent either, which may be another session's there.
+ * through the hook Hoot gives it, once the user trusted that hook: a Codex
+ * chat in a conversation Codex told of goes on in another only when Codex
+ * tells of that one, whatever Codex records in the chat's folder and however
+ * a later run went. For any other Codex chat, and for OpenCode, Hoot reads
+ * the agent's own records when a chat's process ends, or when Hoot starts
+ * for a Codex run it did not see end, to tell whether the chat's
+ * conversation got a message and which conversation a chat went on to, as
+ * before Hoot learned conversations from Codex, but only to one that started
+ * in that run and got a message. It tells that from those records alone, and
+ * from the chats and runs it noted, never from what the user typed: a chat
+ * may go on to one started in its folder out of Hoot, or by another chat's
+ * agent. It never lists a conversation it finds there as a chat of its own.
+ * A project's own folder may hold conversations from before Hoot ran an
+ * agent there: a saved session in it never takes up one that started before
+ * the session was made.
  *
  * A chat the user deletes leaves the lists for good, but keeps its row, with
  * the conversation it was in, for as long as another chat in its folder could
@@ -160,21 +129,8 @@ export class ChatManager extends EventEmitter<{
   private readonly pending = new Set<Promise<void>>()
   /** The chats whose agent's process Hoot started and has not seen end. */
   private readonly running = new Set<string>()
-  /** The line being typed in each chat's session, for the commands that start another conversation. */
+  /** The line being typed in each chat's session, for the commands that leave its conversation. */
   private readonly typing = new Map<string, string>()
-  /**
-   * The sessions whose line being typed may hold a message Hoot does not see
-   * since the last Enter: one recalled from the agent's history, or one made
-   * of the digits typed first in a Codex session.
-   */
-  private readonly unseen = new Set<string>()
-  /** The sessions whose agent was told to leave its conversation for a new one. */
-  private readonly leftForNew = new Set<string>()
-  /**
-   * The sessions in which the user typed Enter or a character of the line:
-   * in a Codex session, the digits typed first are not one.
-   */
-  private readonly typedInput = new Set<string>()
   /**
    * The title each chat had when its agent was last told to leave its
    * conversation for another, until a message there takes the chat with it.
@@ -184,16 +140,6 @@ export class ChatManager extends EventEmitter<{
   private readonly messageReportedAt = new Map<string, number>()
   /** When Hoot last began to start each chat's agent, before its process ran. */
   private readonly runStartedAt = new Map<string, number>()
-  /**
-   * The chats whose agent Hoot saw sent a message since it began to start it
-   * that the chat may have gone on with, as `EndedRun.messaged` says.
-   */
-  private readonly messaged = new Set<string>()
-  /**
-   * The chats whose agent the user told, as Hoot saw, to leave its
-   * conversation for another since Hoot began to start it.
-   */
-  private readonly switched = new Set<string>()
   /** The chats whose agent told of a conversation it sent a message in since Hoot began to start it. */
   private readonly reported = new Set<string>()
   /** The first messages of the saved sessions whose agents have not started yet. */
@@ -336,8 +282,6 @@ export class ChatManager extends EventEmitter<{
     if (!chat || chat.deleted) return null
     this.titlesAtSwitch.delete(id)
     this.messageReportedAt.delete(id)
-    this.messaged.delete(id)
-    this.switched.delete(id)
     this.reported.delete(id)
     const startedAt = this.now()
     this.runStartedAt.set(id, startedAt)
@@ -353,11 +297,11 @@ export class ChatManager extends EventEmitter<{
     }
     const resume = chat.hasMessages && conversationId !== null
     const firstMessage = this.firstMessages.get(id)
-    if (firstMessage !== undefined && !resume) this.messaged.add(id)
     // Kept until Codex reports a conversation in the run, or Hoot sees it end:
-    // what Hoot reads when it starts again after quitting without that.
-    if (chat.toolId === 'codex') {
-      this.chats.update(id, { unreportedRun: { startedAt, messaged: this.messaged.has(id) } })
+    // what Hoot reads when it starts again after quitting without that. A
+    // conversation Codex reported is not read again.
+    if (chat.toolId === 'codex' && !chat.conversationReported) {
+      this.chats.update(id, { unreportedRun: { startedAt } })
     }
     return {
       folder: chat.folder,
@@ -443,8 +387,7 @@ export class ChatManager extends EventEmitter<{
         conversationId: reported,
         conversationReported: true,
         hasMessages: true,
-        title:
-          chat.conversationId === null ? chat.title : titleAfterSwitch(chat, titleAtSwitch, null),
+        title: chat.conversationId === null ? chat.title : titleAfterSwitch(chat, titleAtSwitch),
       })
       this.emitChanged()
     })
@@ -461,108 +404,31 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * Notes that the user told the chat's agent to leave the conversation the
-   * chat is in for another. The messages Hoot saw before the first time in a
-   * run went to that conversation, which the chat stays in unless a message
-   * is sent after: they no longer count as messages the chat may have gone
-   * on with. A chat in no conversation yet started one with them.
-   */
-  private noteLeft(chat: ChatInfo): void {
-    if (this.switched.has(chat.id)) return
-    this.switched.add(chat.id)
-    if (chat.conversationId === null || !this.messaged.delete(chat.id)) return
-    const run = this.chats.get(chat.id)?.unreportedRun
-    if (run?.messaged) this.chats.update(chat.id, { unreportedRun: { ...run, messaged: false } })
-  }
-
-  /**
-   * Notes what the user types in a chat: the messages the user sends, which
-   * a Codex or OpenCode chat's conversation has from then on, and the
-   * commands that leave the conversation for another. Enter on a line with
-   * nothing typed, after a key that recalls a message from the agent's
-   * history, may send that message, whose text Hoot does not see, or may
-   * pick an item of a list. Digits typed first in a Codex session may answer
-   * Codex's review of its hooks, which shows before its input box and takes
-   * a digit with no Enter after it, or may be a message: they are not part
-   * of the line, which may then hold a message Hoot does not see. Enter on a
-   * line that may hold one, with nothing else typed, is taken for a message
-   * only where a message starts a conversation, which Hoot then finds in the
-   * agent's records: in a chat without a conversation yet, and once the
-   * agent was told to leave its conversation for a new one.
+   * Notes the commands the user types in a chat that leave its conversation
+   * for another, for the title the chat shows once its agent reports the next
+   * one: nothing typed tells Hoot which conversation the chat is in.
    */
   typed(chatId: string, sessionId: string, data: string): void {
     const chat = this.chats.get(chatId)
     if (!chat || chat.deleted) return
     let line = this.typing.get(sessionId) ?? ''
-    let unseen = this.unseen.has(sessionId)
-    const historyKeys = HISTORY_KEYS[chat.toolId]
-    const parts = historyKeys === null ? [data] : data.split(historyKeys)
-    for (const [index, part] of parts.entries()) {
-      if (index > 0) unseen = true
-      for (const character of visibleInput(part)) {
-        if (!this.typedInput.has(sessionId)) {
-          if (chat.toolId === 'codex' && /^[1-9]$/.test(character)) {
-            unseen = true
-            continue
-          }
-          if (character === '\r' || character === '\n' || character >= ' ') {
-            this.typedInput.add(sessionId)
-          }
-        }
-        if (character === '\r' || character === '\n') {
-          const command = line.trim()
-          const startsConversation = chat.conversationId === null || this.leftForNew.has(sessionId)
-          const sent = command !== '' || (unseen && startsConversation)
-          line = ''
-          unseen = false
-          if (command.startsWith('/')) {
-            const name = command.split(/\s/, 1)[0] ?? ''
-            if (SWITCH_COMMANDS[chat.toolId].includes(name)) {
-              this.noteSwitch(chatId, chat.title)
-              this.noteLeft(chat)
-            }
-            if (NEW_CONVERSATION_COMMANDS[chat.toolId].includes(name)) {
-              this.leftForNew.add(sessionId)
-            }
-            continue
-          }
-          if (!sent) continue
-          if (!this.messaged.has(chatId)) {
-            this.messaged.add(chatId)
-            const run = this.chats.get(chatId)?.unreportedRun
-            if (run && !run.messaged) {
-              this.chats.update(chatId, { unreportedRun: { ...run, messaged: true } })
-            }
-          }
-          // Claude Code tells of its messages through its hooks. A message
-          // Hoot did not see may have been an item picked or an answer to the
-          // review: the agent's records tell.
-          if (chat.toolId !== 'claude' && command !== '') this.markMessages(chatId)
-          continue
-        }
-        if (character === '\x7f' || character === '\b') {
-          line = line.slice(0, -1)
-          continue
-        }
-        // Escape sequences and other control characters are not part of a command.
-        if ((character.codePointAt(0) ?? 0) < 32) continue
-        line += character
-        if (line.length > 10_000) line = ''
+    for (const character of visibleInput(data)) {
+      if (character === '\r' || character === '\n') {
+        const name = line.trim().split(/\s/, 1)[0] ?? ''
+        line = ''
+        if (SWITCH_COMMANDS[chat.toolId].includes(name)) this.noteSwitch(chatId, chat.title)
+        continue
       }
+      if (character === '\x7f' || character === '\b') {
+        line = line.slice(0, -1)
+        continue
+      }
+      // Escape sequences and other control characters are not part of a command.
+      if ((character.codePointAt(0) ?? 0) < 32) continue
+      line += character
+      if (line.length > 10_000) line = ''
     }
     this.typing.set(sessionId, line)
-    if (unseen) this.unseen.add(sessionId)
-    else this.unseen.delete(sessionId)
-  }
-
-  /** Notes that the user sent a message in the chat, which its conversation now has. */
-  private markMessages(chatId: string): void {
-    void this.enqueue(chatId, async () => {
-      const chat = this.chats.get(chatId)
-      if (!chat || chat.hasMessages) return
-      this.chats.update(chatId, { hasMessages: true })
-      this.emitChanged()
-    })
   }
 
   /** Reads a chat's or saved session's records again once its process ended, to keep what it did. */
@@ -571,18 +437,11 @@ export class ChatManager extends EventEmitter<{
     if (id === null || session.status !== 'exited') return
     this.running.delete(id)
     this.typing.delete(session.id)
-    this.unseen.delete(session.id)
-    this.leftForNew.delete(session.id)
-    this.typedInput.delete(session.id)
     const run: EndedRun = {
       startedAt: this.runStartedAt.get(id) ?? null,
-      messaged: this.messaged.has(id),
       reported: this.reported.has(id),
-      titleAtSwitch: this.titlesAtSwitch.get(id),
     }
     this.runStartedAt.delete(id)
-    this.messaged.delete(id)
-    this.switched.delete(id)
     this.reported.delete(id)
     this.titlesAtSwitch.delete(id)
     void this.enqueue(id, async () => {
@@ -607,9 +466,9 @@ export class ChatManager extends EventEmitter<{
    * conversation they were in, so that no other takes it up. A run of a
    * Codex chat's agent that Hoot did not see end, as when Hoot quit without
    * ending it, and in which Codex reported no conversation, is read as Hoot
-   * reads such a run when it ends. A Codex chat in a conversation, whether
-   * Codex reported it or not, is read for no other: Hoot read each run it
-   * saw end when it ended.
+   * reads such a run when it ends. A Codex chat in a conversation is read for
+   * no other: Hoot read each run it saw end when it ended, and does not read
+   * one whose conversation Codex reported at all.
    */
   reconcileAll(): Promise<void> {
     return this.enqueue('*', async () => {
@@ -624,7 +483,7 @@ export class ChatManager extends EventEmitter<{
         if (chat.toolId === 'codex' && chat.conversationId !== null && run === null) continue
         await this.reconcileChat(
           chat.id,
-          run ? { ...run, reported: false, titleAtSwitch: undefined } : null,
+          run ? { startedAt: run.startedAt, reported: false } : null,
         )
         if (run) this.endUnreportedRun(chat.id, run.startedAt)
       }
@@ -676,15 +535,15 @@ export class ChatManager extends EventEmitter<{
    * chat without a conversation takes up the newest one no other chat has,
    * and one with a conversation goes on to the newest that came after it,
    * when it is the chat opened last in its folder; a conversation either
-   * leaves is no longer the chat's, nor any other's. A run in which Hoot saw
-   * no message sent that the chat may have gone on with, as one in which the
-   * agent was told to leave the chat's conversation and sent none since,
-   * leaves the chat in the conversation it was in. When the chat's
-   * conversation never got a message, the chat goes. A conversation
-   * the agent reported stays the chat's: Hoot reads the records again only
-   * once a later run of the agent ended without reporting one. `run` is how
-   * the run of the agent whose process just ended went, if one did, or one
-   * Hoot did not see end, read when Hoot starts.
+   * leaves is no longer the chat's, nor any other's. Once its agent ended,
+   * only a conversation that started in that run can be the next one: the
+   * agent records one only once a message was sent in it, so a run that sent
+   * none leaves the chat as it was, unless one started in its folder out of
+   * Hoot or by another chat's agent. When the chat's conversation never got
+   * a message, the chat goes. A conversation Codex reported stays the chat's
+   * for good: Hoot does not read the records for it. `run` is how the run of
+   * the agent whose process just ended went, if one did, or one Hoot did not
+   * see end, read when Hoot starts.
    */
   private async reconcileChat(chatId: string, run: EndedRun | null = null): Promise<void> {
     // A chat whose agent runs is left to its process.
@@ -713,7 +572,7 @@ export class ChatManager extends EventEmitter<{
       return
     }
 
-    if (run === null ? chat.conversationReported : run.reported) return
+    if (chat.conversationReported || run?.reported === true) return
     const recorded =
       chat.toolId === 'codex'
         ? await this.conversations.codexConversations(chat.folder)
@@ -725,17 +584,6 @@ export class ChatManager extends EventEmitter<{
     const conversations = ownConversations(chat, recorded, run?.startedAt ?? null)
     const conversationId = chat.conversationId
     const current = conversations.findIndex((conversation) => conversation.id === conversationId)
-    if (run !== null && !run.messaged) {
-      // The agent went on to no other conversation without a message; a
-      // conversation that never got one leaves the chat with none.
-      if (current !== -1 && !chat.hasMessages) {
-        this.chats.update(chatId, { hasMessages: true })
-        this.emitChanged()
-      } else if (current === -1 && !chat.hasMessages) {
-        await this.removeChat(chat)
-      }
-      return
-    }
     // The conversations other chats are in, which this one does not take up.
     const claimed = new Set(
       this.chats
@@ -761,16 +609,15 @@ export class ChatManager extends EventEmitter<{
           conversationId: next.id,
           conversationReported: false,
           hasMessages: true,
-          ...(conversationId === null
-            ? {}
-            : { title: titleAfterSwitch(chat, run?.titleAtSwitch, next.title) }),
+          ...(conversationId === null ? {} : { title: next.title ?? '' }),
         })
         this.emitChanged()
         return
       }
-      // A message the agent did not record keeps the chat. A chat without a
-      // conversation in a folder where another chat holds one may have sent
-      // its message there, and goes rather than becoming a chat with none.
+      // A chat whose conversation got a message stays, though the records no
+      // longer hold it. A chat without a conversation in a folder where
+      // another chat holds one may have sent its message there, and goes
+      // rather than becoming a chat with none.
       const gone =
         conversationId === null
           ? !chat.hasMessages || this.hasConversationSibling(chat)
@@ -785,7 +632,7 @@ export class ChatManager extends EventEmitter<{
         conversationId: next.id,
         conversationReported: false,
         hasMessages: true,
-        title: titleAfterSwitch(chat, run?.titleAtSwitch, next.title),
+        title: next.title ?? '',
       })
       this.emitChanged()
       return
@@ -843,8 +690,6 @@ export class ChatManager extends EventEmitter<{
     this.titlesAtSwitch.delete(id)
     this.messageReportedAt.delete(id)
     this.runStartedAt.delete(id)
-    this.messaged.delete(id)
-    this.switched.delete(id)
     this.reported.delete(id)
   }
 
@@ -918,15 +763,13 @@ export class ChatManager extends EventEmitter<{
 }
 
 /**
- * The title a chat shows once it went on to the next conversation: one its
- * agent set since it was told to leave the conversation it was in, while
- * that title was `titleAtSwitch`, or else the title the agent recorded for
- * the next conversation, if any. Without one, it shows the agent's name.
+ * The title a chat shows once its agent reported the next conversation: one
+ * the agent set since it was told to leave the conversation it was in, while
+ * that title was `titleAtSwitch`. Without one, it shows the agent's name.
  */
 function titleAfterSwitch(
   chat: Pick<ChatInfo, 'toolId' | 'title'>,
   titleAtSwitch: string | undefined,
-  recorded: string | null,
 ): string {
   if (
     titleAtSwitch !== undefined &&
@@ -934,7 +777,7 @@ function titleAfterSwitch(
   ) {
     return chat.title
   }
-  return recorded ?? ''
+  return ''
 }
 
 /**

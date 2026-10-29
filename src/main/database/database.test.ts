@@ -329,7 +329,6 @@ describe('the upgrade to dependencies', () => {
 const REPORT_COLUMNS = {
   conversation_reported: 0,
   unreported_run_started_at: null,
-  unreported_run_messaged: 0,
 }
 
 describe('the upgrade to labels', () => {
@@ -430,15 +429,8 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({
-        ...row,
-        unreported_run_started_at: null,
-        unreported_run_messaged: 0,
-      })),
+      before.map((row) => ({ ...row, unreported_run_started_at: null })),
     )
-    expect(() =>
-      db.exec("UPDATE chats SET unreported_run_messaged = 2 WHERE id = 'saved'"),
-    ).toThrow(/CHECK constraint/)
     db.close()
   })
 

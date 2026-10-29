@@ -17,23 +17,19 @@ interface ChatRow {
   deleted_at: number | null
   conversation_reported: number
   unreported_run_started_at: number | null
-  unreported_run_messaged: number
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
                  custom_name, has_messages, created_at, opened_at, deleted_at,
-                 conversation_reported, unreported_run_started_at, unreported_run_messaged`
+                 conversation_reported, unreported_run_started_at`
 
 /**
- * A run of a Codex chat's agent that Hoot began and has not seen end, while
- * Codex reported no conversation in it: when Hoot began to start the agent,
- * and whether Hoot saw a message sent in it that the chat may have gone on
- * with, not one sent before the agent was told to leave the chat's
- * conversation.
+ * A run of the agent of a Codex chat whose conversation Codex did not report,
+ * which Hoot began and has not seen end, while Codex reported no conversation
+ * in it: when Hoot began to start the agent.
  */
 export interface UnreportedRun {
   startedAt: number
-  messaged: boolean
 }
 
 /**
@@ -78,12 +74,7 @@ function storedFromRow(row: ChatRow): StoredChat {
     deleted: row.deleted_at !== null,
     conversationReported: row.conversation_reported === 1,
     unreportedRun:
-      row.unreported_run_started_at === null
-        ? null
-        : {
-            startedAt: row.unreported_run_started_at,
-            messaged: row.unreported_run_messaged === 1,
-          },
+      row.unreported_run_started_at === null ? null : { startedAt: row.unreported_run_started_at },
   }
 }
 
@@ -146,8 +137,7 @@ export class ChatStore {
       update: db.prepare(
         `UPDATE chats
          SET conversation_id = ?, conversation_reported = ?, unreported_run_started_at = ?,
-             unreported_run_messaged = ?, title = ?, custom_name = ?, has_messages = ?,
-             opened_at = ?
+             title = ?, custom_name = ?, has_messages = ?, opened_at = ?
          WHERE id = ?`,
       ),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
@@ -213,7 +203,6 @@ export class ChatStore {
       changes.conversationId === undefined ? chat.conversationId : changes.conversationId,
       (changes.conversationReported ?? chat.conversationReported) ? 1 : 0,
       unreportedRun?.startedAt ?? null,
-      unreportedRun?.messaged ? 1 : 0,
       changes.title ?? chat.title,
       changes.customName === undefined ? chat.customName : changes.customName,
       (changes.hasMessages ?? chat.hasMessages) ? 1 : 0,

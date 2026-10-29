@@ -489,8 +489,8 @@ function startWithDatabase(database: DatabaseSync): void {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)
   })
-  // The messages the user sends, and the commands that leave a conversation
-  // for another, such as `/new`.
+  // The commands that leave a conversation for another, such as `/new`, for
+  // the name a chat shows once its agent reports the next one.
   sessions.on('input', (id, data) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.typed(chatId, id, data)

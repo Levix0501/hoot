@@ -32,11 +32,20 @@ import { ToolIcon } from './tool-icon'
 import { Button } from './ui/button'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 
-/** A tab, on the main area's background so that it hides what it passes over while dragged. */
-const TAB = 'group/tab relative flex h-7 w-full min-w-0 items-center rounded-lg bg-background px-2'
+/**
+ * The corners of a tab and of the `+`: a quarter rounder than `rounded-lg`,
+ * and drawn as superellipses, which meet the sides more smoothly than arcs.
+ */
+const CORNERS = 'rounded-[12.5px] [corner-shape:superellipse(1.5)]'
 
-/** A tab's icon, name and light, in a row that leaves room for its close button when it shows. */
-const LABEL = 'relative flex min-w-0 flex-1 items-center gap-2 text-sm'
+/** A tab, on the main area's background so that it hides what it passes over while dragged. */
+const TAB = `group/tab relative flex h-7 w-full min-w-0 items-center bg-background px-2 ${CORNERS}`
+
+/**
+ * A tab's icon, name and light, in a row that leaves room for its close
+ * button when it shows; the name is 13px, with the line height of `text-sm`.
+ */
+const LABEL = 'relative flex min-w-0 flex-1 items-center gap-2 text-[13px]/[calc(1.25/0.875)]'
 
 /**
  * The keys of a worktree's tabs (see `tabKey`), or for a `worktreePath` of
@@ -107,7 +116,8 @@ function TabShade({ shaded }: { shaded: boolean }) {
   return (
     <div
       className={cn(
-        'pointer-events-none absolute inset-0 rounded-lg',
+        'pointer-events-none absolute inset-0',
+        CORNERS,
         shaded ? 'bg-secondary' : 'group-hover/tab:bg-secondary',
       )}
     />
@@ -154,7 +164,10 @@ function TabLabel({
           {name}
         </span>
       </span>
-      {state !== null && <StateLight state={state} testId="session-tab-light" />}
+      {/* 2px from the name rather than the row's 8px gap, leaving the name more room. */}
+      {state !== null && (
+        <StateLight state={state} className="-ms-1.5" testId="session-tab-light" />
+      )}
     </>
   )
 }
@@ -168,9 +181,9 @@ function TabLabel({
  * A session's close button shows on the current tab, and on another while
  * the pointer is over it; a middle click closes the session too. A double
  * click renames it. Its context menu is the one of its session's row in the
- * sidebar.
+ * sidebar. When `separated`, a thin line sets it off from the next tab.
  */
-function SessionTab({ id, shown }: { id: string; shown: string }) {
+function SessionTab({ id, shown, separated }: { id: string; shown: string; separated: boolean }) {
   const { session, saved, toolId, name, state: light } = useTab(id)
   const selectSession = useAppStore((state) => state.selectSession)
   const openSavedSession = useAppStore((state) => state.openSavedSession)
@@ -197,7 +210,7 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
       // row is too short for them. While a tab is dragged, the one following
       // the pointer stands for it.
       className={cn(
-        'flex w-40 min-w-[90px] items-center pe-1 [app-region:no-drag]',
+        'relative flex w-40 min-w-[90px] items-center pe-1 [app-region:no-drag]',
         isDragging && 'opacity-0',
       )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
@@ -249,8 +262,10 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
               size="icon-xs"
               // It shows and hides at once, as the light moves aside for it at
               // once: fading out, it would stay over the light for a moment.
+              // Under the pointer, it takes the accent, out to its edges, and
+              // keeps its color.
               className={cn(
-                'absolute inset-y-0 end-1 my-auto size-5 text-muted-foreground transition-none',
+                'absolute inset-y-0 end-1 my-auto size-5 rounded-[10px] bg-clip-border text-foreground transition-none [corner-shape:superellipse(1.5)] hover:bg-accent dark:hover:bg-accent',
                 !current &&
                   'pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
               )}
@@ -267,7 +282,12 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
               aria-label="Close Session"
               data-testid="session-tab-close"
             >
-              <XIcon />
+              {/*
+                A 7.3px cross of 0.93px strokes: 1.77 of its 24 units at this
+                size. Its strokes are drawn in the text's color and then dimmed
+                to half as a whole, so that they do not add up where they cross.
+              */}
+              <XIcon className="size-[12.67px] opacity-50" strokeWidth={1.77} />
             </Button>
           )}
         </ContextMenuTrigger>
@@ -277,6 +297,14 @@ function SessionTab({ id, shown }: { id: string; shown: string }) {
           <SessionMenu session={session} testId="session-tab-context" />
         ) : null}
       </ContextMenu>
+      <div
+        aria-hidden
+        className={cn(
+          'absolute end-0 h-3 w-px bg-border transition-opacity duration-150',
+          separated ? 'opacity-100' : 'opacity-0',
+        )}
+        data-testid="session-tab-separator"
+      />
     </div>
   )
 }
@@ -306,14 +334,18 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
  * its sessions switch in, which dragging a tab changes. The session shown has
  * the current tab. The tab of a saved session whose agent does not run has
  * no light, as its row in the sidebar has none, and its agent starts only
- * once the tab is clicked. Right after the last tab, unless the worktree or
- * the project folder is missing, a `+` starts another session there, as the
- * `+` on its row in the sidebar does; while the tabs do not fit, they
- * scroll, and the `+` stays at the end of the row.
+ * once the tab is clicked. A thin line sets off two tabs next to each other
+ * when neither is the current one. Right after the last tab, unless the
+ * worktree or the project folder is missing, a `+` starts another session
+ * there, as the `+` on its row in the sidebar does; while the tabs do not
+ * fit, they scroll, and the `+` stays at the end of the row. The tabs fade
+ * out toward an end of the row while more of them lie beyond it.
  */
 export function SessionTabs({ session }: { session: UiSession }) {
   const { projectRoot, worktreePath } = session
   const keys = useAppStore(useShallow((state) => worktreeTabs(state, projectRoot, worktreePath)))
+  const currentKey = tabKey(session)
+  const listRef = useRef<HTMLDivElement>(null)
   const missing = useAppStore((state) =>
     worktreePath === null
       ? state.projectFolders[projectRoot]?.missing === true
@@ -324,6 +356,36 @@ export function SessionTabs({ session }: { session: UiSession }) {
   const [dragged, setDragged] = useState<string | null>(null)
   // A press that moves the pointer less than 6px is a click.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+
+  // Whether more tabs lie beyond the start of the row and beyond its end, kept
+  // on the row as `data-more-before` and `data-more-after` as it scrolls, as
+  // it and its tabs change width, and as tabs come and go.
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (list === null) return
+    const update = () => {
+      list.toggleAttribute('data-more-before', list.scrollLeft > 0.5)
+      list.toggleAttribute(
+        'data-more-after',
+        list.scrollLeft + list.clientWidth < list.scrollWidth - 0.5,
+      )
+    }
+    const resizes = new ResizeObserver(update)
+    const observeTabs = () => {
+      resizes.disconnect()
+      resizes.observe(list)
+      for (const tab of list.children) resizes.observe(tab)
+    }
+    observeTabs()
+    const changes = new MutationObserver(observeTabs)
+    changes.observe(list, { childList: true })
+    list.addEventListener('scroll', update, { passive: true })
+    return () => {
+      resizes.disconnect()
+      changes.disconnect()
+      list.removeEventListener('scroll', update)
+    }
+  }, [])
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     setDragged(null)
@@ -344,20 +406,38 @@ export function SessionTabs({ session }: { session: UiSession }) {
       onDragCancel={() => setDragged(null)}
     >
       <div className="flex h-full min-w-0 flex-1 items-center pe-2">
-        <SortableContext items={keys} strategy={horizontalListSortingStrategy}>
+        <div className="relative flex h-full min-w-0 items-center">
+          <SortableContext items={keys} strategy={horizontalListSortingStrategy}>
+            <div
+              ref={listRef}
+              role="tablist"
+              aria-label="Sessions"
+              className="peer/tabs flex h-full min-w-0 scroll-px-1 items-center gap-[3px] overflow-x-auto select-none [scrollbar-width:none]"
+              data-testid="session-tabs"
+            >
+              {keys.map((key, index) => (
+                <SessionTab
+                  key={key}
+                  id={key}
+                  shown={session.id}
+                  separated={
+                    index < keys.length - 1 && key !== currentKey && keys[index + 1] !== currentKey
+                  }
+                />
+              ))}
+            </div>
+          </SortableContext>
           <div
-            role="tablist"
-            aria-label="Sessions"
-            className="flex h-full min-w-0 items-center gap-1.5 overflow-x-auto select-none [scrollbar-width:none]"
-            data-testid="session-tabs"
-          >
-            {keys.map((key) => (
-              <SessionTab key={key} id={key} shown={session.id} />
-            ))}
-          </div>
-        </SortableContext>
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 start-0 z-10 w-10 bg-linear-to-l from-transparent to-background opacity-0 transition-opacity duration-150 peer-data-more-before/tabs:opacity-100"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 end-0 z-10 w-10 bg-linear-to-r from-transparent to-background opacity-0 transition-opacity duration-150 peer-data-more-after/tabs:opacity-100"
+          />
+        </div>
         {!missing && (
-          <div className="flex shrink-0 items-center ps-1.5">
+          <div className="flex shrink-0 items-center">
             <NewWorktreeSessionButton
               projectRoot={projectRoot}
               worktreePath={worktreePath}
@@ -366,14 +446,25 @@ export function SessionTabs({ session }: { session: UiSession }) {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  // Its shade comes and goes at once, as a tab's does.
-                  className="text-muted-foreground transition-none [app-region:no-drag]"
+                  // Its shade, out to its edges, comes and goes at once, as a
+                  // tab's does: the accent under the pointer, which leaves its
+                  // icon's color alone, and the current tab's shade while its
+                  // menu is open.
+                  className={`${CORNERS} bg-clip-border text-foreground transition-none [app-region:no-drag] hover:bg-accent aria-expanded:bg-secondary dark:hover:bg-accent dark:aria-expanded:bg-secondary`}
                   aria-label="New Session"
                   data-testid="session-tabs-new-session"
                 />
               }
             >
-              <PlusIcon />
+              {/*
+                An 11px plus of 1.05px strokes: 1.48 of its 24 units at this
+                size, dimmed to half as a whole like the close buttons' cross,
+                and at full strength while its menu is open.
+              */}
+              <PlusIcon
+                className="size-[17px] opacity-50 group-aria-expanded/button:opacity-100"
+                strokeWidth={1.48}
+              />
             </NewWorktreeSessionButton>
           </div>
         )}

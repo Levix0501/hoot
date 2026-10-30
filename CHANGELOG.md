@@ -1,5 +1,21 @@
 # hoot
 
+## 0.1.0-alpha.20
+
+### Patch Changes
+
+- [`9ff37fc`](https://github.com/Levix0501/hoot/commit/9ff37fc2e7813abc3e9f8f414ec62d03660fb429) - Deleting a worktree goes on in the background once confirmed: the confirmation closes at once, the worktree's row shows a spinner until it is gone and starts nothing meanwhile, Hoot speaks up only when it could not delete it, and quitting asks first while one is being deleted.
+
+- [`9a5bfeb`](https://github.com/Levix0501/hoot/commit/9a5bfeb1883f0f396336bf8c4b6c6dedbd7d01dd) - Clicking Projects or Chats in the sidebar collapses or expands that group, which Hoot remembers, and a collapsed group still shows the light of the session that needs you most.
+
+- [`eb387ca`](https://github.com/Levix0501/hoot/commit/eb387caa44fbeecc5768aeb81637c087b8be441d) - A line across the sidebar sets Settings apart from the list above it.
+
+- [`dabedcd`](https://github.com/Levix0501/hoot/commit/dabedcd02ca8de50f4bcc3ecf3ef170454e7870f) - The interface is set in the system font (San Francisco on macOS, Segoe UI on Windows) instead of Geist.
+
+- [`036a1da`](https://github.com/Levix0501/hoot/commit/036a1da0d434877f8d1e23fec7fbcdeadb5a64e0) - The window's top row is a little taller.
+
+- [`cd24313`](https://github.com/Levix0501/hoot/commit/cd24313ca98032b02fb96fca8e2d04863c11ea5c) - On Windows, Hoot's Git commands take paths longer than 260 characters, so deleting a worktree with a deep `node_modules` no longer fails partway, its files are deleted without following or leaving behind the links pnpm makes, and a deletion that stops partway, as when a file is in use, leaves a worktree that can be deleted again.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

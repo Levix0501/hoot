@@ -45,6 +45,7 @@ import {
 import type { Dependency } from '../shared/dependencies'
 import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
+import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
 import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
 import type { WorkflowStep } from '../shared/workflows'
@@ -479,6 +480,7 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.getWindowState, (): WindowState => ({
     sidebarOpen: deps.sidebar.open,
     sidebarWidth: deps.sidebar.width,
+    collapsedGroups: deps.sidebar.collapsedGroups,
     collapsedProjects: deps.sidebar.collapsedProjects,
     collapsedWorktrees: deps.sidebar.collapsedWorktrees,
     collapsedLocal: deps.sidebar.collapsedLocal,
@@ -492,6 +494,12 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.setSidebarWidth, (width) => {
     const parsed = z.number().safeParse(width)
     if (parsed.success) deps.sidebar.setWidth(parsed.data)
+  })
+  on(IpcChannel.setGroupExpanded, (...args) => {
+    const parsed = z.tuple([z.enum(SIDEBAR_GROUPS), z.boolean()]).safeParse(args)
+    if (!parsed.success) return
+    const [group, expanded] = parsed.data
+    deps.sidebar.setGroupCollapsed(group, !expanded)
   })
   on(IpcChannel.setProjectExpanded, (...args) => {
     const parsed = z.tuple([rowId, z.boolean()]).safeParse(args)

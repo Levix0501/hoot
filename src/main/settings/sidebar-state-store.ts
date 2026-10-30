@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import Conf from 'conf'
+import { isSidebarGroup, type SidebarGroupId } from '../../shared/sidebar-groups'
 import { sidebarWidthWithin } from '../../shared/sidebar-width'
 
 interface StoredSettings {
@@ -7,6 +8,8 @@ interface StoredSettings {
   sidebarCollapsed?: boolean
   /** The sidebar's width in CSS pixels, as it was last resized. */
   sidebarWidth?: number
+  /** The groups collapsed in the sidebar, Projects or Chats; every other group is expanded. */
+  collapsedGroups?: SidebarGroupId[]
   /** The ids of the projects collapsed in the sidebar; every other project is expanded. */
   collapsedProjects?: number[]
   /** The roots of the worktrees collapsed in the sidebar; every other worktree is expanded. */
@@ -27,16 +30,17 @@ function isWorktreeRoot(value: unknown): value is string {
 }
 
 /**
- * Whether the sidebar is expanded, how wide it is, and which of its projects,
- * worktrees and Local rows are collapsed, kept in `settings.json` in the user data
- * directory, next to the launch settings, so that Hoot opens with the sidebar
- * as it was left. Conf reads the file before every change and writes all of
- * it, so the settings do not overwrite each other.
+ * Whether the sidebar is expanded, how wide it is, and which of its groups,
+ * projects, worktrees and Local rows are collapsed, kept in `settings.json`
+ * in the user data directory, next to the launch settings, so that Hoot opens
+ * with the sidebar as it was left. Conf reads the file before every change
+ * and writes all of it, so the settings do not overwrite each other.
  */
 export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }> {
   private readonly config: Conf<StoredSettings>
   private expanded: boolean
   private sidebarWidth: number
+  private collapsedGroupIds: Set<SidebarGroupId>
   private collapsed: Set<number>
   private collapsedRoots: Set<string>
   private collapsedLocalRoots: Set<string>
@@ -52,7 +56,12 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     this.expanded = this.config.get('sidebarCollapsed') !== true
     // The default width until the sidebar is resized for the first time.
     this.sidebarWidth = sidebarWidthWithin(this.config.get('sidebarWidth'))
-    // A project is expanded until it is collapsed for the first time.
+    // A group is expanded until it is collapsed for the first time.
+    const storedGroups: unknown = this.config.get('collapsedGroups')
+    this.collapsedGroupIds = new Set(
+      Array.isArray(storedGroups) ? storedGroups.filter(isSidebarGroup) : [],
+    )
+    // So is a project.
     const stored: unknown = this.config.get('collapsedProjects')
     this.collapsed = new Set(Array.isArray(stored) ? stored.filter(isProjectId) : [])
     // So is a worktree.
@@ -99,6 +108,24 @@ export class SidebarStateStore extends EventEmitter<{ changed: [open: boolean] }
     } catch (error) {
       // The sidebar keeps its width until Hoot quits.
       console.error('Could not save the width of the sidebar:', error)
+    }
+  }
+
+  /** The groups collapsed in the sidebar. */
+  get collapsedGroups(): SidebarGroupId[] {
+    return [...this.collapsedGroupIds]
+  }
+
+  /** Records whether a group is collapsed in the sidebar and saves it. */
+  setGroupCollapsed(group: SidebarGroupId, collapsed: boolean): void {
+    if (this.collapsedGroupIds.has(group) === collapsed) return
+    if (collapsed) this.collapsedGroupIds.add(group)
+    else this.collapsedGroupIds.delete(group)
+    try {
+      this.config.set('collapsedGroups', [...this.collapsedGroupIds])
+    } catch (error) {
+      // The groups stay as they are until Hoot quits.
+      console.error('Could not save which groups of the sidebar are collapsed:', error)
     }
   }
 

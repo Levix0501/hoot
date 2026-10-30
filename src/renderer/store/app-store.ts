@@ -68,6 +68,7 @@ import {
   type SessionInfo,
 } from '../../shared/session'
 import type { ProjectFolderInfo } from '../../shared/project-folders'
+import type { SidebarGroupId } from '../../shared/sidebar-groups'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { startBlockers, startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
@@ -445,6 +446,8 @@ export interface AppState {
    * slides out and back in as well.
    */
   sidebarEdgeDragging: boolean
+  /** The groups collapsed in the sidebar; every other group is expanded. */
+  collapsedGroups: ReadonlySet<SidebarGroupId>
   /** The projects collapsed in the sidebar, by id; every other project is expanded. */
   collapsedProjects: ReadonlySet<number>
   /** The worktrees collapsed in the sidebar, by root; every other worktree is expanded. */
@@ -743,6 +746,8 @@ export interface AppState {
   setSidebarResizing(resizing: boolean): void
   /** Notes that the sidebar's edge is held from now until it is let go of. */
   setSidebarEdgeDragging(dragging: boolean): void
+  /** Expands or collapses a group in the sidebar, and saves its state. */
+  setGroupExpanded(group: SidebarGroupId, expanded: boolean): void
   /** Expands or collapses a project in the sidebar, and saves its state. */
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Expands or collapses a worktree in the sidebar, and saves its state. */
@@ -1450,16 +1455,30 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   /**
-   * Expands the project and the worktree, or the Local row, of a session that
-   * has just become the current one, however it became current, so that its
-   * row shows in the sidebar.
+   * Expands what holds the row of a session that has just become the current
+   * one, however it became current, so that its row shows in the sidebar: the
+   * Chats group for a chat; otherwise the Projects group, and in it the
+   * session's project and its worktree, or its Local row.
    */
   const expandParentsOf = (page: Page | null) => {
     if (page?.kind !== 'session') return
-    const { sessions, projects, setProjectExpanded, setWorktreeExpanded, setLocalExpanded } = get()
+    const {
+      sessions,
+      projects,
+      setGroupExpanded,
+      setProjectExpanded,
+      setWorktreeExpanded,
+      setLocalExpanded,
+    } = get()
     const session = sessions.find((candidate) => candidate.id === page.sessionId)
-    const project = projects.find((candidate) => candidate.root === session?.projectRoot)
-    if (!session || !project || session.chatId !== null) return
+    if (!session) return
+    if (session.chatId !== null) {
+      setGroupExpanded('chats', true)
+      return
+    }
+    const project = projects.find((candidate) => candidate.root === session.projectRoot)
+    if (!project) return
+    setGroupExpanded('projects', true)
     setProjectExpanded(project.id, true)
     if (session.worktreePath !== null) setWorktreeExpanded(project.root, session.worktreePath, true)
     else setLocalExpanded(project.root, true)
@@ -1777,10 +1796,12 @@ export const useAppStore = create<AppState>()((set, get) => {
   const applyAddProjectResult = (result: AddProjectResult) => {
     switch (result.kind) {
       case 'added': {
-        const { projects } = get()
+        const { projects, setGroupExpanded } = get()
         if (!projects.some((project) => project.id === result.project.id)) {
           applyProjects([...projects, result.project])
         }
+        // Its row shows, also when the projects were collapsed.
+        setGroupExpanded('projects', true)
         toast.success('Project added.', { description: pathText(result.project.root) })
         break
       }
@@ -2223,6 +2244,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sidebarWidth: SIDEBAR_WIDTH.default,
     sidebarResizing: false,
     sidebarEdgeDragging: false,
+    collapsedGroups: new Set(),
     collapsedProjects: new Set(),
     collapsedWorktrees: new Set(),
     collapsedLocal: new Set(),
@@ -2240,6 +2262,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         {
           sidebarOpen,
           sidebarWidth,
+          collapsedGroups,
           collapsedProjects,
           collapsedWorktrees,
           collapsedLocal,
@@ -2251,6 +2274,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({
         sidebarOpen,
         sidebarWidth,
+        collapsedGroups: new Set(collapsedGroups),
         collapsedProjects: new Set(collapsedProjects),
         collapsedWorktrees: new Set(collapsedWorktrees),
         collapsedLocal: new Set(collapsedLocal),
@@ -3387,6 +3411,16 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     setSidebarEdgeDragging(dragging) {
       set({ sidebarEdgeDragging: dragging })
+    },
+
+    setGroupExpanded(group, expanded) {
+      const { collapsedGroups } = get()
+      if (collapsedGroups.has(group) === !expanded) return
+      const collapsed = new Set(collapsedGroups)
+      if (expanded) collapsed.delete(group)
+      else collapsed.add(group)
+      set({ collapsedGroups: collapsed })
+      api.setGroupExpanded(group, expanded)
     },
 
     setProjectExpanded(projectId, expanded) {

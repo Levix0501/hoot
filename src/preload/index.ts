@@ -77,6 +77,8 @@ const api: HootApi = {
   getWindowState: () => ipcRenderer.invoke(IpcChannel.getWindowState),
   setSidebarOpen: (open) => ipcRenderer.send(IpcChannel.setSidebarOpen, open),
   setSidebarWidth: (width) => ipcRenderer.send(IpcChannel.setSidebarWidth, width),
+  setGroupExpanded: (group, expanded) =>
+    ipcRenderer.send(IpcChannel.setGroupExpanded, group, expanded),
   setProjectExpanded: (projectId, expanded) =>
     ipcRenderer.send(IpcChannel.setProjectExpanded, projectId, expanded),
   setWorktreeExpanded: (projectRoot, worktreePath, expanded) =>

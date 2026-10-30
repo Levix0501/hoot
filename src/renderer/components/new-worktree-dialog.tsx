@@ -393,6 +393,7 @@ function NewWorktreeForm({
   const [submodules, setSubmodules] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const setGroupExpanded = useAppStore((state) => state.setGroupExpanded)
   const setProjectExpanded = useAppStore((state) => state.setProjectExpanded)
   const setWorktreeExpanded = useAppStore((state) => state.setWorktreeExpanded)
   const openCreatedSession = useAppStore((state) => state.openCreatedSession)
@@ -479,8 +480,9 @@ function NewWorktreeForm({
       setError(result.message)
       return
     }
-    // The new worktree's row shows below the project, also when it was
-    // collapsed, with its session's row below it.
+    // The new worktree's row shows below the project, also when it or the
+    // projects were collapsed, with its session's row below it.
+    setGroupExpanded('projects', true)
     setProjectExpanded(project.id, true)
     setWorktreeExpanded(project.root, result.path, true)
     if (result.warning) warnAboutWorktree(result.warning)

@@ -9,6 +9,7 @@ import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels
 import type { AgentLaunchSettingsChange, LaunchSettings } from './launch-settings'
 import type { ProjectFolderInfo } from './project-folders'
 import type { QuitReason, SessionInfo } from './session'
+import type { SidebarGroupId } from './sidebar-groups'
 import type { ParentChange, SubIssues } from './sub-issues'
 import type { CodingToolId, ToolId } from './tools'
 import type { UpdateStatus } from './updates'
@@ -209,6 +210,8 @@ export interface WindowState {
   sidebarOpen: boolean
   /** The sidebar's width in CSS pixels, as it was last resized. */
   sidebarWidth: number
+  /** The groups collapsed in the sidebar, as they were left; the others are expanded. */
+  collapsedGroups: SidebarGroupId[]
   /** The ids of the projects collapsed in the sidebar, as they were left; the others are expanded. */
   collapsedProjects: number[]
   /** The roots of the worktrees collapsed in the sidebar, as they were left; the others are expanded. */
@@ -289,6 +292,7 @@ export const IpcChannel = {
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
+  setGroupExpanded: 'window:set-group-expanded',
   setProjectExpanded: 'window:set-project-expanded',
   setWorktreeExpanded: 'window:set-worktree-expanded',
   setLocalExpanded: 'window:set-local-expanded',
@@ -511,6 +515,8 @@ export interface HootApi {
   setSidebarOpen(open: boolean): void
   /** Saves the sidebar's width, so that Hoot opens with it as wide as it was left. */
   setSidebarWidth(width: number): void
+  /** Saves whether a group is expanded in the sidebar, so that Hoot opens with it as it was left. */
+  setGroupExpanded(group: SidebarGroupId, expanded: boolean): void
   /** Saves whether a project is expanded in the sidebar, so that Hoot opens with it as it was left. */
   setProjectExpanded(projectId: number, expanded: boolean): void
   /** Saves whether a worktree is expanded in the sidebar, so that Hoot opens with it as it was left. */

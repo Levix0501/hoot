@@ -239,6 +239,7 @@ const worktrees = Object.assign(emitter(), {
   >(async () => ({ ok: false, reason: 'blocked', message: 'The worktree is locked.' })),
 })
 const sidebar = {
+  setGroupCollapsed: vi.fn<(group: string, collapsed: boolean) => void>(),
   setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
   setLocalCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
 }
@@ -1131,5 +1132,20 @@ describe('the messages of the About page', () => {
       IpcChannel.updateFailed,
       'sha512 checksum mismatch',
     )
+  })
+})
+
+describe('the messages of the sidebar', () => {
+  it('keep whether the Projects or the Chats group is collapsed, and nothing else', () => {
+    send(IpcChannel.setGroupExpanded, 'projects', false)
+    send(IpcChannel.setGroupExpanded, 'chats', false)
+    send(IpcChannel.setGroupExpanded, 'chats', true)
+    send(IpcChannel.setGroupExpanded, 'issues', false)
+    send(IpcChannel.setGroupExpanded, 'projects', 'no')
+    expect(sidebar.setGroupCollapsed.mock.calls).toEqual([
+      ['projects', true],
+      ['chats', true],
+      ['chats', false],
+    ])
   })
 })

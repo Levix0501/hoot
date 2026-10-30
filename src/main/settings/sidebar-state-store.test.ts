@@ -294,3 +294,35 @@ describe('SidebarStateStore: collapsed Local rows', () => {
     expect(saved()).toEqual({ collapsedLocal: ['/work/a'], marker: true })
   })
 })
+
+describe('SidebarStateStore: collapsed groups', () => {
+  it('has every group expanded when nothing was saved', () => {
+    expect(new SidebarStateStore(directory).collapsedGroups).toEqual([])
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it('saves which groups are collapsed, apart from the projects, across instances', () => {
+    const first = new SidebarStateStore(directory)
+    first.setProjectCollapsed(2, true)
+    first.setGroupCollapsed('chats', true)
+    first.setGroupCollapsed('projects', true)
+    expect(first.collapsedGroups).toEqual(['chats', 'projects'])
+    expect(saved()).toEqual({ collapsedProjects: [2], collapsedGroups: ['chats', 'projects'] })
+    expect(new SidebarStateStore(directory).collapsedGroups).toEqual(['chats', 'projects'])
+
+    first.setGroupCollapsed('chats', false)
+    const reopened = new SidebarStateStore(directory)
+    expect(reopened.collapsedGroups).toEqual(['projects'])
+    expect(reopened.collapsedProjects).toEqual([2])
+  })
+
+  it('leaves out saved values that are not groups, and writes nothing needlessly', () => {
+    writeSettings({ collapsedGroups: ['chats', 'issues', '', 3, null] })
+    const store = new SidebarStateStore(directory)
+    expect(store.collapsedGroups).toEqual(['chats'])
+    fs.writeFileSync(file, JSON.stringify({ collapsedGroups: ['chats'], marker: true }))
+    store.setGroupCollapsed('chats', true)
+    store.setGroupCollapsed('projects', false)
+    expect(saved()).toEqual({ collapsedGroups: ['chats'], marker: true })
+  })
+})

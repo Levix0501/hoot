@@ -1,10 +1,22 @@
-import { CircleDotIcon, FolderPlusIcon, PencilSparklesIcon, SettingsIcon } from 'lucide-react'
-import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
+import {
+  ChevronRightIcon,
+  CircleDotIcon,
+  FolderPlusIcon,
+  PencilSparklesIcon,
+  SettingsIcon,
+} from 'lucide-react'
+import { Fragment, useLayoutEffect, useMemo, useRef, type ComponentProps } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
+import { sessionsSummary, sessionState, type SessionsSummary } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { hasLocalSessions, sessionWorktrees, useAppStore } from '../store/app-store'
+import {
+  hasLocalSessions,
+  isSessionRunning,
+  sessionWorktrees,
+  useAppStore,
+} from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
 import { worktreeRows, type WorktreeRow } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
@@ -16,9 +28,10 @@ import { contextComponents, ProjectItem } from './project-item'
 import { SavedSessionItem } from './saved-session-item'
 import { SessionItem } from './session-item'
 import { SidebarResizeHandle } from './sidebar-resize-handle'
+import { StateLight } from './state-light'
 import { UpdateButton } from './update-button'
 import { WorktreeItem } from './worktree-item'
-import { Collapsible, CollapsibleContent } from './ui/collapsible'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './ui/context-menu'
 import {
   Sidebar,
@@ -36,22 +49,88 @@ import {
 } from './ui/sidebar'
 
 /**
- * The rows below a project's or a worktree's row, which slide open and closed
- * as the sidebar itself slides, or show and hide at once when the system
- * reduces motion. Like Issues and New chat, they are 1px apart, and 1px below
- * that row. What reaches more than 2px past them is cut off, so that the
- * focus ring of a row, 2px wide, shows whole, also at their top and bottom.
- * (Chromium keeps such a margin only when the sides are cut off too.)
+ * What slides open and closed below a row or a group's title, as the sidebar
+ * itself slides, or shows and hides at once when the system reduces motion.
+ * What reaches more than 2px past it is cut off, so that the focus ring of a
+ * row, 2px wide, shows whole, also at its top and bottom. (Chromium keeps
+ * such a margin only when the sides are cut off too.)
  */
-const SLIDING_ROWS =
-  'flex h-(--collapsible-panel-height) min-w-0 flex-col gap-px overflow-clip transition-[height] duration-200 ease-linear [overflow-clip-margin:2px] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0 [&>:first-child]:mt-px'
+const SLIDING =
+  'h-(--collapsible-panel-height) min-w-0 overflow-clip transition-[height] duration-200 ease-linear [overflow-clip-margin:2px] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:duration-0'
 
 /**
- * A group's action, which shows only while the pointer is on the group's title
- * row, or the action has the keyboard focus. The row marks itself `peer/title`.
+ * The rows below a project's or a worktree's row, which slide open and
+ * closed. Like Issues and New chat, they are 1px apart, and 1px below that
+ * row.
+ */
+const SLIDING_ROWS = `${SLIDING} flex flex-col gap-px [&>:first-child]:mt-px`
+
+/**
+ * A group's action, which shows only while the pointer is on the group's
+ * title row or the keyboard focus is in it. The row marks itself
+ * `group/title`.
  */
 const GROUP_ACTION_ON_HOVER =
-  'opacity-0 peer-hover/title:opacity-100 hover:opacity-100 focus-visible:opacity-100'
+  'opacity-0 group-hover/title:opacity-100 group-has-focus-visible/title:opacity-100'
+
+/**
+ * The title of one of the sidebar's groups, which expands and collapses the
+ * group: its name, then a chevron, which points down while the group is
+ * expanded and at the name while it is collapsed, and shows while the group
+ * is collapsed, or while the pointer is on the title's row or the keyboard
+ * focus is in it; then, while the group is collapsed, at the row's right
+ * end, the light of the state of its sessions that needs the user most, if
+ * any does, hidden while the group's action shows in its place. The title's
+ * row, around it and the action, marks itself `group/title`.
+ */
+function GroupLabel({
+  name,
+  expanded,
+  summary,
+  testId,
+  className,
+  ...props
+}: ComponentProps<'div'> & {
+  name: string
+  expanded: boolean
+  summary: SessionsSummary | null
+  testId: string
+}) {
+  return (
+    <SidebarGroupLabel
+      render={<CollapsibleTrigger />}
+      className={cn('w-full cursor-default gap-1.5', className)}
+      data-testid={`${testId}-label`}
+      {...props}
+    >
+      {name}
+      {/*
+        It turns as the group slides. Its box turns rather than the icon
+        itself, which Chromium would turn without the GPU.
+      */}
+      <span
+        className={cn(
+          'flex shrink-0 transition-[rotate] duration-200 ease-linear motion-reduce:duration-0',
+          expanded &&
+            'rotate-90 opacity-0 group-hover/title:opacity-100 group-has-focus-visible/title:opacity-100',
+        )}
+        data-testid={`${testId}-chevron`}
+      >
+        <ChevronRightIcon className="size-3.5" />
+      </span>
+      {summary && (
+        <>
+          <StateLight
+            state={summary.state}
+            className="ml-auto group-hover/title:hidden group-has-focus-visible/title:hidden"
+            testId={`${testId}-light`}
+          />
+          <span className="sr-only">{summary.description}</span>
+        </>
+      )}
+    </SidebarGroupLabel>
+  )
+}
 
 /**
  * The line saying a project, a worktree or a Local row has no sessions, in
@@ -249,58 +328,134 @@ function IssuesItem() {
 let listScrollTop = 0
 
 /**
- * The sidebar's Chats group, below the projects: its title, which starts a
- * chat with the agent chosen from its right-click menu, and whose button does
- * so with the default agent; then each chat, newest first.
+ * The sidebar's Projects group, below Issues and New chat: its title, which
+ * expands and collapses it, and whose button adds a project; then each
+ * project, with its rows below it.
+ */
+function ProjectsGroup() {
+  const projects = useAppStore((state) => state.projects)
+  const addProject = useAppStore((state) => state.addProject)
+  const expanded = useAppStore((state) => !state.collapsedGroups.has('projects'))
+  const setGroupExpanded = useAppStore((state) => state.setGroupExpanded)
+  // The states of the projects' sessions, in their own folders and their worktrees.
+  const states = useAppStore(
+    useShallow((state) =>
+      state.sessions
+        .filter((session) => session.chatId === null)
+        .map((session) => sessionState(session)),
+    ),
+  )
+  // Its rows show the projects themselves while it is expanded.
+  const summary = expanded ? null : sessionsSummary(states)
+  return (
+    <Collapsible
+      render={<SidebarGroup />}
+      open={expanded}
+      onOpenChange={(open) => setGroupExpanded('projects', open)}
+      data-testid="projects-group"
+    >
+      <div className="group/title">
+        <GroupLabel name="Projects" expanded={expanded} summary={summary} testId="projects" />
+        <SidebarGroupAction
+          className={GROUP_ACTION_ON_HOVER}
+          onClick={() => void addProject()}
+          data-testid="add-project"
+        >
+          <FolderPlusIcon />
+          <span className="sr-only">Add Project</span>
+        </SidebarGroupAction>
+      </div>
+      <CollapsibleContent className={SLIDING}>
+        <SidebarGroupContent>
+          {projects.length === 0 ? (
+            <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-projects">
+              No projects
+            </p>
+          ) : (
+            <SidebarMenu className="gap-px" data-testid="project-list">
+              {projects.map((project) => (
+                <ProjectEntry key={project.root} project={project} />
+              ))}
+            </SidebarMenu>
+          )}
+        </SidebarGroupContent>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/**
+ * The sidebar's Chats group, below the projects: its title, which expands
+ * and collapses it, and whose right-click menu starts a chat with the agent
+ * chosen there, and whose button starts one with the default agent; then
+ * each chat, newest first.
  */
 function ChatsGroup() {
   const chats = useAppStore((state) => state.chats)
   const newChat = useAppStore((state) => state.newChat)
+  const expanded = useAppStore((state) => !state.collapsedGroups.has('chats'))
+  const setGroupExpanded = useAppStore((state) => state.setGroupExpanded)
+  // The states of the chats whose agents run, the ones their rows show.
+  const states = useAppStore(
+    useShallow((state) =>
+      state.sessions
+        .filter((session) => session.chatId !== null && isSessionRunning(session))
+        .map((session) => sessionState(session)),
+    ),
+  )
+  // Its rows show the chats themselves while it is expanded.
+  const summary = expanded ? null : sessionsSummary(states)
   return (
-    <SidebarGroup>
-      <ContextMenu>
-        <ContextMenuTrigger
-          render={<SidebarGroupLabel className="peer/title" />}
-          data-testid="chats-label"
-        >
-          Chats
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-auto min-w-48">
-          <ChatAgentMenuEntries
-            components={contextComponents}
-            onSelect={(toolId) => void newChat(toolId)}
-            testId="chats-agent"
+    <Collapsible
+      render={<SidebarGroup />}
+      open={expanded}
+      onOpenChange={(open) => setGroupExpanded('chats', open)}
+      data-testid="chats-group"
+    >
+      <div className="group/title">
+        <ContextMenu>
+          <ContextMenuTrigger
+            render={
+              <GroupLabel name="Chats" expanded={expanded} summary={summary} testId="chats" />
+            }
           />
-        </ContextMenuContent>
-      </ContextMenu>
-      <SidebarGroupAction
-        className={GROUP_ACTION_ON_HOVER}
-        aria-label="New chat"
-        onClick={() => void newChat()}
-        data-testid="new-chat-group-action"
-      >
-        <PencilSparklesIcon />
-      </SidebarGroupAction>
-      <SidebarGroupContent>
-        {chats.length === 0 ? (
-          <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-chats">
-            No chats
-          </p>
-        ) : (
-          <SidebarMenu className="gap-px" data-testid="chat-list">
-            {chats.map((chat) => (
-              <ChatItem key={chat.id} chat={chat} />
-            ))}
-          </SidebarMenu>
-        )}
-      </SidebarGroupContent>
-    </SidebarGroup>
+          <ContextMenuContent className="w-auto min-w-48">
+            <ChatAgentMenuEntries
+              components={contextComponents}
+              onSelect={(toolId) => void newChat(toolId)}
+              testId="chats-agent"
+            />
+          </ContextMenuContent>
+        </ContextMenu>
+        <SidebarGroupAction
+          className={GROUP_ACTION_ON_HOVER}
+          aria-label="New chat"
+          onClick={() => void newChat()}
+          data-testid="new-chat-group-action"
+        >
+          <PencilSparklesIcon />
+        </SidebarGroupAction>
+      </div>
+      <CollapsibleContent className={SLIDING}>
+        <SidebarGroupContent>
+          {chats.length === 0 ? (
+            <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-chats">
+              No chats
+            </p>
+          ) : (
+            <SidebarMenu className="gap-px" data-testid="chat-list">
+              {chats.map((chat) => (
+                <ChatItem key={chat.id} chat={chat} />
+              ))}
+            </SidebarMenu>
+          )}
+        </SidebarGroupContent>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
 export function ProjectSidebar() {
-  const projects = useAppStore((state) => state.projects)
-  const addProject = useAppStore((state) => state.addProject)
   const showSettings = useAppStore((state) => state.showSettings)
 
   // The sidebar leaves the window while the settings take its place; its
@@ -333,30 +488,7 @@ export function ProjectSidebar() {
             <NewChatItem />
           </SidebarMenu>
         </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className="peer/title">Projects</SidebarGroupLabel>
-          <SidebarGroupAction
-            className={GROUP_ACTION_ON_HOVER}
-            onClick={() => void addProject()}
-            data-testid="add-project"
-          >
-            <FolderPlusIcon />
-            <span className="sr-only">Add Project</span>
-          </SidebarGroupAction>
-          <SidebarGroupContent>
-            {projects.length === 0 ? (
-              <p className="px-2 py-1 text-sm text-muted-foreground" data-testid="no-projects">
-                No projects
-              </p>
-            ) : (
-              <SidebarMenu className="gap-px" data-testid="project-list">
-                {projects.map((project) => (
-                  <ProjectEntry key={project.root} project={project} />
-                ))}
-              </SidebarMenu>
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <ProjectsGroup />
         <ChatsGroup />
       </SidebarContent>
       {/* Between the list, which scrolls, and the footer, from edge to edge. */}

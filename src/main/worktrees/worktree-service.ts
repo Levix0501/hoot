@@ -33,6 +33,7 @@ import {
   type GitResult,
   type WorktreeEntry,
 } from '../git/git'
+import { deleteContents } from './delete-contents'
 import {
   changesBeforeMerge,
   InspectionError,
@@ -123,6 +124,11 @@ export interface WorktreeServiceOptions {
   now?: () => number
   /** Without it, nothing but the records is known of the worktrees, and no session is open. */
   keeping?: WorktreeKeeping
+  /**
+   * Deletes what is in a folder but its `.git` file, as `deleteContents`
+   * does, which runs in the main process when this is not given.
+   */
+  deleteContents?: (folder: string) => Promise<string | null>
 }
 
 interface ProjectState {
@@ -875,15 +881,18 @@ export class WorktreeService extends EventEmitter<{
   /**
    * Deletes a worktree: its inner members, deeper ones first, then its outer
    * member, with everything in its root, and then the registrations of other
-   * linked worktrees that were inside the root. Branches are kept, except
-   * those of `deleteBranches`, which the confirmation said would be deleted:
-   * once the worktree is deleted, each of them that its member had checked
-   * out and that is merged, as it is then, into the branch checked out in
-   * the project folder in its repository is deleted too, and the others are
-   * kept. Unless `discard` is set, a worktree with anything to lose is not
-   * deleted. Once nothing stops the deletion, `endSessions` ends the sessions
-   * running in the worktree, and what they change until they end is deleted
-   * with it.
+   * linked worktrees that were inside the root. Of each member, what is in
+   * its folder goes first, and then Git deletes its `.git` file, its folder
+   * and its registration: a deletion that stops partway, as when a file is in
+   * use, leaves a worktree that can be deleted again. Branches are kept,
+   * except those of `deleteBranches`, which the confirmation said would be
+   * deleted: once the worktree is deleted, each of them that its member had
+   * checked out and that is merged, as it is then, into the branch checked
+   * out in the project folder in its repository is deleted too, and the
+   * others are kept. Unless `discard` is set, a worktree with anything to
+   * lose is not deleted. Once nothing stops the deletion, `endSessions` ends
+   * the sessions running in the worktree, and what they change until they end
+   * is deleted with it.
    */
   async delete(
     projectRoot: string,
@@ -963,6 +972,15 @@ export class WorktreeService extends EventEmitter<{
         : []
     const members = await this.membersOf(context, state, entry.path)
     for (const member of [...deepestFirst(members.inner), members.outer]) {
+      const problem = await (this.options.deleteContents ?? deleteContents)(member.path)
+      if (problem !== null) {
+        await this.refresh(state)
+        return {
+          ok: false,
+          reason: 'failed',
+          message: `Could not delete ${member.path}: ${problem}`,
+        }
+      }
       // Only the outer member's lock, checked above, makes the worktree
       // locked: forcing twice removes an inner member that is locked too.
       const force = member.relativePath === '' ? ['--force'] : ['--force', '--force']

@@ -49,6 +49,7 @@ import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
 import { WorkflowExecutor } from './workflows/workflow-executor'
 import { titleBarOverlay, windowBackground } from './window-colors'
+import { deleteContentsApart } from './worktrees/deleter-process'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
 import { WorktreeStore } from './worktrees/worktree-store'
@@ -422,6 +423,8 @@ function startWithDatabase(database: DatabaseSync): void {
       collapsedPaths: () => sidebar.collapsedWorktrees,
       hasOpenSessions: (root, worktreePath) => sessions.hasOpenIn(root, worktreePath),
     },
+    deleteContents: (folder) =>
+      deleteContentsApart(path.join(import.meta.dirname, '../deleter/index.js'), folder),
   })
   worktrees = worktreeService
   const folders = new ProjectFolders({ gitContext: projectGit })

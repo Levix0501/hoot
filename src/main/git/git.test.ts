@@ -95,6 +95,13 @@ describe('gitEnvironment', () => {
     expect(result).not.toHaveProperty('GIT_DIR')
     expect(result).not.toHaveProperty('GIT_WORK_TREE')
   })
+
+  it('lets git take paths longer than 260 characters on Windows', async () => {
+    const base = { PATH: process.env.PATH ?? '/usr/bin:/bin', GIT_CONFIG_COUNT: '0' }
+    const windows = await runGit('git', ['config', 'core.longpaths'], gitEnvironment(base, 'win32'))
+    expect(windows.stdout.trim()).toBe('true')
+    expect(gitEnvironment(base, 'darwin')).not.toHaveProperty('GIT_CONFIG_COUNT')
+  })
 })
 
 describe('runGit', () => {

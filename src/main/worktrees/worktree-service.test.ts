@@ -812,6 +812,83 @@ describe('WorktreeService', () => {
     }
   })
 
+  it('deletes a worktree with paths longer than the 260 characters Windows allows by default', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/l',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    // As in the dependencies a package manager installs.
+    const folders = Array.from({ length: 6 }, (_, index) => `${'d'.repeat(40)}${index}`)
+    const file = path.join(R, 'node_modules', ...folders, 'index.js')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, '\n')
+    expect(file.length).toBeGreaterThan(260)
+    expect(await service.delete(project, R, true)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(linkedWorktrees(project)).toEqual([])
+  })
+
+  it('deletes a worktree without following the junctions and symbolic links in it', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/j',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    const outside = path.join(root, 'store', 'package')
+    fs.mkdirSync(outside, { recursive: true })
+    fs.writeFileSync(path.join(outside, 'index.js'), '\n')
+    // As pnpm links a dependency on Windows; a symbolic link elsewhere.
+    fs.mkdirSync(path.join(R, 'node_modules'))
+    fs.symlinkSync(outside, path.join(R, 'node_modules', 'package'), 'junction')
+    expect(await service.delete(project, R, true)).toEqual({ ok: true })
+    expect(fs.existsSync(R)).toBe(false)
+    expect(fs.existsSync(path.join(outside, 'index.js'))).toBe(true)
+  })
+
+  // Windows lets the owner delete from a folder whatever its permissions.
+  it.skipIf(process.platform === 'win32')(
+    'keeps a worktree it could not delete all of, which can be deleted again',
+    async () => {
+      await start()
+      const created = await service.create({
+        projectRoot: project,
+        branch: 'feat/s',
+        base: 'main',
+        nested: [{ relativePath: 'inner', base: 'main' }],
+      })
+      if (!created.ok) throw new Error(created.message)
+      const R = created.path
+      const stuck = path.join(R, 'inner', 'stuck')
+      fs.mkdirSync(stuck)
+      fs.writeFileSync(path.join(stuck, 'file.txt'), 'x\n')
+      fs.chmodSync(stuck, 0o555)
+      try {
+        expect(await service.delete(project, R, true)).toMatchObject({
+          ok: false,
+          reason: 'failed',
+        })
+      } finally {
+        fs.chmodSync(stuck, 0o755)
+      }
+      // Still a worktree, with what is left of it.
+      expect(await listed()).toMatchObject([{ path: R, missing: false, innerMembers: ['inner'] }])
+      expect(fs.existsSync(path.join(R, 'inner', 'README.md'))).toBe(false)
+      expect(await service.inspect(project, R)).toMatchObject({ ok: true })
+      expect(await service.delete(project, R, true)).toEqual({ ok: true })
+      expect(fs.existsSync(R)).toBe(false)
+      for (const repository of [project, inner]) expect(linkedWorktrees(repository)).toEqual([])
+    },
+  )
+
   it('removes the registrations of a missing worktree and its inner members, keeping branches', async () => {
     const gone = path.join(W, 'project', 'gone')
     git(project, 'worktree', 'add', '-q', '-b', 'beta', gone)

@@ -53,6 +53,11 @@ export default defineConfig({
         },
       },
       {
+        // The utility process that deletes the files of a worktree.
+        entry: 'src/deleter/index.ts',
+        vite: { build: { outDir: 'dist-electron/deleter', minify: false } },
+      },
+      {
         // hoot, the command line program of Hoot's sessions, which Hoot's
         // own executable runs as Node.js.
         entry: 'src/cli/index.ts',

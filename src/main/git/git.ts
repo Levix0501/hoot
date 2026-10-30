@@ -2,8 +2,13 @@ import { execFile } from 'node:child_process'
 import path from 'node:path'
 import type { Env } from '../env/env'
 
-/** Environment for running git: no repository overrides and untranslated messages. */
-export function gitEnvironment(env: Env): Env {
+/**
+ * Environment for running git: no repository overrides and untranslated
+ * messages. On Windows, paths may also be longer than 260 characters, as in
+ * the `node_modules` of a worktree, which Git for Windows otherwise neither
+ * checks out nor deletes.
+ */
+export function gitEnvironment(env: Env, platform: NodeJS.Platform = process.platform): Env {
   const result: Env = {}
   for (const [name, value] of Object.entries(env)) {
     if (!name.startsWith('GIT_')) result[name] = value
@@ -11,6 +16,11 @@ export function gitEnvironment(env: Env): Env {
   result.LC_ALL = 'C'
   result.GIT_TERMINAL_PROMPT = '0'
   result.GIT_OPTIONAL_LOCKS = '0'
+  if (platform === 'win32') {
+    result.GIT_CONFIG_COUNT = '1'
+    result.GIT_CONFIG_KEY_0 = 'core.longpaths'
+    result.GIT_CONFIG_VALUE_0 = 'true'
+  }
   return result
 }
 

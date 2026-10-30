@@ -63,7 +63,7 @@ export function AppearancePage() {
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-background" data-testid="appearance-page">
       {/* The page's part of the window's top row, which drags the window. */}
-      <div className="h-11 shrink-0 [app-region:drag]" />
+      <div className="h-11.5 shrink-0 [app-region:drag]" />
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 pt-2 pb-10">
           <h1 className="text-2xl font-semibold tracking-tight">Appearance</h1>

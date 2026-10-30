@@ -258,12 +258,12 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
     minHeight: 480,
     title: 'Hoot',
     // No title bar: the page takes the whole window. The traffic lights
-    // (x 15–75, y 15–29) sit in the middle of the page's 44px top row, which
+    // (x 15–75, y 16–30) sit in the middle of the page's 46px top row, which
     // leaves them room. On Windows, Windows draws its minimize, maximize and
     // close buttons over the right end of the row instead, and a window
     // without a title bar has no menu bar either.
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 15, y: 15 },
+    trafficLightPosition: { x: 15, y: 16 },
     ...(windowControls === 'overlay'
       ? { titleBarOverlay: titleBarOverlay(nativeTheme.shouldUseDarkColors) }
       : {}),

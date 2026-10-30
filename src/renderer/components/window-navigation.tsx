@@ -114,7 +114,7 @@ export function WindowNavigation() {
   return (
     <nav
       aria-label="Navigation"
-      className="fixed top-0 left-0 z-20 flex h-11 items-center gap-1 transition-[padding] duration-200 ease-linear [app-region:drag] *:[app-region:no-drag]"
+      className="fixed top-0 left-0 z-20 flex h-11.5 items-center gap-1 transition-[padding] duration-200 ease-linear [app-region:drag] *:[app-region:no-drag]"
       style={{ paddingLeft: start }}
       data-testid="window-navigation"
       data-full-screen={fullScreen}

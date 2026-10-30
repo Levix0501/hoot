@@ -116,7 +116,7 @@ export function SidebarResizeHandle() {
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"
-      className="group/resize absolute top-11 -right-2 bottom-0 w-4 cursor-col-resize touch-none select-none group-data-[state=collapsed]:pointer-events-none"
+      className="group/resize absolute top-11.5 -right-2 bottom-0 w-4 cursor-col-resize touch-none select-none group-data-[state=collapsed]:pointer-events-none"
       onPointerDown={(event) => {
         if (event.button === 0) dragSidebarEdge(event)
       }}

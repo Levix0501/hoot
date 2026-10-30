@@ -11,8 +11,8 @@ const COLORS = {
   dark: { background: '#181818', text: '#ffffff' },
 }
 
-/** The height of the page's top row (`h-11`). */
-const TOP_ROW_HEIGHT = 44
+/** The height of the page's top row (`h-11.5`). */
+const TOP_ROW_HEIGHT = 46
 
 /** The window's background in the dark appearance or the light one. */
 export function windowBackground(dark: boolean): string {

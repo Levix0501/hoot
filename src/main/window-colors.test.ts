@@ -8,7 +8,7 @@ describe('window colors', () => {
   })
 
   it('draw the buttons of Windows on that background, with symbols in the text color', () => {
-    expect(titleBarOverlay(false)).toEqual({ color: '#ffffff', symbolColor: '#1a1c1f', height: 44 })
-    expect(titleBarOverlay(true)).toEqual({ color: '#181818', symbolColor: '#ffffff', height: 44 })
+    expect(titleBarOverlay(false)).toEqual({ color: '#ffffff', symbolColor: '#1a1c1f', height: 46 })
+    expect(titleBarOverlay(true)).toEqual({ color: '#181818', symbolColor: '#ffffff', height: 46 })
   })
 })

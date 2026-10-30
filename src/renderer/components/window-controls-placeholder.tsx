@@ -11,7 +11,7 @@ export function WindowControlsPlaceholder() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed top-0 right-0 z-30 h-11 w-(--window-controls-width) border-l border-dashed border-foreground/25 bg-foreground/5"
+      className="pointer-events-none fixed top-0 right-0 z-30 h-11.5 w-(--window-controls-width) border-l border-dashed border-foreground/25 bg-foreground/5"
       data-testid="window-controls-placeholder"
     />
   )

@@ -96,7 +96,7 @@ function SettingsNavigation() {
         lights sit on it. It reaches over the right border, so that the line
         drags the window too.
       */}
-      <SidebarHeader className="-mr-px h-11 shrink-0 [app-region:drag]" />
+      <SidebarHeader className="-mr-px h-11.5 shrink-0 [app-region:drag]" />
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>

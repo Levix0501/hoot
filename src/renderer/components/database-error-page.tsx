@@ -19,7 +19,7 @@ export function DatabaseErrorPage({ message, path }: { message: string; path: st
   return (
     <div className="flex h-svh flex-col bg-background text-foreground" data-testid="database-error">
       {/* The window's top row, which drags the window. */}
-      <div className="h-11 shrink-0 [app-region:drag]" />
+      <div className="h-11.5 shrink-0 [app-region:drag]" />
       <Empty className="min-h-0 overflow-y-auto">
         <EmptyHeader className="max-w-lg">
           <EmptyMedia variant="icon">

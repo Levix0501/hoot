@@ -22,7 +22,7 @@ export function IssuesTopRow({ children }: { children: ReactNode }) {
   const inset = useTopRowInset()
   return (
     <header
-      className="flex h-11 shrink-0 items-center gap-2 pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4 text-sm transition-[padding] duration-200 ease-linear [app-region:drag]"
+      className="flex h-11.5 shrink-0 items-center gap-2 pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4 text-sm transition-[padding] duration-200 ease-linear [app-region:drag]"
       style={{ paddingLeft: inset }}
       data-testid="issues-top-row"
     >

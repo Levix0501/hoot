@@ -83,7 +83,7 @@ export function SessionPane({ session }: { session: UiSession }) {
       <header
         key={session.chatId === null ? 'tabs' : 'chat'}
         className={cn(
-          'flex h-11 shrink-0 items-center gap-3 transition-[padding] duration-200 ease-linear [app-region:drag]',
+          'flex h-11.5 shrink-0 items-center gap-3 transition-[padding] duration-200 ease-linear [app-region:drag]',
           session.chatId === null
             ? 'pr-(--window-controls-width) pl-2'
             : 'pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4',
@@ -163,7 +163,7 @@ export function NoSession() {
   return (
     <>
       {/* The main area's part of the window's top row, which drags the window. */}
-      <div className="absolute inset-x-0 top-0 h-11 [app-region:drag]" />
+      <div className="absolute inset-x-0 top-0 h-11.5 [app-region:drag]" />
       <Empty className="flex-1" data-testid="no-session">
         <EmptyHeader>
           <EmptyMedia variant="icon">

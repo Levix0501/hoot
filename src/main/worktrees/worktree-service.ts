@@ -287,6 +287,8 @@ export class WorktreeService extends EventEmitter<{
   removed: [projectRoot: string, worktreePaths: string[]]
 }> {
   private readonly projects = new Map<string, ProjectState>()
+  /** The worktrees being deleted, by root, with the names their rows show. */
+  private readonly deleting = new Map<string, string>()
 
   constructor(private readonly options: WorktreeServiceOptions) {
     super()
@@ -907,11 +909,22 @@ export class WorktreeService extends EventEmitter<{
     // Not cleaned up meanwhile, as when its folder is gone before its
     // registration while Git deletes it.
     state.busy.add(worktreePath)
+    const shown = state.worktrees.find((worktree) => worktree.path === worktreePath)
+    this.deleting.set(
+      worktreePath,
+      shown?.name ?? shown?.displayName ?? path.basename(worktreePath),
+    )
     try {
       return await this.deleteMembers(state, worktreePath, discard, endSessions, deleteBranches)
     } finally {
       state.busy.delete(worktreePath)
+      this.deleting.delete(worktreePath)
     }
+  }
+
+  /** The names of the worktrees being deleted, as their rows show them. */
+  deletionsUnderWay(): string[] {
+    return [...this.deleting.values()]
   }
 
   private async deleteMembers(

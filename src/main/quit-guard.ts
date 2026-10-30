@@ -18,6 +18,11 @@ export interface QuitGuardOptions {
   /** The agents being installed or updated, and those waiting to be. */
   agentOperations(): AgentOperationSummary[]
   /**
+   * The names of the worktrees being deleted, whose deletion quitting stops
+   * partway, leaving what is left of them to be deleted later.
+   */
+  worktreeDeletions(): string[]
+  /**
    * Stops them: those waiting never run, and the command of the one running
    * is sent SIGTERM; settles once its process has ended, and none is left
    * running or waiting. Those asked for afterwards never run either, until
@@ -33,12 +38,13 @@ export interface QuitGuardOptions {
 /**
  * Asks for confirmation before the window closes or the app quits while
  * sessions are running, saying how many, or agents are being installed or
- * updated, saying which. Confirming stops those operations, waiting for the
- * running one's process to end, then ends the sessions and quits; cancelling
- * keeps Hoot, every session and every operation running. Restarting into an
- * update asks the same way. Until that process has ended, nothing else quits
- * Hoot, closes its window or restarts it; and once confirmed, no install or
- * update runs, unless restarting into the update fails.
+ * updated, or worktrees deleted, saying which. Confirming stops the agents'
+ * operations, waiting for the running one's process to end, then ends the
+ * sessions and quits, which stops the deletions partway; cancelling keeps
+ * Hoot, every session and every operation running. Restarting into an update
+ * asks the same way. Until that process has ended, nothing else quits Hoot,
+ * closes its window or restarts it; and once confirmed, no install or update
+ * runs, unless restarting into the update fails.
  */
 export class QuitGuard {
   private allowQuit = false
@@ -129,7 +135,11 @@ export class QuitGuard {
   }
 
   private needsAnswer(): boolean {
-    return this.options.runningSessionCount() > 0 || this.options.agentOperations().length > 0
+    return (
+      this.options.runningSessionCount() > 0 ||
+      this.options.agentOperations().length > 0 ||
+      this.options.worktreeDeletions().length > 0
+    )
   }
 
   private ask(reason: QuitReason): void {
@@ -141,6 +151,7 @@ export class QuitGuard {
     this.awaitingAnswer = true
     const running = this.options.runningSessionCount()
     const operations = this.options.agentOperations()
+    const deletions = this.options.worktreeDeletions()
     const window = this.options.getWindow()
     if (!window || window.isDestroyed() || window.webContents.isCrashed()) {
       // Without a working window, ask with a native dialog.
@@ -148,7 +159,7 @@ export class QuitGuard {
         .showMessageBox({
           type: 'warning',
           message: quitQuestion(reason),
-          detail: describeQuit(running, reason, operations),
+          detail: describeQuit(running, reason, operations, deletions),
           buttons: [quitConfirmationLabel(running, reason), 'Cancel'],
           defaultId: 0,
           cancelId: 1,
@@ -157,6 +168,6 @@ export class QuitGuard {
       return
     }
     this.options.presentWindow(window)
-    window.webContents.send(IpcChannel.confirmQuit, running, reason, operations)
+    window.webContents.send(IpcChannel.confirmQuit, running, reason, operations, deletions)
   }
 }

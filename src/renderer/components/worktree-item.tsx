@@ -23,6 +23,7 @@ import { CollapsibleTrigger } from './ui/collapsible'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
+import { Spinner } from './ui/spinner'
 
 /**
  * What the menus say about a locked worktree, below Delete, which the lock
@@ -173,7 +174,8 @@ function WorktreeMenuEntries({
  * in the light's place, which opens the same menu as a right click, and right
  * of it, unless the worktree is missing, its `+`, which starts a session in
  * the worktree with an agent chosen from its menu, or with the only agent
- * that can be used.
+ * that can be used. While the worktree is being deleted, its name is dimmed,
+ * a spinner shows at its right end, and it has neither buttons nor menus.
  */
 export function WorktreeItem({
   projectRoot,
@@ -194,16 +196,19 @@ export function WorktreeItem({
         .map((session) => sessionState(session)),
     ),
   )
+  const deleting = useAppStore((state) => state.deletingWorktrees.has(worktree.path))
   // Its rows show the sessions themselves while it is expanded.
-  const summary = expanded ? null : sessionsSummary(states)
+  const summary = expanded || deleting ? null : sessionsSummary(states)
   const title = worktree.name ?? worktree.displayName
   // While they show, its buttons take the room of two, or of `⋯` alone for a missing worktree.
-  const buttonsRoom = worktree.missing
-    ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
-    : 'group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12'
+  const buttonsRoom = deleting
+    ? null
+    : worktree.missing
+      ? 'group-hover/menu-item:w-6 group-has-focus-visible/menu-item:w-6 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-6'
+      : 'group-hover/menu-item:w-12 group-has-focus-visible/menu-item:w-12 group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:w-12'
 
   return (
-    <ContextMenu>
+    <ContextMenu disabled={deleting}>
       <ContextMenuTrigger
         className="group/menu-item relative"
         data-testid="worktree-item"
@@ -211,6 +216,7 @@ export function WorktreeItem({
         data-worktree-path={worktree.path}
         data-missing={worktree.missing}
         data-locked={worktree.locked}
+        data-deleting={deleting}
       >
         <CollapsibleTrigger
           render={
@@ -234,7 +240,11 @@ export function WorktreeItem({
           >
             <ChevronRightIcon />
           </span>
-          <span className="min-w-0 truncate" data-user-text="" data-testid="worktree-name">
+          <span
+            className={cn('min-w-0 truncate', deleting && 'text-muted-foreground')}
+            data-user-text=""
+            data-testid="worktree-name"
+          >
             {title}
           </span>
           {worktree.missing && (
@@ -246,6 +256,14 @@ export function WorktreeItem({
             <Badge variant="secondary" className="shrink-0" data-testid="worktree-locked">
               Locked
             </Badge>
+          )}
+          {deleting && (
+            <span
+              className="ml-auto flex size-3 shrink-0 items-center justify-center"
+              data-testid="worktree-deleting"
+            >
+              <Spinner className="size-3 text-muted-foreground" aria-label="Deleting" />
+            </span>
           )}
           {summary && (
             <>
@@ -262,37 +280,39 @@ export function WorktreeItem({
           <span className={cn('-ml-1.5 w-0 shrink-0', buttonsRoom)} aria-hidden />
         </CollapsibleTrigger>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuAction
-                showOnHover
-                // The button pointed at stands out on the highlighted row.
-                className={cn('hover:bg-sidebar-foreground/10', !worktree.missing && 'right-7')}
-                aria-label={`More actions for ${title}`}
-                // Its label names the worktree.
-                data-user-text=""
-                data-testid="worktree-actions-button"
+        {!deleting && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <SidebarMenuAction
+                  showOnHover
+                  // The button pointed at stands out on the highlighted row.
+                  className={cn('hover:bg-sidebar-foreground/10', !worktree.missing && 'right-7')}
+                  aria-label={`More actions for ${title}`}
+                  // Its label names the worktree.
+                  data-user-text=""
+                  data-testid="worktree-actions-button"
+                />
+              }
+            >
+              <MoreHorizontalIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-auto min-w-48"
+              finalFocus={focusAfterOverlay}
+            >
+              <WorktreeMenuEntries
+                components={dropdownMenuParts}
+                projectRoot={projectRoot}
+                worktree={worktree}
+                testId="worktree"
               />
-            }
-          >
-            <MoreHorizontalIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="w-auto min-w-48"
-            finalFocus={focusAfterOverlay}
-          >
-            <WorktreeMenuEntries
-              components={dropdownMenuParts}
-              projectRoot={projectRoot}
-              worktree={worktree}
-              testId="worktree"
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
-        {!worktree.missing && (
+        {!worktree.missing && !deleting && (
           <NewWorktreeSessionButton
             projectRoot={projectRoot}
             worktreePath={worktree.path}

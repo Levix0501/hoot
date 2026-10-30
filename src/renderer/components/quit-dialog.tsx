@@ -21,6 +21,7 @@ export function QuitDialog() {
     runningSessions: 1,
     reason: 'quit',
     agentOperations: [],
+    worktreeDeletions: [],
   })
   if (confirmation && confirmation !== shown) setShown(confirmation)
   const answered = useRef(false)
@@ -45,7 +46,12 @@ export function QuitDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>{quitQuestion(shown.reason)}</AlertDialogTitle>
           <AlertDialogDescription data-testid="quit-dialog-description">
-            {describeQuit(shown.runningSessions, shown.reason, shown.agentOperations)}
+            {describeQuit(
+              shown.runningSessions,
+              shown.reason,
+              shown.agentOperations,
+              shown.worktreeDeletions,
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -27,6 +27,8 @@ function setup(options: {
   running: number
   window: BrowserWindow | null
   operations?: AgentOperationSummary[]
+  /** The names of the worktrees being deleted. */
+  deletions?: string[]
   /** Settles when stopping the operations is done; at once without it. */
   stopped?: Promise<void>
 }) {
@@ -51,6 +53,7 @@ function setup(options: {
     runningSessionCount: () => running,
     endSessions,
     agentOperations: () => operations,
+    worktreeDeletions: () => options.deletions ?? [],
     stopAgentOperations,
     resumeAgentOperations,
     onCancel,
@@ -100,7 +103,7 @@ describe('QuitGuard', () => {
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
     expect(presentWindow).toHaveBeenCalledWith(window)
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'quit', [])
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'quit', [], [])
 
     // Asking again while the question is open only brings the window back.
     guard.intercept(quitEvent().event)
@@ -134,6 +137,18 @@ describe('QuitGuard', () => {
     const { event, preventDefault } = quitEvent()
     guard.intercept(event)
     expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('asks before quitting while a worktree is being deleted, naming it', async () => {
+    const { window, send } = fakeWindow()
+    const { guard, endSessions } = setup({ running: 0, window, deletions: ['brave-cats-run'] })
+    const { event, preventDefault } = quitEvent()
+    guard.intercept(event)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'quit', [], ['brave-cats-run'])
+    await guard.answer(true)
+    expect(endSessions).toHaveBeenCalled()
+    expect(electron.app.quit).toHaveBeenCalled()
   })
 
   it('asks with a native dialog when there is no window', async () => {
@@ -177,7 +192,7 @@ describe('QuitGuard with agents being installed or updated', () => {
     const { event, preventDefault } = quitEvent()
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'quit', [updating, waiting])
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'quit', [updating, waiting], [])
   })
 
   it('keeps the operations when the user cancels', async () => {
@@ -209,7 +224,7 @@ describe('QuitGuard with agents being installed or updated', () => {
     const install = vi.fn<() => void>(() => calls.push('install'))
     guard.restartToUpdate(install)
     expect(install).not.toHaveBeenCalled()
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'update', [updating])
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 0, 'update', [updating], [])
     await guard.answer(true)
     expect(calls).toEqual(['stop operations', 'end sessions', 'install'])
   })
@@ -352,7 +367,7 @@ describe('QuitGuard.restartToUpdate', () => {
     const install = vi.fn<() => void>()
     guard.restartToUpdate(install)
     expect(presentWindow).toHaveBeenCalledWith(window)
-    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'update', [])
+    expect(send).toHaveBeenCalledWith(IpcChannel.confirmQuit, 2, 'update', [], [])
     expect(install).not.toHaveBeenCalled()
 
     await guard.answer(true)
@@ -373,7 +388,7 @@ describe('QuitGuard.restartToUpdate', () => {
     const { event, preventDefault } = quitEvent()
     guard.intercept(event)
     expect(preventDefault).toHaveBeenCalled()
-    expect(send).toHaveBeenLastCalledWith(IpcChannel.confirmQuit, 1, 'quit', [])
+    expect(send).toHaveBeenLastCalledWith(IpcChannel.confirmQuit, 1, 'quit', [], [])
   })
 
   it('still asks before quitting after it ended the sessions to install', async () => {

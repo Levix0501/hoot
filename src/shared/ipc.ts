@@ -542,14 +542,15 @@ export interface HootApi {
   onAppearanceChanged(listener: (appearance: Appearance) => void): () => void
   /**
    * Quitting, or restarting into an update, needs confirmation because
-   * `runningSessions` sessions are running, or agents are being installed or
-   * updated, or waiting to be.
+   * `runningSessions` sessions are running, agents are being installed or
+   * updated, or waiting to be, or the worktrees named are being deleted.
    */
   onConfirmQuit(
     listener: (
       runningSessions: number,
       reason: QuitReason,
       agentOperations: AgentOperationSummary[],
+      worktreeDeletions: string[],
     ) => void,
   ): () => void
   respondToQuit(confirmed: boolean): void

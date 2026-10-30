@@ -146,4 +146,16 @@ describe('quit confirmation', () => {
     expect(quitConfirmationLabel(0, 'quit')).toBe('Stop and Quit')
     expect(quitConfirmationLabel(0, 'update')).toBe('Stop and Restart')
   })
+
+  it('names the worktrees being deleted, which quitting stops', () => {
+    expect(describeQuit(0, 'quit', [], ['silver-singers-dance'])).toBe(
+      'silver-singers-dance is still being deleted. ' +
+        'Quitting will stop it, and what is left can be deleted later.',
+    )
+    expect(describeQuit(1, 'update', [], ['a', 'b'])).toBe(
+      'a and b are still being deleted. ' +
+        'Restarting will stop them, and what is left can be deleted later. ' +
+        '1 session is still running. Restarting will end it.',
+    )
+  })
 })

@@ -722,6 +722,24 @@ describe('WorktreeService', () => {
     }
   })
 
+  it('names the worktree it is deleting until it is deleted', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/n',
+      base: 'main',
+      nested: [],
+    })
+    if (!created.ok) throw new Error(created.message)
+    let during: string[] = []
+    const deleted = await service.delete(project, created.path, true, async () => {
+      during = service.deletionsUnderWay()
+    })
+    expect(deleted).toEqual({ ok: true })
+    expect(during).toEqual(['feat/n'])
+    expect(service.deletionsUnderWay()).toEqual([])
+  })
+
   it('does not delete a locked worktree', async () => {
     await start()
     const created = await service.create({

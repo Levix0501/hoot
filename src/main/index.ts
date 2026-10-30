@@ -195,6 +195,7 @@ const quitGuard = new QuitGuard({
   runningSessionCount: () => sessions.runningCount(),
   endSessions: () => sessions.endAll(),
   agentOperations: () => agents.pendingOperations(),
+  worktreeDeletions: () => worktrees?.deletionsUnderWay() ?? [],
   stopAgentOperations: () => agents.stopAll(),
   resumeAgentOperations: () => agents.resume(),
   // Keeping a running session must not leave Hoot without a window.

@@ -203,15 +203,13 @@ function RunningSessions({ names }: { names: readonly string[] }) {
 }
 
 function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
-  // While asking, the sessions running now; once confirmed, those it listed.
-  const running = useAppStore(
+  const sessions = useAppStore(
     useShallow((state) =>
       runningSessionsWithin(state, deletion.path).map((session) =>
         shownSessionName(state, session),
       ),
     ),
   )
-  const sessions = deletion.endingSessions ?? running
   if (deletion.phase === 'checking' || (!deletion.inspection && !deletion.error)) {
     return (
       <p className="flex items-center gap-2" data-testid="worktree-delete-checking">
@@ -250,7 +248,8 @@ function DeletionBody({ deletion }: { deletion: WorktreeDeletion }) {
  * commits and foreign repositories that would be lost. While the branch of
  * any repository of it is merged into the one checked out in the project
  * folder, a checkbox, checked each time the dialog opens, deletes the merged
- * branches with it; the others are kept.
+ * branches with it; the others are kept. Once confirmed, it closes, and the
+ * worktree is deleted in the background, as its row shows.
  */
 export function DeleteWorktreeDialog() {
   const deletion = useAppStore((state) => state.worktreeDeletion)
@@ -261,7 +260,6 @@ export function DeleteWorktreeDialog() {
   if (deletion !== null && deletion !== shown) setShown(deletion)
   const current = deletion ?? shown
   const dirty = current?.inspection ? !inspectionIsClean(current.inspection) : false
-  const deleting = current?.phase === 'deleting'
   const ready = current?.phase === 'confirm' && current.inspection !== null
   const alsoDelete =
     current?.inspection && current.phase !== 'checking' ? alsoDeleteLabel(current.inspection) : null
@@ -270,7 +268,7 @@ export function DeleteWorktreeDialog() {
     <AlertDialog
       open={deletion !== null}
       onOpenChange={(open) => {
-        if (!open && !deleting) void answer(false)
+        if (!open) void answer(false)
       }}
     >
       <AlertDialogContent
@@ -293,7 +291,6 @@ export function DeleteWorktreeDialog() {
             <Checkbox
               checked={current.deleteBranches}
               onCheckedChange={setDeleteBranches}
-              disabled={deleting}
               data-testid="worktree-delete-branches-checkbox"
             />
             <span>
@@ -302,17 +299,14 @@ export function DeleteWorktreeDialog() {
           </Label>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting} data-testid="worktree-delete-cancel">
-            Cancel
-          </AlertDialogCancel>
+          <AlertDialogCancel data-testid="worktree-delete-cancel">Cancel</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
-            disabled={!ready || deleting}
+            disabled={!ready}
             onClick={() => void answer(true)}
             data-testid="worktree-delete-confirm"
           >
-            {deleting && <Spinner />}
-            {deleting ? 'Deleting…' : dirty ? 'Discard Changes and Delete' : 'Delete'}
+            {dirty ? 'Discard Changes and Delete' : 'Delete'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

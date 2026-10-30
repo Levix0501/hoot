@@ -139,23 +139,41 @@ export function describeAgentOperations(
 }
 
 /**
+ * What the quit confirmation says about the worktrees being deleted, by
+ * name: quitting stops their deletion, and what is left of them can be
+ * deleted later.
+ */
+export function describeWorktreeDeletions(names: readonly string[], reason: QuitReason): string {
+  const list = new Intl.ListFormat('en', { type: 'conjunction' }).format(names)
+  const ending = reason === 'quit' ? 'Quitting' : 'Restarting'
+  return names.length === 1
+    ? `${list} is still being deleted. ${ending} will stop it, and what is left can be deleted later.`
+    : `${list} are still being deleted. ${ending} will stop them, and what is left can be deleted later.`
+}
+
+/**
  * Everything the quit confirmation says: about the agents being installed or
- * updated, if any, then about the running sessions, if any.
+ * updated, if any, then about the worktrees being deleted, if any, then about
+ * the running sessions, if any.
  */
 export function describeQuit(
   runningSessions: number,
   reason: QuitReason,
   operations: readonly AgentOperationSummary[],
+  worktreeDeletions: readonly string[] = [],
 ): string {
   const parts: string[] = []
   if (operations.length > 0) parts.push(describeAgentOperations(operations, reason))
+  if (worktreeDeletions.length > 0) {
+    parts.push(describeWorktreeDeletions(worktreeDeletions, reason))
+  }
   if (runningSessions > 0) parts.push(describeRunningSessions(runningSessions, reason))
   return parts.join(' ')
 }
 
 /**
  * The label of the button that confirms quitting: it ends the running
- * sessions, or, with none, stops what is being installed or updated.
+ * sessions, or, with none, stops what is being installed, updated or deleted.
  */
 export function quitConfirmationLabel(count: number, reason: QuitReason): string {
   const action = reason === 'quit' ? 'Quit' : 'Restart'

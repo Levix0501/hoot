@@ -1,5 +1,51 @@
 # hoot
 
+## 0.1.0-alpha.19
+
+### Patch Changes
+
+- [`365d8f1`](https://github.com/Levix0501/hoot/commit/365d8f1b55fa04a40fd33395370c7e7478570c50) - Claude Code now picks the id of each new conversation itself and reports it to Hoot through the hooks Hoot already gives it, so a session follows the conversation you send messages in; with Claude Code's hooks turned off, a new Claude Code session is no longer kept once its agent ends, and its conversation can still be resumed in Claude Code.
+
+- [`790c085`](https://github.com/Levix0501/hoot/commit/790c085e7d6d18fe4b841430e4cdc174a569d6bf) - A worktree whose folder was deleted, or that Git no longer lists, is cleaned up with its saved sessions when Hoot next reads the worktrees, instead of staying as a Missing row; one with open sessions, a locked one, or one in a project folder on a disk that is not connected stays as missing, and Remove, now available on every missing worktree, closes its open sessions first.
+
+- [`fe1ea78`](https://github.com/Levix0501/hoot/commit/fe1ea789c3a0fa520e41e5bbf19855a35050c5c0) - The confirmation before closing a running session has Don't ask again, and Confirm before closing on the Agents page turns asking on or off; quitting, restarting to update and deleting still ask as before.
+
+- [`cf91bcf`](https://github.com/Levix0501/hoot/commit/cf91bcf97cf21f6d4058f571ef30c2a8467c8992) - Codex 0.148 and later tell Hoot which conversation each Codex session is in, through a hook Hoot gives them on the command line that Codex asks you to trust once, so that Codex sessions side by side in one folder, and Codex run outside Hoot in that folder, no longer take each other's conversations; without that trust Hoot still finds a session's conversation in Codex's records when the agent ends, now skipping ones that never got a message.
+
+- [`923d5d7`](https://github.com/Levix0501/hoot/commit/923d5d7cf4720e197ab3766a9ade79c03d344329) - When a worktree's branch is merged into the branch checked out in the project folder, its Delete confirmation offers to delete that branch too, checked by default.
+
+- [`8b8aba7`](https://github.com/Levix0501/hoot/commit/8b8aba78b8b0d921df397a948866bd013be6a5ea) - A saved session or chat can be deleted from its context menu: after asking, Hoot ends its agent if it runs and removes it for good, leaving the agent's own record of the conversation as it is, and moves a Codex or OpenCode chat's own folder to the Trash.
+
+- [`e86804f`](https://github.com/Levix0501/hoot/commit/e86804f7bc10fd579fe54e93722f84571e296d25) - A worktree can be deleted while sessions run in it: the confirmation lists them, and Hoot ends them before it deletes the worktree, with whatever they changed meanwhile.
+
+- [`f41c7f6`](https://github.com/Levix0501/hoot/commit/f41c7f652ed470330990e801b44270967c00bda7) - A worktree's right-click and `⋯` menus have `Merge into <branch> ▸`, which starts a Local session where the agent you pick merges the worktree's branches into the project folder with `git merge`, once Hoot has checked that nothing stands in the way.
+
+- [`e370a97`](https://github.com/Levix0501/hoot/commit/e370a9743a62d0f0dbab89a1ce428f93cba14ffe) - On Windows, a project's right-click menu no longer has New Session, which started a session in the project's folder that Hoot did not keep.
+
+- [`8a4bbd6`](https://github.com/Levix0501/hoot/commit/8a4bbd640944670a5ce909614414b1ac9cc315ed) - OpenCode now picks the id of each new conversation itself, so that new OpenCode sessions start with OpenCode 1.x too, and an OpenCode session goes on only to a conversation that started while its agent ran and got a message, never to a fork you sent nothing in or to one started while Hoot was not running.
+
+- [`4f1c592`](https://github.com/Levix0501/hoot/commit/4f1c5920a86cc3cffa8cd0d659440cb7ea6fad13) - OpenCode 2.0.6 and later now tell Hoot which conversation each OpenCode session is in, through a plugin Hoot gives them in an environment variable, so that OpenCode sessions side by side in one folder, and OpenCode run outside Hoot in that folder, no longer take each other's conversations, and OpenCode's own tab strip no longer shows in Hoot's sessions.
+
+- [`1ef6d7c`](https://github.com/Levix0501/hoot/commit/1ef6d7ceed8fc84a62686abcfb07e27da471ad8f) - A project's right-click and `⋯` menus have New Local Session, which starts an agent in the project's own folder without a worktree; those sessions are kept below the project's Local row, which shows the folder's current branch.
+
+- [`cff93f4`](https://github.com/Levix0501/hoot/commit/cff93f48d1a5958bb91cbdc1998f8a81546b535f) - A session's page shows a tab at the top for each session open in its project or worktree, which you click to switch to it, drag to reorder the tabs (switching sessions with the keyboard follows that order), double-click to rename it, and close with its × or a middle click.
+
+- [`2d4e210`](https://github.com/Levix0501/hoot/commit/2d4e210ecea21923b4a19c2eea8ca153eea45729) - The rows of the sidebar keep their icons closer to their names.
+
+- [`313dd88`](https://github.com/Levix0501/hoot/commit/313dd88f228e1e8d62cda5023929fc609887f492) - The agent icons of the sessions in the sidebar are smaller, in proportion to their smaller names.
+
+- [`4a40a49`](https://github.com/Levix0501/hoot/commit/4a40a4913d4b72da4b4c5003773620062bb047a9) - Starting another conversation in a session, as with `/clear` or `/new`, no longer adds a session to the sidebar: the session goes on in the new conversation once a message is sent there, keeps the name you gave it, and no longer lists the conversation it left, which stays in the agent's own history.
+
+- [`6be412d`](https://github.com/Levix0501/hoot/commit/6be412db60d4b79ea5e15b7c466737a51330a146) - A right click on a tab opens the same menu as on its session's row in the sidebar, to rename, close or delete the session from there.
+
+- [`7862d79`](https://github.com/Levix0501/hoot/commit/7862d793148d09967e5c951a904de03a751684cc) - A `+` right after a worktree's tabs starts another session in the worktree, with an agent picked from its menu, and stays in view while the tabs scroll.
+
+- [`40e2f66`](https://github.com/Levix0501/hoot/commit/40e2f668a1a395fdd6027319d9813a74b9aead88) - A worktree's tabs also show its saved sessions that are not running, without starting them: such a tab has no light, and clicking it continues its session as its row in the sidebar does.
+
+- [`e6d4fd6`](https://github.com/Levix0501/hoot/commit/e6d4fd690c94bd5eb868a43c8cda0ae5c3c216ff) - A worktree's row in the sidebar shows a chevron instead of a package icon, which turns down as the worktree expands and back as it collapses.
+
+- [`0cd5362`](https://github.com/Levix0501/hoot/commit/0cd5362f923cc0278d744f21ea6ea65785368d3e) - The `+` on a worktree's row opens a menu of the agents to start a session with, or starts the only agent you can use at once.
+
 ## 0.1.0-alpha.18
 
 ### Patch Changes

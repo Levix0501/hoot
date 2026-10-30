@@ -32,6 +32,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarSeparator,
 } from './ui/sidebar'
 
 /**
@@ -358,6 +359,8 @@ export function ProjectSidebar() {
         </SidebarGroup>
         <ChatsGroup />
       </SidebarContent>
+      {/* Between the list, which scrolls, and the footer, from edge to edge. */}
+      <SidebarSeparator className="mx-0" />
       <SidebarFooter>
         <SidebarMenu>
           {/*

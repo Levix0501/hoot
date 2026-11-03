@@ -243,6 +243,20 @@ const sidebar = {
   setWorktreeCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
   setLocalCollapsed: vi.fn<(root: string, collapsed: boolean) => void>(),
 }
+const filePanel = {
+  setOpen: vi.fn<(open: boolean) => void>(),
+  setTreeWidth: vi.fn<(width: number) => void>(),
+  setEditorWidth: vi.fn<(width: number) => void>(),
+}
+/** The file panel may show the project's own folder only. */
+const folderAccess = {
+  folder: vi.fn<(root: string, worktreePath: string | null) => Promise<string | null>>(
+    async (root, worktreePath) => (root === project.root && worktreePath === null ? root : null),
+  ),
+}
+const fileWatcher = Object.assign(emitter(), {
+  watch: vi.fn<(folder: string | null, entries: readonly string[]) => void>(),
+})
 const folderThere: ProjectFolderInfo = { missing: false, branch: 'main', displayName: 'main' }
 const projectFolders = Object.assign(emitter(), {
   list: vi.fn<() => Promise<Record<string, ProjectFolderInfo>>>(async () => ({
@@ -290,6 +304,7 @@ beforeEach(() => {
   worktrees.currentWorktree.mockReset()
   worktrees.currentWorktree.mockImplementation(async () => worktreeAt)
   projectFolders.removeAllListeners()
+  fileWatcher.removeAllListeners()
   projectFolders.current.mockReset()
   projectFolders.current.mockImplementation(async (root) =>
     root === project.root ? folderThere : null,
@@ -312,11 +327,59 @@ beforeEach(() => {
     labels,
     sessionStarts,
     sidebar,
+    filePanel,
+    folderAccess,
+    fileWatcher,
   } as unknown as Parameters<typeof registerIpc>[0])
 })
 
 const invoke = (channel: string, ...args: unknown[]) =>
   electron.handlers.get(channel)?.(trusted, ...args)
+
+describe("the file panel's messages", () => {
+  it('read and write only in a folder the panel may show', async () => {
+    const refused = { kind: 'error', message: 'This folder is no longer in Hoot.' }
+    expect(await invoke(IpcChannel.listFolder, '/elsewhere', null, '')).toEqual(refused)
+    expect(await invoke(IpcChannel.readFile, project.root, '/work/other', 'a.ts')).toEqual(refused)
+    expect(
+      await invoke(
+        IpcChannel.writeFile,
+        '/elsewhere',
+        null,
+        'a.ts',
+        'x',
+        { mtimeMs: 1, size: 1 },
+        false,
+      ),
+    ).toEqual(refused)
+    expect(await invoke(IpcChannel.listFolder, project.root, null, 7)).toEqual({
+      kind: 'error',
+      message: 'Not a folder of the panel.',
+    })
+  })
+
+  it('follow the entries asked for, and pass on their changes to the window', async () => {
+    electron.listeners.get(IpcChannel.watchFiles)!(trusted, project.root, null, ['src/', 'a.ts'])
+    await vi.waitFor(() =>
+      expect(fileWatcher.watch).toHaveBeenLastCalledWith(project.root, ['src/', 'a.ts']),
+    )
+    electron.listeners.get(IpcChannel.watchFiles)!(trusted, '/elsewhere', null, ['a.ts'])
+    await vi.waitFor(() => expect(fileWatcher.watch).toHaveBeenLastCalledWith(null, []))
+    electron.listeners.get(IpcChannel.watchFiles)!(trusted, null, null, [])
+    expect(fileWatcher.watch).toHaveBeenLastCalledWith(null, [])
+    fileWatcher.emit('changed', project.root, 'a.ts')
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.filesChanged, project.root, 'a.ts')
+  })
+
+  it('save whether the panel shows and how wide its parts are', () => {
+    electron.listeners.get(IpcChannel.setFilePanelOpen)!(trusted, true)
+    electron.listeners.get(IpcChannel.setFileTreeWidth)!(trusted, 300)
+    electron.listeners.get(IpcChannel.setFileEditorWidth)!(trusted, 'wide')
+    expect(filePanel.setOpen).toHaveBeenCalledWith(true)
+    expect(filePanel.setTreeWidth).toHaveBeenCalledWith(300)
+    expect(filePanel.setEditorWidth).not.toHaveBeenCalled()
+  })
+})
 
 describe('the messages of labels', () => {
   it('give the labels and their activity, and pass on every change of them to the window', async () => {

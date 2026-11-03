@@ -110,6 +110,7 @@ import {
   type Page,
   type PageHistory,
 } from './page-history'
+import { useFilesStore } from './files-store'
 import {
   currentAfterClosing,
   inTabOrder,
@@ -2281,8 +2282,13 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
+      api.onToggleFilePanelRequested(() => useFilesStore.getState().togglePanel())
       api.onFullScreenChanged((fullScreen) => set({ fullScreen }))
-      api.onWindowFocusChanged((windowFocused) => set({ windowFocused }))
+      api.onWindowFocusChanged((windowFocused) => {
+        set({ windowFocused })
+        // What changed while the window was in the background shows in the file panel.
+        if (windowFocused) useFilesStore.getState().refreshShown()
+      })
       api.onAppearanceChanged((appearance) => set({ appearance }))
       const [
         {
@@ -2292,11 +2298,13 @@ export const useAppStore = create<AppState>()((set, get) => {
           collapsedProjects,
           collapsedWorktrees,
           collapsedLocal,
+          filePanel,
           fullScreen,
           focused,
         },
         appearance,
       ] = await Promise.all([api.getWindowState(), api.getAppearance()])
+      useFilesStore.getState().setLayout(filePanel)
       set({
         sidebarOpen,
         sidebarWidth,
@@ -3038,6 +3046,9 @@ export const useAppStore = create<AppState>()((set, get) => {
           break
         case 'settings':
           get().showSettings()
+          break
+        case 'files':
+          useFilesStore.getState().togglePanel()
           break
       }
     },

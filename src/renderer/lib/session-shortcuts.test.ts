@@ -38,6 +38,11 @@ describe('sessionShortcut', () => {
     expect(press('W', 'KeyW', { shift: true })).toBeNull()
   })
 
+  it('shows or hides the file panel with Shift and E', () => {
+    expect(press('E', 'KeyE', { shift: true })).toEqual({ kind: 'files' })
+    expect(press('e', 'KeyE')).toBeNull()
+  })
+
   it('shows the settings with the comma', () => {
     expect(press(',', 'Comma')).toEqual({ kind: 'settings' })
     expect(press('<', 'Comma', { shift: true })).toBeNull()

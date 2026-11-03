@@ -2,14 +2,34 @@ import { useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { sidebarSlide, sidebarSlideEnded } from '../lib/sidebar-slide'
 import { getSessionTerminal, useAppStore } from '../store/app-store'
+import { useFilesStore } from '../store/files-store'
 import { drawWithWebgl } from '../terminal/webgl-renderer'
 
 /** Sessions whose process start has been requested, so it is requested only once. */
 const launchedSessions = new Set<string>()
 
-/** Whether the sidebar's width is changing: while its edge is dragged, and while it slides. */
+/**
+ * Whether the terminal's width is changing: while the sidebar's edge is
+ * dragged, while the sidebar slides, and while an edge of the file panel is
+ * dragged.
+ */
 function sidebarMoving(): boolean {
-  return useAppStore.getState().sidebarResizing || sidebarSlide().length > 0
+  return (
+    useAppStore.getState().sidebarResizing ||
+    sidebarSlide().length > 0 ||
+    useFilesStore.getState().resizing
+  )
+}
+
+/** Resolves once the file panel's edge is let go of. */
+function filePanelResizeEnded(): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = useFilesStore.subscribe((state) => {
+      if (state.resizing) return
+      unsubscribe()
+      resolve()
+    })
+  })
 }
 
 /** Resolves once the sidebar's edge is let go of. */
@@ -26,7 +46,9 @@ function sidebarResizeEnded(): Promise<void> {
 /** Resolves once the sidebar's width has stopped changing. */
 async function sidebarSettled(): Promise<void> {
   while (sidebarMoving()) {
-    await (useAppStore.getState().sidebarResizing ? sidebarResizeEnded() : sidebarSlideEnded())
+    if (useAppStore.getState().sidebarResizing) await sidebarResizeEnded()
+    else if (useFilesStore.getState().resizing) await filePanelResizeEnded()
+    else await sidebarSlideEnded()
   }
 }
 

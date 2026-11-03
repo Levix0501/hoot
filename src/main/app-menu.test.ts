@@ -5,7 +5,7 @@ vi.mock('electron', () => ({ Menu: { buildFromTemplate: vi.fn<() => void>() } })
 
 const { appMenuTemplate, databaseErrorMenuTemplate } = await import('./app-menu')
 
-function setup(options: { sidebarOpen?: boolean } = {}) {
+function setup(options: { sidebarOpen?: boolean; filePanelOpen?: boolean } = {}) {
   const calls: string[] = []
   const template = appMenuTemplate({
     includeDeveloperItems: false,
@@ -20,6 +20,8 @@ function setup(options: { sidebarOpen?: boolean } = {}) {
     goForward: () => calls.push('goForward'),
     sidebarOpen: options.sidebarOpen ?? true,
     toggleSidebar: () => calls.push('toggleSidebar'),
+    filePanelOpen: options.filePanelOpen ?? false,
+    toggleFilePanel: () => calls.push('toggleFilePanel'),
   })
   return { template, calls }
 }
@@ -126,6 +128,20 @@ describe('appMenuTemplate', () => {
       expect(view.at(-1)?.role).toBe('togglefullscreen')
       click(item)
       expect(calls).toEqual(['toggleSidebar'])
+    }
+  })
+
+  it('hides or shows the file panel from the View menu, with Cmd+Shift+E', () => {
+    for (const [filePanelOpen, label] of [
+      [true, 'Hide Files'],
+      [false, 'Show Files'],
+    ] as const) {
+      const { template, calls } = setup({ filePanelOpen })
+      const view = submenu(template.find((item) => item.label === 'View'))
+      const item = view.find((entry) => entry.accelerator === 'CmdOrCtrl+Shift+E')
+      expect(item?.label).toBe(label)
+      click(item)
+      expect(calls).toEqual(['toggleFilePanel'])
     }
   })
 

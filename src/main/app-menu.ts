@@ -19,14 +19,17 @@ export interface AppMenuActions {
   /** Whether the sidebar is expanded: the View menu offers to hide it, or else to show it. */
   sidebarOpen: boolean
   toggleSidebar(): void
+  /** Whether the file panel is shown: the View menu offers to hide it, or else to show it. */
+  filePanelOpen: boolean
+  toggleFilePanel(): void
   includeDeveloperItems: boolean
 }
 
 /**
- * The menu bar. Its session, sidebar and settings commands are also handled
- * in the window, which receives their key presses first (see the renderer's
- * session shortcuts and the sidebar's ⌘B); ⌘1–⌘9 have no menu items and work
- * only there.
+ * The menu bar. Its session, sidebar, file panel and settings commands are
+ * also handled in the window, which receives their key presses first (see
+ * the renderer's session shortcuts and the sidebar's ⌘B); ⌘1–⌘9 have no menu
+ * items and work only there.
  */
 export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOptions[] {
   const viewItems: MenuItemConstructorOptions[] = actions.includeDeveloperItems
@@ -71,6 +74,11 @@ export function appMenuTemplate(actions: AppMenuActions): MenuItemConstructorOpt
           label: actions.sidebarOpen ? 'Hide Sidebar' : 'Show Sidebar',
           accelerator: 'CmdOrCtrl+B',
           click: () => actions.toggleSidebar(),
+        },
+        {
+          label: actions.filePanelOpen ? 'Hide Files' : 'Show Files',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => actions.toggleFilePanel(),
         },
         { type: 'separator' },
         { role: 'togglefullscreen' },

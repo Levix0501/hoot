@@ -7,6 +7,7 @@ export type SessionShortcut =
   | { kind: 'forward' }
   | { kind: 'close' }
   | { kind: 'settings' }
+  | { kind: 'files' }
 
 type ShortcutKeyEvent = Pick<
   KeyboardEvent,
@@ -17,7 +18,8 @@ type ShortcutKeyEvent = Pick<
  * The session command of a key press: ⌘1–⌘9 select the session at that place
  * in the sidebar, ⌘⇧] and ⌘⇧[ the next and previous session, ⌘[ and ⌘] go
  * back and forward among the pages shown (sessions, Issues pages and the
- * settings), ⌘W closes the current session, and ⌘, shows the settings.
+ * settings), ⌘W closes the current session, ⌘, shows the settings, and ⌘⇧E
+ * shows or hides the file panel.
  * Digits are matched by the key's position on the number row, the other keys
  * by the character they type.
  */
@@ -27,6 +29,7 @@ export function sessionShortcut(event: ShortcutKeyEvent): SessionShortcut | null
   if (event.shiftKey) {
     if (key === ']' || key === '}') return { kind: 'next' }
     if (key === '[' || key === '{') return { kind: 'previous' }
+    if (key === 'e') return { kind: 'files' }
     return null
   }
   if (key === '[') return { kind: 'back' }

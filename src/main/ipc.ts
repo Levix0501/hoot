@@ -43,6 +43,12 @@ import {
   type NewIssue,
 } from '../shared/issues'
 import type { Dependency } from '../shared/dependencies'
+import {
+  MAX_OPENED_FILE_BYTES,
+  type ListFolderResult,
+  type ReadFileResult,
+  type WriteFileResult,
+} from '../shared/files'
 import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
@@ -60,6 +66,9 @@ import type {
 } from '../shared/worktrees'
 import type { AgentService } from './agents/agent-service'
 import type { ChatManager } from './chats/chat-manager'
+import type { FileWatcher } from './files/file-watcher'
+import type { FolderAccess } from './files/folder-access'
+import { entryLocation, listFolder, readTextFile, writeTextFile } from './files/folder-files'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
@@ -71,6 +80,7 @@ import type { SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
+import type { FilePanelStore } from './settings/file-panel-store'
 import type { LaunchSettingsStore } from './settings/launch-settings-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
@@ -90,6 +100,12 @@ export interface IpcDependencies {
   agents: AgentService
   launchSettings: LaunchSettingsStore
   sidebar: SidebarStateStore
+  /** Whether the file panel is shown, and how wide its parts are. */
+  filePanel: FilePanelStore
+  /** Which folders the file panel may read and write files in. */
+  folderAccess: FolderAccess
+  /** The entries the file panel follows: its open files and expanded folders. */
+  fileWatcher: FileWatcher
   appearance: AppearanceStore
   sessions: SessionManager
   /** The chats, which belong to no project. */
@@ -224,6 +240,14 @@ const agentLaunchSettingsChange = z.strictObject({
  * identifier or title; or what the About page tells of Hoot.
  */
 const clipboardText = z.string().max(10_000_000)
+/** A file panel's folder: a project's root, and one of its worktrees or `null` for its own folder. */
+const panelFolder = [z.string().min(1), z.string().min(1).nullable()] as const
+/** The path of an entry of a file panel's folder (see `src/shared/files.ts`). */
+const entryPath = z.string().max(4_096)
+/** The version of a file the file panel read or wrote. */
+const fileVersion = z.object({ mtimeMs: z.number(), size: z.number() })
+/** What the file panel saves to a file: the text of a file it opened, edited. */
+const fileContent = z.string().max(2 * MAX_OPENED_FILE_BYTES)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -484,6 +508,7 @@ export function registerIpc(deps: IpcDependencies): void {
     collapsedProjects: deps.sidebar.collapsedProjects,
     collapsedWorktrees: deps.sidebar.collapsedWorktrees,
     collapsedLocal: deps.sidebar.collapsedLocal,
+    filePanel: deps.filePanel.layout,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
     focused: deps.getWindow()?.isFocused() ?? false,
   }))
@@ -494,6 +519,18 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.setSidebarWidth, (width) => {
     const parsed = z.number().safeParse(width)
     if (parsed.success) deps.sidebar.setWidth(parsed.data)
+  })
+  on(IpcChannel.setFilePanelOpen, (open) => {
+    const parsed = z.boolean().safeParse(open)
+    if (parsed.success) deps.filePanel.setOpen(parsed.data)
+  })
+  on(IpcChannel.setFileTreeWidth, (width) => {
+    const parsed = z.number().safeParse(width)
+    if (parsed.success) deps.filePanel.setTreeWidth(parsed.data)
+  })
+  on(IpcChannel.setFileEditorWidth, (width) => {
+    const parsed = z.number().safeParse(width)
+    if (parsed.success) deps.filePanel.setEditorWidth(parsed.data)
   })
   on(IpcChannel.setGroupExpanded, (...args) => {
     const parsed = z.tuple([z.enum(SIDEBAR_GROUPS), z.boolean()]).safeParse(args)
@@ -1029,6 +1066,71 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.copyProjectFolderPath, (value) => {
     const parsed = projectRoot.safeParse(value)
     if (parsed.success && deps.projects.find(parsed.data)) clipboard.writeText(parsed.data)
+  })
+
+  // The file panel reads and writes only in the folder it shows: a project's
+  // own folder, or one of the project's worktrees.
+  const notShown = 'This folder is no longer in Hoot.'
+  handle(IpcChannel.listFolder, async (_event, ...args): Promise<ListFolderResult> => {
+    const parsed = z.tuple([...panelFolder, entryPath]).safeParse(args)
+    if (!parsed.success) return { kind: 'error', message: 'Not a folder of the panel.' }
+    const [root, worktreePath, directory] = parsed.data
+    const folder = await deps.folderAccess.folder(root, worktreePath)
+    return folder === null ? { kind: 'error', message: notShown } : listFolder(folder, directory)
+  })
+  handle(IpcChannel.readFile, async (_event, ...args): Promise<ReadFileResult> => {
+    const parsed = z.tuple([...panelFolder, entryPath]).safeParse(args)
+    if (!parsed.success) return { kind: 'error', message: 'Not a file of the panel.' }
+    const [root, worktreePath, file] = parsed.data
+    const folder = await deps.folderAccess.folder(root, worktreePath)
+    return folder === null ? { kind: 'error', message: notShown } : readTextFile(folder, file)
+  })
+  handle(IpcChannel.writeFile, async (_event, ...args): Promise<WriteFileResult> => {
+    const parsed = z
+      .tuple([...panelFolder, entryPath, fileContent, fileVersion, z.boolean()])
+      .safeParse(args)
+    if (!parsed.success) return { kind: 'error', message: 'Not a file of the panel.' }
+    const [root, worktreePath, file, content, expected, bom] = parsed.data
+    const folder = await deps.folderAccess.folder(root, worktreePath)
+    if (folder === null) return { kind: 'error', message: notShown }
+    return writeTextFile(folder, file, content, expected, bom)
+  })
+  // Only the last request counts, also when the folder of an earlier one is
+  // found out about after it.
+  let watchRequests = 0
+  on(IpcChannel.watchFiles, (...args) => {
+    const parsed = z
+      .tuple([z.string().min(1).nullable(), z.string().min(1).nullable(), z.array(entryPath)])
+      .safeParse(args)
+    if (!parsed.success) return
+    const request = ++watchRequests
+    const [root, worktreePath, entries] = parsed.data
+    if (root === null) {
+      deps.fileWatcher.watch(null, [])
+      return
+    }
+    void deps.folderAccess.folder(root, worktreePath).then((folder) => {
+      if (request === watchRequests) deps.fileWatcher.watch(folder, folder === null ? [] : entries)
+    })
+  })
+  deps.fileWatcher.on('changed', (folder, entry) => send(IpcChannel.filesChanged, folder, entry))
+  /** Where an entry of a file panel's folder is on disk, for the messages that take one. */
+  const panelEntryLocation = async (args: unknown[]): Promise<string | null> => {
+    const parsed = z.tuple([...panelFolder, entryPath]).safeParse(args)
+    if (!parsed.success) return null
+    const [root, worktreePath, entry] = parsed.data
+    const folder = await deps.folderAccess.folder(root, worktreePath)
+    return folder === null ? null : entryLocation(folder, entry)
+  }
+  on(IpcChannel.revealFile, (...args) => {
+    void panelEntryLocation(args).then((location) => {
+      if (location !== null) shell.showItemInFolder(location)
+    })
+  })
+  on(IpcChannel.copyFilePath, (...args) => {
+    void panelEntryLocation(args).then((location) => {
+      if (location !== null) clipboard.writeText(location)
+    })
   })
 
   const noIssue = 'The issue no longer exists.'

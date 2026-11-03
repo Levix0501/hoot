@@ -4,6 +4,7 @@ import { AddProjectDialog } from './components/add-project-dialog'
 import { CloseSessionDialog } from './components/close-session-dialog'
 import { DeleteSessionDialog } from './components/delete-session-dialog'
 import { DeleteWorktreeDialog } from './components/delete-worktree-dialog'
+import { DiscardChangesDialog } from './components/files/file-panel'
 import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
 import { DependentIssueDialogView } from './components/issues/dependent-issue-dialog'
 import { IssuePickerDialog } from './components/issues/issue-picker-dialog'
@@ -26,6 +27,7 @@ import { TooltipProvider } from './components/ui/tooltip'
 import { WindowNavigation } from './components/window-navigation'
 import { sessionShortcut } from './lib/session-shortcuts'
 import { useAppStore } from './store/app-store'
+import { useFilesStore } from './store/files-store'
 import { isSettingsPage } from './store/page-history'
 
 /**
@@ -45,11 +47,12 @@ const SIDEBAR_RESIZING_CLASS =
   'data-resizing:**:data-[slot=sidebar-container]:transition-none data-resizing:**:data-[slot=sidebar-gap]:transition-none'
 
 /**
- * Handles the session shortcuts (⌘1–⌘9, ⌘⇧], ⌘⇧[, ⌘[, ⌘] and ⌘W) and ⌘, for
- * the settings wherever the keyboard focus is in the window, terminals and
- * text fields included. The window receives these key presses before the
- * application menu does; handling them here keeps them from reaching the
- * menu, a text field, or the terminal and its program.
+ * Handles the session shortcuts (⌘1–⌘9, ⌘⇧], ⌘⇧[, ⌘[, ⌘] and ⌘W), ⌘, for
+ * the settings and ⌘⇧E for the file panel wherever the keyboard focus is in
+ * the window, terminals and text fields included. The window receives these
+ * key presses before the application menu does; handling them here keeps
+ * them from reaching the menu, a text field, or the terminal and its
+ * program. In the file panel, ⌘W closes the file shown rather than the session.
  */
 function useSessionShortcuts(): void {
   const runShortcut = useAppStore((state) => state.runShortcut)
@@ -59,6 +62,14 @@ function useSessionShortcuts(): void {
       if (!shortcut) return
       event.preventDefault()
       event.stopPropagation()
+      if (
+        shortcut.kind === 'close' &&
+        event.target instanceof Element &&
+        event.target.closest('[data-file-panel]') !== null
+      ) {
+        useFilesStore.getState().closeActiveTab()
+        return
+      }
       runShortcut(shortcut)
     }
     window.addEventListener('keydown', onKeyDown, true)
@@ -130,6 +141,7 @@ export function App() {
       <IssuePickerDialog />
       <DependentIssueDialogView />
       <AddProjectDialog />
+      <DiscardChangesDialog />
       <QuitDialog />
       {/* Below the main area's top row, clear of its buttons and of the ended-session bar. */}
       <Toaster position="top-right" offset={{ top: 60, right: 16 }} />

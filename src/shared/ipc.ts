@@ -3,6 +3,14 @@ import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { ChatInfo, SavedSessionInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
+import type { FilePanelLayout } from './file-panel'
+import type {
+  FileVersion,
+  ListFolderResult,
+  PanelFolder,
+  ReadFileResult,
+  WriteFileResult,
+} from './files'
 import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
@@ -221,6 +229,8 @@ export interface WindowState {
    * they were left; the others are expanded.
    */
   collapsedLocal: string[]
+  /** Whether the file panel is shown and how wide its parts are, as they were left. */
+  filePanel: FilePanelLayout
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -297,6 +307,10 @@ export const IpcChannel = {
   setWorktreeExpanded: 'window:set-worktree-expanded',
   setLocalExpanded: 'window:set-local-expanded',
   toggleSidebarRequested: 'window:toggle-sidebar-requested',
+  setFilePanelOpen: 'window:set-file-panel-open',
+  setFileTreeWidth: 'window:set-file-tree-width',
+  setFileEditorWidth: 'window:set-file-editor-width',
+  toggleFilePanelRequested: 'window:toggle-file-panel-requested',
   fullScreenChanged: 'window:full-screen-changed',
   windowFocusChanged: 'window:focus-changed',
   showSettingsRequested: 'settings:show-requested',
@@ -330,6 +344,13 @@ export const IpcChannel = {
   projectFolderChanged: 'project-folders:changed',
   revealProjectFolder: 'project-folders:reveal',
   copyProjectFolderPath: 'project-folders:copy-path',
+  listFolder: 'files:list-folder',
+  readFile: 'files:read',
+  writeFile: 'files:write',
+  watchFiles: 'files:watch',
+  filesChanged: 'files:changed',
+  revealFile: 'files:reveal',
+  copyFilePath: 'files:copy-path',
   listIssues: 'issues:list',
   createIssue: 'issues:create',
   updateIssue: 'issues:update',
@@ -528,6 +549,14 @@ export interface HootApi {
   setLocalExpanded(projectRoot: string, expanded: boolean): void
   /** The application menu asked to show or hide the sidebar. */
   onToggleSidebarRequested(listener: () => void): () => void
+  /** Saves whether the file panel is shown, so that Hoot opens with it as it was left. */
+  setFilePanelOpen(open: boolean): void
+  /** Saves the width of the file panel's tree, so that Hoot opens with it as wide as it was left. */
+  setFileTreeWidth(width: number): void
+  /** Saves the width of the file panel's open files, so that Hoot opens with them as wide as they were left. */
+  setFileEditorWidth(width: number): void
+  /** The application menu asked to show or hide the file panel. */
+  onToggleFilePanelRequested(listener: () => void): () => void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
   /** The window became the system's active window, or stopped being it. */
   onWindowFocusChanged(listener: (focused: boolean) => void): () => void
@@ -653,6 +682,36 @@ export interface HootApi {
   revealProjectFolder(projectRoot: string): void
   /** Puts the path of a project's own folder on the clipboard. */
   copyProjectFolderPath(projectRoot: string): void
+  /**
+   * The entries of a folder in a file panel's folder, by its path from that
+   * folder (`''` for the folder itself, else ending with `/`); see
+   * `src/shared/files.ts`.
+   */
+  listFolder(folder: PanelFolder, directory: string): Promise<ListFolderResult>
+  /** Reads a file of a file panel's folder as text. */
+  readFile(folder: PanelFolder, file: string): Promise<ReadFileResult>
+  /**
+   * Writes a file of a file panel's folder, unless it changed since it was at
+   * `expected`; with a byte order mark before `content` when `bom`.
+   */
+  writeFile(
+    folder: PanelFolder,
+    file: string,
+    content: string,
+    expected: FileVersion,
+    bom: boolean,
+  ): Promise<WriteFileResult>
+  /**
+   * Follows `entries` of a file panel's folder, its open files and expanded
+   * folders, in place of what was followed before; nothing for `null`.
+   */
+  watchFiles(folder: PanelFolder | null, entries: string[]): void
+  /** An entry followed with `watchFiles` changed, appeared or went away; `folder` is its root. */
+  onFilesChanged(listener: (folder: string, entry: string) => void): () => void
+  /** Shows an entry of a file panel's folder in Finder (File Explorer on Windows). */
+  revealFile(folder: PanelFolder, entry: string): void
+  /** Puts the full path of an entry of a file panel's folder on the clipboard. */
+  copyFilePath(folder: PanelFolder, entry: string): void
   /**
    * The issues without a project and those of the projects in the list, in
    * the order they were created.

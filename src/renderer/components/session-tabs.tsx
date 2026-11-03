@@ -36,16 +36,20 @@ import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
  * The corners of a tab and of the `+`: a quarter rounder than `rounded-lg`,
  * and drawn as superellipses, which meet the sides more smoothly than arcs.
  */
-const CORNERS = 'rounded-[12.5px] [corner-shape:superellipse(1.5)]'
+export const CORNERS = 'rounded-[12.5px] [corner-shape:superellipse(1.5)]'
 
-/** A tab, on the main area's background so that it hides what it passes over while dragged. */
-const TAB = `group/tab relative flex h-7 w-full min-w-0 items-center bg-background px-2 ${CORNERS}`
+/**
+ * A tab, on the main area's background so that it hides what it passes over
+ * while dragged; the file panel's tabs look the same.
+ */
+export const TAB = `group/tab relative flex h-7 w-full min-w-0 items-center bg-background px-2 ${CORNERS}`
 
 /**
  * A tab's icon, name and light, in a row that leaves room for its close
  * button when it shows; the name is 13px, with the line height of `text-sm`.
  */
-const LABEL = 'relative flex min-w-0 flex-1 items-center gap-2 text-[13px]/[calc(1.25/0.875)]'
+export const LABEL =
+  'relative flex min-w-0 flex-1 items-center gap-2 text-[13px]/[calc(1.25/0.875)]'
 
 /**
  * The keys of a worktree's tabs (see `tabKey`), or for a `worktreePath` of
@@ -112,7 +116,7 @@ function useTab(key: string): {
 }
 
 /** The shade of the current tab and of the tab being dragged, and of another under the pointer. */
-function TabShade({ shaded }: { shaded: boolean }) {
+export function TabShade({ shaded }: { shaded: boolean }) {
   return (
     <div
       className={cn(

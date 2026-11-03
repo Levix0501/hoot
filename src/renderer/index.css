@@ -173,6 +173,15 @@
   }
 }
 
+/*
+ * While an edge of the file panel is held, the pointer shows the resize
+ * cursor wherever it is, and no text is selected.
+ */
+:root[data-file-panel-resizing] * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 /* The terminal's own scrollbar: a thin slider with round ends. */
 .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
   border-radius: calc(infinity * 1px);

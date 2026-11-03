@@ -26,14 +26,14 @@ const HEADER_GAP = 12
  * The buttons have half-strength icons that keep their color while pointed
  * at, over a faint highlight.
  */
-const BUTTON_CLASS =
+export const BUTTON_CLASS =
   'text-foreground/50 hover:bg-foreground/5 hover:text-foreground/50 disabled:opacity-40 dark:hover:bg-foreground/6'
 /**
  * Their tooltips are a pill with a faint border, white in the light
  * appearance and, in the dark one, the popover color mixed with 13% white.
  * They have no arrow, and show and hide at once.
  */
-const TOOLTIP_CLASS =
+export const TOOLTIP_CLASS =
   'gap-2 rounded-2xl border border-foreground/8 bg-popover px-2 py-1.5 text-[13px]/[18px] text-popover-foreground animate-none! has-data-[slot=kbd]:pr-2 **:data-[slot=kbd]:rounded-md dark:bg-[color-mix(in_srgb,var(--popover),white_13%)] [&>[data-side]]:hidden'
 
 /** Where the navigation starts now. */
@@ -64,7 +64,7 @@ export function useTopRowInset(): number | undefined {
  * terminal, say) when the button is clicked, as the window's own title bar
  * would.
  */
-function NavigationButton({
+export function NavigationButton({
   label,
   shortcut,
   children,

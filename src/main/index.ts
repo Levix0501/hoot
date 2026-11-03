@@ -22,6 +22,8 @@ import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { ChatManager } from './chats/chat-manager'
 import { localChatConversations } from './chats/conversations'
+import { FileWatcher } from './files/file-watcher'
+import { FolderAccess } from './files/folder-access'
 import { databaseFile, openDatabase, transaction } from './database/database'
 import { captureBaseEnv } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
@@ -41,6 +43,7 @@ import { openCodePluginFolder } from './session/opencode-plugin'
 import { SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
+import { FilePanelStore } from './settings/file-panel-store'
 import { LaunchSettingsStore } from './settings/launch-settings-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { defaultShell } from './tools/default-shell'
@@ -95,6 +98,9 @@ const windowControls = windowControlsFor(
 const shell = defaultShell(baseEnv)
 const launchSettings = new LaunchSettingsStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
+const filePanel = new FilePanelStore(app.getPath('userData'))
+/** The open files and expanded folders of the file panel, which it follows. */
+const fileWatcher = new FileWatcher()
 const appearance = new AppearanceStore(app.getPath('userData'))
 // The appearance picked in the settings, macOS's until one is picked. Applied
 // before the window opens, so that its background and its first paint have
@@ -356,6 +362,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     worktrees?.dispose()
     projectFolders?.dispose()
+    fileWatcher.dispose()
     const shutdown = (async () => {
       // Also when Hoot quits without asking, as on SIGTERM.
       await agents.stopAll()
@@ -463,6 +470,12 @@ function startWithDatabase(database: DatabaseSync): void {
     agents,
     launchSettings,
     sidebar,
+    filePanel,
+    folderAccess: new FolderAccess({
+      isProject: (root) => projects.find(root) !== undefined,
+      isWorktreeOf: (root, worktreePath) => worktreeService.isWorktreeOf(root, worktreePath),
+    }),
+    fileWatcher,
     appearance,
     sessions,
     chats,
@@ -557,7 +570,10 @@ function startWithDatabase(database: DatabaseSync): void {
   const sendSessionCommand = (command: SessionCommand) =>
     getWindow()?.webContents.send(IpcChannel.sessionCommand, command)
 
-  /** Sets the menu bar, again whenever the sidebar is shown or hidden: its item's label says which. */
+  /**
+   * Sets the menu bar, again whenever the sidebar or the file panel is shown
+   * or hidden: their items' labels say which.
+   */
   const updateApplicationMenu = () =>
     Menu.setApplicationMenu(
       buildAppMenu({
@@ -573,12 +589,15 @@ function startWithDatabase(database: DatabaseSync): void {
         goForward: () => sendSessionCommand('forward'),
         sidebarOpen: sidebar.open,
         toggleSidebar: () => getWindow()?.webContents.send(IpcChannel.toggleSidebarRequested),
+        filePanelOpen: filePanel.layout.open,
+        toggleFilePanel: () => getWindow()?.webContents.send(IpcChannel.toggleFilePanelRequested),
       }),
     )
 
   void app.whenReady().then(() => {
     updateApplicationMenu()
     sidebar.on('changed', updateApplicationMenu)
+    filePanel.on('changed', updateApplicationMenu)
     mainWindow = createMainWindow({ reveal: !openInBackground })
     // Clicking the Dock icon shows the window, also after a background start.
     app.on('activate', showMainWindow)

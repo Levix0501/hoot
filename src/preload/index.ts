@@ -86,6 +86,11 @@ const api: HootApi = {
   setLocalExpanded: (projectRoot, expanded) =>
     ipcRenderer.send(IpcChannel.setLocalExpanded, projectRoot, expanded),
   onToggleSidebarRequested: (listener) => subscribe(IpcChannel.toggleSidebarRequested, listener),
+  setFilePanelOpen: (open) => ipcRenderer.send(IpcChannel.setFilePanelOpen, open),
+  setFileTreeWidth: (width) => ipcRenderer.send(IpcChannel.setFileTreeWidth, width),
+  setFileEditorWidth: (width) => ipcRenderer.send(IpcChannel.setFileEditorWidth, width),
+  onToggleFilePanelRequested: (listener) =>
+    subscribe(IpcChannel.toggleFilePanelRequested, listener),
   onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onWindowFocusChanged: (listener) => subscribe(IpcChannel.windowFocusChanged, listener),
   onShowSettingsRequested: (listener) => subscribe(IpcChannel.showSettingsRequested, listener),
@@ -137,6 +142,32 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.revealProjectFolder, projectRoot),
   copyProjectFolderPath: (projectRoot) =>
     ipcRenderer.send(IpcChannel.copyProjectFolderPath, projectRoot),
+  listFolder: (folder, directory) =>
+    ipcRenderer.invoke(IpcChannel.listFolder, folder.projectRoot, folder.worktreePath, directory),
+  readFile: (folder, file) =>
+    ipcRenderer.invoke(IpcChannel.readFile, folder.projectRoot, folder.worktreePath, file),
+  writeFile: (folder, file, content, expected, bom) =>
+    ipcRenderer.invoke(
+      IpcChannel.writeFile,
+      folder.projectRoot,
+      folder.worktreePath,
+      file,
+      content,
+      expected,
+      bom,
+    ),
+  watchFiles: (folder, entries) =>
+    ipcRenderer.send(
+      IpcChannel.watchFiles,
+      folder?.projectRoot ?? null,
+      folder?.worktreePath ?? null,
+      entries,
+    ),
+  onFilesChanged: (listener) => subscribe(IpcChannel.filesChanged, listener),
+  revealFile: (folder, entry) =>
+    ipcRenderer.send(IpcChannel.revealFile, folder.projectRoot, folder.worktreePath, entry),
+  copyFilePath: (folder, entry) =>
+    ipcRenderer.send(IpcChannel.copyFilePath, folder.projectRoot, folder.worktreePath, entry),
   listIssues: () => ipcRenderer.invoke(IpcChannel.listIssues),
   createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),

@@ -1,5 +1,19 @@
 # hoot
 
+## 0.1.0-alpha.22
+
+### Patch Changes
+
+- [`10a58aa`](https://github.com/Levix0501/hoot/commit/10a58aaf4afde1747feb8280f69b0eb2389092a8) - Collapsed projects, worktrees, Local rows and the Projects and Chats groups now show a light whenever they hold sessions, not only when one needs you: a session that needs you still comes first, then one at work, then an idle or running one.
+
+- [`a6060f7`](https://github.com/Levix0501/hoot/commit/a6060f79f42db3e5ee452cfab5f2a7515e1c326e) - `Merge into <branch> ▸` now hands the merge to the agent you pick straight away, telling it only which branches to merge into which, and leaves it to the agent how to merge and what to do about uncommitted changes, sessions still running in the worktree, a lock, a HEAD on no branch, a merge or rebase in progress or nothing left to merge, which Hoot no longer checks first.
+
+- [`93b3975`](https://github.com/Levix0501/hoot/commit/93b3975ac5ebbda02263ea88094bb027c7a29bd5) - New Worktree… in a worktree's right-click and `⋯` menus makes a new worktree from that one: it starts from the branch the worktree has checked out, with the same nested repositories, each from the branch it has checked out there.
+
+- [`1edf6aa`](https://github.com/Levix0501/hoot/commit/1edf6aae7a2c3bd0856d4265064007e9aabda36f) - The icons beside the Projects and Chats titles are now 14px, as large as their chevrons, rather than 16px.
+
+- [`823af37`](https://github.com/Levix0501/hoot/commit/823af37e684502087ff8fdb3259c49ce598f66fa) - Deleting a worktree no longer spins forever: `.asar` files, such as the one in an Electron project's dependencies, are deleted like any other file, and a file that cannot be deleted is named within seconds, with the worktree kept to delete again.
+
 ## 0.1.0-alpha.21
 
 ### Patch Changes

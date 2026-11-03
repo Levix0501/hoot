@@ -427,13 +427,20 @@ export function SessionTabs({ session }: { session: UiSession }) {
               ))}
             </div>
           </SortableContext>
+          {/*
+            The fades stay out of the area that drags the window. app-region
+            is inherited, so they would take the top row's `drag` and, coming
+            after the tabs, give it back to the ends of the first and the last
+            tab: the last tab's close button would neither light up nor take a
+            click. `initial` leaves them out, where `none` means `no-drag`.
+          */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 start-0 z-10 w-10 bg-linear-to-l from-transparent to-background opacity-0 transition-opacity duration-150 peer-data-more-before/tabs:opacity-100"
+            className="pointer-events-none absolute inset-y-0 start-0 z-10 w-10 bg-linear-to-l from-transparent to-background opacity-0 transition-opacity duration-150 [app-region:initial] peer-data-more-before/tabs:opacity-100"
           />
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 end-0 z-10 w-10 bg-linear-to-r from-transparent to-background opacity-0 transition-opacity duration-150 peer-data-more-after/tabs:opacity-100"
+            className="pointer-events-none absolute inset-y-0 end-0 z-10 w-10 bg-linear-to-r from-transparent to-background opacity-0 transition-opacity duration-150 [app-region:initial] peer-data-more-after/tabs:opacity-100"
           />
         </div>
         {!missing && (

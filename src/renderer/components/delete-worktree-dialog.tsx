@@ -291,6 +291,8 @@ export function DeleteWorktreeDialog() {
             <Checkbox
               checked={current.deleteBranches}
               onCheckedChange={setDeleteBranches}
+              // The fill switches with the tick instead of fading around it.
+              className="transition-none"
               data-testid="worktree-delete-branches-checkbox"
             />
             <span>

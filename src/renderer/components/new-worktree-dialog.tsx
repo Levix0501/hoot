@@ -305,6 +305,8 @@ function NestedRepositoryRow({
           checked={choice.included}
           disabled={disabled || !repository.hasCommits}
           onCheckedChange={(checked) => onChange({ included: checked })}
+          // The fill switches with the tick instead of fading around it.
+          className="transition-none"
           data-testid="worktree-nested-checkbox"
         />
         <span className="truncate font-mono text-xs" data-path="" title={repository.relativePath}>

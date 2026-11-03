@@ -61,6 +61,8 @@ export function CloseSessionDialog() {
           <Checkbox
             checked={dontAskAgain}
             onCheckedChange={setDontAskAgain}
+            // The fill switches with the tick instead of fading around it.
+            className="transition-none"
             data-testid="close-session-dont-ask"
           />
           Don't ask again

@@ -78,10 +78,11 @@ const GROUP_ACTION =
  * group: its name, then a chevron, which points down while the group is
  * expanded and at the name while it is collapsed, and shows while the group
  * is collapsed, or while the pointer is on the title's row or the keyboard
- * focus is in it; then, while the group is collapsed, at the row's right
- * end, the light of the state of its sessions that needs the user most, if
- * any does, hidden while the group's action shows in its place. The title's
- * row, around it and the action, marks itself `group/title`.
+ * focus is in it; then, while the group is collapsed and has sessions, at
+ * the row's right end, the light of their most pressing state, as a
+ * worktree's row shows it, hidden while the group's action shows in its
+ * place. The title's row, around it and the action, marks itself
+ * `group/title`.
  */
 function GroupLabel({
   name,

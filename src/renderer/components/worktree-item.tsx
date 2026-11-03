@@ -167,9 +167,10 @@ function WorktreeMenuEntries({
  * further in than the project's icon, which points right while the worktree
  * is collapsed and turns down as it expands; the worktree's name when Hoot
  * made it with the New Worktree dialog, otherwise its branch (or abbreviated
- * commit); whether it is missing or locked; and, while it is collapsed, at
- * its right end, the light of the state of its sessions that needs the user
- * most, if any does.
+ * commit); whether it is missing or locked; and, while it is collapsed and
+ * has sessions, at its right end, the light of their most pressing state: one
+ * that needs the user before one at work, and one at work before an idle or
+ * running one.
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and right
  * of it, unless the worktree is missing, its `+`, which starts a session in

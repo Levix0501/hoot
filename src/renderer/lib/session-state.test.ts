@@ -478,23 +478,22 @@ describe('stateDescription and stateLabel', () => {
 })
 
 describe('sessionsSummary', () => {
-  it('shows nothing while no session needs the user', () => {
+  it('shows nothing without sessions', () => {
     expect(sessionsSummary([])).toBeNull()
-    expect(sessionsSummary(['working', 'idle', 'running', 'starting'])).toBeNull()
   })
 
   it('shows the light of the state that needs the user most, and counts the sessions in each', () => {
     expect(sessionsSummary(['done', 'working'])).toEqual({
       state: 'done',
-      description: '1 session done',
+      description: '1 session done, 1 session working',
     })
     expect(sessionsSummary(['done', 'waiting', 'idle'])).toEqual({
       state: 'waiting',
-      description: '1 session waiting for you, 1 session done',
+      description: '1 session waiting for you, 1 session done, 1 session idle',
     })
     expect(sessionsSummary(['done', 'ended', 'waiting', 'running'])).toEqual({
       state: 'waiting',
-      description: '1 session waiting for you, 1 session ended, 1 session done',
+      description: '1 session waiting for you, 1 session ended, 1 session done, 1 session running',
     })
     expect(sessionsSummary(['done', 'ended', 'error', 'waiting'])).toEqual({
       state: 'waiting',
@@ -514,6 +513,29 @@ describe('sessionsSummary', () => {
     expect(sessionsSummary(['waiting', 'waiting', 'error', 'error', 'ended', 'ended'])).toEqual({
       state: 'waiting',
       description: '2 sessions waiting for you, 2 sessions stopped by an error, 2 sessions ended',
+    })
+  })
+
+  it('shows sessions at work before quiet ones while none needs the user', () => {
+    expect(sessionsSummary(['idle', 'working', 'running', 'working'])).toEqual({
+      state: 'working',
+      description: '2 sessions working, 1 session idle, 1 session running',
+    })
+    expect(sessionsSummary(['starting', 'working'])).toEqual({
+      state: 'working',
+      description: '1 session working, 1 session starting',
+    })
+    expect(sessionsSummary(['running', 'starting', 'idle'])).toEqual({
+      state: 'starting',
+      description: '1 session starting, 1 session idle, 1 session running',
+    })
+    expect(sessionsSummary(['running', 'idle', 'running'])).toEqual({
+      state: 'idle',
+      description: '1 session idle, 2 sessions running',
+    })
+    expect(sessionsSummary(['running'])).toEqual({
+      state: 'running',
+      description: '1 session running',
     })
   })
 })

@@ -81,8 +81,8 @@ function LocalMenuEntries({
  * them. It shows what a worktree row shows: a chevron that turns as they
  * slide; "Local", and after it, lighter, the branch checked out in the
  * folder, or the abbreviated commit while HEAD is on no branch; whether the
- * folder is missing; and, while it is collapsed, at its right end, the light
- * of the state of its sessions that needs the user most, if any does.
+ * folder is missing; and, while it is collapsed and has sessions, at its
+ * right end, the light of their most pressing state.
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and
  * right of it, unless the folder is missing, its `+`, which starts a session

@@ -102,11 +102,12 @@ function ProjectMenuEntries({
 
 /**
  * A project's row in the sidebar: click it to expand or collapse the project.
- * It shows the project's name and, while the project is collapsed, at its
- * right end, the light of the state of its sessions that needs the user most,
- * if any does. Pointing at it, or moving the keyboard focus into it, shows its
- * `⋯` and `+` buttons in the light's place: `+` opens the New Worktree
- * dialog, and `⋯` the same menu as a right click.
+ * It shows the project's name and, while the project is collapsed and has
+ * sessions, in its own folder or its worktrees, at its right end, the light
+ * of their most pressing state, as a worktree's row does. Pointing at it, or
+ * moving the keyboard focus into it, shows its `⋯` and `+` buttons in the
+ * light's place: `+` opens the New Worktree dialog, and `⋯` the same menu as
+ * a right click.
  */
 export function ProjectItem({ project, expanded }: { project: Project; expanded: boolean }) {
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)

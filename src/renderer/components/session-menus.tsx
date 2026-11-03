@@ -16,6 +16,13 @@ function focusAfterSessionMenu(dialogOpened: () => boolean): () => HTMLElement |
 }
 
 /**
+ * The class of the menus a tab shares with its session's row in the sidebar.
+ * Opened on a tab, such a menu lies partly over the window's top row, which
+ * drags the window, and takes the pointer there too.
+ */
+const SESSION_MENU_CLASS = 'w-auto min-w-36 [app-region:no-drag]'
+
+/**
  * The context menu of a saved session, the same on its row in the sidebar
  * and on its tab: Rename…, Close while its agent runs, and Delete, whether or
  * not it runs. `testId` is the prefix of the items' test ids.
@@ -31,7 +38,7 @@ export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId:
   const requestDelete = useAppStore((state) => state.requestDeleteSession)
   return (
     <ContextMenuContent
-      className="w-auto min-w-36"
+      className={SESSION_MENU_CLASS}
       finalFocus={focusAfterSessionMenu(() => {
         const state = useAppStore.getState()
         return state.renamingSavedSessionId === savedId || state.sessionDeletion === savedId
@@ -122,7 +129,7 @@ export function SessionMenu({ session, testId }: { session: UiSession; testId: s
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   return (
     <ContextMenuContent
-      className="w-auto min-w-36"
+      className={SESSION_MENU_CLASS}
       // The rename dialog takes the focus; otherwise it returns to the terminal.
       finalFocus={focusAfterSessionMenu(
         () => useAppStore.getState().renamingSessionId === session.id,

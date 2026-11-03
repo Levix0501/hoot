@@ -67,11 +67,11 @@ const SLIDING_ROWS = `${SLIDING} flex flex-col gap-px [&>:first-child]:mt-px`
 
 /**
  * A group's action, which shows only while the pointer is on the group's
- * title row or the keyboard focus is in it. The row marks itself
- * `group/title`.
+ * title row or the keyboard focus is in it, with an icon as large as the
+ * title's chevron rather than a row's. The row marks itself `group/title`.
  */
-const GROUP_ACTION_ON_HOVER =
-  'opacity-0 group-hover/title:opacity-100 group-has-focus-visible/title:opacity-100'
+const GROUP_ACTION =
+  'opacity-0 group-hover/title:opacity-100 group-has-focus-visible/title:opacity-100 [&>svg]:size-3.5'
 
 /**
  * The title of one of the sidebar's groups, which expands and collapses the
@@ -357,7 +357,7 @@ function ProjectsGroup() {
       <div className="group/title">
         <GroupLabel name="Projects" expanded={expanded} summary={summary} testId="projects" />
         <SidebarGroupAction
-          className={GROUP_ACTION_ON_HOVER}
+          className={GROUP_ACTION}
           onClick={() => void addProject()}
           data-testid="add-project"
         >
@@ -428,7 +428,7 @@ function ChatsGroup() {
           </ContextMenuContent>
         </ContextMenu>
         <SidebarGroupAction
-          className={GROUP_ACTION_ON_HOVER}
+          className={GROUP_ACTION}
           aria-label="New chat"
           onClick={() => void newChat()}
           data-testid="new-chat-group-action"

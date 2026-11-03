@@ -21,6 +21,7 @@ import {
   type InspectWorktreeResult,
   type NewWorktreeOptionsResult,
   type RemoveWorktreeResult,
+  type SourceWorktree,
   type WorktreeBranch,
   type WorktreeInfo,
   type WorktreeInspection,
@@ -402,9 +403,11 @@ export class WorktreeService extends EventEmitter<{
   /**
    * What the new worktree dialog offers, after looking for inner repositories
    * again; or why it offers nothing, as for a project that is not a Git
-   * repository.
+   * repository. For a new worktree made `from` one of the project's
+   * worktrees, by its root, also the branch each member of that worktree has
+   * checked out now; nothing once Git no longer lists that worktree.
    */
-  async newWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptionsResult> {
+  async newWorktreeOptions(projectRoot: string, from?: string): Promise<NewWorktreeOptionsResult> {
     const state = this.projects.get(projectRoot)
     if (!state) return { ok: false, message: 'This project is no longer in the list.' }
     const context = await this.options.gitContext()
@@ -415,6 +418,22 @@ export class WorktreeService extends EventEmitter<{
       }
     }
     await this.discover(state)
+    let source: SourceWorktree | null = null
+    if (from !== undefined) {
+      const entry = (await this.readEntries(context, state))?.entries.find(
+        (candidate) => candidate.path === from,
+      )
+      if (!entry) return { ok: false, message: `The worktree no longer exists: ${from}` }
+      const branch = branchOf(entry)
+      const members = await this.memberBranches(context, state, entry.path, branch)
+      source = {
+        branch,
+        // After the outer member, which comes first.
+        innerMembers: members
+          .slice(1)
+          .map((member) => ({ relativePath: member.relativePath, branch: member.branch })),
+      }
+    }
     const [project, nested] = await Promise.all([
       readBranches(context, projectRoot),
       Promise.all(
@@ -424,7 +443,10 @@ export class WorktreeService extends EventEmitter<{
         })),
       ),
     ])
-    return { ok: true, options: { branches: project.branches, current: project.current, nested } }
+    return {
+      ok: true,
+      options: { branches: project.branches, current: project.current, nested, source },
+    }
   }
 
   /** Whether Git accepts a name as a new branch's name. */

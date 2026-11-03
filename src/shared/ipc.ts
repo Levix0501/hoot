@@ -613,9 +613,11 @@ export interface HootApi {
   onWorktreesRemoved(listener: (projectRoot: string, worktreePaths: string[]) => void): () => void
   /**
    * What the new worktree dialog offers, or why it offers nothing: the project
-   * is not in the list, or not a Git repository.
+   * is not in the list, or not a Git repository. For a new worktree made
+   * `from` one of the project's worktrees, by its root, also the branch each
+   * of that worktree's members has checked out, or nothing once it is gone.
    */
-  getNewWorktreeOptions(projectRoot: string): Promise<NewWorktreeOptionsResult>
+  getNewWorktreeOptions(projectRoot: string, from?: string): Promise<NewWorktreeOptionsResult>
   /** The submodules in the base branches' commits of the repositories that would take part. */
   getWorktreeSubmodules(
     projectRoot: string,

@@ -2,6 +2,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   FolderOpenIcon,
+  GitBranchPlusIcon,
   GitMergeIcon,
   MoreHorizontalIcon,
   PlusIcon,
@@ -49,12 +50,13 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
 
 /**
  * What a worktree's `⋯` menu and its context menu hold, the same in both: the
- * agents to start a session with in the worktree; the agents to merge it with
- * into the branch checked out in the project folder, which the item names
- * (only "Merge" while the folder is on no branch), always available, as what
- * could stop a merge is checked once an agent is chosen; Reveal in Finder
- * (File Explorer on Windows), Copy Path and Delete; for a missing worktree,
- * Remove.
+ * agents to start a session with in the worktree; New Worktree…, which opens
+ * the New Worktree dialog for a worktree made from this one; the agents to
+ * merge it with into the branch checked out in the project folder, which the
+ * item names (only "Merge" while the folder is on no branch), always
+ * available, as what could stop a merge is checked once an agent is chosen;
+ * Reveal in Finder (File Explorer on Windows), Copy Path and Delete; for a
+ * missing worktree, Remove.
  */
 function WorktreeMenuEntries({
   components,
@@ -69,6 +71,7 @@ function WorktreeMenuEntries({
   testId: string
 }) {
   const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
+  const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
   const mergeWorktree = useAppStore((state) => state.mergeWorktree)
   const into = useAppStore((state) => state.projectFolders[projectRoot]?.branch ?? null)
   const requestDeleteWorktree = useAppStore((state) => state.requestDeleteWorktree)
@@ -77,6 +80,11 @@ function WorktreeMenuEntries({
 
   const startSession = (toolId: CodingToolId) =>
     void newWorktreeSession(projectRoot, worktree.path, toolId)
+  const newWorktree = () =>
+    openNewWorktreeDialog(projectRoot, {
+      path: worktree.path,
+      name: worktree.name ?? worktree.displayName,
+    })
   const merge = (toolId: CodingToolId) => void mergeWorktree(projectRoot, worktree.path, toolId)
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
@@ -117,6 +125,10 @@ function WorktreeMenuEntries({
           />
         </SubContent>
       </Sub>
+      <Item onClick={newWorktree} data-testid={`${testId}-new-worktree`}>
+        <GitBranchPlusIcon />
+        New Worktree…
+      </Item>
       <Sub>
         <SubTrigger data-testid={`${testId}-merge`}>
           <GitMergeIcon />

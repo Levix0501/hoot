@@ -17,6 +17,7 @@ import type { Project } from '../../shared/ipc'
 import { getTool, type CodingToolId } from '../../shared/tools'
 import {
   defaultNestedBase,
+  initialWorktreeChoices,
   type NestedRepositoryOption,
   type NewWorktreeOptions,
   type NewWorktreeOptionsResult,
@@ -24,7 +25,13 @@ import {
 import { hasUntransliterableText, worktreeBranchName } from '../../shared/worktree-names'
 import { api } from '../lib/api'
 import { cn } from '../lib/utils'
-import { errorMessage, focusAfterOverlay, useAppStore, warnAboutWorktree } from '../store/app-store'
+import {
+  errorMessage,
+  focusAfterOverlay,
+  useAppStore,
+  warnAboutWorktree,
+  type NewWorktreeRequest,
+} from '../store/app-store'
 import { Spinner } from './ui/spinner'
 import { ToolIcon } from './tool-icon'
 import { Badge } from './ui/badge'
@@ -341,6 +348,7 @@ function NestedRepositoryRow({
 function NewWorktreeForm({
   projectRoot,
   project,
+  sourceName,
   name,
   onNameChange,
   agent,
@@ -351,6 +359,8 @@ function NewWorktreeForm({
 }: {
   projectRoot: string
   project: Project
+  /** The name of the worktree the new one is made from, as its row shows it; `null` for none. */
+  sourceName: string | null
   name: string
   onNameChange: (name: string) => void
   agent: CodingToolId
@@ -360,9 +370,10 @@ function NewWorktreeForm({
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
 }) {
-  // The choices to make, from the project's own branches once Git has given
-  // them: kept with the options they were made from, so that the first
-  // options to arrive replace them.
+  // The choices to make, from the project's own branches, or those of the
+  // worktree the new one is made from, once Git has given them: kept with
+  // the options they were made from, so that the first options to arrive
+  // replace them.
   const [choices, setChoices] = useState<{
     from: NewWorktreeOptions | null
     base: string | null
@@ -370,24 +381,18 @@ function NewWorktreeForm({
     advancedOpen: boolean
   }>({ from: null, base: null, nested: {}, advancedOpen: false })
   if (options !== null && choices.from !== options) {
+    const initial = initialWorktreeChoices(options)
     const nested = Object.fromEntries(
-      options.nested.map((repository) => [
-        repository.relativePath,
-        {
-          included: repository.hasCommits,
-          base: defaultNestedBase(repository, options.current),
-          manual: false,
-        } satisfies NestedChoice,
+      Object.entries(initial.nested).map(([relativePath, choice]) => [
+        relativePath,
+        { ...choice, manual: false } satisfies NestedChoice,
       ]),
     )
     // Advanced opens by itself while a base branch cannot be told, to be picked.
     const undecided =
-      options.current === null ||
-      options.nested.some((repository) => {
-        const choice = nested[repository.relativePath]
-        return choice?.included && choice.base === null
-      })
-    setChoices({ from: options, base: options.current, nested, advancedOpen: undecided })
+      initial.base === null ||
+      Object.values(nested).some((choice) => choice.included && choice.base === null)
+    setChoices({ from: options, base: initial.base, nested, advancedOpen: undecided })
   }
   const { base, nested, advancedOpen } = choices
   const setAdvancedOpen = (open: boolean) =>
@@ -574,8 +579,13 @@ function NewWorktreeForm({
                   missing={base === null}
                 />
                 {base === null && (
-                  <p className="text-xs text-destructive">
-                    The main worktree has no branch checked out: pick the branch to start from.
+                  <p className="text-xs text-destructive" data-testid="worktree-base-missing">
+                    {sourceName === null ? (
+                      'The main worktree'
+                    ) : (
+                      <span data-user-text="">{sourceName}</span>
+                    )}{' '}
+                    has no branch checked out: pick the branch to start from.
                   </p>
                 )}
               </div>
@@ -649,14 +659,20 @@ function NewWorktreeForm({
   )
 }
 
-/** Loads the options of a project's new worktree dialog, then shows its form. */
+/**
+ * Loads the options of a project's new worktree dialog, then shows its form;
+ * for the project the dialog opened for, made from the worktree it was
+ * opened `from`, if any.
+ */
 function NewWorktreeContent({
   initialProject,
+  from,
   busy,
   onCreatingChange,
   onDone,
 }: {
   initialProject: Project
+  from: NewWorktreeRequest['from']
   busy: boolean
   onCreatingChange: (creating: boolean) => void
   onDone: () => void
@@ -676,10 +692,13 @@ function NewWorktreeContent({
     { root: string; options: NewWorktreeOptionsResult } | { root: string; error: string } | null
   >(null)
   const root = project?.root ?? null
+  // Another project picked has none of the worktree's branches.
+  const source = root === initialProject.root ? from : null
+  const sourcePath = source?.path
   useEffect(() => {
     if (root === null) return
     let current = true
-    void api.getNewWorktreeOptions(root).then(
+    void api.getNewWorktreeOptions(root, sourcePath).then(
       (options) => {
         if (current) setLoaded({ root, options })
       },
@@ -690,7 +709,7 @@ function NewWorktreeContent({
     return () => {
       current = false
     }
-  }, [root])
+  }, [root, sourcePath])
   const result = loaded !== null && loaded.root === root ? loaded : null
   const options =
     result !== null && !('error' in result) && result.options.ok ? result.options.options : null
@@ -733,6 +752,7 @@ function NewWorktreeContent({
           key={project.root}
           projectRoot={project.root}
           project={project}
+          sourceName={source?.name ?? null}
           name={name}
           onNameChange={setName}
           agent={agent}
@@ -757,23 +777,25 @@ function NewWorktreeContent({
 /**
  * The New Worktree dialog: the project, a name that may be blank, the agent to
  * open a session with, and under Advanced the base branches and the inner
- * repositories to bring along. While the worktree is being created, the
- * dialog says so, stays open, and closes only once it is made.
+ * repositories to bring along: by default, from the project's own folder, or
+ * for a new worktree made from another, the same repositories as that one,
+ * each from the branch it has checked out there. While the worktree is being
+ * created, the dialog says so, stays open, and closes only once it is made.
  */
 export function NewWorktreeDialog() {
-  const projectRoot = useAppStore((state) => state.newWorktreeProject)
+  const request = useAppStore((state) => state.newWorktree)
   const projects = useAppStore((state) => state.projects)
   const close = useAppStore((state) => state.closeNewWorktreeDialog)
   // Kept while the dialog fades out after it closes.
-  const [shownRoot, setShownRoot] = useState<string | null>(null)
-  if (projectRoot !== null && projectRoot !== shownRoot) setShownRoot(projectRoot)
+  const [shown, setShown] = useState<NewWorktreeRequest | null>(null)
+  if (request !== null && request !== shown) setShown(request)
   const creating = useRef(false)
   const [busy, setBusy] = useState(false)
-  const project = projects.find((candidate) => candidate.root === shownRoot)
+  const project = projects.find((candidate) => candidate.root === shown?.projectRoot)
 
   return (
     <Dialog
-      open={projectRoot !== null}
+      open={request !== null}
       onOpenChange={(open) => {
         if (!open && !creating.current) close()
       }}
@@ -786,10 +808,12 @@ export function NewWorktreeDialog() {
         data-testid="new-worktree-dialog"
         data-creating={busy}
       >
-        {project !== undefined && (
+        {project !== undefined && shown !== null && (
           <NewWorktreeContent
-            key={project.root}
+            // Afresh for each project or worktree it opens for.
+            key={shown.from?.path ?? project.root}
             initialProject={project}
+            from={shown.from}
             busy={busy}
             onCreatingChange={(value) => {
               creating.current = value

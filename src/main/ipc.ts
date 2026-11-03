@@ -145,6 +145,8 @@ const startSessionRequest = z.object({
 }) satisfies z.ZodType<StartSessionRequest>
 const projectRoot = z.string().min(1)
 const worktreeArguments = z.tuple([projectRoot, z.string().min(1)])
+/** A project, and the root of the worktree a new one is made from, if any. */
+const newWorktreeOptionsArguments = z.tuple([projectRoot, z.string().min(1).optional()])
 const createWorktreeRequest = z.object({
   projectRoot,
   name: z.string().max(10_000),
@@ -893,10 +895,10 @@ export function registerIpc(deps: IpcDependencies): void {
     send(IpcChannel.worktreesRemoved, root, worktreePaths)
   })
 
-  handle(IpcChannel.newWorktreeOptions, (_event, value): Promise<NewWorktreeOptionsResult> => {
-    const parsed = projectRoot.safeParse(value)
+  handle(IpcChannel.newWorktreeOptions, (_event, ...args): Promise<NewWorktreeOptionsResult> => {
+    const parsed = newWorktreeOptionsArguments.safeParse(args)
     return parsed.success
-      ? deps.worktrees.newWorktreeOptions(parsed.data)
+      ? deps.worktrees.newWorktreeOptions(...parsed.data)
       : Promise.resolve({ ok: false, message: 'Invalid project.' })
   })
 

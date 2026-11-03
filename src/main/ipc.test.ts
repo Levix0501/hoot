@@ -221,6 +221,10 @@ const worktreeAt = {
 }
 const worktrees = Object.assign(emitter(), {
   currentWorktree: vi.fn<() => Promise<typeof worktreeAt | null>>(async () => worktreeAt),
+  newWorktreeOptions: vi.fn<(root: string, from?: string) => Promise<unknown>>(async () => ({
+    ok: false,
+    message: 'No.',
+  })),
   createNamed: vi.fn<(request: unknown) => Promise<unknown>>(),
   delete: vi.fn<
     (
@@ -832,6 +836,25 @@ describe('the messages of worktrees', () => {
       [gone[1], false],
     ])
     expect(webContents.send).toHaveBeenCalledWith(IpcChannel.worktreesRemoved, project.root, gone)
+  })
+
+  it('give what the New Worktree dialog offers, also for a new worktree made from another', async () => {
+    const at = saved.worktreePath!
+    await invoke(IpcChannel.newWorktreeOptions, project.root, undefined)
+    await invoke(IpcChannel.newWorktreeOptions, project.root, at)
+    expect(worktrees.newWorktreeOptions.mock.calls).toEqual([
+      [project.root, undefined],
+      [project.root, at],
+    ])
+    expect(await invoke(IpcChannel.newWorktreeOptions, project.root, '')).toEqual({
+      ok: false,
+      message: 'Invalid project.',
+    })
+    expect(await invoke(IpcChannel.newWorktreeOptions, '')).toEqual({
+      ok: false,
+      message: 'Invalid project.',
+    })
+    expect(worktrees.newWorktreeOptions).toHaveBeenCalledTimes(2)
   })
 
   it('end the sessions running in a worktree before deleting it, and forget it once deleted', async () => {

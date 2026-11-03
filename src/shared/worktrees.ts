@@ -75,6 +75,17 @@ export function isWithin(file: string, directory: string): boolean {
   return below.some((start) => file.startsWith(start))
 }
 
+/**
+ * The worktree a new worktree is made from: the branch each of its members
+ * has checked out, which the new worktree's members start from.
+ */
+export interface SourceWorktree {
+  /** The branch its outer member has checked out, or `null` on a detached HEAD. */
+  branch: string | null
+  /** Its inner members, each with the branch it has checked out, or `null` on a detached HEAD. */
+  innerMembers: Array<{ relativePath: string; branch: string | null }>
+}
+
 /** What the new worktree dialog of a project offers. */
 export interface NewWorktreeOptions {
   /** The project repository's local branches. */
@@ -82,12 +93,64 @@ export interface NewWorktreeOptions {
   /** The branch checked out in the main worktree, or `null` when detached. */
   current: string | null
   nested: NestedRepositoryOption[]
+  /** The worktree the new one is made from, as Git lists it now; `null` when made from none. */
+  source: SourceWorktree | null
 }
 
 /** What the new worktree dialog offers, or why the project cannot have a new worktree. */
 export type NewWorktreeOptionsResult =
   | { ok: true; options: NewWorktreeOptions }
   | { ok: false; message: string }
+
+/** What the new worktree dialog has chosen as it opens. */
+export interface InitialWorktreeChoices {
+  /** The project repository's base branch, or `null` when it is left to be picked. */
+  base: string | null
+  /**
+   * Each inner repository the dialog offers, by its path relative to the
+   * project root: whether it is included, and its base branch, or `null`
+   * when that is left to be picked.
+   */
+  nested: Record<string, { included: boolean; base: string | null }>
+}
+
+/**
+ * What the new worktree dialog has chosen as it opens. Made from a worktree,
+ * the new one has the same members: each repository starts from the branch
+ * that worktree's member of it has checked out, and the inner repositories it
+ * has no member of are left out. Otherwise the project starts from the branch
+ * checked out in the main worktree, and every inner repository with commits
+ * is included, starting from its {@link defaultNestedBase}. A base branch that
+ * cannot be told, as of a member on a detached HEAD, is left to be picked.
+ */
+export function initialWorktreeChoices(options: NewWorktreeOptions): InitialWorktreeChoices {
+  const { source } = options
+  const base = source === null ? options.current : localBranch(source.branch, options.branches)
+  const nested = Object.fromEntries(
+    options.nested.map((repository) => {
+      const member = source?.innerMembers.find(
+        (candidate) => candidate.relativePath === repository.relativePath,
+      )
+      const choice =
+        source === null || member === undefined
+          ? {
+              included: source === null && repository.hasCommits,
+              base: defaultNestedBase(repository, base),
+            }
+          : {
+              included: repository.hasCommits,
+              base: localBranch(member.branch, repository.branches),
+            }
+      return [repository.relativePath, choice]
+    }),
+  )
+  return { base, nested }
+}
+
+/** The branch, when it is one of a repository's local branches; otherwise `null`. */
+function localBranch(branch: string | null, branches: readonly string[]): string | null {
+  return branch !== null && branches.includes(branch) ? branch : null
+}
 
 export interface CreateWorktreeRequest {
   projectRoot: string

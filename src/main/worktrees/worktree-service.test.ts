@@ -332,6 +332,7 @@ describe('WorktreeService', () => {
           },
           { relativePath: 'inner/deep', branches: ['main'], current: 'main', hasCommits: true },
         ],
+        source: null,
       },
     })
     expect(await service.isValidBranchName('feat/login')).toBe(true)
@@ -343,6 +344,42 @@ describe('WorktreeService', () => {
       displayPath: path.join('~', '.hoot', 'worktrees', 'project', 'feat-login'),
     })
     expect(fs.existsSync(W)).toBe(false)
+  })
+
+  it('offers the branch each member of a worktree has checked out now, for a new worktree made from it', async () => {
+    await start()
+    const created = await service.create({
+      projectRoot: project,
+      branch: 'feat/s',
+      base: 'develop',
+      nested: [{ relativePath: 'inner', base: 'develop' }],
+    })
+    if (!created.ok) throw new Error(created.message)
+    const R = created.path
+    // Its inner member moved on to a branch of its own.
+    git(path.join(R, 'inner'), 'checkout', '-q', '-b', 'feat/s-inner')
+    expect(await service.newWorktreeOptions(project, R)).toMatchObject({
+      ok: true,
+      options: {
+        current: 'main',
+        source: {
+          branch: 'feat/s',
+          innerMembers: [{ relativePath: 'inner', branch: 'feat/s-inner' }],
+        },
+      },
+    })
+
+    git(R, 'checkout', '-q', '--detach')
+    expect(await service.newWorktreeOptions(project, R)).toMatchObject({
+      ok: true,
+      options: { source: { branch: null } },
+    })
+
+    const gone = path.join(W, 'project', 'gone')
+    expect(await service.newWorktreeOptions(project, gone)).toEqual({
+      ok: false,
+      message: `The worktree no longer exists: ${gone}`,
+    })
   })
 
   it('creates a worktree with inner members, each from its base branch', async () => {

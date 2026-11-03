@@ -243,6 +243,16 @@ export interface DependentIssueDialog {
   title: string
 }
 
+/** What the New Worktree dialog was opened for. */
+export interface NewWorktreeRequest {
+  projectRoot: string
+  /**
+   * The worktree of the project the new one is made from, by its root, with
+   * the name its row shows; `null` for one made from the project.
+   */
+  from: { path: string; name: string } | null
+}
+
 /**
  * The confirmation before a worktree is deleted, from checking it until it is
  * confirmed or cancelled; the deletion itself goes on in the background.
@@ -292,8 +302,8 @@ export interface AppState {
    * shows.
    */
   projectFolders: Record<string, ProjectFolderInfo>
-  /** The project whose new worktree dialog is open. */
-  newWorktreeProject: string | null
+  /** What the open New Worktree dialog was opened for. */
+  newWorktree: NewWorktreeRequest | null
   worktreeDeletion: WorktreeDeletion | null
   /**
    * The roots of the worktrees being deleted, which goes on once the
@@ -779,7 +789,11 @@ export interface AppState {
   installUpdate(): void
   /** Looks for a newer version, unless one is being downloaded or installed. */
   checkForUpdates(): void
-  openNewWorktreeDialog(projectRoot: string): void
+  /**
+   * Opens the New Worktree dialog for a project, for a new worktree made
+   * `from` one of its worktrees if given.
+   */
+  openNewWorktreeDialog(projectRoot: string, from?: NewWorktreeRequest['from']): void
   closeNewWorktreeDialog(): void
   /**
    * Reads the project's worktrees again and, unless the worktree is gone,
@@ -2226,7 +2240,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     worktrees: {},
     knownWorktrees: {},
     projectFolders: {},
-    newWorktreeProject: null,
+    newWorktree: null,
     worktreeDeletion: null,
     deletingWorktrees: new Set(),
     worktreeRemoval: null,
@@ -3578,7 +3592,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.checkForUpdates()
     },
 
-    openNewWorktreeDialog(projectRoot) {
+    openNewWorktreeDialog(projectRoot, from = null) {
       if (!get().projects.some((project) => project.root === projectRoot)) return
       const { tools, launchSettings } = get()
       // Until the first detection has finished, nothing happens.
@@ -3590,11 +3604,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         get().showSettings('agents')
         return
       }
-      set({ newWorktreeProject: projectRoot })
+      set({ newWorktree: { projectRoot, from } })
     },
 
     closeNewWorktreeDialog() {
-      set({ newWorktreeProject: null })
+      set({ newWorktree: null })
     },
     requestDeleteWorktree(projectRoot, path) {
       const { worktreeDeletion, deletingWorktrees } = get()

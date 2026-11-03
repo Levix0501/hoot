@@ -54,7 +54,7 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
  * the New Worktree dialog for a worktree made from this one; the agents to
  * merge it with into the branch checked out in the project folder, which the
  * item names (only "Merge" while the folder is on no branch), always
- * available, as what could stop a merge is checked once an agent is chosen;
+ * available, as the agent chosen judges what to do about anything in the way;
  * Reveal in Finder (File Explorer on Windows), Copy Path and Delete; for a
  * missing worktree, Remove.
  */

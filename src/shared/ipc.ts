@@ -656,10 +656,10 @@ export interface HootApi {
    */
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   /**
-   * Checks whether a worktree can be merged into the project's own folder,
-   * and if so makes the saved session there that has an agent merge it,
-   * named after the worktree, which is sent how to merge it when it first
-   * starts.
+   * Makes the saved session in the project's own folder that has an agent
+   * merge a worktree into it, named after the worktree, which is sent what
+   * to merge when it first starts and judges the rest itself. Nothing is
+   * checked first; only a project folder or worktree that is gone stops it.
    */
   startMerge(
     projectRoot: string,

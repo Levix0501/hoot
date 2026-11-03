@@ -106,28 +106,6 @@ async function uncommittedChanges(
 }
 
 /**
- * The uncommitted changes of a working directory, as a merge must not find
- * them: modified, deleted and staged tracked files and untracked files that
- * are not ignored, in it and its populated submodules, leaving out what is in
- * another Git repository inside it, such as an inner repository at one of the
- * `nested` paths, relative to it, or one Git lists as an untracked folder.
- * Throws an `InspectionError` when Git cannot tell.
- */
-export async function changesBeforeMerge(
-  context: GitContext,
-  directory: MemberToCheck,
-  nested: readonly string[],
-): Promise<string[]> {
-  return (
-    (await statusOf(context, directory))
-      // Git lists a repository inside, and only that, as an untracked folder.
-      .filter((entry) => !(entry.status === '??' && entry.file.endsWith('/')))
-      .map((entry) => entry.file)
-      .filter((file) => !isWithin(file, nested))
-  )
-}
-
-/**
  * Whether a repository is on a detached HEAD whose commit is in no local or
  * remote-tracking branch.
  */

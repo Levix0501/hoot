@@ -238,9 +238,10 @@ const worktrees = Object.assign(emitter(), {
   removeMissing: vi.fn<
     (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
   >(async () => ({ ok: true })),
-  planMerge: vi.fn<
-    (root: string, worktreePath: string, runningSessions: () => number) => Promise<unknown>
-  >(async () => ({ ok: false, reason: 'blocked', message: 'The worktree is locked.' })),
+  planMerge: vi.fn<(root: string, worktreePath: string) => Promise<unknown>>(async () => ({
+    ok: false,
+    message: 'The worktree no longer exists.',
+  })),
 })
 const sidebar = {
   setGroupCollapsed: vi.fn<(group: string, collapsed: boolean) => void>(),
@@ -883,28 +884,20 @@ describe('the messages of worktrees', () => {
     expect(sidebar.setWorktreeCollapsed).toHaveBeenCalledWith(at, false)
   })
 
-  it('start a merge in the project folder, named after the worktree, once nothing stops it', async () => {
+  it('start a merge in the project folder, named after the worktree, unless it or the folder is gone', async () => {
     const at = saved.worktreePath!
-    // What stops it is said, and nothing is made.
+    // A worktree that is gone is said, and nothing is made.
     expect(await invoke(IpcChannel.startMerge, project.root, at, 'codex')).toEqual({
       ok: false,
-      reason: 'blocked',
-      message: 'The worktree is locked.',
+      message: 'The worktree no longer exists.',
     })
+    expect(worktrees.planMerge).toHaveBeenCalledWith(project.root, at)
     expect(chats.createSavedSession).not.toHaveBeenCalled()
-    // Sessions running in the worktree count, as they are once the rest is checked.
-    const runningSessions = worktrees.planMerge.mock.calls[0]![2]
-    sessionManager.runningIdsWithin.mockReturnValueOnce(['one', 'two'])
-    expect(runningSessions()).toBe(2)
-    expect(sessionManager.runningIdsWithin).toHaveBeenCalledWith(at)
 
     const plan = {
       worktreeName: 'Fix login bug',
       worktreePath: at,
-      projectFolder: project.root,
-      repositories: [
-        { label: 'project', path: project.root, branch: 'fix-login-bug', into: 'main' },
-      ],
+      repositories: [{ path: project.root, branch: 'fix-login-bug', into: 'main' }],
     }
     worktrees.planMerge.mockResolvedValueOnce({ ok: true, plan })
     expect(await invoke(IpcChannel.startMerge, project.root, at, 'codex')).toEqual({

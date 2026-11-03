@@ -1010,22 +1010,16 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.startMerge, async (_event, ...args): Promise<StartMergeResult> => {
     const parsed = mergeArguments.safeParse(args)
-    if (!parsed.success) return { ok: false, reason: 'blocked', message: 'Invalid request.' }
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
     const [root, worktreePath, toolId] = parsed.data
-    if (!deps.projects.find(root)) {
-      return { ok: false, reason: 'blocked', message: 'The project is not in the list.' }
-    }
-    // Sessions running in it, which may still change it, stop the merge;
-    // those in the project folder do not.
-    const planned = await deps.worktrees.planMerge(
-      root,
-      worktreePath,
-      () => deps.sessions.runningIdsWithin(worktreePath).length,
-    )
+    if (!deps.projects.find(root)) return { ok: false, message: 'The project is not in the list.' }
+    // Nothing stops the merge but a project folder or worktree that is gone:
+    // what to do about anything else in the way is the agent's to judge.
+    const planned = await deps.worktrees.planMerge(root, worktreePath)
     if (!planned.ok) return planned
     // A session in the project's own folder, named after the worktree, whose
-    // agent is told how to merge it as it first starts. Hoot follows the
-    // merge no further: the agent says when it is done.
+    // agent is told what to merge as it first starts, and nothing of how.
+    // Hoot follows the merge no further.
     const session = deps.chats.createSavedSession(root, null, toolId, {
       name: `Merge ${planned.plan.worktreeName}`,
       firstMessage: mergeInstruction(planned.plan),

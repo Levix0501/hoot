@@ -317,10 +317,8 @@ export type RemoveWorktreeResult = { ok: true } | { ok: false; message: string }
 /**
  * What choosing an agent in a worktree's Merge menu came to: the saved
  * session in the project's own folder that merges the worktree, or why none
- * was made. `nothing-to-merge`: the worktree's branch is merged already in
- * every repository of it; `blocked`: something else stops the merge, which
- * the message says.
+ * was made, as when the project folder or the worktree is gone.
  */
 export type StartMergeResult =
   | { ok: true; session: SavedSessionInfo }
-  | { ok: false; reason: 'blocked' | 'nothing-to-merge'; message: string }
+  | { ok: false; message: string }

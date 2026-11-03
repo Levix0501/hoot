@@ -813,10 +813,10 @@ export interface AppState {
    * Merges a worktree into the project's own folder with an agent, as its
    * Merge menu does. While the merge session it last opened for the worktree
    * has its agent running, as it has since it started, that session shows,
-   * and nothing else happens. Otherwise, unless the main process finds the
-   * worktree cannot be merged now and Hoot says why, it opens a new Local
-   * session of the agent, named after the worktree, which is told how to
-   * merge it.
+   * and nothing else happens. Otherwise it opens a new Local session of the
+   * agent, named after the worktree, which is told what to merge and judges
+   * the rest itself, with nothing checked first. Only a project folder or
+   * worktree that is gone stops it, which Hoot says.
    */
   mergeWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
   /**
@@ -1908,7 +1908,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     })
   }
 
-  /** The worktrees being checked before a merge, by `mergeKey`. */
+  /** The worktrees whose merge session is being made, by `mergeKey`. */
   const mergesStarting = new Set<string>()
   /**
    * The session of the merge session Hoot last opened for each worktree, by
@@ -2779,25 +2779,17 @@ export const useAppStore = create<AppState>()((set, get) => {
         get().showSettings('agents')
         return
       }
-      // Chosen again while the first choice is being checked.
+      // Chosen again while the first choice is being made.
       if (mergesStarting.has(key)) return
       mergesStarting.add(key)
       const result = await api
         .startMerge(projectRoot, worktreePath, toolId)
-        .catch((error: unknown) => ({
-          ok: false as const,
-          reason: 'blocked' as const,
-          message: errorMessage(error),
-        }))
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
         .finally(() => mergesStarting.delete(key))
       if (!result.ok) {
-        if (result.reason === 'nothing-to-merge') {
-          toast.info('Nothing to merge.', { description: result.message })
-        } else {
-          toast.error(`Could not merge ${worktreeName(projectRoot, worktreePath)}.`, {
-            description: result.message,
-          })
-        }
+        toast.error(`Could not merge ${worktreeName(projectRoot, worktreePath)}.`, {
+          description: result.message,
+        })
         return
       }
       // The change event may have shown it already.

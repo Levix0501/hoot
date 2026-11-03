@@ -1,5 +1,17 @@
 # hoot
 
+## 0.1.0-alpha.21
+
+### Patch Changes
+
+- [`78c5a3d`](https://github.com/Levix0501/hoot/commit/78c5a3db7e59499a0829f893ec5fa851515b4a5c) - Checkboxes, such as Don't ask again when closing a running session, switch at once when ticked or cleared instead of briefly showing a blank box or a faded tick.
+
+- [`e638f1d`](https://github.com/Levix0501/hoot/commit/e638f1d498162f5ca4a4898f8c558194cd1d63eb) - A file panel beside the terminal, shown and hidden with ⌘⇧E, lists the session's folder as a tree and opens its files to edit: edits save 3 seconds after you stop typing or at once with ⌘S, a file an agent changes updates in place, and when an agent changes a file with your unsaved edits, Hoot shows both versions and lets you pick which to keep.
+
+- [`b5b997b`](https://github.com/Levix0501/hoot/commit/b5b997b712e1e0928e2d0cbf83d3f902fc25a705) - The last tab's close button responds to the pointer again, and pressing the first tab's icon no longer drags the window.
+
+- [`495b74a`](https://github.com/Levix0501/hoot/commit/495b74ac28e10c28cd00a27bb7271c400e1e341d) - Rename… in a tab's right-click menu can be clicked even where the menu covers the window's top row.
+
 ## 0.1.0-alpha.20
 
 ### Patch Changes

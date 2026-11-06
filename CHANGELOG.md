@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.23
+
+### Patch Changes
+
+- [`4f8f7b0`](https://github.com/Levix0501/hoot/commit/4f8f7b056062ba5110494d29650d8b1734ae0da3) - `Delete ▸` in a worktree's right-click and `⋯` menus now hands the deletion to the agent you pick, telling it to delete the worktree and its branch, instead of Hoot checking the worktree and deleting it after a confirmation; a worktree deleted outside Hoot, as by that agent, now leaves the sidebar within a second.
+
+- [`88d8f68`](https://github.com/Levix0501/hoot/commit/88d8f68c65d16fc2832cdf0c9bee72716f1155c9) - A worktree's tabs now show only the sessions open in it, chats get tabs of their own with a `+` that starts another chat, and a tab, like the row of an open session or chat in the sidebar, shows a × in place of its light while you point at it; a session or chat you close stays in the sidebar, where clicking it opens it again with its tab last, and closing the tab you are on shows the one next to it.
+
+- [`887f76c`](https://github.com/Levix0501/hoot/commit/887f76ccf891505f7e410881c52afe825903e9b0) - New Session ▸ and the `+` menus now end with Terminal, which opens the system's terminal in the worktree or project folder (Terminal on macOS, the default terminal application on Windows); the `+` therefore always opens its menu, also with a single agent.
+
 ## 0.1.0-alpha.22
 
 ### Patch Changes

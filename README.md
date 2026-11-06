@@ -44,7 +44,7 @@ Linear-style issues, and hand an issue to an agent in a Git worktree of its own 
 - **A worktree for every task.** Point at a project, click `+`, and give the worktree a name or
   leave it blank for a random one. Agents work in parallel, each on a branch and in a folder of its
   own, and the sessions you start in a worktree are kept to continue after the agent exits or Hoot
-  restarts. Before deleting a worktree, Hoot checks it for work that would be lost.
+  restarts. When you are done, pick an agent to delete the worktree and its branch.
 - **Agents, managed.** Detect, install and update agents, and set each one's model, reasoning
   effort and extra arguments.
 - **`hoot` for agents.** In every session, agents can read and update the project's issues with

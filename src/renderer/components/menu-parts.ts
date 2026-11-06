@@ -28,7 +28,12 @@ export interface MenuParts {
   }>
   Separator: ComponentType
   Sub: ComponentType<{ children?: ReactNode }>
-  SubTrigger: ComponentType<{ children?: ReactNode; 'data-testid'?: string }>
+  SubTrigger: ComponentType<{
+    children?: ReactNode
+    className?: string
+    'data-variant'?: 'destructive'
+    'data-testid'?: string
+  }>
   SubContent: ComponentType<{ children?: ReactNode; className?: string }>
 }
 

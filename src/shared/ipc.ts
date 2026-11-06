@@ -24,14 +24,12 @@ import type { UpdateStatus } from './updates'
 import type { WindowControls } from './window-controls'
 import type { WindowsPty } from './windows-pty'
 import type {
-  BranchToDelete,
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
   CreateWorktreeResult,
-  DeleteWorktreeResult,
-  InspectWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  StartDeletionResult,
   StartMergeResult,
   WorktreeInfo,
 } from './worktrees'
@@ -329,7 +327,6 @@ export const IpcChannel = {
   installUpdate: 'updates:install',
   updateFailed: 'updates:failed',
   listWorktrees: 'worktrees:list',
-  currentWorktree: 'worktrees:current',
   worktreesChanged: 'worktrees:changed',
   worktreesRemoved: 'worktrees:removed',
   newWorktreeOptions: 'worktrees:new-options',
@@ -337,10 +334,9 @@ export const IpcChannel = {
   createWorktree: 'worktrees:create',
   createIssueWorktree: 'worktrees:create-for-issue',
   readWorktrees: 'worktrees:read',
-  inspectWorktree: 'worktrees:inspect',
-  deleteWorktree: 'worktrees:delete',
   removeWorktree: 'worktrees:remove',
   startMerge: 'worktrees:start-merge',
+  startDeletion: 'worktrees:start-deletion',
   revealWorktree: 'worktrees:reveal',
   copyWorktreePath: 'worktrees:copy-path',
   listProjectFolders: 'project-folders:list',
@@ -575,15 +571,14 @@ export interface HootApi {
   onAppearanceChanged(listener: (appearance: Appearance) => void): () => void
   /**
    * Quitting, or restarting into an update, needs confirmation because
-   * `runningSessions` sessions are running, agents are being installed or
-   * updated, or waiting to be, or the worktrees named are being deleted.
+   * `runningSessions` sessions are running, or agents are being installed or
+   * updated, or waiting to be.
    */
   onConfirmQuit(
     listener: (
       runningSessions: number,
       reason: QuitReason,
       agentOperations: AgentOperationSummary[],
-      worktreeDeletions: string[],
     ) => void,
   ): () => void
   respondToQuit(confirmed: boolean): void
@@ -602,12 +597,6 @@ export interface HootApi {
   onUpdateFailed(listener: (message: string) => void): () => void
   /** The worktrees of every project in the list, by project root. */
   listWorktrees(): Promise<Record<string, WorktreeInfo[]>>
-  /**
-   * Reads a project's worktrees again, which `onWorktreesChanged` then
-   * reports, and returns the worktree at a root as it is now, or `null` when
-   * there is none.
-   */
-  currentWorktree(projectRoot: string, worktreePath: string): Promise<WorktreeInfo | null>
   onWorktreesChanged(listener: (projectRoot: string, worktrees: WorktreeInfo[]) => void): () => void
   /**
    * Worktrees of a project that were gone were cleaned up, as their worktrees
@@ -640,20 +629,6 @@ export interface HootApi {
    * reports, and returns them; `null` when the project is not in the list.
    */
   readWorktrees(projectRoot: string): Promise<WorktreeInfo[] | null>
-  /** Checks what deleting a worktree would delete and lose. */
-  inspectWorktree(projectRoot: string, worktreePath: string): Promise<InspectWorktreeResult>
-  /**
-   * Deletes a worktree; with `discard` false, only one with nothing to lose.
-   * Then each of `deleteBranches`, the branches its confirmation said would
-   * be deleted too, that its member still had checked out and that is still
-   * merged into the branch checked out in the project folder.
-   */
-  deleteWorktree(
-    projectRoot: string,
-    worktreePath: string,
-    discard: boolean,
-    deleteBranches: BranchToDelete[],
-  ): Promise<DeleteWorktreeResult>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
    * its registrations, and what Hoot keeps of it, such as its saved sessions.
@@ -670,6 +645,18 @@ export interface HootApi {
     worktreePath: string,
     toolId: CodingToolId,
   ): Promise<StartMergeResult>
+  /**
+   * Makes the saved session in the project's own folder that has an agent
+   * delete a worktree and its branch, named after the worktree, which is
+   * sent what to delete when it first starts and judges the rest itself.
+   * Nothing is checked first; only a project folder or worktree that is
+   * gone stops it.
+   */
+  startDeletion(
+    projectRoot: string,
+    worktreePath: string,
+    toolId: CodingToolId,
+  ): Promise<StartDeletionResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void
   /**

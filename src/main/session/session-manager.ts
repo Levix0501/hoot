@@ -5,7 +5,6 @@ import type { HookEventReport } from '../../shared/hoot-cli'
 import type { StartSessionRequest } from '../../shared/ipc'
 import type { PtySpawnRequest } from '../../shared/pty-protocol'
 import type { SessionExit, SessionInfo } from '../../shared/session'
-import { isWithin } from '../../shared/worktrees'
 import type { ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
 import type { ChatLaunch, SentIssue } from './launch'
@@ -179,31 +178,6 @@ export class SessionManager extends EventEmitter<{
   }
 
   /**
-   * The sessions starting or running in a directory or below it, other than
-   * chats: in a worktree with this root, say, or in a project's worktree
-   * inside it.
-   */
-  runningIdsWithin(directory: string): string[] {
-    return [...this.records.values()]
-      .filter(
-        (record) =>
-          isRunning(record) &&
-          record.info.chatId === null &&
-          isWithin(record.info.worktreePath ?? record.info.projectRoot, directory),
-      )
-      .map((record) => record.info.id)
-  }
-
-  /**
-   * Closes the sessions starting or running in a directory or below it (see
-   * `runningIdsWithin`), as before a worktree with this root is deleted:
-   * settles once their processes have ended.
-   */
-  async closeRunningWithin(directory: string): Promise<void> {
-    await Promise.all(this.runningIdsWithin(directory).map((id) => this.close(id)))
-  }
-
-  /**
    * Closes the open sessions of a project's worktree, other than chats (see
    * `hasOpenIn`), as before a worktree that is gone is removed: settles once
    * their processes have ended.
@@ -365,23 +339,6 @@ export class SessionManager extends EventEmitter<{
   forgetWorktree(worktreePath: string): void {
     for (const [id, record] of this.records) {
       if (record.info.worktreePath === worktreePath && !isRunning(record)) this.drop(id, record)
-    }
-  }
-
-  /**
-   * Forgets the ended sessions in a directory or below it, other than chats,
-   * as when the worktree with this root is deleted, and with it a project's
-   * worktree inside it.
-   */
-  forgetWithin(directory: string): void {
-    for (const [id, record] of this.records) {
-      if (
-        !isRunning(record) &&
-        record.info.chatId === null &&
-        isWithin(record.info.worktreePath ?? record.info.projectRoot, directory)
-      ) {
-        this.drop(id, record)
-      }
     }
   }
 

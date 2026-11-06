@@ -17,7 +17,6 @@
   "include": [
     "resources/opencode-plugin",
     "src/cli",
-    "src/deleter",
     "src/main",
     "src/preload",
     "src/pty-host",

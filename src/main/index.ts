@@ -53,7 +53,6 @@ import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
 import { WorkflowExecutor } from './workflows/workflow-executor'
 import { titleBarOverlay, windowBackground } from './window-colors'
-import { deleteContentsApart } from './worktrees/deleter-process'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
 import { WorktreeStore } from './worktrees/worktree-store'
@@ -202,7 +201,6 @@ const quitGuard = new QuitGuard({
   runningSessionCount: () => sessions.runningCount(),
   endSessions: () => sessions.endAll(),
   agentOperations: () => agents.pendingOperations(),
-  worktreeDeletions: () => worktrees?.deletionsUnderWay() ?? [],
   stopAgentOperations: () => agents.stopAll(),
   resumeAgentOperations: () => agents.resume(),
   // Keeping a running session must not leave Hoot without a window.
@@ -296,9 +294,10 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
   })
-  // The worktrees are not watched: what changed outside Hoot, such as a
-  // worktree's folder deleted, shows when the window gets the focus. The
-  // projects' own folders are looked at all the time, and again then.
+  // The worktrees are not watched: a worktree added or removed outside Hoot
+  // shows within a second, while other changes, such as a worktree's folder
+  // deleted, show when the window gets the focus. The projects' own folders
+  // are looked at all the time, and again then.
   window.on('focus', () => {
     worktrees?.refreshAll()
     projectFolders?.refreshAll()
@@ -432,8 +431,6 @@ function startWithDatabase(database: DatabaseSync): void {
       collapsedPaths: () => sidebar.collapsedWorktrees,
       hasOpenSessions: (root, worktreePath) => sessions.hasOpenIn(root, worktreePath),
     },
-    deleteContents: (folder) =>
-      deleteContentsApart(path.join(import.meta.dirname, '../deleter/index.js'), folder),
   })
   worktrees = worktreeService
   const folders = new ProjectFolders({ gitContext: projectGit })

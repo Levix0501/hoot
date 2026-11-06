@@ -106,8 +106,6 @@ const api: HootApi = {
   installUpdate: () => ipcRenderer.send(IpcChannel.installUpdate),
   onUpdateFailed: (listener) => subscribe(IpcChannel.updateFailed, listener),
   listWorktrees: () => ipcRenderer.invoke(IpcChannel.listWorktrees),
-  currentWorktree: (projectRoot, worktreePath) =>
-    ipcRenderer.invoke(IpcChannel.currentWorktree, projectRoot, worktreePath),
   onWorktreesChanged: (listener) => subscribe(IpcChannel.worktreesChanged, listener),
   onWorktreesRemoved: (listener) => subscribe(IpcChannel.worktreesRemoved, listener),
   getNewWorktreeOptions: (projectRoot, from) =>
@@ -118,20 +116,12 @@ const api: HootApi = {
   createIssueWorktree: (projectRoot, issueId) =>
     ipcRenderer.invoke(IpcChannel.createIssueWorktree, projectRoot, issueId),
   readWorktrees: (projectRoot) => ipcRenderer.invoke(IpcChannel.readWorktrees, projectRoot),
-  inspectWorktree: (projectRoot, worktreePath) =>
-    ipcRenderer.invoke(IpcChannel.inspectWorktree, projectRoot, worktreePath),
-  deleteWorktree: (projectRoot, worktreePath, discard, deleteBranches) =>
-    ipcRenderer.invoke(
-      IpcChannel.deleteWorktree,
-      projectRoot,
-      worktreePath,
-      discard,
-      deleteBranches,
-    ),
   removeWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.removeWorktree, projectRoot, worktreePath),
   startMerge: (projectRoot, worktreePath, toolId) =>
     ipcRenderer.invoke(IpcChannel.startMerge, projectRoot, worktreePath, toolId),
+  startDeletion: (projectRoot, worktreePath, toolId) =>
+    ipcRenderer.invoke(IpcChannel.startDeletion, projectRoot, worktreePath, toolId),
   revealWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>

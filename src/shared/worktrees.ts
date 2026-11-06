@@ -233,85 +233,6 @@ export type CreateIssueWorktreeResult =
       message: string
     }
 
-/** What a repository of a worktree would lose. */
-export interface RepositoryChanges {
-  /** The project name for the outer member, otherwise the path relative to the root. */
-  repository: string
-  /** The first few changed files. */
-  files: string[]
-  /** How many files changed. */
-  total: number
-  /** It is on a detached HEAD whose commit is in no branch. */
-  detachedCommits: boolean
-}
-
-/**
- * The branch a member of a worktree has checked out, and whether it is merged
- * into the branch checked out in the project folder in the member's repository.
- */
-export interface WorktreeBranch {
-  /** The project name for the outer member, otherwise the path relative to the root. */
-  repository: string
-  /** The member's path relative to the root: `''` for the outer member. */
-  relativePath: string
-  /** The branch the member has checked out, or `null` when detached. */
-  branch: string | null
-  /**
-   * The branch checked out in the repository's working directory in the
-   * project folder, or `null` when its HEAD is on no branch.
-   */
-  current: string | null
-  /** The member's branch points to `current`, or to a commit in its history. */
-  merged: boolean
-}
-
-/**
- * A branch the confirmation of a worktree's deletion said would be deleted
- * with it: the one the member at `relativePath` (`''` for the outer member)
- * has checked out.
- */
-export interface BranchToDelete {
-  relativePath: string
-  branch: string
-}
-
-/** What deleting a worktree would delete, and what would be lost with it. */
-export interface WorktreeInspection {
-  root: string
-  /** The directories of the inner members whose folders exist, which deleting deletes. */
-  innerMembers: string[]
-  /** The branch of the outer member, which is kept, or `null` when detached. */
-  branch: string | null
-  /** The branches of the outer member and of every inner member, in that order. */
-  branches: WorktreeBranch[]
-  /** The repositories that have uncommitted changes or detached commits. */
-  changes: RepositoryChanges[]
-  /** Repositories inside the root that are not part of the worktree, relative to the root. */
-  foreignRepositories: string[]
-}
-
-export function inspectionIsClean(inspection: WorktreeInspection): boolean {
-  return inspection.changes.length === 0 && inspection.foreignRepositories.length === 0
-}
-
-export type InspectWorktreeResult =
-  | { ok: true; inspection: WorktreeInspection }
-  | { ok: false; message: string }
-
-export type DeleteWorktreeResult =
-  | {
-      ok: true
-      /** Set when a merged branch that was to be deleted with the worktree could not be. */
-      warning?: string
-    }
-  | {
-      ok: false
-      /** `changed`: changes appeared since the check; `inspection` says which. */
-      reason: 'locked' | 'missing' | 'not-found' | 'changed' | 'failed'
-      message: string
-      inspection?: WorktreeInspection
-    }
-
 export type RemoveWorktreeResult = { ok: true } | { ok: false; message: string }
 
 /**
@@ -320,5 +241,15 @@ export type RemoveWorktreeResult = { ok: true } | { ok: false; message: string }
  * was made, as when the project folder or the worktree is gone.
  */
 export type StartMergeResult =
+  | { ok: true; session: SavedSessionInfo }
+  | { ok: false; message: string }
+
+/**
+ * What choosing an agent in a worktree's Delete menu came to: the saved
+ * session in the project's own folder that deletes the worktree and its
+ * branch, or why none was made, as when the project folder or the worktree
+ * is gone.
+ */
+export type StartDeletionResult =
   | { ok: true; session: SavedSessionInfo }
   | { ok: false; message: string }

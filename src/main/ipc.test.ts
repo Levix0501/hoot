@@ -13,6 +13,7 @@ import type { ProjectFolderInfo } from '../shared/project-folders'
 import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
+import { deletionInstruction } from './worktrees/deletion'
 import { mergeInstruction } from './worktrees/merge'
 
 type Listener = (event: { sender: unknown }, ...args: unknown[]) => unknown
@@ -226,19 +227,14 @@ const worktrees = Object.assign(emitter(), {
     message: 'No.',
   })),
   createNamed: vi.fn<(request: unknown) => Promise<unknown>>(),
-  delete: vi.fn<
-    (
-      root: string,
-      worktreePath: string,
-      discard: boolean,
-      endSessions: () => Promise<void>,
-      deleteBranches?: readonly { relativePath: string; branch: string }[],
-    ) => Promise<{ ok: boolean }>
-  >(async () => ({ ok: true })),
   removeMissing: vi.fn<
     (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
   >(async () => ({ ok: true })),
   planMerge: vi.fn<(root: string, worktreePath: string) => Promise<unknown>>(async () => ({
+    ok: false,
+    message: 'The worktree no longer exists.',
+  })),
+  planDeletion: vi.fn<(root: string, worktreePath: string) => Promise<unknown>>(async () => ({
     ok: false,
     message: 'The worktree no longer exists.',
   })),
@@ -277,10 +273,7 @@ const projectFolders = Object.assign(emitter(), {
 const sessionManager = Object.assign(emitter(), {
   closeOf: vi.fn<(chatId: string) => Promise<void>>(async () => {}),
   closeIn: vi.fn<(root: string, worktreePath: string) => Promise<void>>(async () => {}),
-  closeRunningWithin: vi.fn<(directory: string) => Promise<void>>(async () => {}),
-  runningIdsWithin: vi.fn<(directory: string) => string[]>(() => []),
   forgetWorktree: vi.fn<(worktreePath: string) => void>(),
-  forgetWithin: vi.fn<(directory: string) => void>(),
   start: vi.fn<(request: StartSessionRequest) => Promise<SessionInfo>>(async (request) => ({
     id: request.id,
     projectRoot: request.projectRoot,
@@ -884,32 +877,6 @@ describe('the messages of worktrees', () => {
     expect(worktrees.newWorktreeOptions).toHaveBeenCalledTimes(2)
   })
 
-  it('end the sessions running in a worktree before deleting it, and forget it once deleted', async () => {
-    const at = saved.worktreePath
-    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, true)).toEqual({ ok: true })
-    // Its merged branches are deleted with it only when the confirmation named them.
-    expect(worktrees.delete.mock.calls[0]![4]).toEqual([])
-    const named = [{ relativePath: '', branch: 'fix-login-bug' }]
-    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, named)).toEqual({
-      ok: true,
-    })
-    expect(worktrees.delete.mock.calls[1]![4]).toEqual(named)
-    expect(await invoke(IpcChannel.deleteWorktree, project.root, at, false, true)).toMatchObject({
-      ok: false,
-    })
-    expect(
-      await invoke(IpcChannel.deleteWorktree, project.root, at, false, [{ relativePath: '' }]),
-    ).toMatchObject({ ok: false })
-    expect(worktrees.delete).toHaveBeenCalledTimes(2)
-    const endSessions = worktrees.delete.mock.calls[0]![3]
-    expect(sessionManager.closeRunningWithin).not.toHaveBeenCalled()
-    await endSessions()
-    expect(sessionManager.closeRunningWithin).toHaveBeenCalledWith(at)
-    expect(sessionManager.forgetWithin).toHaveBeenCalledWith(at)
-    expect(chats.removeForWorktree).toHaveBeenCalledWith(at)
-    expect(sidebar.setWorktreeCollapsed).toHaveBeenCalledWith(at, false)
-  })
-
   it('start a merge in the project folder, named after the worktree, unless it or the folder is gone', async () => {
     const at = saved.worktreePath!
     // A worktree that is gone is said, and nothing is made.
@@ -944,6 +911,45 @@ describe('the messages of worktrees', () => {
       ok: false,
     })
     expect(worktrees.planMerge).not.toHaveBeenCalled()
+  })
+
+  it('start a deletion in the project folder, named after the worktree, unless it or the folder is gone', async () => {
+    const at = saved.worktreePath!
+    // A worktree that is gone is said, and nothing is made.
+    expect(await invoke(IpcChannel.startDeletion, project.root, at, 'codex')).toEqual({
+      ok: false,
+      message: 'The worktree no longer exists.',
+    })
+    expect(worktrees.planDeletion).toHaveBeenCalledWith(project.root, at)
+    expect(chats.createSavedSession).not.toHaveBeenCalled()
+
+    const plan = {
+      worktreeName: 'Fix login bug',
+      worktreePath: at,
+      repositories: [{ path: project.root, branch: 'fix-login-bug' }],
+    }
+    worktrees.planDeletion.mockResolvedValueOnce({ ok: true, plan })
+    expect(await invoke(IpcChannel.startDeletion, project.root, at, 'codex')).toEqual({
+      ok: true,
+      session: local,
+    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex', {
+      name: 'Delete Fix login bug',
+      firstMessage: deletionInstruction(plan),
+    })
+    // Hoot deletes nothing itself, and closes none of the worktree's sessions.
+    expect(sessionManager.closeIn).not.toHaveBeenCalled()
+    expect(chats.removeForWorktree).not.toHaveBeenCalled()
+
+    vi.clearAllMocks()
+    expect(await invoke(IpcChannel.startDeletion, '/work/other', at, 'codex')).toMatchObject({
+      ok: false,
+      message: 'The project is not in the list.',
+    })
+    expect(await invoke(IpcChannel.startDeletion, project.root, at, 'shell')).toMatchObject({
+      ok: false,
+    })
+    expect(worktrees.planDeletion).not.toHaveBeenCalled()
   })
 
   it('close the open sessions of a missing worktree before removing it, and forget it once removed', async () => {

@@ -60,9 +60,9 @@ import type {
   CreateIssueWorktreeResult,
   CreateWorktreeRequest,
   CreateWorktreeResult,
-  DeleteWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  StartDeletionResult,
   StartMergeResult,
 } from '../shared/worktrees'
 import type { AgentService } from './agents/agent-service'
@@ -87,6 +87,7 @@ import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
 import type { UpdateService } from './updates/update-service'
 import type { WorkflowExecutor } from './workflows/workflow-executor'
+import { deletionInstruction } from './worktrees/deletion'
 import { mergeInstruction } from './worktrees/merge'
 import type { WorktreeService } from './worktrees/worktree-service'
 
@@ -171,11 +172,8 @@ const savedSessionArguments = z.tuple([
   z.string().min(1).nullable(),
   z.enum(CODING_TOOL_IDS),
 ])
-const mergeArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
-/** The branches a worktree's deletion confirmation said would be deleted with it. */
-const branchesToDelete = z
-  .array(z.object({ relativePath: z.string(), branch: z.string().min(1) }))
-  .max(1_000)
+/** A project, the root of one of its worktrees, and the agent of a session that works on it. */
+const worktreeAgentArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -883,10 +881,6 @@ export function registerIpc(deps: IpcDependencies): void {
   deps.updates.on('failed', (message) => send(IpcChannel.updateFailed, message))
 
   handle(IpcChannel.listWorktrees, () => deps.worktrees.listAll())
-  handle(IpcChannel.currentWorktree, (_event, ...args) => {
-    const parsed = worktreeArguments.safeParse(args)
-    return parsed.success ? deps.worktrees.currentWorktree(...parsed.data) : null
-  })
   deps.worktrees.on('changed', (root, worktrees) =>
     send(IpcChannel.worktreesChanged, root, worktrees),
   )
@@ -963,39 +957,6 @@ export function registerIpc(deps: IpcDependencies): void {
     return parsed.success ? deps.worktrees.read(parsed.data) : null
   })
 
-  handle(IpcChannel.inspectWorktree, (_event, ...args) => {
-    const parsed = worktreeArguments.safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-    return deps.worktrees.inspect(...parsed.data)
-  })
-
-  handle(IpcChannel.deleteWorktree, async (_event, ...args): Promise<DeleteWorktreeResult> => {
-    const parsed = z
-      .tuple([projectRoot, z.string().min(1), z.boolean(), branchesToDelete.optional()])
-      .safeParse(args)
-    if (!parsed.success) return { ok: false, reason: 'not-found', message: 'Invalid request.' }
-    const [root, worktreePath, discard, deleteBranches] = parsed.data
-    // The sessions running in it end first, also those in a project's worktree
-    // inside it, which deleting it deletes: the window closes those it listed
-    // before asking, and any that started since close here.
-    const result = await deps.worktrees.delete(
-      root,
-      worktreePath,
-      discard,
-      () => deps.sessions.closeRunningWithin(worktreePath),
-      deleteBranches ?? [],
-    )
-    // Its sessions, which have all ended, close with it, also those of a
-    // project's worktree inside it, and so do its saved sessions. A worktree
-    // made again at its root is expanded.
-    if (result.ok) {
-      deps.sessions.forgetWithin(worktreePath)
-      deps.chats.removeForWorktree(worktreePath)
-      deps.sidebar.setWorktreeCollapsed(worktreePath, false)
-    }
-    return result
-  })
-
   handle(IpcChannel.removeWorktree, async (_event, ...args): Promise<RemoveWorktreeResult> => {
     const parsed = worktreeArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
@@ -1015,7 +976,7 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle(IpcChannel.startMerge, async (_event, ...args): Promise<StartMergeResult> => {
-    const parsed = mergeArguments.safeParse(args)
+    const parsed = worktreeAgentArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
     const [root, worktreePath, toolId] = parsed.data
     if (!deps.projects.find(root)) return { ok: false, message: 'The project is not in the list.' }
@@ -1029,6 +990,26 @@ export function registerIpc(deps: IpcDependencies): void {
     const session = deps.chats.createSavedSession(root, null, toolId, {
       name: `Merge ${planned.plan.worktreeName}`,
       firstMessage: mergeInstruction(planned.plan),
+    })
+    return { ok: true, session }
+  })
+
+  handle(IpcChannel.startDeletion, async (_event, ...args): Promise<StartDeletionResult> => {
+    const parsed = worktreeAgentArguments.safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    const [root, worktreePath, toolId] = parsed.data
+    if (!deps.projects.find(root)) return { ok: false, message: 'The project is not in the list.' }
+    // Nothing stops the deletion but a project folder or worktree that is
+    // gone: what to do about anything else in the way is the agent's to judge.
+    const planned = await deps.worktrees.planDeletion(root, worktreePath)
+    if (!planned.ok) return planned
+    // A session in the project's own folder, which the worktree's deletion
+    // leaves, named after the worktree, whose agent is told what to delete as
+    // it first starts, and nothing of how. Hoot follows the deletion no
+    // further: the worktree's row goes once Git no longer lists it.
+    const session = deps.chats.createSavedSession(root, null, toolId, {
+      name: `Delete ${planned.plan.worktreeName}`,
+      firstMessage: deletionInstruction(planned.plan),
     })
     return { ok: true, session }
   })

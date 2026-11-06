@@ -3,7 +3,6 @@ import {
   compareWorktrees,
   defaultNestedBase,
   initialWorktreeChoices,
-  inspectionIsClean,
   isWithin,
   type NewWorktreeOptions,
   type WorktreeInfo,
@@ -110,26 +109,5 @@ describe('isWithin', () => {
     expect(isWithin('C:\\w\\G\\feat\\inner', 'C:\\w\\G\\feat')).toBe(true)
     expect(isWithin('C:\\w\\G\\feature', 'C:\\w\\G\\feat')).toBe(false)
     expect(isWithin('C:\\w', 'C:\\')).toBe(true)
-  })
-})
-
-describe('inspectionIsClean', () => {
-  it('is clean without changes and without foreign repositories', () => {
-    const base = {
-      root: '/r',
-      innerMembers: [],
-      branch: 'b',
-      branches: [],
-      changes: [],
-      foreignRepositories: [],
-    }
-    expect(inspectionIsClean(base)).toBe(true)
-    expect(inspectionIsClean({ ...base, foreignRepositories: ['x'] })).toBe(false)
-    expect(
-      inspectionIsClean({
-        ...base,
-        changes: [{ repository: 'r', files: [], total: 0, detachedCommits: true }],
-      }),
-    ).toBe(false)
   })
 })

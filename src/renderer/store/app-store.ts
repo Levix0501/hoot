@@ -75,14 +75,7 @@ import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../.
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
-import { branchesToDelete } from '../../shared/worktree-branches'
-import {
-  inspectionIsClean,
-  isWithin,
-  type CreateIssueWorktreeResult,
-  type WorktreeInfo,
-  type WorktreeInspection,
-} from '../../shared/worktrees'
+import type { CreateIssueWorktreeResult, WorktreeInfo } from '../../shared/worktrees'
 import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib/session-state'
 import { api } from '../lib/api'
 import { isOnList, type ProjectChoice } from '../lib/project-choices'
@@ -254,26 +247,6 @@ export interface NewWorktreeRequest {
 }
 
 /**
- * The confirmation before a worktree is deleted, from checking it until it is
- * confirmed or cancelled; the deletion itself goes on in the background.
- */
-export interface WorktreeDeletion {
-  projectRoot: string
-  path: string
-  /** Checking what would be lost, or asking for confirmation. */
-  phase: 'checking' | 'confirm'
-  inspection: WorktreeInspection | null
-  /** What went wrong while checking. */
-  error: string | null
-  /**
-   * Whether the branches merged into the project folder's are to be deleted
-   * with the worktree, as its checkbox says, checked each time the dialog
-   * opens; it shows only while one is merged.
-   */
-  deleteBranches: boolean
-}
-
-/**
  * The removal of a missing worktree some of whose sessions are open, from
  * asking whether to close them until it is removed or cancelled.
  */
@@ -304,12 +277,6 @@ export interface AppState {
   projectFolders: Record<string, ProjectFolderInfo>
   /** What the open New Worktree dialog was opened for. */
   newWorktree: NewWorktreeRequest | null
-  worktreeDeletion: WorktreeDeletion | null
-  /**
-   * The roots of the worktrees being deleted, which goes on once the
-   * confirmation closed: their rows show it, and no session starts in them.
-   */
-  deletingWorktrees: ReadonlySet<string>
   worktreeRemoval: WorktreeRemoval | null
   tools: ToolsState
   /** The agents of the Agents page and their operations; `null` until they are known. */
@@ -427,14 +394,12 @@ export interface AppState {
   /**
    * While Hoot asks whether to quit, or to restart into an update: how many
    * sessions are running, which agents are being installed or updated or wait
-   * to be, the names of the worktrees being deleted, and which of the two it
-   * asks.
+   * to be, and which of the two it asks.
    */
   quitConfirmation: {
     runningSessions: number
     reason: QuitReason
     agentOperations: AgentOperationSummary[]
-    worktreeDeletions: string[]
   } | null
   /** Where Hoot is with a newer version of itself, which an Update button beside Settings offers. */
   update: UpdateState
@@ -801,20 +766,6 @@ export interface AppState {
   openNewWorktreeDialog(projectRoot: string, from?: NewWorktreeRequest['from']): void
   closeNewWorktreeDialog(): void
   /**
-   * Reads the project's worktrees again and, unless the worktree is gone,
-   * missing or locked now, or being deleted already, checks it and asks for
-   * confirmation before deleting it.
-   */
-  requestDeleteWorktree(projectRoot: string, path: string): void
-  /** Checks or unchecks deleting the merged branches with the worktree asked about. */
-  setDeleteWorktreeBranches(checked: boolean): void
-  /**
-   * Closes the confirmation. Once it is confirmed, the worktree is deleted in
-   * the background: its running sessions end first, and Hoot says nothing
-   * more unless the worktree is not deleted, or a branch with it.
-   */
-  answerDeleteWorktree(confirmed: boolean): Promise<void>
-  /**
    * Merges a worktree into the project's own folder with an agent, as its
    * Merge menu does. While the merge session it last opened for the worktree
    * has its agent running, as it has since it started, that session shows,
@@ -824,6 +775,17 @@ export interface AppState {
    * worktree that is gone stops it, which Hoot says.
    */
   mergeWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
+  /**
+   * Deletes a worktree and its branch with an agent, as its Delete menu
+   * does. While the deletion session it last opened for the worktree has its
+   * agent running, as it has since it started, that session shows, and
+   * nothing else happens. Otherwise it opens a new Local session of the
+   * agent, named after the worktree, which is told what to delete and judges
+   * the rest itself, with nothing checked first. Only a project folder or
+   * worktree that is gone stops it, which Hoot says. The worktree's row goes
+   * once Git no longer lists it.
+   */
+  deleteWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
    * its registrations and what Hoot keeps of it, such as its saved
@@ -971,14 +933,6 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Why a worktree, as it is now, cannot be deleted; `null` when it can. */
-function whyNotDeletable(worktree: WorktreeInfo | null): string | null {
-  if (worktree === null) return 'The worktree no longer exists.'
-  if (worktree.missing) return 'The folder of the worktree is missing.'
-  if (worktree.locked) return 'The worktree is locked.'
-  return null
-}
-
 /** A chat or saved session asked to be deleted, unless it is in neither list. */
 function deletionAmong(
   id: string | null,
@@ -992,30 +946,17 @@ function deletionAmong(
     : id
 }
 
-/** What Hoot keeps the merge of a worktree of a project by. */
-function mergeKey(projectRoot: string, worktreePath: string): string {
-  return JSON.stringify([projectRoot, worktreePath])
+/** What an agent is asked to do with a worktree in a session of the project's own folder. */
+type WorktreeJob = 'merge' | 'delete'
+
+/** What Hoot keeps the merge or the deletion of a worktree of a project by. */
+function worktreeJobKey(job: WorktreeJob, projectRoot: string, worktreePath: string): string {
+  return JSON.stringify([job, projectRoot, worktreePath])
 }
 
 /** True while a session is starting or running. */
 export function isSessionRunning(session: UiSession): boolean {
   return session.status !== 'exited'
-}
-
-/**
- * The sessions starting or running in a worktree, also in a project's
- * worktree inside it, which deleting the worktree ends; chats run elsewhere.
- */
-export function runningSessionsWithin(
-  state: Pick<AppState, 'sessions'>,
-  worktreePath: string,
-): UiSession[] {
-  return state.sessions.filter(
-    (session) =>
-      isSessionRunning(session) &&
-      session.chatId === null &&
-      isWithin(session.worktreePath ?? session.projectRoot, worktreePath),
-  )
 }
 
 /**
@@ -1894,54 +1835,84 @@ export const useAppStore = create<AppState>()((set, get) => {
     set((state) => ({ projectFolders: { ...state.projectFolders, [projectRoot]: folder } }))
   }
 
-  /** Whether Delete was chosen and the worktree is being read again before it is checked. */
-  let preparingDeletion = false
-
   /** The name a worktree's row shows, or its root when it has no row. */
   const worktreeName = (projectRoot: string, path: string) => {
     const worktree = projectWorktreeRows(get(), projectRoot).find((row) => row.path === path)
     return worktree ? (worktree.name ?? worktree.displayName) : path
   }
 
-  /** Marks a worktree as being deleted, or as no longer being deleted. */
-  const markDeleting = (path: string, deleting: boolean) => {
-    set((state) => {
-      const deletingWorktrees = new Set(state.deletingWorktrees)
-      if (deleting) deletingWorktrees.add(path)
-      else deletingWorktrees.delete(path)
-      return { deletingWorktrees }
-    })
-  }
-
-  /** The worktrees whose merge session is being made, by `mergeKey`. */
-  const mergesStarting = new Set<string>()
+  /** The worktrees whose merge or deletion session is being made, by `worktreeJobKey`. */
+  const jobsStarting = new Set<string>()
   /**
-   * The session of the merge session Hoot last opened for each worktree, by
-   * `mergeKey`, which shows again while its agent runs, as it has since it
-   * started.
+   * The session of the merge or deletion session Hoot last opened for each
+   * worktree, by `worktreeJobKey`, which shows again while its agent runs, as
+   * it has since it started.
    */
-  const mergeSessions = new Map<string, string>()
+  const jobSessions = new Map<string, string>()
+
+  /**
+   * Has an agent merge or delete a worktree in a new Local session, as its
+   * Merge and Delete menus do (see `mergeWorktree` and `deleteWorktree`).
+   */
+  const startWorktreeJob = async (
+    job: WorktreeJob,
+    projectRoot: string,
+    worktreePath: string,
+    toolId: CodingToolId,
+  ) => {
+    const key = worktreeJobKey(job, projectRoot, worktreePath)
+    const shown = jobSessions.get(key)
+    const running = get().sessions.find(
+      (session) => session.id === shown && isSessionRunning(session),
+    )
+    if (running) {
+      get().selectSession(running.id)
+      return
+    }
+    jobSessions.delete(key)
+    // As for a new session: an agent turned off since the menu showed starts nothing.
+    const { tools, launchSettings } = get()
+    if (firstDetectionRunning(tools)) return
+    if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
+      toast.error('Could not start a session.', {
+        description: 'Install an agent or turn one on in the Agents page first.',
+      })
+      get().showSettings('agents')
+      return
+    }
+    // Chosen again while the first choice is being made.
+    if (jobsStarting.has(key)) return
+    jobsStarting.add(key)
+    const result = await (
+      job === 'merge'
+        ? api.startMerge(projectRoot, worktreePath, toolId)
+        : api.startDeletion(projectRoot, worktreePath, toolId)
+    )
+      .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      .finally(() => jobsStarting.delete(key))
+    if (!result.ok) {
+      toast.error(`Could not ${job} ${worktreeName(projectRoot, worktreePath)}.`, {
+        description: result.message,
+      })
+      return
+    }
+    // The change event may have shown it already.
+    set((state) => ({
+      savedSessions: state.savedSessions.some((saved) => saved.id === result.session.id)
+        ? state.savedSessions
+        : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
+    }))
+    get().openSavedSession(result.session.id)
+    const opened = get().sessions.find(
+      (session) => session.savedSessionId === result.session.id && isSessionRunning(session),
+    )
+    if (opened) jobSessions.set(key, opened.id)
+  }
 
   /** Closes the ended sessions of a worktree that is gone, as its deletion does. */
   const closeEndedSessionsIn = (path: string) => {
     const ended = get()
       .sessions.filter((session) => session.worktreePath === path && !isSessionRunning(session))
-      .map((session) => session.id)
-    if (ended.length > 0) removeSessions(ended)
-  }
-
-  /**
-   * Closes the ended sessions of a deleted worktree, also those of a
-   * project's worktree inside it, which the deletion deleted.
-   */
-  const closeEndedSessionsWithin = (path: string) => {
-    const ended = get()
-      .sessions.filter(
-        (session) =>
-          !isSessionRunning(session) &&
-          session.chatId === null &&
-          isWithin(session.worktreePath ?? session.projectRoot, path),
-      )
       .map((session) => session.id)
     if (ended.length > 0) removeSessions(ended)
   }
@@ -2246,8 +2217,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     knownWorktrees: {},
     projectFolders: {},
     newWorktree: null,
-    worktreeDeletion: null,
-    deletingWorktrees: new Set(),
     worktreeRemoval: null,
     tools: { detecting: true, tools: [], error: null },
     agents: null,
@@ -2429,10 +2398,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       })
       api.onShowSettingsRequested(() => get().showSettings())
       api.onShowAboutRequested(() => get().showSettings('about'))
-      api.onConfirmQuit((runningSessions, reason, agentOperations, worktreeDeletions) =>
-        set({
-          quitConfirmation: { runningSessions, reason, agentOperations, worktreeDeletions },
-        }),
+      api.onConfirmQuit((runningSessions, reason, agentOperations) =>
+        set({ quitConfirmation: { runningSessions, reason, agentOperations } }),
       )
       api.onUpdateStatusChanged(({ state, check }) => set({ update: state, updateCheck: check }))
       api.onUpdateFailed((message) => {
@@ -2694,12 +2661,6 @@ export const useAppStore = create<AppState>()((set, get) => {
           })
           return
         }
-        if (get().deletingWorktrees.has(saved.worktreePath)) {
-          toast.error('Could not open the session.', {
-            description: 'The worktree is being deleted.',
-          })
-          return
-        }
       }
       // An agent that ended unexpectedly leaves its page with the last output
       // and a Resume button; continuing it starts a new session.
@@ -2727,12 +2688,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     async newWorktreeSession(projectRoot, worktreePath, toolId) {
-      const { tools, launchSettings, deletingWorktrees } = get()
+      const { tools, launchSettings } = get()
       if (firstDetectionRunning(tools)) return
-      if (worktreePath !== null && deletingWorktrees.has(worktreePath)) {
-        toast.error('Could not start a session.', { description: 'The worktree is being deleted.' })
-        return
-      }
       const agent = toolId ?? chatAgent(tools, launchSettings)
       if (agent === null || !usableChatAgents(tools, launchSettings).includes(agent)) {
         toast.error('Could not start a session.', {
@@ -2758,67 +2715,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     async openTerminal(projectRoot, worktreePath) {
-      if (worktreePath !== null && get().deletingWorktrees.has(worktreePath)) {
-        toast.error('Could not open Terminal.', { description: 'The worktree is being deleted.' })
-        return
-      }
       const result = await api
         .openTerminal(projectRoot, worktreePath)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
       if (!result.ok) toast.error('Could not open Terminal.', { description: result.message })
     },
 
-    async mergeWorktree(projectRoot, worktreePath, toolId) {
-      const key = mergeKey(projectRoot, worktreePath)
-      const shown = mergeSessions.get(key)
-      const running = get().sessions.find(
-        (session) => session.id === shown && isSessionRunning(session),
-      )
-      if (running) {
-        get().selectSession(running.id)
-        return
-      }
-      if (get().deletingWorktrees.has(worktreePath)) {
-        toast.error(`Could not merge ${worktreeName(projectRoot, worktreePath)}.`, {
-          description: 'The worktree is being deleted.',
-        })
-        return
-      }
-      mergeSessions.delete(key)
-      // As for a new session: an agent turned off since the menu showed starts nothing.
-      const { tools, launchSettings } = get()
-      if (firstDetectionRunning(tools)) return
-      if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
-        toast.error('Could not start a session.', {
-          description: 'Install an agent or turn one on in the Agents page first.',
-        })
-        get().showSettings('agents')
-        return
-      }
-      // Chosen again while the first choice is being made.
-      if (mergesStarting.has(key)) return
-      mergesStarting.add(key)
-      const result = await api
-        .startMerge(projectRoot, worktreePath, toolId)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        .finally(() => mergesStarting.delete(key))
-      if (!result.ok) {
-        toast.error(`Could not merge ${worktreeName(projectRoot, worktreePath)}.`, {
-          description: result.message,
-        })
-        return
-      }
-      // The change event may have shown it already.
-      set((state) => ({
-        savedSessions: state.savedSessions.some((saved) => saved.id === result.session.id)
-          ? state.savedSessions
-          : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
-      }))
-      get().openSavedSession(result.session.id)
-      const opened = get().sessions.find(
-        (session) => session.savedSessionId === result.session.id && isSessionRunning(session),
-      )
-      if (opened) mergeSessions.set(key, opened.id)
+    mergeWorktree(projectRoot, worktreePath, toolId) {
+      return startWorktreeJob('merge', projectRoot, worktreePath, toolId)
+    },
+
+    deleteWorktree(projectRoot, worktreePath, toolId) {
+      return startWorktreeJob('delete', projectRoot, worktreePath, toolId)
     },
 
     openCreatedSession(session) {
@@ -3618,99 +3526,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     closeNewWorktreeDialog() {
       set({ newWorktree: null })
     },
-    requestDeleteWorktree(projectRoot, path) {
-      const { worktreeDeletion, deletingWorktrees } = get()
-      if (worktreeDeletion !== null || preparingDeletion || deletingWorktrees.has(path)) return
-      preparingDeletion = true
-      void (async () => {
-        // As it is now, which the sidebar then shows: gone, missing or locked
-        // since the sidebar last showed it, it is neither checked nor deleted.
-        let reason: string | null
-        try {
-          reason = whyNotDeletable(await api.currentWorktree(projectRoot, path))
-        } catch (error) {
-          reason = errorMessage(error)
-        } finally {
-          preparingDeletion = false
-        }
-        if (reason !== null) {
-          toast.error('Could not delete the worktree.', { description: reason })
-          return
-        }
-        const deletion: WorktreeDeletion = {
-          projectRoot,
-          path,
-          phase: 'checking',
-          inspection: null,
-          error: null,
-          deleteBranches: true,
-        }
-        set({ worktreeDeletion: deletion })
-        const result = await api
-          .inspectWorktree(projectRoot, path)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (get().worktreeDeletion !== deletion) return
-        set({
-          worktreeDeletion: result.ok
-            ? { ...deletion, phase: 'confirm', inspection: result.inspection }
-            : { ...deletion, phase: 'confirm', error: result.message },
-        })
-      })()
-    },
-
-    setDeleteWorktreeBranches(checked) {
-      const deletion = get().worktreeDeletion
-      if (deletion === null || deletion.phase !== 'confirm') return
-      set({ worktreeDeletion: { ...deletion, deleteBranches: checked } })
-    },
-
-    async answerDeleteWorktree(confirmed) {
-      const deletion = get().worktreeDeletion
-      if (deletion === null) return
-      set({ worktreeDeletion: null })
-      if (!confirmed || deletion.phase !== 'confirm' || !deletion.inspection) return
-      const { projectRoot, path, inspection } = deletion
-      // Its row shows it is being deleted, and no session starts in it until
-      // it is. The running sessions the confirmation listed end first,
-      // closing their tabs. What they change until then goes with the
-      // worktree without asking again; otherwise discarding is confirmed
-      // only for what the confirmation listed.
-      markDeleting(path, true)
-      const running = runningSessionsWithin(get(), path)
-      await Promise.allSettled(running.map((session) => get().closeSession(session.id)))
-      const discard = running.length > 0 || !inspectionIsClean(inspection)
-      // Only as the checkbox said, when it showed: the branches the confirmation named.
-      const deleteBranches = deletion.deleteBranches ? branchesToDelete(inspection) : []
-      const result = await api
-        .deleteWorktree(projectRoot, path, discard, deleteBranches)
-        .catch((error: unknown) => ({
-          ok: false as const,
-          reason: 'failed' as const,
-          message: errorMessage(error),
-          inspection: undefined,
-        }))
-      markDeleting(path, false)
-      if (result.ok) {
-        closeEndedSessionsWithin(path)
-        forgetCollapsedWorktree(path)
-        if (result.warning !== undefined) {
-          toast.warning('The worktree was deleted, but not every branch.', {
-            description: result.warning,
-          })
-        }
-        return
-      }
-      // Something to lose appeared since the confirmation: the worktree is
-      // kept, and deleting it again lists what.
-      if (result.reason === 'changed') {
-        toast.warning('The worktree was not deleted.', {
-          description: 'It has changes now that would be lost. Delete it again to see them.',
-        })
-        return
-      }
-      toast.error('Could not delete the worktree.', { description: result.message })
-    },
-
     async removeMissingWorktree(projectRoot, path) {
       if (get().worktreeRemoval !== null) return
       // Its open sessions close first, once the user agrees.

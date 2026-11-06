@@ -142,6 +142,8 @@ const api: HootApi = {
     ipcRenderer.send(IpcChannel.revealProjectFolder, projectRoot),
   copyProjectFolderPath: (projectRoot) =>
     ipcRenderer.send(IpcChannel.copyProjectFolderPath, projectRoot),
+  openTerminal: (projectRoot, worktreePath) =>
+    ipcRenderer.invoke(IpcChannel.openTerminal, projectRoot, worktreePath),
   listFolder: (folder, directory) =>
     ipcRenderer.invoke(IpcChannel.listFolder, folder.projectRoot, folder.worktreePath, directory),
   readFile: (folder, file) =>

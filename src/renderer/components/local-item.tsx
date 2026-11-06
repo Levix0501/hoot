@@ -7,13 +7,12 @@ import {
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
-import type { CodingToolId } from '../../shared/tools'
 import { api } from '../lib/api'
 import { sessionsSummary, sessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
 import { focusAfterOverlay, useAppStore } from '../store/app-store'
-import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { contextMenuParts, dropdownMenuParts, type MenuParts } from './menu-parts'
+import { NewSessionMenuEntries } from './new-session-menu-entries'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { StateLight } from './state-light'
 import { Badge } from './ui/badge'
@@ -25,9 +24,10 @@ import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
 /**
  * What a project's Local row's `⋯` menu and its context menu hold, the same
  * in both: the agents to start a session with in the project's own folder,
- * Reveal in Finder (File Explorer on Windows) and Copy Path, as a
- * worktree's menus hold them. There is no Delete: the folder is the
- * project's, and the row goes once its sessions do.
+ * and Terminal, which opens the system's terminal in it; Reveal in Finder
+ * (File Explorer on Windows) and Copy Path, as a worktree's menus hold them.
+ * There is no Delete: the folder is the project's, and the row goes once its
+ * sessions do.
  */
 function LocalMenuEntries({
   components,
@@ -39,11 +39,9 @@ function LocalMenuEntries({
   /** The prefix of the items' test ids, which tells the `⋯` menu from the context menu. */
   testId: string
 }) {
-  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const missing = useAppStore((state) => state.projectFolders[project.root]?.missing === true)
   const { Item, Sub, SubTrigger, SubContent } = components
 
-  const startSession = (toolId: CodingToolId) => void newWorktreeSession(project.root, null, toolId)
   const reveal = () => api.revealProjectFolder(project.root)
   const copyPath = () => api.copyProjectFolderPath(project.root)
 
@@ -55,11 +53,11 @@ function LocalMenuEntries({
           New Session
         </SubTrigger>
         <SubContent className="w-auto min-w-56">
-          <ChatAgentMenuEntries
+          <NewSessionMenuEntries
             components={components}
-            onSelect={startSession}
+            projectRoot={project.root}
+            worktreePath={null}
             testId="local-agent"
-            failure="Could not start a session."
           />
         </SubContent>
       </Sub>

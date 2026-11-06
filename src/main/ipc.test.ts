@@ -262,6 +262,7 @@ const folderAccess = {
 const fileWatcher = Object.assign(emitter(), {
   watch: vi.fn<(folder: string | null, entries: readonly string[]) => void>(),
 })
+const openTerminal = vi.fn<(folder: string) => Promise<void>>(async () => {})
 const folderThere: ProjectFolderInfo = { missing: false, branch: 'main', displayName: 'main' }
 const projectFolders = Object.assign(emitter(), {
   list: vi.fn<() => Promise<Record<string, ProjectFolderInfo>>>(async () => ({
@@ -335,6 +336,7 @@ beforeEach(() => {
     filePanel,
     folderAccess,
     fileWatcher,
+    openTerminal,
   } as unknown as Parameters<typeof registerIpc>[0])
 })
 
@@ -383,6 +385,30 @@ describe("the file panel's messages", () => {
     expect(filePanel.setOpen).toHaveBeenCalledWith(true)
     expect(filePanel.setTreeWidth).toHaveBeenCalledWith(300)
     expect(filePanel.setEditorWidth).not.toHaveBeenCalled()
+  })
+})
+
+describe('the message that opens Terminal', () => {
+  it('opens it only in a folder the file panel may show', async () => {
+    expect(await invoke(IpcChannel.openTerminal, project.root, null)).toEqual({ ok: true })
+    expect(openTerminal).toHaveBeenCalledExactlyOnceWith(project.root)
+    openTerminal.mockClear()
+    const refused = { ok: false, message: 'This folder is no longer in Hoot.' }
+    expect(await invoke(IpcChannel.openTerminal, project.root, '/work/other')).toEqual(refused)
+    expect(await invoke(IpcChannel.openTerminal, '/elsewhere', null)).toEqual(refused)
+    expect(await invoke(IpcChannel.openTerminal, project.root, 7)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+    expect(openTerminal).not.toHaveBeenCalled()
+  })
+
+  it('says what went wrong opening it', async () => {
+    openTerminal.mockRejectedValueOnce(new Error(`The folder is missing: ${project.root}`))
+    expect(await invoke(IpcChannel.openTerminal, project.root, null)).toEqual({
+      ok: false,
+      message: `The folder is missing: ${project.root}`,
+    })
   })
 })
 

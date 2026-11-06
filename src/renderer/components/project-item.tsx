@@ -8,11 +8,11 @@ import {
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '../../shared/ipc'
-import type { CodingToolId } from '../../shared/tools'
 import { sessionsSummary, sessionState } from '../lib/session-state'
 import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
-import { ChatAgentMenuEntries, type ChatMenuComponents } from './chat-agent-menu'
+import type { ChatMenuComponents } from './chat-agent-menu'
 import { contextMenuParts, dropdownMenuParts, type MenuParts } from './menu-parts'
+import { NewSessionMenuEntries } from './new-session-menu-entries'
 import { StateLight } from './state-light'
 import { CollapsibleTrigger } from './ui/collapsible'
 import {
@@ -35,10 +35,10 @@ export const contextComponents: ChatMenuComponents = { Item: ContextMenuItem }
 
 /**
  * What a project's `⋯` menu and its context menu hold, the same in both: the
- * agents to start a session with in the project's own folder, as a
- * worktree's New Session ▸ lists them; New Worktree…, which opens the New
- * Worktree dialog; and Remove from list, which cannot be chosen while one of
- * the project's sessions runs, in its folder or any of its worktrees.
+ * agents to start a session with in the project's own folder, and Terminal,
+ * as a worktree's New Session ▸ lists them; New Worktree…, which opens the
+ * New Worktree dialog; and Remove from list, which cannot be chosen while one
+ * of the project's sessions runs, in its folder or any of its worktrees.
  */
 function ProjectMenuEntries({
   components,
@@ -52,16 +52,12 @@ function ProjectMenuEntries({
 }) {
   const removeProject = useAppStore((state) => state.removeProject)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
-  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const runningHere = useAppStore((state) =>
     state.sessions.some(
       (session) => session.projectRoot === project.root && isSessionRunning(session),
     ),
   )
   const { Item, Separator, Sub, SubTrigger, SubContent } = components
-
-  const startLocalSession = (toolId: CodingToolId) =>
-    void newWorktreeSession(project.root, null, toolId)
 
   return (
     <>
@@ -71,11 +67,11 @@ function ProjectMenuEntries({
           New Local Session
         </SubTrigger>
         <SubContent className="w-auto min-w-56">
-          <ChatAgentMenuEntries
+          <NewSessionMenuEntries
             components={components}
-            onSelect={startLocalSession}
+            projectRoot={project.root}
+            worktreePath={null}
             testId="project-agent"
-            failure="Could not start a session."
           />
         </SubContent>
       </Sub>

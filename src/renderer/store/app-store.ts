@@ -556,6 +556,11 @@ export interface AppState {
     worktreePath: string | null,
     toolId?: CodingToolId,
   ): Promise<void>
+  /**
+   * Opens the system's terminal in a worktree, or with `null` for the
+   * worktree, in the project's own folder, or says why it cannot.
+   */
+  openTerminal(projectRoot: string, worktreePath: string | null): Promise<void>
   /** Opens a saved session the New Worktree dialog made, showing its page. */
   openCreatedSession(session: SavedSessionInfo): void
   /** Asks for confirmation before closing a running saved session's agent. */
@@ -2750,6 +2755,17 @@ export const useAppStore = create<AppState>()((set, get) => {
           : [...state.savedSessions, result.session].toSorted((a, b) => a.createdAt - b.createdAt),
       }))
       get().openSavedSession(result.session.id)
+    },
+
+    async openTerminal(projectRoot, worktreePath) {
+      if (worktreePath !== null && get().deletingWorktrees.has(worktreePath)) {
+        toast.error('Could not open Terminal.', { description: 'The worktree is being deleted.' })
+        return
+      }
+      const result = await api
+        .openTerminal(projectRoot, worktreePath)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) toast.error('Could not open Terminal.', { description: result.message })
     },
 
     async mergeWorktree(projectRoot, worktreePath, toolId) {

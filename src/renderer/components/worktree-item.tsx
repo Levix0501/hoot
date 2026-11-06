@@ -17,6 +17,7 @@ import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import type { WorktreeRow } from '../store/worktree-rows'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
 import { contextMenuParts, dropdownMenuParts, type MenuParts } from './menu-parts'
+import { NewSessionMenuEntries } from './new-session-menu-entries'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { StateLight } from './state-light'
 import { Badge } from './ui/badge'
@@ -50,13 +51,13 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
 
 /**
  * What a worktree's `⋯` menu and its context menu hold, the same in both: the
- * agents to start a session with in the worktree; New Worktree…, which opens
- * the New Worktree dialog for a worktree made from this one; the agents to
- * merge it with into the branch checked out in the project folder, which the
- * item names (only "Merge" while the folder is on no branch), always
- * available, as the agent chosen judges what to do about anything in the way;
- * Reveal in Finder (File Explorer on Windows), Copy Path and Delete; for a
- * missing worktree, Remove.
+ * agents to start a session with in the worktree, and Terminal, which opens
+ * the system's terminal in it; New Worktree…, which opens the New Worktree
+ * dialog for a worktree made from this one; the agents to merge it with into
+ * the branch checked out in the project folder, which the item names (only
+ * "Merge" while the folder is on no branch), always available, as the agent
+ * chosen judges what to do about anything in the way; Reveal in Finder (File
+ * Explorer on Windows), Copy Path and Delete; for a missing worktree, Remove.
  */
 function WorktreeMenuEntries({
   components,
@@ -70,7 +71,6 @@ function WorktreeMenuEntries({
   /** The prefix of the items' test ids, which tells the `⋯` menu from the context menu. */
   testId: string
 }) {
-  const newWorktreeSession = useAppStore((state) => state.newWorktreeSession)
   const openNewWorktreeDialog = useAppStore((state) => state.openNewWorktreeDialog)
   const mergeWorktree = useAppStore((state) => state.mergeWorktree)
   const into = useAppStore((state) => state.projectFolders[projectRoot]?.branch ?? null)
@@ -78,8 +78,6 @@ function WorktreeMenuEntries({
   const removeMissingWorktree = useAppStore((state) => state.removeMissingWorktree)
   const { Item, Separator, Sub, SubTrigger, SubContent } = components
 
-  const startSession = (toolId: CodingToolId) =>
-    void newWorktreeSession(projectRoot, worktree.path, toolId)
   const newWorktree = () =>
     openNewWorktreeDialog(projectRoot, {
       path: worktree.path,
@@ -117,11 +115,11 @@ function WorktreeMenuEntries({
           New Session
         </SubTrigger>
         <SubContent className="w-auto min-w-56">
-          <ChatAgentMenuEntries
+          <NewSessionMenuEntries
             components={components}
-            onSelect={startSession}
+            projectRoot={projectRoot}
+            worktreePath={worktree.path}
             testId="worktree-agent"
-            failure="Could not start a session."
           />
         </SubContent>
       </Sub>
@@ -185,10 +183,10 @@ function WorktreeMenuEntries({
  * running one.
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and right
- * of it, unless the worktree is missing, its `+`, which starts a session in
- * the worktree with an agent chosen from its menu, or with the only agent
- * that can be used. While the worktree is being deleted, its name is dimmed,
- * a spinner shows at its right end, and it has neither buttons nor menus.
+ * of it, unless the worktree is missing, its `+`, whose menu starts a session
+ * in the worktree with the agent chosen, or opens the system's terminal in
+ * it. While the worktree is being deleted, its name is dimmed, a spinner
+ * shows at its right end, and it has neither buttons nor menus.
  */
 export function WorktreeItem({
   projectRoot,

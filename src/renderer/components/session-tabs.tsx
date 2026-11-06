@@ -341,9 +341,10 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
  * once the tab is clicked. A thin line sets off two tabs next to each other
  * when neither is the current one. Right after the last tab, unless the
  * worktree or the project folder is missing, a `+` starts another session
- * there, as the `+` on its row in the sidebar does; while the tabs do not
- * fit, they scroll, and the `+` stays at the end of the row. The tabs fade
- * out toward an end of the row while more of them lie beyond it.
+ * there, or opens the system's terminal there, as the `+` on its row in the
+ * sidebar does; while the tabs do not fit, they scroll, and the `+` stays at
+ * the end of the row. The tabs fade out toward an end of the row while more
+ * of them lie beyond it.
  */
 export function SessionTabs({ session }: { session: UiSession }) {
   const { projectRoot, worktreePath } = session

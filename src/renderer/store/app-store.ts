@@ -105,13 +105,14 @@ import {
 } from './page-history'
 import { useFilesStore } from './files-store'
 import {
+  CHAT_TABS,
   currentAfterClosing,
   inTabOrder,
-  orderedChatSessions,
   relativeSession,
-  sessionsInSwitchOrder,
   sidebarOrder,
   tabKey,
+  tabStrip,
+  withoutTabs,
 } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
@@ -178,7 +179,13 @@ export interface UiSession {
   unread: boolean
   /** The name the user gave the session, if any. */
   customName: string | null
-  /** Milliseconds since the Unix epoch, when the session was made, as its row orders it. */
+  /**
+   * Milliseconds since the Unix epoch, when the session was made: its tab
+   * comes after those of the sessions made before it, unless the tabs were
+   * dragged, as does the row of a session Hoot does not keep. A session that
+   * continues a saved session or a chat after an unexpected end has the time
+   * of the one it replaces, whose tab's place it keeps.
+   */
   createdAt: number
   /** Set once the session is being closed, until it is gone. */
   closing: boolean
@@ -296,10 +303,10 @@ export interface AppState {
    */
   savedSessions: SavedSessionInfo[]
   /**
-   * The order the tabs of worktrees were dragged into, by the root of the
-   * worktree, which is the project's root for its main worktree: the keys of
-   * its tabs (see `tabKey`). The tabs it does not have come after them, in
-   * the order they were made.
+   * The order each row of tabs was dragged into, by its key (see
+   * `tabStrip`): the keys of its tabs (see `tabKey`). The tabs it does not
+   * have come after them, in the order they were made; a tab that closes
+   * leaves it, so that it comes last when it opens again.
    */
   tabOrders: Readonly<Record<string, readonly string[]>>
   /**
@@ -528,7 +535,11 @@ export interface AppState {
   openTerminal(projectRoot: string, worktreePath: string | null): Promise<void>
   /** Opens a saved session the New Worktree dialog made, showing its page. */
   openCreatedSession(session: SavedSessionInfo): void
-  /** Asks for confirmation before closing a running saved session's agent. */
+  /**
+   * Closes a saved session's open session, as its × does: asks for
+   * confirmation first while its agent runs, unless the Agents page says
+   * not to ask. The saved session stays, to continue later.
+   */
   closeSavedSession(id: string): void
   startRenamingSavedSession(id: string): void
   /** Ends renaming a saved session; `null` keeps its name as it was. */
@@ -537,7 +548,11 @@ export interface AppState {
   answerAddProject(confirmed: boolean): Promise<void>
   /** Continues a chat whose agent ended unexpectedly, as its Resume button does. */
   resumeChat(chatId: string): void
-  /** Asks for confirmation before closing a running chat's agent, as closing a session does. */
+  /**
+   * Closes a chat's open session, as its × does: asks for confirmation first
+   * while its agent runs, unless the Agents page says not to ask. The chat
+   * stays, to continue later.
+   */
   closeChat(chatId: string): void
   /**
    * Asks for confirmation before deleting a chat or saved session, by its id,
@@ -582,10 +597,11 @@ export interface AppState {
   /** Shows a session and puts the keyboard focus in its terminal. */
   selectSession(id: string): void
   /**
-   * Puts the tabs of a worktree, by its root, in the order of the keys given:
-   * after one of them was dragged. Its sessions switch in that order.
+   * Puts a row of tabs, by its key (see `tabStrip`), in the order of the
+   * keys given: after one of them was dragged. Its sessions switch in that
+   * order.
    */
-  reorderTabs(root: string, keys: readonly string[]): void
+  reorderTabs(strip: string, keys: readonly string[]): void
   runShortcut(shortcut: SessionShortcut): void
   runMenuCommand(command: SessionCommand): void
   /** Shows the page shown before the current one, if any. */
@@ -976,13 +992,21 @@ export function openSessionsOf(
   )
 }
 
-/** The name a session shows in the sidebar and on its tab: its saved session's, when it has one. */
+/**
+ * The name a session shows in the sidebar and on its tab: its saved
+ * session's or its chat's, when it has one.
+ */
 export function shownSessionName(
-  state: Pick<AppState, 'savedSessions'>,
+  state: Pick<AppState, 'savedSessions' | 'chats'>,
   session: UiSession,
 ): string {
-  const saved = state.savedSessions.find((candidate) => candidate.id === session.savedSessionId)
-  return saved === undefined ? sessionName(session) : chatName(saved)
+  const record =
+    session.savedSessionId !== null
+      ? state.savedSessions.find((candidate) => candidate.id === session.savedSessionId)
+      : session.chatId !== null
+        ? state.chats.find((candidate) => candidate.id === session.chatId)
+        : undefined
+  return record === undefined ? sessionName(session) : chatName(record)
 }
 
 function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
@@ -995,7 +1019,7 @@ function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
     failure: null,
     unread: false,
     customName: record?.customName ?? null,
-    createdAt: record?.createdAt ?? Date.now(),
+    createdAt: Date.now(),
     closing: false,
   }
 }
@@ -1291,41 +1315,29 @@ export function sessionWorktrees(sessions: readonly UiSession[], projectRoot: st
 }
 
 /**
- * Every session in switch order: the sessions of the projects in sidebar
- * order, those of a worktree in the order of its tabs, then the running
- * chats in the order of the Chats group, which is where chats come in the
- * sidebar. A saved session that is not running is left out, as its page may
- * stay after an unexpected end; its row or its tab opens it.
+ * Every session in switch order, which is the order of the tabs: the
+ * sessions of the projects in sidebar order, those of a worktree in the order
+ * of its tabs, then the chats' sessions in the order of their tabs, as chats
+ * come after the projects in the sidebar.
  */
 export function orderedSessions(
-  state: Pick<
-    AppState,
-    | 'projects'
-    | 'worktrees'
-    | 'knownWorktrees'
-    | 'sessions'
-    | 'savedSessions'
-    | 'chats'
-    | 'tabOrders'
-  >,
-  /** Sessions that are being closed count too, at the place of their chat or their tab. */
-  closing: ReadonlySet<string> = new Set(),
+  state: Pick<AppState, 'projects' | 'worktrees' | 'knownWorktrees' | 'sessions' | 'tabOrders'>,
 ): UiSession[] {
   const sessions = sidebarOrder(
     state.projects,
-    sessionsInSwitchOrder(
-      // No two worktrees have a tab with the same key, as the keys are ids.
-      inTabOrder(
-        state.sessions.filter((session) => session.chatId === null),
-        tabKey,
-        Object.values(state.tabOrders).flat(),
-      ),
-      isSessionRunning,
-      closing,
+    // No two rows have a tab with the same key, as the keys are ids.
+    inTabOrder(
+      state.sessions.filter((session) => session.chatId === null),
+      tabKey,
+      Object.values(state.tabOrders).flat(),
     ),
     (root) => projectWorktreeRows(state, root).map((row) => row.path),
   )
-  const chats = orderedChatSessions(state.chats, state.sessions, isSessionRunning, closing)
+  const chats = inTabOrder(
+    state.sessions.filter((session) => session.chatId !== null),
+    tabKey,
+    state.tabOrders[CHAT_TABS] ?? [],
+  )
   return [...sessions, ...chats]
 }
 
@@ -1479,12 +1491,13 @@ export const useAppStore = create<AppState>()((set, get) => {
   /**
    * Takes the pages of closed sessions, and of the issues of removed
    * projects, out of the window, and the closed sessions with their
-   * terminals; the issue list stays. When the current page is among them, a
-   * closed session gives way to the next session in sidebar order (or the
-   * previous one when there is none after it), which is recorded in the
-   * history; without another session, and for the page of a removed
-   * project's issue, the page of the history's current entry is shown, or
-   * the empty page without one.
+   * terminals and tabs; the issue list stays. When the current page is among
+   * them, a closed session gives way to the next tab in its row (or the
+   * previous one when there is none after it), and once its row has none
+   * left, to the next session in switch order (or the previous one), which
+   * is recorded in the history (see `currentAfterClosing`); without another
+   * session, and for the page of a removed project's issue, the page of the
+   * history's current entry is shown, or the empty page without one.
    */
   const removePages = (
     ids: ReadonlySet<string>,
@@ -1504,10 +1517,9 @@ export const useAppStore = create<AppState>()((set, get) => {
       let history = forget(state.history, gone)
       let currentPage = state.currentPage
       if (currentPage !== null && gone(currentPage)) {
-        const order = orderedSessions(state, ids).map((session) => session.id)
         const next =
           currentPage.kind === 'session'
-            ? currentAfterClosing(order, currentPage.sessionId, ids)
+            ? currentAfterClosing(orderedSessions(state), currentPage.sessionId, ids, tabStrip)
             : null
         if (next !== null) {
           currentPage = sessionPage(next)
@@ -1520,9 +1532,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       for (const id of goneIssues) unsavedChanges.delete(id)
       const draft = state.newIssueDraft
+      const closed = state.sessions.filter((session) => ids.has(session.id))
       return {
         projects: projects ?? state.projects,
         sessions: state.sessions.filter((session) => !ids.has(session.id)),
+        tabOrders: withoutTabs(state.tabOrders, new Set(closed.map(tabKey))),
         currentPage,
         history,
         renamingSessionId: keep(state.renamingSessionId),
@@ -1986,7 +2000,8 @@ export const useAppStore = create<AppState>()((set, get) => {
   /**
    * Adds a session, which is shown at once unless `show` is false; its
    * terminal view starts the process with the size the terminal has on
-   * screen, once it is shown. Returns its id.
+   * screen, once it is shown. `createdAt` is now, unless it continues a
+   * session whose tab it takes the place of. Returns its id.
    */
   const addSession = (
     projectRoot: string,
@@ -1996,6 +2011,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     show = true,
     chat: ChatInfo | null = null,
     saved: SavedSessionInfo | null = null,
+    createdAt = Date.now(),
   ): string => {
     const id = crypto.randomUUID()
     openTerminal(id)
@@ -2020,7 +2036,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           failure: null,
           unread: false,
           customName: saved?.customName ?? chat?.customName ?? null,
-          createdAt: saved?.createdAt ?? Date.now(),
+          createdAt,
           closing: false,
         },
       ],
@@ -2623,7 +2639,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           arrivals.delete(ended.id)
         }, 0)
       }
-      addSession(chat.folder, chat.toolId, null, null, true, chat)
+      // Continuing the chat, it takes the place of the tab of the one that ended.
+      addSession(chat.folder, chat.toolId, null, null, true, chat, null, ended?.createdAt)
     },
 
     resumeChat(chatId) {
@@ -2680,7 +2697,17 @@ export const useAppStore = create<AppState>()((set, get) => {
           arrivals.delete(ended.id)
         }, 0)
       }
-      addSession(saved.projectRoot, saved.toolId, saved.worktreePath, null, true, null, saved)
+      // Continuing the session, it takes the place of the tab of the one that ended.
+      addSession(
+        saved.projectRoot,
+        saved.toolId,
+        saved.worktreePath,
+        null,
+        true,
+        null,
+        saved,
+        ended?.createdAt,
+      )
     },
 
     resumeSavedSession(id) {
@@ -2739,10 +2766,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     closeSavedSession(id) {
-      const running = get().sessions.find(
-        (session) => session.savedSessionId === id && isSessionRunning(session),
-      )
-      if (running) get().requestCloseSession(running.id)
+      const open = get().sessions.find((session) => session.savedSessionId === id)
+      if (open) get().requestCloseSession(open.id)
     },
 
     startRenamingSavedSession(id) {
@@ -2774,10 +2799,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     closeChat(chatId) {
-      const running = get().sessions.find(
-        (session) => session.chatId === chatId && isSessionRunning(session),
-      )
-      if (running) get().requestCloseSession(running.id)
+      const open = get().sessions.find((session) => session.chatId === chatId)
+      if (open) get().requestCloseSession(open.id)
     },
 
     requestDeleteSession(id) {
@@ -2950,8 +2973,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (findSession(id)) showPage(sessionPage(id))
     },
 
-    reorderTabs(root, keys) {
-      set((state) => ({ tabOrders: { ...state.tabOrders, [root]: keys } }))
+    reorderTabs(strip, keys) {
+      set((state) => ({ tabOrders: { ...state.tabOrders, [strip]: keys } }))
     },
 
     runShortcut(shortcut) {

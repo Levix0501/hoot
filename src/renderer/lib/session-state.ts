@@ -1,10 +1,5 @@
 import type { HookEventReport } from '../../shared/hoot-cli'
-import {
-  describeExit,
-  describeExitShort,
-  isClaudeCodeWorkingTitle,
-  type SessionExit,
-} from '../../shared/session'
+import { describeExit, isClaudeCodeWorkingTitle, type SessionExit } from '../../shared/session'
 import type { ToolId } from '../../shared/tools'
 
 /**
@@ -197,17 +192,6 @@ const STATE_NAMES: Record<Exclude<SessionState, 'ended' | 'ended-unexpectedly'>,
 export function stateDescription(state: SessionState, exit: SessionExit | null): string {
   if (state === 'ended' || state === 'ended-unexpectedly') {
     return exit ? describeExit(exit) : 'The session has ended.'
-  }
-  return STATE_NAMES[state]
-}
-
-/**
- * What the session header says right of the light: the name of the
- * session's state, or for a session that ended, how it ended, in a few words.
- */
-export function stateLabel(state: SessionState, exit: SessionExit | null): string {
-  if (state === 'ended' || state === 'ended-unexpectedly') {
-    return exit ? describeExitShort(exit) : 'Ended'
   }
   return STATE_NAMES[state]
 }

@@ -3,7 +3,6 @@ import {
   defaultSessionName,
   describeExit,
   describeAgentOperations,
-  describeExitShort,
   describeQuit,
   describeRunningSessions,
   isClaudeCodeWorkingTitle,
@@ -24,19 +23,16 @@ const exit = (overrides: Partial<SessionExit>): SessionExit => ({
 describe('describeExit', () => {
   it('reports the exit code', () => {
     expect(describeExit(exit({ code: 3 }))).toBe('Process exited with code 3.')
-    expect(describeExitShort(exit({ code: 3 }))).toBe('Exited (3)')
   })
 
   it('reports the terminating signal', () => {
     expect(describeExit(exit({ signal: 'SIGKILL' }))).toBe('Process terminated by signal SIGKILL.')
-    expect(describeExitShort(exit({ signal: 'SIGKILL' }))).toBe('Terminated (SIGKILL)')
   })
 
   it('marks an abnormal end', () => {
     expect(describeExit(exit({ abnormal: true }))).toBe(
       'The terminal host stopped unexpectedly. The session has ended.',
     )
-    expect(describeExitShort(exit({ abnormal: true }))).toBe('Ended unexpectedly')
   })
 })
 

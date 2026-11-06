@@ -11,12 +11,7 @@ import type { Project } from '../../shared/ipc'
 import { isIssueOpen } from '../../shared/issues'
 import { sessionsSummary, sessionState, type SessionsSummary } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import {
-  hasLocalSessions,
-  isSessionRunning,
-  sessionWorktrees,
-  useAppStore,
-} from '../store/app-store'
+import { hasLocalSessions, sessionWorktrees, useAppStore } from '../store/app-store'
 import { isIssuesPage } from '../store/page-history'
 import { worktreeRows, type WorktreeRow } from '../store/worktree-rows'
 import { OpenIssueCount } from './open-issue-count'
@@ -396,11 +391,11 @@ function ChatsGroup() {
   const newChat = useAppStore((state) => state.newChat)
   const expanded = useAppStore((state) => !state.collapsedGroups.has('chats'))
   const setGroupExpanded = useAppStore((state) => state.setGroupExpanded)
-  // The states of the chats whose agents run, the ones their rows show.
+  // The states of the open chats, the ones their rows show.
   const states = useAppStore(
     useShallow((state) =>
       state.sessions
-        .filter((session) => session.chatId !== null && isSessionRunning(session))
+        .filter((session) => session.chatId !== null)
         .map((session) => sessionState(session)),
     ),
   )

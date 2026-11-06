@@ -1,17 +1,12 @@
 import { FolderPlusIcon, PlayIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
-import { chatName } from '../../shared/chats'
-import { describeExit, isNormalExit, sessionName } from '../../shared/session'
-import { sessionState, stateLabel } from '../lib/session-state'
+import { describeExit, isNormalExit } from '../../shared/session'
 import { cn } from '../lib/utils'
 import { useAppStore, type UiSession } from '../store/app-store'
 import { useFilesStore } from '../store/files-store'
 import { FilePanel, FilePanelToggle } from './files/file-panel'
 import { SessionTabs } from './session-tabs'
-import { StateLight } from './state-light'
 import { TerminalView } from './terminal-view'
-import { ToolIcon } from './tool-icon'
 import { useTopRowInset } from './window-navigation'
-import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import {
   Empty,
@@ -22,17 +17,6 @@ import {
   EmptyTitle,
 } from './ui/empty'
 
-/** The light of the session's state, and right of it the state's name or how the session ended. */
-function StatusBadge({ session }: { session: UiSession }) {
-  const state = sessionState(session)
-  return (
-    <Badge variant="secondary" className="gap-1.5" data-testid="session-status" data-state={state}>
-      <StateLight state={state} />
-      {stateLabel(state, session.exit)}
-    </Badge>
-  )
-}
-
 /**
  * A session's page: its header in the window's top row, and its terminal;
  * for a session of a project, also the file panel of its folder, right of
@@ -40,7 +24,6 @@ function StatusBadge({ session }: { session: UiSession }) {
  * the top row's right end.
  */
 export function SessionPane({ session }: { session: UiSession }) {
-  const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const closeSession = useAppStore((state) => state.closeSession)
   const resumeChat = useAppStore((state) => state.resumeChat)
   const resumeSavedSession = useAppStore((state) => state.resumeSavedSession)
@@ -68,9 +51,6 @@ export function SessionPane({ session }: { session: UiSession }) {
     session.status === 'exited' &&
     session.exit !== null &&
     !isNormalExit(session.exit)
-  // The page shows the name of the chat or saved session, which keeps the
-  // last title its agent set when the agent clears the terminal title.
-  const name = record === undefined ? sessionName(session) : chatName(record)
 
   return (
     <div
@@ -84,59 +64,29 @@ export function SessionPane({ session }: { session: UiSession }) {
       <div className="flex min-h-0 min-w-[min(360px,50%)] flex-1 flex-col">
         {/*
         The main area's part of the window's top row: the tabs of the sessions
-        in the session's worktree, or for a chat its name, state and close
-        button. Its blank parts drag the window; the tabs, the name, which
-        shows its full text on hover, and the close button do not. While the
+        open in the session's worktree, or for a chat, of the chats open. Its
+        blank parts drag the window; the tabs and their `+` do not. While the
         sidebar slides, its left padding changes in step, keeping its content
-        clear of the navigation. The tabs and a chat's row keep their content
-        at different distances from its ends, so each has a row of its own:
-        switching between them does not slide the content as well. At its
-        right end it leaves room for the window's buttons on Windows, and for
-        the file panel's button while the panel is hidden; the panel's own
-        part of the row has them while it shows.
+        clear of the navigation. The tabs of a chat leave no room for the file
+        panel's button, which a chat does not have, so each kind of row is a
+        row of its own: switching between them does not slide the row's end
+        as well. At its right end it leaves room for the window's buttons on
+        Windows, and for the file panel's button while the panel is hidden;
+        the panel's own part of the row has them while it shows.
       */}
         <header
-          key={session.chatId === null ? 'tabs' : 'chat'}
+          key={session.chatId === null ? 'tabs' : 'chat-tabs'}
           className={cn(
-            'flex h-11.5 shrink-0 items-center gap-3 transition-[padding] duration-200 ease-linear [app-region:drag]',
+            'flex h-11.5 shrink-0 items-center gap-3 pl-2 transition-[padding] duration-200 ease-linear [app-region:drag]',
             session.chatId !== null
-              ? 'pr-[calc(--spacing(4)+var(--window-controls-width))] pl-4'
+              ? 'pr-(--window-controls-width)'
               : filesShown
-                ? 'pr-0 pl-2'
-                : 'pr-[calc(--spacing(10)+var(--window-controls-width))] pl-2',
+                ? 'pr-0'
+                : 'pr-[calc(--spacing(10)+var(--window-controls-width))]',
           )}
           style={{ paddingLeft: inset }}
         >
-          {session.chatId === null ? (
-            <SessionTabs session={session} />
-          ) : (
-            <>
-              <ToolIcon toolId={session.toolId} className="size-4 shrink-0 text-muted-foreground" />
-              <div className="flex min-w-0 flex-1 text-sm">
-                <span
-                  className="min-w-0 truncate font-medium [app-region:no-drag]"
-                  title={name}
-                  data-session-name=""
-                  data-testid="session-name"
-                >
-                  {name}
-                </span>
-              </div>
-              <StatusBadge session={session} />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="[app-region:no-drag]"
-                disabled={session.closing}
-                onClick={() => requestCloseSession(session.id)}
-                aria-label="Close Session"
-                title="Close Session"
-                data-testid="session-header-close"
-              >
-                <XIcon />
-              </Button>
-            </>
-          )}
+          <SessionTabs session={session} />
         </header>
         <TerminalView key={session.id} sessionId={session.id} />
         {session.status === 'exited' && session.exit && (

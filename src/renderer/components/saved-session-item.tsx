@@ -1,6 +1,8 @@
 import { chatName, type SavedSessionInfo } from '../../shared/chats'
 import { sessionState, stateDescription } from '../lib/session-state'
+import { cn } from '../lib/utils'
 import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-store'
+import { LIGHT_UNDER_CLOSE, ROW_WITH_CLOSE, SessionCloseButton } from './session-close-button'
 import { SavedSessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
@@ -11,17 +13,16 @@ import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
  * A saved session's row below its worktree's, or below its project's Local
  * row: the agent's icon, 12px further in than that row's chevron; the
  * session's name; both smaller than that row's, and the name, unless the row
- * is pointed at or selected, lighter; and while its agent runs, at its right
- * end, the light of its state. Click it to show the session, continuing its
- * conversation when its agent does not run; double-click it or use its
- * context menu to rename it. Its context menu also closes a running one, and
+ * is pointed at or selected, lighter; and while it is open, as its tab shows,
+ * at its right end, the light of its state, which gives way to its close
+ * button while the pointer is on the row. Click it to show the session,
+ * continuing its conversation when it is not open; double-click it or use its
+ * context menu to rename it. Its context menu also closes an open one, and
  * deletes it.
  */
 export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
-  const running = useAppStore((state) =>
-    state.sessions.find(
-      (session) => session.savedSessionId === saved.id && isSessionRunning(session),
-    ),
+  const open = useAppStore((state) =>
+    state.sessions.find((session) => session.savedSessionId === saved.id),
   )
   const current = useAppStore((state) => {
     const id = currentSessionId(state)
@@ -30,10 +31,10 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
       state.sessions.some((entry) => entry.id === id && entry.savedSessionId === saved.id)
     )
   })
-  const open = useAppStore((state) => state.openSavedSession)
+  const openSaved = useAppStore((state) => state.openSavedSession)
   const startRenaming = useAppStore((state) => state.startRenamingSavedSession)
   const name = chatName(saved)
-  const state = running ? sessionState(running) : null
+  const state = open ? sessionState(open) : null
 
   return (
     <ContextMenu>
@@ -42,14 +43,14 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
         data-testid="saved-session-item"
         data-saved-session-id={saved.id}
         data-tool={saved.toolId}
-        data-running={running !== undefined}
+        data-running={open !== undefined && isSessionRunning(open)}
         data-current={current}
       >
         <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className="cursor-default pl-8 text-xs text-sidebar-foreground/70"
-          onClick={() => open(saved.id)}
+          className={cn('cursor-default pl-8 text-xs text-sidebar-foreground/70', ROW_WITH_CLOSE)}
+          onClick={() => openSaved(saved.id)}
           onDoubleClick={() => startRenaming(saved.id)}
           data-testid="saved-session-item-button"
         >
@@ -62,13 +63,26 @@ export function SavedSessionItem({ saved }: { saved: SavedSessionInfo }) {
           >
             {name}
           </span>
-          {running && state !== null && (
+          {open && state !== null && (
             <>
-              <StateLight state={state} testId="saved-session-light" />
-              <span className="sr-only">{stateDescription(state, running.exit)}</span>
+              <StateLight
+                state={state}
+                className={LIGHT_UNDER_CLOSE}
+                testId="saved-session-light"
+              />
+              <span className="sr-only">{stateDescription(state, open.exit)}</span>
             </>
           )}
         </SidebarMenuButton>
+        {open && (
+          // As much smaller as the row's icon.
+          <SessionCloseButton
+            session={open}
+            name={name}
+            className="[&>svg]:size-3.5"
+            testId="saved-session-item-close"
+          />
+        )}
       </ContextMenuTrigger>
       <SavedSessionMenu savedId={saved.id} testId="saved-session-context" />
     </ContextMenu>

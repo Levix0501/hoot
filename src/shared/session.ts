@@ -54,13 +54,6 @@ export function describeExit(exit: SessionExit): string {
   return `Process exited with code ${exit.code ?? 'unknown'}.`
 }
 
-/** How the session ended, in a few words for the session header. */
-export function describeExitShort(exit: SessionExit): string {
-  if (exit.abnormal) return 'Ended unexpectedly'
-  if (exit.signal) return `Terminated (${exit.signal})`
-  return `Exited (${exit.code ?? '?'})`
-}
-
 /**
  * The marks Claude Code puts, followed by a space, before the text of the
  * terminal titles it sets: one while it is idle and two it alternates between

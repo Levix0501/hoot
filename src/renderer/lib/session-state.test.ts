@@ -7,7 +7,6 @@ import {
   sessionsSummary,
   sessionState,
   stateDescription,
-  stateLabel,
   type StateSource,
 } from './session-state'
 
@@ -449,8 +448,8 @@ describe('what a Claude Code session does', () => {
   })
 })
 
-describe('stateDescription and stateLabel', () => {
-  it("name a running session's state, and tell how an ended one ended", () => {
+describe('stateDescription', () => {
+  it("names a running session's state, and tells how an ended one ended", () => {
     const names = {
       starting: 'Starting',
       working: 'Working',
@@ -462,18 +461,14 @@ describe('stateDescription and stateLabel', () => {
     } as const
     for (const [state, name] of Object.entries(names)) {
       expect(stateDescription(state as keyof typeof names, null)).toBe(name)
-      expect(stateLabel(state as keyof typeof names, null)).toBe(name)
     }
     expect(stateDescription('ended', exit({ code: 3 }))).toBe('Process exited with code 3.')
-    expect(stateLabel('ended', exit({ code: 3 }))).toBe('Exited (3)')
     expect(stateDescription('ended', exit({ signal: 'SIGKILL' }))).toBe(
       'Process terminated by signal SIGKILL.',
     )
-    expect(stateLabel('ended', exit({ signal: 'SIGKILL' }))).toBe('Terminated (SIGKILL)')
     expect(stateDescription('ended-unexpectedly', exit({ abnormal: true }))).toBe(
       'The terminal host stopped unexpectedly. The session has ended.',
     )
-    expect(stateLabel('ended-unexpectedly', exit({ abnormal: true }))).toBe('Ended unexpectedly')
   })
 })
 

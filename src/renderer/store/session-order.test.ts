@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHAT_TABS,
   currentAfterClosing,
   inTabOrder,
-  orderedChatSessions,
   relativeSession,
-  sessionsInSwitchOrder,
   sidebarOrder,
   tabKey,
+  tabStrip,
+  withoutTabs,
 } from './session-order'
 
 const project = (root: string) => ({ id: root.charCodeAt(1), root, name: root.slice(1) })
@@ -59,72 +60,39 @@ describe('sidebarOrder with worktrees', () => {
 })
 
 describe('currentAfterClosing', () => {
-  const order = ['s1', 's2', 's3']
+  // Two rows of tabs, `a` and `b`, in switch order.
+  const order = [
+    { id: 'a1', strip: 'a' },
+    { id: 'a2', strip: 'a' },
+    { id: 'a3', strip: 'a' },
+    { id: 'b1', strip: 'b' },
+  ]
+  const after = (current: string, closing: readonly string[]) =>
+    currentAfterClosing(order, current, new Set(closing), (session) => session.strip)
 
   it('keeps the current session when another one closes', () => {
-    expect(currentAfterClosing(order, 's1', new Set(['s2']))).toBe('s1')
+    expect(after('a1', ['a2'])).toBe('a1')
+    expect(currentAfterClosing(order, null, new Set(['a1']), (session) => session.strip)).toBeNull()
   })
 
-  it('moves to the next session, or to the previous one after the last', () => {
-    expect(currentAfterClosing(order, 's2', new Set(['s2']))).toBe('s3')
-    expect(currentAfterClosing(order, 's3', new Set(['s3']))).toBe('s2')
-    expect(currentAfterClosing(['s1'], 's1', new Set(['s1']))).toBeNull()
+  it('moves to the next tab of its row, or to the previous one after the last', () => {
+    expect(after('a2', ['a2'])).toBe('a3')
+    expect(after('a3', ['a3'])).toBe('a2')
   })
 
-  it('skips sessions that close at the same time', () => {
-    expect(currentAfterClosing(['s0', 's1', 's2', 's3'], 's1', new Set(['s1', 's2']))).toBe('s3')
-    expect(currentAfterClosing(['s0', 's1', 's2'], 's1', new Set(['s1', 's2']))).toBe('s0')
-    expect(currentAfterClosing(order, 's1', new Set(order))).toBeNull()
-  })
-})
-
-describe('sessionsInSwitchOrder', () => {
-  it('leaves out a saved session that is not running, and keeps the others', () => {
-    const sessions = [
-      { id: 'plain-ended', savedSessionId: null },
-      { id: 'saved-running', savedSessionId: 'a' },
-      { id: 'saved-ended', savedSessionId: 'b' },
-    ]
-    const running = (session: (typeof sessions)[number]) => session.id === 'saved-running'
-    expect(sessionsInSwitchOrder(sessions, running).map((session) => session.id)).toEqual([
-      'plain-ended',
-      'saved-running',
-    ])
+  it('moves to the next tab of its row past those that close too, before leaving the row', () => {
+    expect(after('a1', ['a1', 'a2'])).toBe('a3')
+    expect(after('a3', ['a2', 'a3'])).toBe('a1')
   })
 
-  it('keeps a closing saved session at its place, so the next one shown is the one after it', () => {
-    const sessions = [
-      { id: 'plain', savedSessionId: null },
-      { id: 'saved-closing', savedSessionId: 'a' },
-      { id: 'saved-ended', savedSessionId: 'b' },
-      { id: 'saved-running', savedSessionId: 'c' },
-    ]
-    const running = (session: (typeof sessions)[number]) => session.id === 'saved-running'
-    const closing = new Set(['saved-closing'])
-    const order = sessionsInSwitchOrder(sessions, running, closing).map((session) => session.id)
-    expect(order).toEqual(['plain', 'saved-closing', 'saved-running'])
-    expect(currentAfterClosing(order, 'saved-closing', closing)).toBe('saved-running')
+  it('moves to another row once its own has no tab left: the next session, else the previous one', () => {
+    expect(after('a1', ['a1', 'a2', 'a3'])).toBe('b1')
+    expect(after('b1', ['b1'])).toBe('a3')
+    expect(after('b1', ['a3', 'b1'])).toBe('a2')
   })
-})
 
-describe('orderedChatSessions', () => {
-  it('puts the running chats in the order of the Chats group, and a closing one at its place', () => {
-    const chats = [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }]
-    const sessions = [
-      { id: 's1', chatId: 'c3' },
-      { id: 's2', chatId: 'c1' },
-      { id: 's3', chatId: 'c2' },
-    ]
-    expect(
-      orderedChatSessions(chats, sessions, (session) => session.id !== 's3').map(
-        (session) => session.id,
-      ),
-    ).toEqual(['s2', 's1'])
-    expect(
-      orderedChatSessions(chats, sessions, () => false, new Set(['s3'])).map(
-        (session) => session.id,
-      ),
-    ).toEqual(['s3'])
+  it('shows none once every session closes', () => {
+    expect(after('a1', ['a1', 'a2', 'a3', 'b1'])).toBeNull()
   })
 })
 
@@ -145,10 +113,34 @@ describe('relativeSession', () => {
   })
 })
 
+describe('tabStrip', () => {
+  it("is the root of a session's worktree, its project's for the project's own folder, and the chats' for a chat", () => {
+    expect(tabStrip({ projectRoot: '/G', worktreePath: '/W/G/a-tree', chatId: null })).toBe(
+      '/W/G/a-tree',
+    )
+    expect(tabStrip({ projectRoot: '/G', worktreePath: null, chatId: null })).toBe('/G')
+    expect(tabStrip({ projectRoot: '/C/c1', worktreePath: null, chatId: 'c1' })).toBe(CHAT_TABS)
+  })
+})
+
 describe('tabKey', () => {
-  it("is a saved session's id for its session, and a session's own id otherwise", () => {
-    expect(tabKey({ id: 's1', savedSessionId: 'v1' })).toBe('v1')
-    expect(tabKey({ id: 's2', savedSessionId: null })).toBe('s2')
+  it("is a saved session's or a chat's id for its session, and a session's own id otherwise", () => {
+    expect(tabKey({ id: 's1', savedSessionId: 'v1', chatId: null })).toBe('v1')
+    expect(tabKey({ id: 's2', savedSessionId: null, chatId: 'c1' })).toBe('c1')
+    expect(tabKey({ id: 's3', savedSessionId: null, chatId: null })).toBe('s3')
+  })
+})
+
+describe('withoutTabs', () => {
+  it('drops the closed tabs from the orders, and the orders left empty', () => {
+    const orders = { '/G': ['a', 'b', 'c'], [CHAT_TABS]: ['c1'] }
+    expect(withoutTabs(orders, new Set(['b', 'c1']))).toEqual({ '/G': ['a', 'c'] })
+  })
+
+  it('gives back the same orders when they have none of the closed tabs', () => {
+    const orders = { '/G': ['a', 'b'] }
+    expect(withoutTabs(orders, new Set(['z']))).toBe(orders)
+    expect(withoutTabs(orders, new Set())).toBe(orders)
   })
 })
 

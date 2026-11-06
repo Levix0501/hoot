@@ -15,22 +15,38 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { PlusIcon, XIcon } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { chatName, type SavedSessionInfo } from '../../shared/chats'
-import { sessionName } from '../../shared/session'
 import type { ToolId } from '../../shared/tools'
 import { sessionState, type SessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
-import { projectWorktreeRows, useAppStore, type AppState, type UiSession } from '../store/app-store'
-import { inTabOrder, tabKey } from '../store/session-order'
+import {
+  focusAfterOverlay,
+  projectWorktreeRows,
+  shownSessionName,
+  useAppStore,
+  type AppState,
+  type UiSession,
+} from '../store/app-store'
+import { inTabOrder, tabKey, tabStrip } from '../store/session-order'
+import { ChatAgentMenuEntries } from './chat-agent-menu'
+import { dropdownMenuParts } from './menu-parts'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
-import { SavedSessionMenu, SessionMenu } from './session-menus'
+import { ChatMenu, SavedSessionMenu, SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
 import { Button } from './ui/button'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /**
  * The corners of a tab and of the `+`: a quarter rounder than `rounded-lg`,
@@ -45,74 +61,39 @@ export const CORNERS = 'rounded-[12.5px] [corner-shape:superellipse(1.5)]'
 export const TAB = `group/tab relative flex h-7 w-full min-w-0 items-center bg-background px-2 ${CORNERS}`
 
 /**
- * A tab's icon, name and light, in a row that leaves room for its close
- * button when it shows; the name is 13px, with the line height of `text-sm`.
+ * A tab's icon, name and light, in a row, which a file's tab ends early to
+ * leave room for its close button when it shows; the name is 13px, with the
+ * line height of `text-sm`.
  */
 export const LABEL =
   'relative flex min-w-0 flex-1 items-center gap-2 text-[13px]/[calc(1.25/0.875)]'
 
 /**
- * The keys of a worktree's tabs (see `tabKey`), or for a `worktreePath` of
- * `null`, of the tabs of the project's own folder, in their order: one for
- * each saved session there, whether its agent runs or not, and one for each
- * other session started there, such as an issue's.
+ * The keys of the tabs of a row (see `tabStrip`), in their order: one for
+ * each session open there, starting, running, or ended while its page stays.
  */
-function worktreeTabs(
-  state: Pick<AppState, 'sessions' | 'savedSessions' | 'tabOrders'>,
-  projectRoot: string,
-  worktreePath: string | null,
-): string[] {
-  // When each tab's saved session or session was made, by its key.
-  const made = new Map<string, number>()
-  for (const saved of state.savedSessions) {
-    if (saved.projectRoot === projectRoot && saved.worktreePath === worktreePath) {
-      made.set(saved.id, saved.createdAt)
-    }
-  }
-  for (const session of state.sessions) {
-    if (
-      session.chatId === null &&
-      session.projectRoot === projectRoot &&
-      session.worktreePath === worktreePath &&
-      !made.has(tabKey(session))
-    ) {
-      made.set(tabKey(session), session.createdAt)
-    }
-  }
+function stripTabs(state: Pick<AppState, 'sessions' | 'tabOrders'>, strip: string): string[] {
   return inTabOrder(
-    [...made].map(([key, createdAt]) => ({ key, createdAt })),
-    (tab) => tab.key,
-    state.tabOrders[worktreePath ?? projectRoot] ?? [],
-  ).map((tab) => tab.key)
+    state.sessions.filter((session) => tabStrip(session) === strip),
+    tabKey,
+    state.tabOrders[strip] ?? [],
+  ).map(tabKey)
 }
 
 /**
- * What a tab stands for, as the store has it: the session it shows, once one
- * was started, and the saved session that session continues, if any. The tab
- * shows the agent's icon, the name of the saved session, which keeps the
+ * What a tab stands for, as the store has it: its session, and the name it
+ * shows, the one of the session's saved session or chat, which keeps the
  * last title its agent set when the agent clears the terminal title, or else
- * the session's, and the light of the session's state while there is one.
+ * the session's.
  */
-function useTab(key: string): {
-  session: UiSession | undefined
-  saved: SavedSessionInfo | undefined
-  toolId: ToolId | undefined
-  name: string
-  state: SessionState | null
-} {
+function useTab(key: string): { session: UiSession | undefined; name: string } {
   const session = useAppStore((state) =>
     state.sessions.find((candidate) => tabKey(candidate) === key),
   )
-  const saved = useAppStore((state) =>
-    state.savedSessions.find((candidate) => candidate.id === key),
+  const name = useAppStore((state) =>
+    session === undefined ? '' : shownSessionName(state, session),
   )
-  return {
-    session,
-    saved,
-    toolId: session?.toolId ?? saved?.toolId,
-    name: saved !== undefined ? chatName(saved) : session !== undefined ? sessionName(session) : '',
-    state: session === undefined ? null : sessionState(session),
-  }
+  return { session, name }
 }
 
 /** The shade of the current tab and of the tab being dragged, and of another under the pointer. */
@@ -130,16 +111,20 @@ export function TabShade({ shaded }: { shaded: boolean }) {
 
 /**
  * A tab's agent icon, its name, which fades out where it is cut off, and the
- * light of its session's state, if it has a session.
+ * light of its session's state. With `closable`, the light gives way to the
+ * tab's close button, which shows in its place, while the pointer is on the
+ * tab or the keyboard focus in it.
  */
 function TabLabel({
   toolId,
   name,
   state,
+  closable = false,
 }: {
   toolId: ToolId
   name: string
-  state: SessionState | null
+  state: SessionState
+  closable?: boolean
 }) {
   const nameRef = useRef<HTMLSpanElement>(null)
 
@@ -168,32 +153,40 @@ function TabLabel({
           {name}
         </span>
       </span>
-      {/* 2px from the name rather than the row's 8px gap, leaving the name more room. */}
-      {state !== null && (
-        <StateLight state={state} className="-ms-1.5" testId="session-tab-light" />
-      )}
+      {/*
+        2px from the name rather than the row's 8px gap, leaving the name more
+        room. It keeps its room while the close button shows over it, so that
+        the name stays as it is.
+      */}
+      <StateLight
+        state={state}
+        className={cn(
+          '-ms-1.5',
+          closable && 'group-hover/tab:invisible group-has-focus-visible/tab:invisible',
+        )}
+        testId="session-tab-light"
+      />
     </>
   )
 }
 
 /**
- * A tab of a worktree, by its key. Pressing the tab of a session shows the
- * session, with the keyboard focus left out of the tab so that the session's
- * terminal takes it; clicking the tab of a saved session whose agent does
- * not run starts the agent, continuing its conversation, as its row in the
- * sidebar does. Moving the pointer 6px while pressing drags the tab instead.
- * A session's close button shows on the current tab, and on another while
- * the pointer is over it; a middle click closes the session too. A double
+ * A tab of a row, by its key. Pressing it shows its session, with the
+ * keyboard focus left out of the tab so that the session's terminal takes
+ * it; moving the pointer 6px while pressing drags the tab instead. Its close
+ * button shows in the place of its light while the pointer is on it, also on
+ * the current tab, and closes its session, as a middle click does too; the
+ * saved session or chat the session continues stays in the sidebar. A double
  * click renames it. Its context menu is the one of its session's row in the
  * sidebar. When `separated`, a thin line sets it off from the next tab.
  */
 function SessionTab({ id, shown, separated }: { id: string; shown: string; separated: boolean }) {
-  const { session, saved, toolId, name, state: light } = useTab(id)
+  const { session, name } = useTab(id)
   const selectSession = useAppStore((state) => state.selectSession)
-  const openSavedSession = useAppStore((state) => state.openSavedSession)
   const requestCloseSession = useAppStore((state) => state.requestCloseSession)
   const startRenaming = useAppStore((state) => state.startRenaming)
   const startRenamingSavedSession = useAppStore((state) => state.startRenamingSavedSession)
+  const startRenamingChat = useAppStore((state) => state.startRenamingChat)
   const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({ id })
   const nodeRef = useRef<HTMLDivElement | null>(null)
   const current = session?.id === shown
@@ -203,7 +196,13 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
     if (current) nodeRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [current])
 
-  if (toolId === undefined) return null
+  if (session === undefined) return null
+  // A saved session or a chat is renamed as its row in the sidebar renames it.
+  const rename = () => {
+    if (session.savedSessionId !== null) startRenamingSavedSession(session.savedSessionId)
+    else if (session.chatId !== null) startRenamingChat(session.chatId)
+    else startRenaming(session.id)
+  }
   return (
     <div
       ref={(node) => {
@@ -220,86 +219,70 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
       style={{ transform: CSS.Translate.toString(transform), transition }}
       data-testid="session-tab"
       data-tab-key={id}
-      data-session-id={session?.id}
+      data-session-id={session.id}
       data-current={current}
     >
       <ContextMenu>
         <ContextMenuTrigger
-          className={cn(TAB, session?.closing === true && 'opacity-60')}
+          className={cn(TAB, session.closing && 'opacity-60')}
           {...listeners}
           onMouseDown={(event) => {
             if (event.button === 1) event.preventDefault()
             if (event.button !== 0) return
             event.preventDefault()
-            if (session !== undefined) selectSession(session.id)
-          }}
-          // On a click rather than a press, which may begin a drag instead.
-          onClick={() => {
-            if (session === undefined && saved !== undefined) openSavedSession(saved.id)
+            selectSession(session.id)
           }}
           onAuxClick={(event) => {
-            if (event.button !== 1 || session === undefined) return
+            if (event.button !== 1) return
             event.preventDefault()
             requestCloseSession(session.id)
           }}
-          // A saved session is renamed as its row in the sidebar renames it.
-          onDoubleClick={() => {
-            if (saved !== undefined) startRenamingSavedSession(saved.id)
-            else if (session !== undefined) startRenaming(session.id)
-          }}
+          onDoubleClick={rename}
         >
           <TabShade shaded={current} />
           <div
             role="tab"
             aria-selected={current}
-            className={cn(
-              LABEL,
-              current ? 'pe-5 text-foreground' : 'text-foreground/70',
-              !current && session !== undefined && 'group-hover/tab:pe-5',
-            )}
+            className={cn(LABEL, current ? 'text-foreground' : 'text-foreground/70')}
           >
-            <TabLabel toolId={toolId} name={name} state={light} />
+            <TabLabel toolId={session.toolId} name={name} state={sessionState(session)} closable />
           </div>
-          {session !== undefined && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              // It shows and hides at once, as the light moves aside for it at
-              // once: fading out, it would stay over the light for a moment.
-              // Under the pointer, it takes the accent, out to its edges, and
-              // keeps its color.
-              className={cn(
-                'absolute inset-y-0 end-1 my-auto size-5 rounded-[10px] bg-clip-border text-foreground transition-none [corner-shape:superellipse(1.5)] hover:bg-accent dark:hover:bg-accent',
-                !current &&
-                  'pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
-              )}
-              disabled={session.closing}
-              // Pressing it neither shows nor drags the tab, and leaves the
-              // keyboard focus where it is.
-              onPointerDown={(event) => event.stopPropagation()}
-              onMouseDown={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-              }}
-              onDoubleClick={(event) => event.stopPropagation()}
-              onClick={() => requestCloseSession(session.id)}
-              aria-label="Close Session"
-              data-testid="session-tab-close"
-            >
-              {/*
-                A 7.3px cross of 0.93px strokes: 1.77 of its 24 units at this
-                size. Its strokes are drawn in the text's color and then dimmed
-                to half as a whole, so that they do not add up where they cross.
-              */}
-              <XIcon className="size-[12.67px] opacity-50" strokeWidth={1.77} />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            // Centered where the light is, it shows and hides at once, as the
+            // light does: fading, the two would show at the same time for a
+            // moment. Under the pointer, it takes the accent, out to its
+            // edges, and keeps its color.
+            className="pointer-events-none absolute inset-y-0 end-1 my-auto size-5 rounded-[10px] bg-clip-border text-foreground opacity-0 transition-none [corner-shape:superellipse(1.5)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 dark:hover:bg-accent"
+            disabled={session.closing}
+            // Pressing it neither shows nor drags the tab, and leaves the
+            // keyboard focus where it is.
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={() => requestCloseSession(session.id)}
+            aria-label="Close Session"
+            data-testid="session-tab-close"
+          >
+            {/*
+              A 7.3px cross of 0.93px strokes: 1.77 of its 24 units at this
+              size. Its strokes are drawn in the text's color and then dimmed
+              to half as a whole, so that they do not add up where they cross.
+            */}
+            <XIcon className="size-[12.67px] opacity-50" strokeWidth={1.77} />
+          </Button>
         </ContextMenuTrigger>
-        {saved !== undefined ? (
-          <SavedSessionMenu savedId={saved.id} testId="session-tab-context" />
-        ) : session !== undefined ? (
+        {session.savedSessionId !== null ? (
+          <SavedSessionMenu savedId={session.savedSessionId} testId="session-tab-context" />
+        ) : session.chatId !== null ? (
+          <ChatMenu chatId={session.chatId} testId="session-tab-context" />
+        ) : (
           <SessionMenu session={session} testId="session-tab-context" />
-        ) : null}
+        )}
       </ContextMenu>
       <div
         aria-hidden
@@ -315,16 +298,14 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
 
 /** The copy of a tab that follows the pointer while the tab is dragged, shaded. */
 function DraggedTab({ id, shown }: { id: string; shown: string }) {
-  const { session, toolId, name, state } = useTab(id)
-  if (toolId === undefined) return null
+  const { session, name } = useTab(id)
+  if (session === undefined) return null
   return (
     <div className="flex h-full items-center pe-1" data-testid="session-tab-dragged">
       <div className={TAB}>
         <TabShade shaded />
-        <div
-          className={cn(LABEL, session?.id === shown ? 'text-foreground' : 'text-foreground/70')}
-        >
-          <TabLabel toolId={toolId} name={name} state={state} />
+        <div className={cn(LABEL, session.id === shown ? 'text-foreground' : 'text-foreground/70')}>
+          <TabLabel toolId={session.toolId} name={name} state={sessionState(session)} />
         </div>
       </div>
     </div>
@@ -332,30 +313,93 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
 }
 
 /**
- * The tabs of a session's worktree, or of its project's own folder, for the
- * main area's top row: one for each saved session there, whether its agent
- * runs or not, and one for each other session started there; in the order
- * its sessions switch in, which dragging a tab changes. The session shown has
- * the current tab. The tab of a saved session whose agent does not run has
- * no light, as its row in the sidebar has none, and its agent starts only
- * once the tab is clicked. A thin line sets off two tabs next to each other
- * when neither is the current one. Right after the last tab, unless the
- * worktree or the project folder is missing, a `+` starts another session
- * there, or opens the system's terminal there, as the `+` on its row in the
- * sidebar does; while the tabs do not fit, they scroll, and the `+` stays at
- * the end of the row. The tabs fade out toward an end of the row while more
- * of them lie beyond it.
+ * The `+` after the tabs, which opens its menu; a menu's trigger renders it,
+ * with its props merged in.
+ */
+function NewTabButton({
+  label,
+  testId,
+  ...props
+}: ComponentProps<typeof Button> & { label: string; testId: string }) {
+  return (
+    <Button
+      {...props}
+      variant="ghost"
+      size="icon-sm"
+      // Its shade, out to its edges, comes and goes at once, as a tab's
+      // does: the accent under the pointer, which leaves its icon's color
+      // alone, and the current tab's shade while its menu is open.
+      className={`${CORNERS} bg-clip-border text-foreground transition-none [app-region:no-drag] hover:bg-accent aria-expanded:bg-secondary dark:hover:bg-accent dark:aria-expanded:bg-secondary`}
+      aria-label={label}
+      data-testid={testId}
+    />
+  )
+}
+
+/**
+ * The icon of the `+` after the tabs: an 11px plus of 1.05px strokes, 1.48 of
+ * its 24 units at this size, dimmed to half as a whole like the close
+ * buttons' cross, and at full strength while its menu is open.
+ */
+function NewTabIcon() {
+  return (
+    <PlusIcon
+      className="size-[17px] opacity-50 group-aria-expanded/button:opacity-100"
+      strokeWidth={1.48}
+    />
+  )
+}
+
+/**
+ * The `+` after the chats' tabs, drawn as `render` with `children` in it:
+ * its menu lists the agents a chat can start with, as the right-click menu
+ * of the Chats title does, and one of them starts a new chat.
+ */
+function NewChatButton({ render, children }: { render: ReactElement; children: ReactNode }) {
+  const newChat = useAppStore((state) => state.newChat)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={render}>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
+        <ChatAgentMenuEntries
+          components={dropdownMenuParts}
+          onSelect={(toolId) => void newChat(toolId)}
+          testId="session-tabs-chat-agent"
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/**
+ * The row of tabs of a session, for the main area's top row: the tabs of the
+ * sessions open in its worktree or its project's own folder, or for a chat,
+ * those of the chats open; in the order its sessions switch in, which
+ * dragging a tab changes. The session shown has the current tab. A saved
+ * session or chat that is not open has no tab: clicking its row in the
+ * sidebar opens it again, with its tab last. A thin line sets off two tabs
+ * next to each other when neither is the current one. Right after the last
+ * tab comes a `+`: for a worktree or the project's folder, unless it is
+ * missing, one that starts another session there, or opens the system's
+ * terminal there, as the `+` on its row in the sidebar does; for a chat, one
+ * that starts a new chat with the agent picked from its menu. While the tabs
+ * do not fit, they scroll, and the `+` stays at the end of the row. The tabs
+ * fade out toward an end of the row while more of them lie beyond it.
  */
 export function SessionTabs({ session }: { session: UiSession }) {
   const { projectRoot, worktreePath } = session
-  const keys = useAppStore(useShallow((state) => worktreeTabs(state, projectRoot, worktreePath)))
+  const chat = session.chatId !== null
+  const strip = tabStrip(session)
+  const keys = useAppStore(useShallow((state) => stripTabs(state, strip)))
   const currentKey = tabKey(session)
   const listRef = useRef<HTMLDivElement>(null)
   const missing = useAppStore((state) =>
-    worktreePath === null
-      ? state.projectFolders[projectRoot]?.missing === true
-      : (projectWorktreeRows(state, projectRoot).find((row) => row.path === worktreePath)
-          ?.missing ?? true),
+    chat
+      ? false
+      : worktreePath === null
+        ? state.projectFolders[projectRoot]?.missing === true
+        : (projectWorktreeRows(state, projectRoot).find((row) => row.path === worktreePath)
+            ?.missing ?? true),
   )
   const reorderTabs = useAppStore((state) => state.reorderTabs)
   const [dragged, setDragged] = useState<string | null>(null)
@@ -397,9 +441,7 @@ export function SessionTabs({ session }: { session: UiSession }) {
     if (over === null || active.id === over.id) return
     const from = keys.indexOf(String(active.id))
     const to = keys.indexOf(String(over.id))
-    if (from !== -1 && to !== -1) {
-      reorderTabs(worktreePath ?? projectRoot, arrayMove(keys, from, to))
-    }
+    if (from !== -1 && to !== -1) reorderTabs(strip, arrayMove(keys, from, to))
   }
 
   return (
@@ -450,34 +492,22 @@ export function SessionTabs({ session }: { session: UiSession }) {
         </div>
         {!missing && (
           <div className="flex shrink-0 items-center">
-            <NewWorktreeSessionButton
-              projectRoot={projectRoot}
-              worktreePath={worktreePath}
-              testId="session-tabs-agent"
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  // Its shade, out to its edges, comes and goes at once, as a
-                  // tab's does: the accent under the pointer, which leaves its
-                  // icon's color alone, and the current tab's shade while its
-                  // menu is open.
-                  className={`${CORNERS} bg-clip-border text-foreground transition-none [app-region:no-drag] hover:bg-accent aria-expanded:bg-secondary dark:hover:bg-accent dark:aria-expanded:bg-secondary`}
-                  aria-label="New Session"
-                  data-testid="session-tabs-new-session"
-                />
-              }
-            >
-              {/*
-                An 11px plus of 1.05px strokes: 1.48 of its 24 units at this
-                size, dimmed to half as a whole like the close buttons' cross,
-                and at full strength while its menu is open.
-              */}
-              <PlusIcon
-                className="size-[17px] opacity-50 group-aria-expanded/button:opacity-100"
-                strokeWidth={1.48}
-              />
-            </NewWorktreeSessionButton>
+            {chat ? (
+              <NewChatButton
+                render={<NewTabButton label="New Chat" testId="session-tabs-new-chat" />}
+              >
+                <NewTabIcon />
+              </NewChatButton>
+            ) : (
+              <NewWorktreeSessionButton
+                projectRoot={projectRoot}
+                worktreePath={worktreePath}
+                testId="session-tabs-agent"
+                render={<NewTabButton label="New Session" testId="session-tabs-new-session" />}
+              >
+                <NewTabIcon />
+              </NewWorktreeSessionButton>
+            )}
           </div>
         )}
       </div>

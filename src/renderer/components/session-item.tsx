@@ -2,6 +2,7 @@ import { sessionName } from '../../shared/session'
 import { currentSessionId, useAppStore, type UiSession } from '../store/app-store'
 import { sessionState, stateDescription } from '../lib/session-state'
 import { cn } from '../lib/utils'
+import { LIGHT_UNDER_CLOSE, ROW_WITH_CLOSE, SessionCloseButton } from './session-close-button'
 import { SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
 import { ToolIcon } from './tool-icon'
@@ -13,9 +14,10 @@ import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
  * its project's own folder, below its project's Local row: the tool's icon,
  * 12px further in than that row's chevron; the session's name; both smaller
  * than that row's, and the name, unless the row is pointed at or selected,
- * lighter; and, at its right end, the light of the session's state. Click it
- * to show the session, and double-click it or use its context menu to rename
- * it in a dialog; close it from its context menu.
+ * lighter; and, at its right end, the light of the session's state, which
+ * gives way to its close button while the pointer is on the row. Click it to
+ * show the session, and double-click it or use its context menu to rename it
+ * in a dialog; close it with its close button or from its context menu.
  */
 export function SessionItem({ session }: { session: UiSession }) {
   const current = useAppStore((state) => currentSessionId(state) === session.id)
@@ -39,7 +41,7 @@ export function SessionItem({ session }: { session: UiSession }) {
         <SidebarMenuButton
           render={<button type="button" />}
           isActive={current}
-          className="cursor-default pl-8 text-xs text-sidebar-foreground/70"
+          className={cn('cursor-default pl-8 text-xs text-sidebar-foreground/70', ROW_WITH_CLOSE)}
           onClick={() => selectSession(session.id)}
           onDoubleClick={() => startRenaming(session.id)}
           data-testid="session-item-button"
@@ -53,9 +55,16 @@ export function SessionItem({ session }: { session: UiSession }) {
           >
             {name}
           </span>
-          <StateLight state={state} testId="session-light" />
+          <StateLight state={state} className={LIGHT_UNDER_CLOSE} testId="session-light" />
           <span className="sr-only">{stateDescription(state, session.exit)}</span>
         </SidebarMenuButton>
+        {/* As much smaller as the row's icon. */}
+        <SessionCloseButton
+          session={session}
+          name={name}
+          className="[&>svg]:size-3.5"
+          testId="session-item-close"
+        />
       </ContextMenuTrigger>
       <SessionMenu session={session} testId="session-context" />
     </ContextMenu>

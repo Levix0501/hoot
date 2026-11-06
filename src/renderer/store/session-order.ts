@@ -34,59 +34,27 @@ export function sidebarOrder<T extends { projectRoot: string; worktreePath: stri
 }
 
 /**
- * The sessions of the switch order among those given: a saved session that is
- * not running is left out, as its page may stay after an unexpected end with
- * its Resume button, which the shortcuts do not show; every other session
- * stays, as a session of a project does after it ended. A session that is
- * being closed stays too, at its place: end it at its place as a chat does,
- * so that the session shown next is the one after it.
+ * The session shown once the sessions in `closing` are closed: the current
+ * one if it stays; otherwise the first remaining tab after it in its row of
+ * tabs, else the last remaining one before it there; once its row has no tab
+ * left, the first remaining session after it in switch order, else the last
+ * remaining one before it; otherwise none. `strip` gives the row of a
+ * session's tab (see `tabStrip`).
  */
-export function sessionsInSwitchOrder<T extends { id: string; savedSessionId: string | null }>(
-  sessions: readonly T[],
-  running: (session: T) => boolean,
-  closing: ReadonlySet<string> = new Set(),
-): T[] {
-  return sessions.filter(
-    (session) => session.savedSessionId === null || running(session) || closing.has(session.id),
-  )
-}
-
-/**
- * The sessions of running chats, in the order of the Chats group, which comes
- * after the projects in the sidebar and in the switch order. A session that
- * is being closed counts too, at the place of its chat.
- */
-export function orderedChatSessions<T extends { id: string; chatId: string | null }>(
-  chats: readonly { id: string }[],
-  sessions: readonly T[],
-  running: (session: T) => boolean,
-  closing: ReadonlySet<string> = new Set(),
-): T[] {
-  return chats.flatMap((chat) => {
-    const session = sessions.find(
-      (candidate) =>
-        candidate.chatId === chat.id && (running(candidate) || closing.has(candidate.id)),
-    )
-    return session === undefined ? [] : [session]
-  })
-}
-
-/**
- * The session shown once the sessions in `closing` are closed: the current one
- * if it stays, otherwise the first remaining session after it in sidebar order,
- * otherwise the last remaining one before it, otherwise none.
- */
-export function currentAfterClosing(
-  order: readonly string[],
+export function currentAfterClosing<T extends { id: string }>(
+  order: readonly T[],
   current: string | null,
   closing: ReadonlySet<string>,
+  strip: (session: T) => string,
 ): string | null {
   if (current === null || !closing.has(current)) return current
-  const index = order.indexOf(current)
-  const after = order.slice(index + 1).find((id) => !closing.has(id))
-  if (after !== undefined) return after
-  const before = order.slice(0, Math.max(index, 0)).findLast((id) => !closing.has(id))
-  return before ?? null
+  const index = order.findIndex((session) => session.id === current)
+  const row = index === -1 ? null : strip(order[index]!)
+  const stays = (session: T) => !closing.has(session.id)
+  const after = order.slice(index + 1).filter(stays)
+  const before = order.slice(0, Math.max(index, 0)).filter(stays)
+  const inRow = (session: T) => strip(session) === row
+  return (after.find(inRow) ?? before.findLast(inRow) ?? after[0] ?? before.at(-1))?.id ?? null
 }
 
 /**
@@ -105,16 +73,57 @@ export function relativeSession(
 }
 
 /**
- * The key of a session's tab: the id of its saved session, whose tab stays
- * while its agent does not run, or else its own id.
+ * The key in `tabOrders` of the chats' row of tabs, which no folder's root
+ * is: the roots of projects and worktrees are absolute paths.
  */
-export function tabKey(session: { id: string; savedSessionId: string | null }): string {
-  return session.savedSessionId ?? session.id
+export const CHAT_TABS = 'chats'
+
+/**
+ * The row of tabs a session's tab is in, by its key in `tabOrders`: for a
+ * chat's session the chats' (`CHAT_TABS`), otherwise the root of the
+ * worktree the session runs in, which for the project's own folder is the
+ * project's root.
+ */
+export function tabStrip(session: {
+  projectRoot: string
+  worktreePath: string | null
+  chatId: string | null
+}): string {
+  return session.chatId === null ? (session.worktreePath ?? session.projectRoot) : CHAT_TABS
+}
+
+/**
+ * The key of a session's tab: the id of its saved session or chat, which
+ * the session that continues it after an unexpected end keeps, or else its
+ * own id.
+ */
+export function tabKey(session: {
+  id: string
+  savedSessionId: string | null
+  chatId: string | null
+}): string {
+  return session.savedSessionId ?? session.chatId ?? session.id
+}
+
+/**
+ * The orders tabs were dragged into without the tabs of `closed`, by their
+ * keys, so that a tab opened again comes last, as a new one does; the same
+ * object when it has none of them.
+ */
+export function withoutTabs(
+  orders: Readonly<Record<string, readonly string[]>>,
+  closed: ReadonlySet<string>,
+): Readonly<Record<string, readonly string[]>> {
+  const kept = Object.entries(orders).map(
+    ([strip, order]) => [strip, order.filter((key) => !closed.has(key))] as const,
+  )
+  if (kept.every(([strip, order]) => order.length === orders[strip]!.length)) return orders
+  return Object.fromEntries(kept.filter(([, order]) => order.length > 0))
 }
 
 /**
  * Tabs, or the sessions of tabs, in the order of the tabs: first those whose
- * keys `order` has, in its order, which is the order a worktree's tabs were
+ * keys `order` has, in its order, which is the order a row of tabs was
  * dragged into; then the others in the order they were made, so that a new
  * tab comes last.
  */

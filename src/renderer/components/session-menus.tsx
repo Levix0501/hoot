@@ -1,10 +1,5 @@
 import { PencilIcon, Trash2Icon, XIcon } from 'lucide-react'
-import {
-  focusAfterOverlay,
-  isSessionRunning,
-  useAppStore,
-  type UiSession,
-} from '../store/app-store'
+import { focusAfterOverlay, useAppStore, type UiSession } from '../store/app-store'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 
 /**
@@ -24,14 +19,13 @@ const SESSION_MENU_CLASS = 'w-auto min-w-36 [app-region:no-drag]'
 
 /**
  * The context menu of a saved session, the same on its row in the sidebar
- * and on its tab: Rename…, Close while its agent runs, and Delete, whether or
- * not it runs. `testId` is the prefix of the items' test ids.
+ * and on its tab: Rename…, Close while it is open, as its close button
+ * closes it, and Delete, whether or not it is open. `testId` is the prefix of
+ * the items' test ids.
  */
 export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId: string }) {
-  const running = useAppStore((state) =>
-    state.sessions.find(
-      (session) => session.savedSessionId === savedId && isSessionRunning(session),
-    ),
+  const open = useAppStore((state) =>
+    state.sessions.find((session) => session.savedSessionId === savedId),
   )
   const startRenaming = useAppStore((state) => state.startRenamingSavedSession)
   const close = useAppStore((state) => state.closeSavedSession)
@@ -49,10 +43,10 @@ export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId:
         Rename…
       </ContextMenuItem>
       <ContextMenuSeparator />
-      {running && (
+      {open && (
         <ContextMenuItem
           variant="destructive"
-          disabled={running.closing}
+          disabled={open.closing}
           onClick={() => close(savedId)}
           data-testid={`${testId}-close`}
         >
@@ -73,19 +67,19 @@ export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId:
 }
 
 /**
- * The context menu of a chat's row in the sidebar: Rename…, Close while its
- * agent runs, and Delete, whether or not it runs.
+ * The context menu of a chat, the same on its row in the sidebar and on its
+ * tab: Rename…, Close while it is open, as its close button closes it, and
+ * Delete, whether or not it is open. `testId` is the prefix of the items'
+ * test ids.
  */
 export function ChatMenu({ chatId, testId }: { chatId: string; testId: string }) {
-  const running = useAppStore((state) =>
-    state.sessions.find((session) => session.chatId === chatId && isSessionRunning(session)),
-  )
+  const open = useAppStore((state) => state.sessions.find((session) => session.chatId === chatId))
   const startRenaming = useAppStore((state) => state.startRenamingChat)
   const close = useAppStore((state) => state.closeChat)
   const requestDelete = useAppStore((state) => state.requestDeleteSession)
   return (
     <ContextMenuContent
-      className="w-auto min-w-36"
+      className={SESSION_MENU_CLASS}
       finalFocus={focusAfterSessionMenu(() => {
         const state = useAppStore.getState()
         return state.renamingChatId === chatId || state.sessionDeletion === chatId
@@ -96,10 +90,10 @@ export function ChatMenu({ chatId, testId }: { chatId: string; testId: string })
         Rename…
       </ContextMenuItem>
       <ContextMenuSeparator />
-      {running && (
+      {open && (
         <ContextMenuItem
           variant="destructive"
-          disabled={running.closing}
+          disabled={open.closing}
           onClick={() => close(chatId)}
           data-testid={`${testId}-close`}
         >

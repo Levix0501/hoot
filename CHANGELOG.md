@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.24
+
+### Patch Changes
+
+- [`7576204`](https://github.com/Levix0501/hoot/commit/7576204b586eb2818189a1841ad18886e5ba12cd) - Terminal in New Session ▸ and the `+` menus now opens a terminal tab inside Hoot, running your default shell in the worktree or project folder, instead of opening the system's terminal.
+
 ## 0.1.0-alpha.23
 
 ### Patch Changes

@@ -28,7 +28,6 @@ import {
   type LabelChangeResult,
   type NewIssueDependency,
   type NewLabelRequest,
-  type OpenTerminalResult,
   type SessionStartAnswer,
   type StartSessionRequest,
   type StartSessionResult,
@@ -104,7 +103,7 @@ export interface IpcDependencies {
   sidebar: SidebarStateStore
   /** Whether the file panel is shown, and how wide its parts are. */
   filePanel: FilePanelStore
-  /** Which folders the file panel may read and write files in, and Terminal open in. */
+  /** Which folders the file panel may read and write files in. */
   folderAccess: FolderAccess
   /** The entries the file panel follows: its open files and expanded folders. */
   fileWatcher: FileWatcher
@@ -122,11 +121,6 @@ export interface IpcDependencies {
   sessionStarts: SessionStartRequests
   /** What adding a folder as a project takes: nothing, or a first commit after a confirmation. */
   inspectProjectFolder(directory: string): Promise<AddProjectInspection>
-  /**
-   * Opens the system's terminal in a folder: Terminal on macOS, the default
-   * terminal application on Windows. Rejects with what went wrong.
-   */
-  openTerminal(folder: string): Promise<void>
   /** Runs `git init` in a folder, or makes the first commit of a repository without one. */
   initializeProject(
     folder: string,
@@ -1114,21 +1108,6 @@ export function registerIpc(deps: IpcDependencies): void {
     void panelEntryLocation(args).then((location) => {
       if (location !== null) clipboard.writeText(location)
     })
-  })
-
-  // Terminal opens only in a folder the file panel may show: a project's own
-  // folder, or one of the project's worktrees.
-  handle(IpcChannel.openTerminal, async (_event, ...args): Promise<OpenTerminalResult> => {
-    const parsed = z.tuple([...panelFolder]).safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-    const folder = await deps.folderAccess.folder(...parsed.data)
-    if (folder === null) return { ok: false, message: notShown }
-    try {
-      await deps.openTerminal(folder)
-      return { ok: true }
-    } catch (error) {
-      return { ok: false, message: errorMessage(error) }
-    }
   })
 
   const noIssue = 'The issue no longer exists.'

@@ -48,7 +48,6 @@ import { LaunchSettingsStore } from './settings/launch-settings-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { defaultShell } from './tools/default-shell'
 import { findCommand } from './tools/find-command'
-import { openSystemTerminal } from './tools/system-terminal'
 import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
 import { WorkflowExecutor } from './workflows/workflow-executor'
@@ -483,7 +482,6 @@ function startWithDatabase(database: DatabaseSync): void {
     projectFolders: folders,
     workflows,
     sessionStarts,
-    openTerminal: (folder) => openSystemTerminal(folder, shell, baseEnv),
     inspectProjectFolder: async (directory) => {
       try {
         return await inspectAddProject(directory, await projectGit())

@@ -275,7 +275,7 @@ export class SessionManager extends EventEmitter<{
    * Passes on an event of a hook of a running Claude Code or Codex session,
    * or of the plugin Hoot gives a running OpenCode session, in order with its
    * output: from what the session wrote before the event was reported, and
-   * before what it writes after. A Shell session's are none: an OpenCode
+   * before what it writes after. A Terminal session's are none: an OpenCode
    * started there is not Hoot's.
    */
   reportHookEvent(id: string, report: HookEventReport): void {

@@ -344,7 +344,7 @@ describe('the plugin Hoot gives OpenCode', () => {
     expect(window.listening()).toBe(false)
   })
 
-  it('does nothing in an OpenCode Hoot did not start, as one in a Shell session or a terminal', () => {
+  it('does nothing in an OpenCode Hoot did not start, as one in a Terminal session or another terminal', () => {
     const record = path.join(root, 'unreported.json')
     inSession(record)
     vi.stubEnv(HOOT_ENV.openCodePlugin, undefined)

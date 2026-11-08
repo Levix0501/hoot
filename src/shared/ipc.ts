@@ -149,9 +149,6 @@ export type CreateSavedSessionResult =
 /** Whether a chat or saved session was deleted, or why not. */
 export type DeleteChatResult = { ok: true } | { ok: false; message: string }
 
-/** Whether the system's terminal was asked to open in a folder, or why not. */
-export type OpenTerminalResult = { ok: true } | { ok: false; message: string }
-
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
 
@@ -343,7 +340,6 @@ export const IpcChannel = {
   projectFolderChanged: 'project-folders:changed',
   revealProjectFolder: 'project-folders:reveal',
   copyProjectFolderPath: 'project-folders:copy-path',
-  openTerminal: 'terminal:open',
   listFolder: 'files:list-folder',
   readFile: 'files:read',
   writeFile: 'files:write',
@@ -675,13 +671,6 @@ export interface HootApi {
   revealProjectFolder(projectRoot: string): void
   /** Puts the path of a project's own folder on the clipboard. */
   copyProjectFolderPath(projectRoot: string): void
-  /**
-   * Opens the system's terminal in a worktree of a project, or with `null`
-   * for the worktree, in the project's own folder: Terminal on macOS, and on
-   * Windows the default terminal application, running the shell that Shell
-   * sessions run.
-   */
-  openTerminal(projectRoot: string, worktreePath: string | null): Promise<OpenTerminalResult>
   /**
    * The entries of a folder in a file panel's folder, by its path from that
    * folder (`''` for the folder itself, else ending with `/`); see

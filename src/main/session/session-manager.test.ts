@@ -267,7 +267,7 @@ describe('SessionManager', () => {
     manager.reportHookEvent('c2', report('Stop'))
     manager.reportHookEvent('x1', report('UserPromptSubmit'))
     manager.reportHookEvent('o1', report('UserPromptSubmit'))
-    // A Shell session has none, as its OpenCode is not Hoot's, and only a
+    // A Terminal session has none, as its OpenCode is not Hoot's, and only a
     // running session reports them.
     manager.reportHookEvent('s1', report('UserPromptSubmit'))
     manager.reportHookEvent('s1', report('Stop'))

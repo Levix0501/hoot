@@ -7,7 +7,7 @@ describe('tools', () => {
       ['claude', 'Claude Code', 'claude'],
       ['codex', 'Codex', 'codex'],
       ['opencode', 'OpenCode', 'opencode'],
-      ['shell', 'Shell', null],
+      ['shell', 'Terminal', null],
     ])
   })
 

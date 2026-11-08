@@ -53,7 +53,7 @@ export const TOOLS: readonly ToolDefinition[] = [
   },
   {
     id: 'shell',
-    label: 'Shell',
+    label: 'Terminal',
     command: null,
     npmPackage: null,
     installCommand: null,

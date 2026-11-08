@@ -50,8 +50,8 @@ function LockNote({ worktree }: { worktree: WorktreeRow }) {
 
 /**
  * What a worktree's `⋯` menu and its context menu hold, the same in both: the
- * agents to start a session with in the worktree, and Terminal, which opens
- * the system's terminal in it; New Worktree…, which opens the New Worktree
+ * agents to start a session with in the worktree, and Terminal, which starts
+ * a Terminal session in it; New Worktree…, which opens the New Worktree
  * dialog for a worktree made from this one; the agents to merge it with into
  * the branch checked out in the project folder, which the item names (only
  * "Merge" while the folder is on no branch); Reveal in Finder (File Explorer
@@ -194,8 +194,7 @@ function WorktreeMenuEntries({
  * Pointing at it, or moving the keyboard focus into it, shows its `⋯` button
  * in the light's place, which opens the same menu as a right click, and right
  * of it, unless the worktree is missing, its `+`, whose menu starts a session
- * in the worktree with the agent chosen, or opens the system's terminal in
- * it.
+ * in the worktree with the agent chosen, or a Terminal session.
  */
 export function WorktreeItem({
   projectRoot,

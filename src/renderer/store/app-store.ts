@@ -529,10 +529,12 @@ export interface AppState {
     toolId?: CodingToolId,
   ): Promise<void>
   /**
-   * Opens the system's terminal in a worktree, or with `null` for the
-   * worktree, in the project's own folder, or says why it cannot.
+   * Starts a Terminal session in a worktree, or with `null` for the worktree,
+   * in the project's own folder, and shows it: the user's default shell, with
+   * a tab there as an agent's session has. Hoot does not keep it, so it is
+   * gone once closed; one that cannot start says why and goes.
    */
-  openTerminal(projectRoot: string, worktreePath: string | null): Promise<void>
+  newTerminalSession(projectRoot: string, worktreePath: string | null): void
   /** Opens a saved session the New Worktree dialog made, showing its page. */
   openCreatedSession(session: SavedSessionInfo): void
   /**
@@ -2741,11 +2743,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       get().openSavedSession(result.session.id)
     },
 
-    async openTerminal(projectRoot, worktreePath) {
-      const result = await api
-        .openTerminal(projectRoot, worktreePath)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-      if (!result.ok) toast.error('Could not open Terminal.', { description: result.message })
+    newTerminalSession(projectRoot, worktreePath) {
+      addSession(projectRoot, 'shell', worktreePath)
     },
 
     mergeWorktree(projectRoot, worktreePath, toolId) {

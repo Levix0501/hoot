@@ -24,7 +24,7 @@ import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
 /**
  * What a project's Local row's `⋯` menu and its context menu hold, the same
  * in both: the agents to start a session with in the project's own folder,
- * and Terminal, which opens the system's terminal in it; Reveal in Finder
+ * and Terminal, which starts a Terminal session in it; Reveal in Finder
  * (File Explorer on Windows) and Copy Path, as a worktree's menus hold them.
  * There is no Delete: the folder is the project's, and the row goes once its
  * sessions do.

@@ -6,7 +6,10 @@ import { resolveLoginShellEnv } from '../env/login-shell-env'
 import { findCommand } from './find-command'
 
 export interface ToolServiceOptions {
-  /** The program of the shell Shell sessions run, whose login environment is read outside Windows. */
+  /**
+   * The program of the shell Terminal sessions run, whose login environment
+   * is read outside Windows.
+   */
   shell: string
   baseEnv: Env
   cwd: string

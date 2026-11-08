@@ -43,7 +43,7 @@ export const HOOT_ENV = {
   /**
    * `1` in an OpenCode session Hoot starts, and in no other session, for the
    * plugin Hoot gives OpenCode there: run by any other OpenCode, as one
-   * started in a Shell session, it reports nothing.
+   * started in a Terminal session, it reports nothing.
    */
   openCodePlugin: 'HOOT_OPENCODE_PLUGIN',
 } as const

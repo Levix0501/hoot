@@ -24,7 +24,7 @@ import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
 import { SessionError, type SessionLaunch } from './session-manager'
 
 export interface LaunchContext {
-  /** The shell that Shell sessions run, and its arguments (see `defaultShell`). */
+  /** The shell that Terminal sessions run, and its arguments (see `defaultShell`). */
   shell: SessionShell
   /** The graphical login session environment Hoot started with. */
   baseEnv: Env
@@ -268,7 +268,7 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
 
 /**
  * Decides what a session runs in its working directory (the project root, or
- * the root of one of the project's worktrees). A Shell session runs the
+ * the root of one of the project's worktrees). A Terminal session runs the
  * default shell with its arguments, as a login shell outside Windows,
  * starting from the same environment a terminal opened from the Dock or the
  * Start menu would give it. A coding tool runs its command directly, the one

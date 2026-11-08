@@ -75,7 +75,7 @@ describe('defaultSessionName', () => {
     expect(defaultSessionName('claude', '')).toBe('Claude Code')
     expect(defaultSessionName('claude', '✳ ')).toBe('Claude Code')
     expect(defaultSessionName('opencode', '')).toBe('OpenCode')
-    expect(defaultSessionName('shell', '')).toBe('Shell')
+    expect(defaultSessionName('shell', '')).toBe('Terminal')
   })
 
   it('keeps the titles of other tools as they are', () => {

@@ -35,7 +35,7 @@ const isCommand = (command: string) => (found: string | null | undefined) =>
 // it reads the login shell environment; on Windows it takes the environment
 // Hoot started with instead (see the test of Windows).
 describe('ToolService', () => {
-  it('checks each tool against the login shell PATH; Shell is always available', async () => {
+  it('checks each tool against the login shell PATH; Terminal is always available', async () => {
     const service = new ToolService({
       shell: '/bin/zsh',
       baseEnv: { PATH: '/usr/bin' },

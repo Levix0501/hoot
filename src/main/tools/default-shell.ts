@@ -4,21 +4,21 @@ import path from 'node:path'
 import { envVariable, type Env } from '../env/env'
 import { pathFolders } from './find-command'
 
-/** The shell that Shell sessions run: its program, and the arguments it starts with. */
+/** The shell that Terminal sessions run: its program, and the arguments it starts with. */
 export interface SessionShell {
   file: string
   args: string[]
 }
 
 /**
- * The shell that Shell sessions run. Outside Windows, the user's default
+ * The shell that Terminal sessions run. Outside Windows, the user's default
  * shell, as a login shell: the one SHELL names, or else the one of the user's
  * account, or else zsh, or else sh. Windows names no shell of the user's, so
  * there it is PowerShell, which VS Code also runs by default: the first
  * PowerShell 7 on PATH, or else the Windows PowerShell that comes with
  * Windows, both without their banner. SHELL is left aside there, where only
- * Git Bash sets it, so that Shell sessions run the same shell however Hoot
- * was started.
+ * Git Bash sets it, so that Terminal sessions run the same shell however
+ * Hoot was started.
  */
 export function defaultShell(env: Env, platform: NodeJS.Platform = process.platform): SessionShell {
   if (platform === 'win32') {

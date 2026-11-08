@@ -380,8 +380,8 @@ function NewChatButton({ render, children }: { render: ReactElement; children: R
  * sidebar opens it again, with its tab last. A thin line sets off two tabs
  * next to each other when neither is the current one. Right after the last
  * tab comes a `+`: for a worktree or the project's folder, unless it is
- * missing, one that starts another session there, or opens the system's
- * terminal there, as the `+` on its row in the sidebar does; for a chat, one
+ * missing, one that starts another session there, of an agent or a Terminal
+ * session, as the `+` on its row in the sidebar does; for a chat, one
  * that starts a new chat with the agent picked from its menu. While the tabs
  * do not fit, they scroll, and the `+` stays at the end of the row. The tabs
  * fade out toward an end of the row while more of them lie beyond it.

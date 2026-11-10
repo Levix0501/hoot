@@ -516,11 +516,17 @@ function NewWorktreeForm({
         { ...choice, manual: false } satisfies NestedChoice,
       ]),
     )
-    // Advanced opens by itself while a base branch cannot be told, to be picked.
+    // Advanced opens by itself while a base branch cannot be told, to be picked,
+    // and stays open if the user opened it while the options loaded.
     const undecided =
       initial.base === null ||
       Object.values(nested).some((choice) => choice.included && choice.base === null)
-    setChoices({ from: options, base: initial.base, nested, advancedOpen: undecided })
+    setChoices({
+      from: options,
+      base: initial.base,
+      nested,
+      advancedOpen: choices.advancedOpen || undecided,
+    })
   }
   const { base, nested, advancedOpen } = choices
   const setAdvancedOpen = (open: boolean) =>

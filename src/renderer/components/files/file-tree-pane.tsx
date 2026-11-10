@@ -63,9 +63,9 @@ function folderName(root: string): string {
  * it in the preview tab; a double click, or Enter, opens it in a tab of its
  * own. A right click opens the menu of the entry under the pointer, or of the
  * folder itself on no entry: Reveal in Finder (File Explorer on Windows) and
- * Copy Path.
+ * Copy Path. It is as wide as the session's page says (`--file-tree-width`).
  */
-export function FileTreePane({ folder, width }: { folder: PanelFolder; width: number }) {
+export function FileTreePane({ folder }: { folder: PanelFolder }) {
   const tree = folderTree(folder)
   const openFile = useFilesStore((state) => state.openFile)
   const [menuEntry, setMenuEntry] = useState('')
@@ -79,7 +79,10 @@ export function FileTreePane({ folder, width }: { folder: PanelFolder; width: nu
   }
 
   return (
-    <div className="flex h-full shrink-0 flex-col" style={{ width }} data-testid="file-tree-pane">
+    <div
+      className="flex h-full w-(--file-tree-width) shrink-0 flex-col"
+      data-testid="file-tree-pane"
+    >
       {/* The panel's part of the window's top row, which drags the window. */}
       <div className="flex h-11.5 shrink-0 items-center ps-3 pe-[calc(--spacing(12)+var(--window-controls-width))] [app-region:drag]">
         <span

@@ -107,10 +107,10 @@ export interface FilesState {
   setLayout(layout: FilePanelLayout): void
   setPanelOpen(open: boolean): void
   togglePanel(): void
-  /** Sets the tree's width, and saves it unless `persist` is false, as while its edge is dragged. */
-  setTreeWidth(width: number, persist?: boolean): void
-  /** Sets the open files' width, and saves it unless `persist` is false. */
-  setEditorWidth(width: number, persist?: boolean): void
+  /** Sets the tree's width, and saves it. */
+  setTreeWidth(width: number): void
+  /** Sets the open files' width, and saves it. */
+  setEditorWidth(width: number): void
   setResizing(resizing: boolean): void
   /** Notes the folder whose panel is on screen, or `null` once none is, and looks at its files again. */
   showFolder(folder: PanelFolder | null): void
@@ -597,20 +597,18 @@ export const useFilesStore = create<FilesState>()((set, get) => {
       get().setPanelOpen(!get().layout.open)
     },
 
-    setTreeWidth(width, persist = true) {
+    setTreeWidth(width) {
       const within = fileTreeWidthWithin(width)
-      if (within !== get().layout.treeWidth) {
-        set((state) => ({ layout: { ...state.layout, treeWidth: within } }))
-      }
-      if (persist) api.setFileTreeWidth(within)
+      if (within === get().layout.treeWidth) return
+      set((state) => ({ layout: { ...state.layout, treeWidth: within } }))
+      api.setFileTreeWidth(within)
     },
 
-    setEditorWidth(width, persist = true) {
+    setEditorWidth(width) {
       const within = fileEditorWidthWithin(width)
-      if (within !== get().layout.editorWidth) {
-        set((state) => ({ layout: { ...state.layout, editorWidth: within } }))
-      }
-      if (persist) api.setFileEditorWidth(within)
+      if (within === get().layout.editorWidth) return
+      set((state) => ({ layout: { ...state.layout, editorWidth: within } }))
+      api.setFileEditorWidth(within)
     },
 
     setResizing(resizing) {

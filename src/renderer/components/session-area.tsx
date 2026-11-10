@@ -1,4 +1,6 @@
 import { FolderPlusIcon, PlayIcon, SquareTerminalIcon, XIcon } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { TERMINAL_MIN_WIDTH } from '../../shared/file-panel'
 import { describeExit, isNormalExit } from '../../shared/session'
 import { cn } from '../lib/utils'
 import { useAppStore, type UiSession } from '../store/app-store'
@@ -39,6 +41,12 @@ export function SessionPane({ session }: { session: UiSession }) {
   )
   const inset = useTopRowInset()
   const filePanelOpen = useFilesStore((state) => state.layout.open)
+  const { treeWidth, editorWidth } = useFilesStore(
+    useShallow((state) => ({
+      treeWidth: state.layout.treeWidth,
+      editorWidth: state.layout.editorWidth,
+    })),
+  )
   // A chat runs in a folder of its own, which has no file panel.
   const hasFiles = session.chatId === null
   const filesShown = hasFiles && filePanelOpen
@@ -55,13 +63,25 @@ export function SessionPane({ session }: { session: UiSession }) {
   return (
     <div
       className="relative flex min-h-0 flex-1"
+      // The widths of the file panel's parts, which dragging its edges sets
+      // here directly while the panel follows the pointer.
+      style={
+        {
+          '--file-tree-width': `${treeWidth}px`,
+          '--file-editor-width': `${editorWidth}px`,
+        } as React.CSSProperties
+      }
+      data-session-page=""
       data-testid="session"
       data-session-id={session.id}
       data-status={session.status}
       data-tool={session.toolId}
     >
       {/* Narrowed by the file panel no further than this, or half the page in a narrow window. */}
-      <div className="flex min-h-0 min-w-[min(360px,50%)] flex-1 flex-col">
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        style={{ minWidth: `min(${TERMINAL_MIN_WIDTH}px, 50%)` }}
+      >
         {/*
         The main area's part of the window's top row: the tabs of the sessions
         open in the session's worktree, or for a chat, of the chats open. Its

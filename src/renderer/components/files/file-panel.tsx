@@ -10,8 +10,13 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import { useShallow } from 'zustand/react/shallow'
-import { FILE_EDITOR_WIDTH, FILE_TREE_WIDTH } from '../../../shared/file-panel'
+import {
+  FILE_EDITOR_WIDTH,
+  FILE_TREE_WIDTH,
+  draggedPanelEdge,
+  draggedTreeEdge,
+  type FilePanelWidths,
+} from '../../../shared/file-panel'
 import { entryName, folderKey, type PanelFolder } from '../../../shared/files'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
@@ -58,53 +63,87 @@ function formatSize(bytes: number): string {
   return `${size.toFixed(1)} ${units[unit]}`
 }
 
+/** The panel's edges: its left edge, and the line between its open files and its tree. */
+type PanelEdge = 'panel' | 'tree'
+
 /**
  * Follows the pointer that pressed one of the panel's edges until it is let
- * go of: `resize` gets how far it moved left from where it was pressed, and
- * `done` follows once it is let go of. While the edge is held, the pointer
- * shows the resize cursor wherever it is, nothing is selected, and the
- * terminal keeps its size until the edge is let go of.
+ * go of. The widths `dragged` gives the panel's parts, for the pointer at `x`
+ * having pressed the edge at `startX` in a session's page `pageWidth` wide,
+ * are set on the page directly, so the panel follows the pointer without
+ * being rendered again, and saved when the pointer is let go of. The edge is
+ * held for as long as the pointer is down: its line shows, the resize cursor
+ * shows wherever the pointer is, nothing is selected, and the terminal keeps
+ * its size until the edge is let go of.
  */
 function dragEdge(
   down: ReactPointerEvent<HTMLElement>,
-  resize: (movedLeft: number) => void,
-  done: () => void,
+  edge: PanelEdge,
+  dragged: (startX: number, x: number, pageWidth: number) => FilePanelWidths,
 ): void {
+  const handle = down.currentTarget
+  // The session's page, whose style holds the widths of the panel's parts.
+  const page = handle.closest<HTMLElement>('[data-session-page]')
+  if (!page) return
   const { pointerId, clientX: startX } = down
-  down.currentTarget.setPointerCapture(pointerId)
+  // The pointer's events keep coming to the edge wherever the pointer goes.
+  handle.setPointerCapture(pointerId)
+  const pageWidth = page.getBoundingClientRect().width
   const store = useFilesStore.getState
-  store().setResizing(true)
-  document.documentElement.dataset.filePanelResizing = ''
+
+  // The widths the pointer gives the panel's parts, from when it first moves.
+  let widths: FilePanelWidths | null = null
+
   const onMove = (event: PointerEvent) => {
-    if (event.pointerId === pointerId) resize(startX - event.clientX)
+    if (event.pointerId !== pointerId) return
+    widths = dragged(startX, event.clientX, pageWidth)
+    page.style.setProperty('--file-tree-width', `${widths.treeWidth}px`)
+    page.style.setProperty('--file-editor-width', `${widths.editorWidth}px`)
   }
+
   const onUp = (event: PointerEvent) => {
     if (event.pointerId !== pointerId) return
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
+    if (widths !== null) {
+      store().setTreeWidth(widths.treeWidth)
+      store().setEditorWidth(widths.editorWidth)
+    }
     delete document.documentElement.dataset.filePanelResizing
     store().setResizing(false)
-    done()
   }
+
+  // Names the edge held, whose line shows (see `HELD_EDGE_LINE`).
+  document.documentElement.dataset.filePanelResizing = edge
+  store().setResizing(true)
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onUp)
 }
 
+/** For each of the panel's edges, the classes that show its line while it is held. */
+const HELD_EDGE_LINE: Record<PanelEdge, string> = {
+  panel: 'in-data-[file-panel-resizing=panel]:opacity-100',
+  tree: 'in-data-[file-panel-resizing=tree]:opacity-100',
+}
+
 /**
  * An edge of the panel's parts, below the window's top row: dragging it
- * resizes them, and a double click gives them their default widths back. It
- * reaches 8 pixels either side of the line it sits on, which a line covers
- * while the pointer is on it or drags it, as on the sidebar's edge.
+ * resizes them (see {@link dragEdge}), and a double click gives them their
+ * default widths back. It reaches 8 pixels either side of the line it sits
+ * on, which a line covers while the pointer is on it or the edge is held, as
+ * on the sidebar's edge.
  */
 function ResizeEdge({
+  edge,
   label,
   className,
   onPointerDown,
   onReset,
   testId,
 }: {
+  edge: PanelEdge
   label: string
   className: string
   onPointerDown(event: ReactPointerEvent<HTMLElement>): void
@@ -127,7 +166,12 @@ function ResizeEdge({
       onDoubleClick={onReset}
       data-testid={testId}
     >
-      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-linear-to-b from-transparent via-foreground/25 to-transparent opacity-0 group-hover/resize:opacity-100 group-active/resize:opacity-100" />
+      <div
+        className={cn(
+          'pointer-events-none absolute inset-y-0 left-1/2 w-px bg-linear-to-b from-transparent via-foreground/25 to-transparent opacity-0 group-hover/resize:opacity-100',
+          HELD_EDGE_LINE[edge],
+        )}
+      />
     </div>
   )
 }
@@ -560,12 +604,6 @@ export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
   const key = folderKey(folder)
   const showFolder = useFilesStore((state) => state.showFolder)
   const hasTabs = useFilesStore((state) => (state.folders[key]?.tabs.length ?? 0) > 0)
-  const { treeWidth, editorWidth } = useFilesStore(
-    useShallow((state) => ({
-      treeWidth: state.layout.treeWidth,
-      editorWidth: state.layout.editorWidth,
-    })),
-  )
   const editorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -573,52 +611,46 @@ export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
     return () => showFolder(null)
   }, [folder, showFolder])
 
-  /** How wide the open files are now, which may be less than their width in a narrow window. */
-  const shownEditorWidth = () => editorRef.current?.getBoundingClientRect().width ?? editorWidth
   const store = useFilesStore.getState
 
+  /** How wide the panel's parts show: in a narrow window, the open files may be narrower than their width. */
+  const shownWidths = (): FilePanelWidths => {
+    const { treeWidth, editorWidth } = store().layout
+    const editor = editorRef.current
+    return {
+      treeWidth,
+      editorWidth: editor === null ? editorWidth : Math.round(editor.getBoundingClientRect().width),
+    }
+  }
+
   const dragPanelEdge = (down: ReactPointerEvent<HTMLElement>) => {
-    const startTree = treeWidth
-    const startEditor = shownEditorWidth()
-    dragEdge(
-      down,
-      (moved) => {
-        if (hasTabs) store().setEditorWidth(startEditor + moved, false)
-        else store().setTreeWidth(startTree + moved, false)
-      },
-      () => {
-        if (hasTabs) store().setEditorWidth(store().layout.editorWidth)
-        else store().setTreeWidth(store().layout.treeWidth)
-      },
+    const start = shownWidths()
+    dragEdge(down, 'panel', (startX, x, pageWidth) =>
+      draggedPanelEdge(start, hasTabs, startX, x, pageWidth),
     )
   }
 
   const dragTreeEdge = (down: ReactPointerEvent<HTMLElement>) => {
-    const startTree = treeWidth
-    const startEditor = shownEditorWidth()
-    dragEdge(
-      down,
-      (moved) => {
-        store().setTreeWidth(startTree + moved, false)
-        store().setEditorWidth(startEditor - (store().layout.treeWidth - startTree), false)
-      },
-      () => {
-        store().setTreeWidth(store().layout.treeWidth)
-        store().setEditorWidth(store().layout.editorWidth)
-      },
-    )
+    const start = shownWidths()
+    dragEdge(down, 'tree', (startX, x, pageWidth) => draggedTreeEdge(start, startX, x, pageWidth))
   }
 
   return (
     <EditProvider createEditor={createEditor}>
       <div
         className="relative flex h-full min-w-0 shrink border-l"
-        // Their widths, and the lines at the panel's left edge and between them.
-        style={{ width: hasTabs ? editorWidth + 1 + treeWidth + 1 : treeWidth + 1 }}
+        // Their widths, which the session's page holds, and the lines at the
+        // panel's left edge and between them.
+        style={{
+          width: hasTabs
+            ? 'calc(var(--file-editor-width) + var(--file-tree-width) + 2px)'
+            : 'calc(var(--file-tree-width) + 1px)',
+        }}
         data-file-panel=""
         data-testid="file-panel"
       >
         <ResizeEdge
+          edge="panel"
           label="Resize file panel"
           className="-left-2"
           onPointerDown={dragPanelEdge}
@@ -636,6 +668,7 @@ export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
             </div>
             <div className="relative w-px shrink-0 bg-border">
               <ResizeEdge
+                edge="tree"
                 label="Resize file tree"
                 className="-left-2"
                 onPointerDown={dragTreeEdge}
@@ -645,7 +678,7 @@ export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
             </div>
           </>
         )}
-        <FileTreePane folder={folder} width={treeWidth} />
+        <FileTreePane folder={folder} />
       </div>
     </EditProvider>
   )

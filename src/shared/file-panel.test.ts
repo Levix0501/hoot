@@ -27,24 +27,44 @@ describe('draggedPanelEdge', () => {
   })
 
   it("stops at the limits of the open files' width", () => {
-    expect(draggedPanelEdge(start, true, 500, 600, 1000).editorWidth).toBe(240)
-    expect(draggedPanelEdge(start, true, 500, -3000, 4000).editorWidth).toBe(1600)
+    expect(draggedPanelEdge(start, true, 500, 600, 1000)?.editorWidth).toBe(240)
+    expect(draggedPanelEdge(start, true, 500, -3000, 4000)?.editorWidth).toBe(1600)
   })
 
   it("stops at the limits of the tree's width", () => {
-    expect(draggedPanelEdge(start, false, 500, 600, 1000).treeWidth).toBe(200)
-    expect(draggedPanelEdge(start, false, 500, 0, 1000).treeWidth).toBe(480)
+    expect(draggedPanelEdge(start, false, 500, 600, 1000)?.treeWidth).toBe(200)
+    expect(draggedPanelEdge(start, false, 500, 0, 1000)?.treeWidth).toBe(480)
   })
 
   it('leaves the terminal 360 pixels of the page, or half of a narrow one', () => {
-    expect(draggedPanelEdge(start, true, 500, 300, 1000).editorWidth).toBe(388)
-    expect(draggedPanelEdge(start, true, 500, 0, 1000).editorWidth).toBe(388)
+    expect(draggedPanelEdge(start, true, 500, 300, 1000)?.editorWidth).toBe(388)
+    expect(draggedPanelEdge(start, true, 500, 0, 1000)?.editorWidth).toBe(388)
     // 600 pixels: the terminal keeps 300, and the tree gets up to 299 beside the panel's line.
-    expect(draggedPanelEdge(start, false, 500, 0, 600).treeWidth).toBe(299)
+    expect(draggedPanelEdge(start, false, 500, 0, 600)?.treeWidth).toBe(299)
   })
 
   it('never makes a part narrower than its narrowest width, even in a page too narrow for it', () => {
-    expect(draggedPanelEdge(start, true, 500, 450, 700).editorWidth).toBe(240)
+    expect(draggedPanelEdge(start, true, 500, 450, 700)?.editorWidth).toBe(240)
+  })
+
+  it('hides the panel once the open files get narrower than 120, half their narrowest width', () => {
+    expect(draggedPanelEdge(start, true, 500, 681, 1000)).toBeNull()
+    expect(draggedPanelEdge(start, true, 500, 2000, 1000)).toBeNull()
+    expect(draggedPanelEdge(start, true, 500, 680, 1000)?.editorWidth).toBe(240)
+  })
+
+  it('hides the panel only once open files shown narrower than 240 are dragged 120 pixels right', () => {
+    // 725 pixels leave the panel 365, of which the open files show 113.
+    const narrow = { treeWidth: 250, editorWidth: 113 }
+    expect(draggedPanelEdge(narrow, true, 500, 505, 725)?.editorWidth).toBe(240)
+    expect(draggedPanelEdge(narrow, true, 500, 495, 725)?.editorWidth).toBe(240)
+    expect(draggedPanelEdge(narrow, true, 500, 620, 725)?.editorWidth).toBe(240)
+    expect(draggedPanelEdge(narrow, true, 500, 621, 725)).toBeNull()
+  })
+
+  it('hides the panel once the tree gets narrower than 100 while no file is open', () => {
+    expect(draggedPanelEdge(start, false, 500, 651, 1000)).toBeNull()
+    expect(draggedPanelEdge(start, false, 500, 650, 1000)?.treeWidth).toBe(200)
   })
 })
 

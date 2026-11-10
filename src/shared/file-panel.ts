@@ -53,9 +53,10 @@ function panelRoom(pageWidth: number): number {
 /**
  * The widths the file panel's parts take when the panel's left edge, grabbed
  * at `startX` while they were `start` wide, is dragged to `x` in a session's
- * page `pageWidth` wide. The edge resizes the open files or, while none is
- * open (`filesOpen` false), the tree: within its limits, and narrow enough to
- * leave the terminal its narrowest width.
+ * page `pageWidth` wide; `null` when the panel hides there. The edge resizes
+ * the open files or, while none is open (`filesOpen` false), the tree: within
+ * its limits, and narrow enough to leave the terminal its narrowest width.
+ * Dragged narrower than half its narrowest width, the part hides the panel.
  */
 export function draggedPanelEdge(
   start: FilePanelWidths,
@@ -63,9 +64,14 @@ export function draggedPanelEdge(
   startX: number,
   x: number,
   pageWidth: number,
-): FilePanelWidths {
+): FilePanelWidths | null {
   const limits = filesOpen ? FILE_EDITOR_WIDTH : FILE_TREE_WIDTH
-  const width = (filesOpen ? start.editorWidth : start.treeWidth) + startX - x
+  const startWidth = filesOpen ? start.editorWidth : start.treeWidth
+  // A part shown narrower than its narrowest width, as the open files are in
+  // a page too narrow for them, hides the panel only once dragged as far as
+  // from that width, not as soon as the edge moves.
+  if (Math.max(startWidth, limits.min) + startX - x < limits.min / 2) return null
+  const width = startWidth + startX - x
   // The rest of the panel: the tree and the lines left of it and of the open
   // files, or the line at the panel's left edge alone.
   const rest = filesOpen ? start.treeWidth + 2 : 1

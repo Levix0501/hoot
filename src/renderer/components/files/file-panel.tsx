@@ -71,18 +71,21 @@ type PanelEdge = 'panel' | 'tree'
  * go of. The widths `dragged` gives the panel's parts, for the pointer at `x`
  * having pressed the edge at `startX` in a session's page `pageWidth` wide,
  * are set on the page directly, so the panel follows the pointer without
- * being rendered again, and saved when the pointer is let go of. The edge is
- * held for as long as the pointer is down: its line shows, the resize cursor
- * shows wherever the pointer is, nothing is selected, and the terminal keeps
- * its size until the edge is let go of.
+ * being rendered again, and saved when the pointer is let go of. Where
+ * `dragged` gives none, the panel hides, as when it is toggled, and keeps the
+ * widths it had before; brought back, it shows again and follows the
+ * pointer. The edge is held for as long as the pointer is down: its line
+ * shows, the resize cursor shows wherever the pointer is, nothing is
+ * selected, and the terminal keeps its size until the edge is let go of.
  */
 function dragEdge(
   down: ReactPointerEvent<HTMLElement>,
   edge: PanelEdge,
-  dragged: (startX: number, x: number, pageWidth: number) => FilePanelWidths,
+  dragged: (startX: number, x: number, pageWidth: number) => FilePanelWidths | null,
 ): void {
   const handle = down.currentTarget
-  // The session's page, whose style holds the widths of the panel's parts.
+  // The session's page, whose style holds the widths of the panel's parts,
+  // and which stays while the panel hides.
   const page = handle.closest<HTMLElement>('[data-session-page]')
   if (!page) return
   const { pointerId, clientX: startX } = down
@@ -90,15 +93,33 @@ function dragEdge(
   handle.setPointerCapture(pointerId)
   const pageWidth = page.getBoundingClientRect().width
   const store = useFilesStore.getState
+  const show = ({ treeWidth, editorWidth }: FilePanelWidths) => {
+    page.style.setProperty('--file-tree-width', `${treeWidth}px`)
+    page.style.setProperty('--file-editor-width', `${editorWidth}px`)
+  }
 
   // The widths the pointer gives the panel's parts, from when it first moves.
   let widths: FilePanelWidths | null = null
+  // Whether the pointer has hidden the panel.
+  let hidden = false
 
   const onMove = (event: PointerEvent) => {
     if (event.pointerId !== pointerId) return
-    widths = dragged(startX, event.clientX, pageWidth)
-    page.style.setProperty('--file-tree-width', `${widths.treeWidth}px`)
-    page.style.setProperty('--file-editor-width', `${widths.editorWidth}px`)
+    const next = dragged(startX, event.clientX, pageWidth)
+    if (next === null) {
+      if (hidden) return
+      hidden = true
+      // The edge goes with the panel; the page, which stays, gets the pointer's events.
+      page.setPointerCapture(pointerId)
+      store().setPanelOpen(false)
+      return
+    }
+    widths = next
+    show(next)
+    if (hidden) {
+      hidden = false
+      store().setPanelOpen(true)
+    }
   }
 
   const onUp = (event: PointerEvent) => {
@@ -106,7 +127,10 @@ function dragEdge(
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
-    if (widths !== null) {
+    if (hidden) {
+      // The widths the panel had, which it shows with again.
+      show(store().layout)
+    } else if (widths !== null) {
       store().setTreeWidth(widths.treeWidth)
       store().setEditorWidth(widths.editorWidth)
     }
@@ -595,9 +619,10 @@ function OpenFiles({ folder }: { folder: PanelFolder }) {
  * The file panel of a session's folder, right of the terminal: the folder's
  * tree at the window's right edge and, once a file is open, the open files
  * left of it. Dragging the panel's left edge resizes the open files (the
- * tree, while no file is open); dragging the line between them moves it,
- * resizing the tree. The panel narrows, its open files first, to leave the
- * terminal room beside it.
+ * tree, while no file is open), and past half their narrowest width hides the
+ * panel, as the sidebar's edge does the sidebar; dragging the line between
+ * them moves it, resizing the tree. The panel narrows, its open files first,
+ * to leave the terminal room beside it.
  */
 export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
   const folder = useMemo(() => ({ projectRoot, worktreePath }), [projectRoot, worktreePath])

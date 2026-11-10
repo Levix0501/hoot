@@ -18,6 +18,9 @@ import { getTool, type CodingToolId } from '../../shared/tools'
 import {
   defaultNestedBase,
   initialWorktreeChoices,
+  nestedRepositoryTree,
+  repositoriesIn,
+  type NestedRepositoryNode,
   type NestedRepositoryOption,
   type NewWorktreeOptions,
   type NewWorktreeOptionsResult,
@@ -287,44 +290,108 @@ function ProjectPicker({
   )
 }
 
+/**
+ * The look of a checkbox in its mixed state, which a folder's shows while
+ * only some of its repositories are included: filled as when it is checked,
+ * with a dash in place of the tick. base-nova's Checkbox has no look of its own
+ * for it. The fill switches with the tick instead of fading around it.
+ */
+const TREE_CHECKBOX = cn(
+  'transition-none',
+  'data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:text-primary-foreground dark:data-indeterminate:bg-primary',
+  'data-indeterminate:[&_svg]:hidden data-indeterminate:before:absolute data-indeterminate:before:h-0.5 data-indeterminate:before:w-2 data-indeterminate:before:rounded-full data-indeterminate:before:bg-current',
+)
+
+/** How far a row of the tree of inner repositories is in: under the name of the row it is under. */
+const TREE_INDENT_REM = 1.5
+
+/**
+ * The checkbox state of repositories, which a checkbox that includes them all
+ * at once shows: checked while all of those with commits are included, mixed
+ * while only some are, unchecked while none are.
+ */
+function inclusionOf(
+  repositories: readonly NestedRepositoryOption[],
+  nested: Record<string, NestedChoice>,
+) {
+  const includable = repositories.filter((repository) => repository.hasCommits)
+  const included = includable.filter(
+    (repository) => nested[repository.relativePath]?.included,
+  ).length
+  return {
+    includable,
+    checked: includable.length > 0 && included === includable.length,
+    indeterminate: included > 0 && included < includable.length,
+  }
+}
+
+/** The rows of the tree of inner repositories, top to bottom, each with how far in it is. */
+function treeRows(
+  nodes: readonly NestedRepositoryNode[],
+  depth: number,
+): Array<{ node: NestedRepositoryNode; depth: number }> {
+  return nodes.flatMap((node) => [{ node, depth }, ...treeRows(node.children, depth + 1)])
+}
+
+/**
+ * A row of the tree of inner repositories: a repository, with its base
+ * branch, or a folder of several. Its checkbox includes, or leaves out, every
+ * repository with commits that the row holds: its own, if any, and those
+ * under it.
+ */
 function NestedRepositoryRow({
-  repository,
-  choice,
+  node,
+  depth,
+  nested,
   disabled,
-  onChange,
+  onInclude,
+  onBaseChange,
 }: {
-  repository: NestedRepositoryOption
-  choice: NestedChoice
+  node: NestedRepositoryNode
+  /** How many rows it is under, counting the list's own checkbox. */
+  depth: number
+  nested: Record<string, NestedChoice>
   disabled: boolean
-  onChange: (change: Partial<NestedChoice>) => void
+  onInclude: (repositories: readonly NestedRepositoryOption[], included: boolean) => void
+  onBaseChange: (repository: NestedRepositoryOption, base: string | null) => void
 }) {
-  const id = `nested-${repository.relativePath}`
+  const { repository } = node
+  const id = `nested-${node.relativePath}`
+  const { includable, checked, indeterminate } = inclusionOf(repositoriesIn(node), nested)
+  const choice = repository === null ? null : nested[repository.relativePath]!
   return (
     <li
-      className="grid grid-cols-[minmax(0,1fr)_minmax(0,11rem)] items-center gap-3"
-      data-testid="worktree-nested"
-      data-relative-path={repository.relativePath}
-      data-has-commits={repository.hasCommits}
+      // As tall as a row with a branch.
+      className="grid min-h-8 grid-cols-[minmax(0,1fr)_minmax(0,11rem)] items-center gap-3"
+      data-testid={repository === null ? 'worktree-nested-folder' : 'worktree-nested'}
+      data-relative-path={node.relativePath}
+      data-has-commits={repository?.hasCommits}
     >
-      <Label htmlFor={id} className="min-w-0 font-normal">
+      <Label
+        htmlFor={id}
+        className="min-w-0 font-normal"
+        style={{ paddingInlineStart: `${depth * TREE_INDENT_REM}rem` }}
+      >
         <Checkbox
           id={id}
-          checked={choice.included}
-          disabled={disabled || !repository.hasCommits}
-          onCheckedChange={(checked) => onChange({ included: checked })}
-          // The fill switches with the tick instead of fading around it.
-          className="transition-none"
-          data-testid="worktree-nested-checkbox"
+          checked={checked}
+          indeterminate={indeterminate}
+          disabled={disabled || includable.length === 0}
+          onCheckedChange={(value) => onInclude(includable, value)}
+          className={TREE_CHECKBOX}
+          data-testid={
+            repository === null ? 'worktree-nested-folder-checkbox' : 'worktree-nested-checkbox'
+          }
         />
-        <span className="truncate font-mono text-xs" data-path="" title={repository.relativePath}>
-          {repository.relativePath}
+        <span className="truncate font-mono text-xs" data-path="" title={node.relativePath}>
+          {repository === null ? `${node.label}/` : node.label}
         </span>
       </Label>
-      {repository.hasCommits ? (
+      {repository === null || choice === null ? null : repository.hasCommits ? (
         <BranchSelect
           branches={repository.branches}
           value={choice.base}
-          onChange={(base) => onChange({ base, manual: true })}
+          onChange={(base) => onBaseChange(repository, base)}
           disabled={disabled || !choice.included}
           label={`Base branch of ${repository.relativePath}`}
           testId="worktree-nested-base-select"
@@ -336,6 +403,67 @@ function NestedRepositoryRow({
         </span>
       )}
     </li>
+  )
+}
+
+/**
+ * The inner repositories the dialog offers, in a tree by folder (see
+ * `nestedRepositoryTree`). With more than one, the list's own checkbox, at
+ * its label, includes or leaves out all of them at once.
+ */
+function NestedRepositoryList({
+  repositories,
+  nested,
+  disabled,
+  onInclude,
+  onBaseChange,
+}: {
+  repositories: readonly NestedRepositoryOption[]
+  nested: Record<string, NestedChoice>
+  disabled: boolean
+  onInclude: (repositories: readonly NestedRepositoryOption[], included: boolean) => void
+  onBaseChange: (repository: NestedRepositoryOption, base: string | null) => void
+}) {
+  const rows = useMemo(() => treeRows(nestedRepositoryTree(repositories), 0), [repositories])
+  const all = repositories.length > 1
+  const { includable, checked, indeterminate } = inclusionOf(repositories, nested)
+  // Under the name of the list's checkbox, as the rows are.
+  const indent = { paddingInlineStart: all ? `${TREE_INDENT_REM}rem` : undefined }
+  return (
+    <div className="grid gap-2">
+      {all ? (
+        <Label htmlFor="nested-all">
+          <Checkbox
+            id="nested-all"
+            checked={checked}
+            indeterminate={indeterminate}
+            disabled={disabled || includable.length === 0}
+            onCheckedChange={(value) => onInclude(includable, value)}
+            className={TREE_CHECKBOX}
+            data-testid="worktree-nested-all-checkbox"
+          />
+          Nested repositories
+        </Label>
+      ) : (
+        <Label>Nested repositories</Label>
+      )}
+      <p className="text-xs text-muted-foreground" style={indent}>
+        Each one gets the same branch, at the same path inside the new worktree.
+      </p>
+      <ul className="grid gap-2" data-testid="worktree-nested-list">
+        {rows.map(({ node, depth }) => (
+          <NestedRepositoryRow
+            key={node.relativePath}
+            node={node}
+            depth={depth + (all ? 1 : 0)}
+            nested={nested}
+            disabled={disabled}
+            onInclude={onInclude}
+            onBaseChange={onBaseChange}
+          />
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -591,34 +719,38 @@ function NewWorktreeForm({
               </div>
 
               {options.nested.length > 0 && (
-                <div className="grid gap-2">
-                  <Label>Nested repositories</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Each one gets the same branch, at the same path inside the new worktree.
-                  </p>
-                  <ul className="grid gap-2" data-testid="worktree-nested-list">
-                    {options.nested.map((repository) => (
-                      <NestedRepositoryRow
-                        key={repository.relativePath}
-                        repository={repository}
-                        choice={nested[repository.relativePath]!}
-                        disabled={creating}
-                        onChange={(change) =>
-                          setChoices((current) => ({
-                            ...current,
-                            nested: {
-                              ...current.nested,
-                              [repository.relativePath]: {
-                                ...current.nested[repository.relativePath]!,
-                                ...change,
-                              },
-                            },
-                          }))
-                        }
-                      />
-                    ))}
-                  </ul>
-                </div>
+                <NestedRepositoryList
+                  repositories={options.nested}
+                  nested={nested}
+                  disabled={creating}
+                  onInclude={(repositories, value) =>
+                    setChoices((current) => ({
+                      ...current,
+                      nested: {
+                        ...current.nested,
+                        ...Object.fromEntries(
+                          repositories.map((repository) => [
+                            repository.relativePath,
+                            { ...current.nested[repository.relativePath]!, included: value },
+                          ]),
+                        ),
+                      },
+                    }))
+                  }
+                  onBaseChange={(repository, value) =>
+                    setChoices((current) => ({
+                      ...current,
+                      nested: {
+                        ...current.nested,
+                        [repository.relativePath]: {
+                          ...current.nested[repository.relativePath]!,
+                          base: value,
+                          manual: true,
+                        },
+                      },
+                    }))
+                  }
+                />
               )}
 
               {submodules.length > 0 && (

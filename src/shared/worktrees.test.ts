@@ -4,6 +4,10 @@ import {
   defaultNestedBase,
   initialWorktreeChoices,
   isWithin,
+  nestedRepositoryTree,
+  repositoriesIn,
+  type NestedRepositoryNode,
+  type NestedRepositoryOption,
   type NewWorktreeOptions,
   type WorktreeInfo,
 } from './worktrees'
@@ -109,5 +113,114 @@ describe('isWithin', () => {
     expect(isWithin('C:\\w\\G\\feat\\inner', 'C:\\w\\G\\feat')).toBe(true)
     expect(isWithin('C:\\w\\G\\feature', 'C:\\w\\G\\feat')).toBe(false)
     expect(isWithin('C:\\w', 'C:\\')).toBe(true)
+  })
+})
+
+/** An inner repository with commits, at a path relative to the project root. */
+const repository = (relativePath: string): NestedRepositoryOption => ({
+  relativePath,
+  branches: ['main'],
+  current: 'main',
+  hasCommits: true,
+})
+
+/** Each row of a tree of inner repositories as its label, path and kind, with the rows under it. */
+const shape = (nodes: NestedRepositoryNode[]): unknown[] =>
+  nodes.map((node) => [
+    node.label,
+    node.relativePath,
+    node.repository === null ? 'folder' : 'repository',
+    ...(node.children.length > 0 ? [shape(node.children)] : []),
+  ])
+
+describe('nestedRepositoryTree', () => {
+  it('puts the repositories that share a folder under a row of that folder', () => {
+    const tree = nestedRepositoryTree(
+      ['apps/admin', 'apps/web', 'packages/ui', 'packages/utils'].map(repository),
+    )
+    expect(shape(tree)).toEqual([
+      [
+        'apps',
+        'apps',
+        'folder',
+        [
+          ['admin', 'apps/admin', 'repository'],
+          ['web', 'apps/web', 'repository'],
+        ],
+      ],
+      [
+        'packages',
+        'packages',
+        'folder',
+        [
+          ['ui', 'packages/ui', 'repository'],
+          ['utils', 'packages/utils', 'repository'],
+        ],
+      ],
+    ])
+  })
+
+  it('gives a folder with only one repository or one folder in it a row together with that', () => {
+    const tree = nestedRepositoryTree(
+      ['tools/cli', 'services/backend/api', 'services/backend/worker', '.claude/worktrees/mcu'].map(
+        repository,
+      ),
+    )
+    expect(shape(tree)).toEqual([
+      ['.claude/worktrees/mcu', '.claude/worktrees/mcu', 'repository'],
+      [
+        'services/backend',
+        'services/backend',
+        'folder',
+        [
+          ['api', 'services/backend/api', 'repository'],
+          ['worker', 'services/backend/worker', 'repository'],
+        ],
+      ],
+      ['tools/cli', 'tools/cli', 'repository'],
+    ])
+  })
+
+  it('puts the repositories inside a repository under its row', () => {
+    const tree = nestedRepositoryTree(
+      ['services', 'services/plugins/a', 'services/plugins/b', 'web'].map(repository),
+    )
+    expect(shape(tree)).toEqual([
+      [
+        'services',
+        'services',
+        'repository',
+        [
+          [
+            'plugins',
+            'services/plugins',
+            'folder',
+            [
+              ['a', 'services/plugins/a', 'repository'],
+              ['b', 'services/plugins/b', 'repository'],
+            ],
+          ],
+        ],
+      ],
+      ['web', 'web', 'repository'],
+    ])
+    expect(repositoriesIn(tree[0]!).map((option) => option.relativePath)).toEqual([
+      'services',
+      'services/plugins/a',
+      'services/plugins/b',
+    ])
+  })
+
+  it('orders the rows of each folder by name, whatever order the repositories come in', () => {
+    // Sorted as whole paths, a-b/x comes before a/x; as rows, a comes before a-b.
+    const tree = nestedRepositoryTree(['a-b/x', 'a-b/y', 'a/x', 'a/y', 'B'].map(repository))
+    expect(tree.map((node) => node.label)).toEqual(['B', 'a', 'a-b'])
+  })
+
+  it('lists one repository on its own row, and none as no rows', () => {
+    expect(shape(nestedRepositoryTree([repository('hoot')]))).toEqual([
+      ['hoot', 'hoot', 'repository'],
+    ])
+    expect(nestedRepositoryTree([])).toEqual([])
   })
 })

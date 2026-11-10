@@ -53,6 +53,78 @@ export interface NestedRepositoryOption {
 }
 
 /**
+ * A row of the tree, by folder, in which the new worktree dialog lists the
+ * inner repositories it offers: a repository, or a folder that holds several.
+ */
+export interface NestedRepositoryNode {
+  /** What the row shows: its path from the row it is under, of one or more folders. */
+  label: string
+  /** Its path relative to the project root. */
+  relativePath: string
+  /** The repository at that path; `null` for a folder that only holds repositories. */
+  repository: NestedRepositoryOption | null
+  /** The rows under it: the repositories inside it and the folders that hold them. */
+  children: NestedRepositoryNode[]
+}
+
+/**
+ * The inner repositories in a tree by folder, each folder's rows in the order
+ * of their names. A folder with nothing but one repository or one folder in
+ * it shares a row with that, as VS Code's Explorer shows a folder with only
+ * one folder in it.
+ */
+export function nestedRepositoryTree(
+  repositories: readonly NestedRepositoryOption[],
+): NestedRepositoryNode[] {
+  interface Folder {
+    relativePath: string
+    repository: NestedRepositoryOption | null
+    children: Map<string, Folder>
+  }
+  const root: Folder = { relativePath: '', repository: null, children: new Map() }
+  for (const repository of repositories) {
+    let folder = root
+    for (const name of repository.relativePath.split('/')) {
+      let child = folder.children.get(name)
+      if (!child) {
+        const relativePath = folder === root ? name : `${folder.relativePath}/${name}`
+        child = { relativePath, repository: null, children: new Map() }
+        folder.children.set(name, child)
+      }
+      folder = child
+    }
+    folder.repository = repository
+  }
+  const rows = (folder: Folder): NestedRepositoryNode[] =>
+    [...folder.children]
+      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([name, child]) => {
+        let label = name
+        let shown = child
+        while (shown.repository === null && shown.children.size === 1) {
+          const [[innerName, inner]] = shown.children
+          label = `${label}/${innerName}`
+          shown = inner
+        }
+        return {
+          label,
+          relativePath: shown.relativePath,
+          repository: shown.repository,
+          children: rows(shown),
+        }
+      })
+  return rows(root)
+}
+
+/** The repositories of a row of the tree of inner repositories: its own and those under it. */
+export function repositoriesIn(node: NestedRepositoryNode): NestedRepositoryOption[] {
+  return [
+    ...(node.repository === null ? [] : [node.repository]),
+    ...node.children.flatMap(repositoriesIn),
+  ]
+}
+
+/**
  * The base branch an inner repository starts from until one is picked for it
  * by hand: its branch named like the project's base branch, otherwise the
  * branch checked out in it, otherwise none.

@@ -1,5 +1,19 @@
 # hoot
 
+## 0.1.0-alpha.25
+
+### Patch Changes
+
+- [`90d3870`](https://github.com/Levix0501/hoot/commit/90d3870a763fd73432a518d6ca51a088cf06b34b) - Advanced in the New Worktree dialog no longer closes by itself when you open it while the dialog is still looking for branches and inner repositories.
+
+- [`108c369`](https://github.com/Levix0501/hoot/commit/108c369eaf53a5b076b5d1d8b831467571cd74a9) - The file panel keeps the width it shows when you let go of an edge dragged as far as it goes, instead of widening once the window has more room.
+
+- [`092bb94`](https://github.com/Levix0501/hoot/commit/092bb945472c46add2ae68e589426894b994067f) - The file panel now shows PNG, JPEG, GIF, WebP, AVIF, BMP and ICO images instead of saying they are not text, and opens SVG files as images too, with a button right of the tabs that switches to their source and back.
+
+- [`f2ea4a4`](https://github.com/Levix0501/hoot/commit/f2ea4a4fd6d59bbc82af49f14765da2735dde25e) - Dragging the file panel's left edge far enough to the right hides the panel, as dragging the sidebar's edge hides the sidebar, and dragging it back in the same drag shows the panel again.
+
+- [`5a7743b`](https://github.com/Levix0501/hoot/commit/5a7743bc5c3591176c45ec921ea2ac715b1cd95e) - The New Worktree dialog now lists nested repositories in a tree by folder, and a folder's checkbox, or the one beside Nested repositories, includes or leaves out all the repositories in it at once.
+
 ## 0.1.0-alpha.24
 
 ### Patch Changes

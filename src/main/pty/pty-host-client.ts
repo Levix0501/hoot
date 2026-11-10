@@ -16,6 +16,8 @@ interface Connection {
 export interface PtyHostClientEvents {
   data: [id: string, data: string]
   exit: [id: string, exitCode: number, signal: number]
+  /** See `PtyHostEvents.program`. */
+  program: [id: string, name: string]
   /** The utility process ended; `expected` is false when it was not asked to stop. */
   'host-exit': [code: number, expected: boolean]
 }
@@ -76,6 +78,7 @@ export class PtyHostClient extends EventEmitter<PtyHostClientEvents> {
       {
         data: (id, data) => this.emit('data', id, data),
         exit: (id, exitCode, signal) => this.emit('exit', id, exitCode, signal),
+        program: (id, name) => this.emit('program', id, name),
       },
       {
         post: (message) => child.postMessage(message),

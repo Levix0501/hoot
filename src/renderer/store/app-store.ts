@@ -156,6 +156,12 @@ export interface UiSession {
   /** The terminal title the session's program set last; empty until it sets one. */
   title: string
   /**
+   * For a Terminal session, the program in the foreground of its terminal,
+   * which names it (see `SessionInfo.program`); `null` until it is known, and
+   * for any other session.
+   */
+  program: string | null
+  /**
    * For Claude Code, when the output arrived that last set a working title
    * after one that is not; see `afterHookEvent`.
    */
@@ -2032,6 +2038,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           status: 'starting',
           exit: null,
           title: saved?.title ?? chat?.title ?? '',
+          program: null,
           workingSince: null,
           attention: null,
           turns: [],
@@ -2395,6 +2402,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           sessions: updateSession(state.sessions, info.id, {
             status: info.status,
             exit: info.exit,
+            program: info.program,
           }),
         }))
         if (info.status !== 'exited') return

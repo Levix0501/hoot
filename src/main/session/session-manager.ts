@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import os from 'node:os'
+import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import type { StartSessionRequest } from '../../shared/ipc'
@@ -28,6 +29,7 @@ export interface PtyHost {
   kill(id: string, signal: string): void
   on(event: 'data', listener: (id: string, data: string) => void): unknown
   on(event: 'exit', listener: (id: string, exitCode: number, signal: number) => void): unknown
+  on(event: 'program', listener: (id: string, name: string) => void): unknown
   on(event: 'host-exit', listener: (code: number, expected: boolean) => void): unknown
 }
 
@@ -80,12 +82,30 @@ function defaultSignalProcessGroup(pid: number, signal: NodeJS.Signals): void {
 }
 
 /**
+ * The name of the program in a terminal's foreground, from the name the pty
+ * host reports for it, as VS Code's terminals take it: on Windows, the file's
+ * name without its folder and extension; elsewhere, the last part of a path,
+ * or what comes before the first space of anything else.
+ */
+export function programName(
+  reported: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === 'win32') return path.win32.parse(reported).name
+  if (reported.startsWith('/')) return path.posix.basename(reported)
+  const space = reported.indexOf(' ')
+  return space === -1 ? reported : reported.slice(0, space)
+}
+
+/**
  * Tracks every session Hoot runs: starting each one, routing its input and
  * output and the events of the hooks of its Claude Code or Codex, or of the
- * plugin of its OpenCode, ending its process when it is closed or Hoot quits,
- * and marking the running ones ended when the pty host stops. `closed`
- * reports a session that started once it is gone: closed, or forgotten with
- * its worktree or project.
+ * plugin of its OpenCode, following the program in the foreground of a
+ * Terminal session's terminal, ending its process when it is closed or Hoot
+ * quits, and marking the running ones ended when the pty host stops.
+ * `updated` reports a change to a session that started; `closed` reports
+ * such a session once it is gone: closed, or forgotten with its worktree or
+ * project.
  */
 export class SessionManager extends EventEmitter<{
   data: [id: string, data: string]
@@ -113,6 +133,7 @@ export class SessionManager extends EventEmitter<{
         abnormal: false,
       })
     })
+    options.host.on('program', (id, name) => this.setProgram(id, name))
     options.host.on('host-exit', () => this.handleHostExit())
   }
 
@@ -228,6 +249,7 @@ export class SessionManager extends EventEmitter<{
         issueId: request.issueId,
         status: 'running',
         exit: null,
+        program: null,
       },
       starting: true,
       started,
@@ -252,6 +274,7 @@ export class SessionManager extends EventEmitter<{
           env: launch.env,
           cols: request.cols,
           rows: request.rows,
+          reportProgram: request.toolId === 'shell',
         })
       } catch (error) {
         throw new SessionError(
@@ -381,6 +404,20 @@ export class SessionManager extends EventEmitter<{
     let done = false
     await Promise.race([promise.then(() => (done = true)), delay(ms)])
     return done
+  }
+
+  /**
+   * Records the program in the foreground of a running Terminal session's
+   * terminal, which the pty host reported: by its name (see `programName`).
+   */
+  private setProgram(id: string, reported: string): void {
+    const record = this.records.get(id)
+    if (!record || record.info.toolId !== 'shell' || record.info.status !== 'running') return
+    const program = programName(reported)
+    if (program === '' || program === record.info.program) return
+    record.info = { ...record.info, program }
+    // A session that is still starting reports it once the start completes.
+    if (!record.starting) this.emit('updated', { ...record.info })
   }
 
   private markExited(id: string, exit: SessionExit): void {

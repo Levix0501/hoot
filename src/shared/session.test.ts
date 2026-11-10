@@ -81,7 +81,13 @@ describe('defaultSessionName', () => {
   it('keeps the titles of other tools as they are', () => {
     expect(defaultSessionName('codex', '⠙ Fix tests | G')).toBe('⠙ Fix tests | G')
     expect(defaultSessionName('opencode', '✳ Not stripped')).toBe('✳ Not stripped')
-    expect(defaultSessionName('shell', '◐ x')).toBe('◐ x')
+  })
+
+  it("names a Terminal session after its terminal's foreground program, not its title", () => {
+    expect(defaultSessionName('shell', '~/D/p/hoot', 'fish')).toBe('fish')
+    expect(defaultSessionName('shell', 'vim ~/D/p/hoot', 'vim')).toBe('vim')
+    expect(defaultSessionName('shell', '~/D/p/hoot', null)).toBe('Terminal')
+    expect(defaultSessionName('shell', '~/D/p/hoot')).toBe('Terminal')
   })
 })
 
@@ -91,6 +97,12 @@ describe('sessionName', () => {
       'Auth work',
     )
     expect(sessionName({ toolId: 'claude', title: '✳ Topic', customName: null })).toBe('Topic')
+    expect(
+      sessionName({ toolId: 'shell', title: '~/D/p/hoot', program: 'fish', customName: 'Server' }),
+    ).toBe('Server')
+    expect(
+      sessionName({ toolId: 'shell', title: '~/D/p/hoot', program: 'fish', customName: null }),
+    ).toBe('fish')
   })
 })
 

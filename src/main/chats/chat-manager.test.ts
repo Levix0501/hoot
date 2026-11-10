@@ -58,6 +58,7 @@ const endedSaved = (
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
+  program: null,
 })
 
 /** The process of a saved session in its project's own folder that ended. */
@@ -75,6 +76,7 @@ const endedLocal = (
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
+  program: null,
 })
 
 const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): SessionInfo => ({
@@ -87,6 +89,7 @@ const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): Session
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
+  program: null,
 })
 
 describe('ChatManager', () => {
@@ -825,6 +828,7 @@ describe('ChatManager', () => {
       issueId: null,
       status: 'exited',
       exit: { code: 0, signal: null, abnormal: false },
+      program: null,
     })
     await manager.flush()
 

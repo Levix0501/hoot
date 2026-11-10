@@ -4,6 +4,7 @@ import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
 import type { ChatLaunch, SentIssue } from './launch'
 import {
+  programName,
   SessionError,
   SessionManager,
   signalName,
@@ -148,6 +149,7 @@ describe('SessionManager', () => {
       issueId: null,
       status: 'running',
       exit: null,
+      program: null,
     })
     expect(host.spawned[0]).toMatchObject({
       file: 'claude',
@@ -155,6 +157,7 @@ describe('SessionManager', () => {
       cwd: '/work/project',
       cols: 80,
       rows: 24,
+      reportProgram: false,
     })
     expect(manager.hasRunningSession()).toBe(true)
     expect(manager.isRunningIn('/work/project')).toBe(true)
@@ -204,6 +207,54 @@ describe('SessionManager', () => {
       ['s2', 'exited'],
     ])
     expect(manager.hasRunningSession()).toBe(false)
+  })
+
+  it("names a running Terminal session after the program in its terminal's foreground, and no other session", async () => {
+    const { manager, host, updates } = setup()
+    await manager.start(request('s1'))
+    await manager.start(request('c1', 'claude'))
+    expect(host.spawned.map((spawned) => [spawned.id, spawned.reportProgram])).toEqual([
+      ['s1', true],
+      ['c1', false],
+    ])
+    updates.length = 0
+    host.emit('program', 's1', '/bin/zsh')
+    host.emit('program', 's1', 'vim')
+    // The same name again, or none, changes nothing.
+    host.emit('program', 's1', 'vim')
+    host.emit('program', 's1', '')
+    host.emit('program', 'c1', 'node')
+    host.emit('program', 'other', 'zsh')
+    expect(updates.map((update) => [update.id, update.program])).toEqual([
+      ['s1', 'zsh'],
+      ['s1', 'vim'],
+    ])
+    expect(manager.list().map((session) => [session.id, session.program])).toEqual([
+      ['s1', 'vim'],
+      ['c1', null],
+    ])
+    // An ended session keeps the name it had.
+    host.emit('exit', 's1', 1, 0)
+    host.emit('program', 's1', 'zsh')
+    expect(manager.list()[0]).toMatchObject({ status: 'exited', program: 'vim' })
+  })
+
+  it('reports the program of a Terminal session that is still starting once the start completes', async () => {
+    const { manager, host, updates } = setup()
+    let answer!: () => void
+    host.spawn = async (spawnRequest) => {
+      host.spawned.push(spawnRequest)
+      // The report comes before the spawn's answer.
+      host.emit('program', spawnRequest.id, 'zsh')
+      await new Promise<void>((resolve) => (answer = resolve))
+      return 100
+    }
+    const started = manager.start(request('s1'))
+    await expect.poll(() => host.spawned.length).toBe(1)
+    expect(updates).toEqual([])
+    answer()
+    expect(await started).toMatchObject({ id: 's1', program: 'zsh' })
+    expect(updates.map((update) => [update.id, update.program])).toEqual([['s1', 'zsh']])
   })
 
   it('routes input, resizes and output to each running session', async () => {
@@ -625,5 +676,22 @@ describe('signalName', () => {
     expect(signalName(1)).toBe('SIGHUP')
     expect(signalName(9)).toBe('SIGKILL')
     expect(signalName(999)).toBe('signal 999')
+  })
+})
+
+describe('programName', () => {
+  it('takes the last part of a path, or what comes before the first space, as VS Code does', () => {
+    expect(programName('fish', 'darwin')).toBe('fish')
+    expect(programName('/usr/local/bin/fish', 'darwin')).toBe('fish')
+    expect(programName('/usr/bin/zsh', 'linux')).toBe('zsh')
+    expect(programName('node server.js', 'linux')).toBe('node')
+  })
+
+  it('takes the name of the file without its folder and extension on Windows', () => {
+    expect(programName('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32')).toBe('pwsh')
+    expect(
+      programName('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'win32'),
+    ).toBe('powershell')
+    expect(programName('cmd.exe', 'win32')).toBe('cmd')
   })
 })

@@ -283,6 +283,7 @@ const sessionManager = Object.assign(emitter(), {
     issueId: request.issueId,
     status: 'running' as const,
     exit: null,
+    program: null,
   })),
 })
 

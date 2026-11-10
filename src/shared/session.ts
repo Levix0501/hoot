@@ -37,6 +37,12 @@ export interface SessionInfo {
   issueId: number | null
   status: SessionStatus
   exit: SessionExit | null
+  /**
+   * For a Terminal session, the name of the program in the foreground of its
+   * terminal, which names the session: its shell, or a command the shell
+   * runs, such as `vim`; `null` until it is known, and for any other session.
+   */
+  program: string | null
 }
 
 /**
@@ -74,11 +80,19 @@ export function isClaudeCodeWorkingTitle(title: string): boolean {
 }
 
 /**
- * The name of a session that the user has not named: its terminal title, with
- * Claude Code's status mark removed, or the tool's name when that leaves no text.
+ * The name of a session that the user has not named. A Terminal session's is
+ * the name of the program in the foreground of its terminal (`program`), as
+ * VS Code names its terminals by default: the titles shells set mostly give
+ * the folder, as fish's `~/D/p/hoot` does, in a form hard to read. Any other
+ * session's is its terminal title, with Claude Code's status mark removed.
+ * Either way, the tool's name when that leaves no text.
  */
-export function defaultSessionName(toolId: ToolId, title: string): string {
-  let text = title
+export function defaultSessionName(
+  toolId: ToolId,
+  title: string,
+  program: string | null = null,
+): string {
+  let text = toolId === 'shell' ? (program ?? '') : title
   if (toolId === 'claude') {
     const mark = CLAUDE_CODE_TITLE_MARKS.find((candidate) => text.startsWith(`${candidate} `))
     if (mark) text = text.slice(mark.length + 1)
@@ -90,9 +104,13 @@ export function defaultSessionName(toolId: ToolId, title: string): string {
 export function sessionName(session: {
   toolId: ToolId
   title: string
+  /** See `SessionInfo.program`. */
+  program?: string | null
   customName: string | null
 }): string {
-  return session.customName ?? defaultSessionName(session.toolId, session.title)
+  return (
+    session.customName ?? defaultSessionName(session.toolId, session.title, session.program ?? null)
+  )
 }
 
 /**

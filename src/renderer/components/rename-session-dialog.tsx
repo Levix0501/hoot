@@ -97,7 +97,7 @@ export function RenameSessionDialog() {
             key={shown.id}
             title="Rename Session"
             name={sessionName(shown)}
-            placeholder={defaultSessionName(shown.toolId, shown.title)}
+            placeholder={defaultSessionName(shown.toolId, shown.title, shown.program)}
             ariaLabel="Session name"
             testId="session-rename-input"
             onRename={(name) => finishRenaming(shown.id, name)}

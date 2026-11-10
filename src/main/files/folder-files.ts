@@ -3,6 +3,7 @@ import path from 'node:path'
 import {
   HIDDEN_ENTRY_NAMES,
   MAX_OPENED_FILE_BYTES,
+  entryExtension,
   isEntryPath,
   isFolderPath,
   type FileVersion,
@@ -17,6 +18,24 @@ import {
  * binary: as much as Git looks at to tell whether a file is binary.
  */
 const BINARY_CHECK_BYTES = 8000
+
+/**
+ * The extensions of the pictures the panel shows, in lowercase: the formats
+ * Chromium draws. An SVG file is text, which the panel edits, and draws from
+ * its text.
+ */
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'apng',
+  'avif',
+  'bmp',
+  'gif',
+  'ico',
+  'jfif',
+  'jpeg',
+  'jpg',
+  'png',
+  'webp',
+])
 
 const BYTE_ORDER_MARK = '﻿'
 
@@ -103,13 +122,14 @@ export async function listFolder(folder: string, directory: string): Promise<Lis
 }
 
 /**
- * Reads a file of the panel's folder as UTF-8 text. A file with a NUL byte
- * near its start, or that is not valid UTF-8, is not text; one larger than
- * {@link MAX_OPENED_FILE_BYTES} is not read. The version is the file's as it
- * was just before it was read: a change made while it is read shows as a
- * change when the file is saved.
+ * Reads a file of the panel's folder: a picture's bytes, for a file named
+ * as one (see {@link IMAGE_EXTENSIONS}), and any other file as UTF-8 text.
+ * A file with a NUL byte near its start, or that is not valid UTF-8, is not
+ * text; one larger than {@link MAX_OPENED_FILE_BYTES} is not read. The
+ * version is the file's as it was just before it was read: a change made
+ * while it is read shows as a change when the file is saved.
  */
-export async function readTextFile(folder: string, file: string): Promise<ReadFileResult> {
+export async function readFile(folder: string, file: string): Promise<ReadFileResult> {
   const location = file === '' || isFolderPath(file) ? null : entryLocation(folder, file)
   if (location === null) return { kind: 'error', message: `"${file}" is not a file.` }
   let handle
@@ -127,6 +147,11 @@ export async function readTextFile(folder: string, file: string): Promise<ReadFi
     if (!stats.isFile()) return { kind: 'not-text' }
     if (stats.size > MAX_OPENED_FILE_BYTES) return { kind: 'too-large', size: stats.size }
     const bytes = await handle.readFile()
+    const version = { mtimeMs: stats.mtimeMs, size: stats.size }
+    const extension = entryExtension(file)
+    if (extension !== null && IMAGE_EXTENSIONS.has(extension)) {
+      return { kind: 'image', bytes, version }
+    }
     if (bytes.subarray(0, BINARY_CHECK_BYTES).includes(0)) return { kind: 'not-text' }
     let text: string
     try {
@@ -135,12 +160,7 @@ export async function readTextFile(folder: string, file: string): Promise<ReadFi
       return { kind: 'not-text' }
     }
     const bom = text.startsWith(BYTE_ORDER_MARK)
-    return {
-      kind: 'text',
-      content: bom ? text.slice(BYTE_ORDER_MARK.length) : text,
-      version: { mtimeMs: stats.mtimeMs, size: stats.size },
-      bom,
-    }
+    return { kind: 'text', content: bom ? text.slice(BYTE_ORDER_MARK.length) : text, version, bom }
   } catch (error) {
     return { kind: 'error', message: errorMessage(error) }
   } finally {

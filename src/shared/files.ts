@@ -6,7 +6,7 @@
  * with `/` (`src/`), as the panel's tree takes it; the folder itself is `''`.
  */
 
-/** Files larger than this many bytes are not opened: too large to edit here. */
+/** Files larger than this many bytes are not opened: too large to edit or show here. */
 export const MAX_OPENED_FILE_BYTES = 10 * 1024 * 1024
 
 /**
@@ -54,6 +54,8 @@ export type ReadFileResult =
       /** Whether the file starts with a UTF-8 byte order mark, which saving keeps. */
       bom: boolean
     }
+  /** A picture, which the panel shows rather than edits. */
+  | { kind: 'image'; bytes: Uint8Array<ArrayBuffer>; version: FileVersion }
   /** Not UTF-8 text: a binary file, or text in another encoding. */
   | { kind: 'not-text' }
   /** Larger than {@link MAX_OPENED_FILE_BYTES}. */
@@ -93,6 +95,16 @@ export function isFolderPath(entry: string): boolean {
 export function entryName(entry: string): string {
   const parts = entry.split('/').filter((part) => part !== '')
   return parts.at(-1) ?? ''
+}
+
+/**
+ * The extension of an entry's name, in lowercase and without its dot: `svg`
+ * of `assets/logo.SVG`; `null` for a name without one, such as `.env`.
+ */
+export function entryExtension(entry: string): string | null {
+  const name = entryName(entry)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : null
 }
 
 /** The path of an entry of the folder `parent` (`''` for the folder itself). */

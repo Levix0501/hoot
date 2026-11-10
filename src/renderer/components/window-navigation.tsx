@@ -58,11 +58,11 @@ export function useTopRowInset(): number | undefined {
 }
 
 /**
- * A navigation button with a tooltip below it giving its name and shortcut.
- * The tooltip's trigger wraps the button, so that it also shows while the
- * button is disabled, and keeps the keyboard focus where it is (in a
- * terminal, say) when the button is clicked, as the window's own title bar
- * would.
+ * A navigation button with a tooltip below it giving its name and its
+ * shortcut, if it has one. The tooltip's trigger wraps the button, so that
+ * it also shows while the button is disabled, and keeps the keyboard focus
+ * where it is (in a terminal, say) when the button is clicked, as the
+ * window's own title bar would.
  */
 export function NavigationButton({
   label,
@@ -70,7 +70,7 @@ export function NavigationButton({
   children,
 }: {
   label: string
-  shortcut: string
+  shortcut?: string
   children: ReactNode
 }) {
   return (
@@ -83,9 +83,11 @@ export function NavigationButton({
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={2} className={TOOLTIP_CLASS}>
         {label}
-        <Kbd className="h-4 px-1.5 font-normal in-data-[slot=tooltip-content]:bg-current/10 in-data-[slot=tooltip-content]:text-current dark:in-data-[slot=tooltip-content]:bg-current/10">
-          {shortcut}
-        </Kbd>
+        {shortcut !== undefined && (
+          <Kbd className="h-4 px-1.5 font-normal in-data-[slot=tooltip-content]:bg-current/10 in-data-[slot=tooltip-content]:text-current dark:in-data-[slot=tooltip-content]:bg-current/10">
+            {shortcut}
+          </Kbd>
+        )}
       </TooltipContent>
     </Tooltip>
   )

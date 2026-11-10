@@ -1,6 +1,6 @@
 import { Editor, type EditorFactory } from '@pierre/diffs/edit'
 import { EditProvider } from '@pierre/diffs/react'
-import { FolderOpenIcon, PanelRightIcon, XIcon } from 'lucide-react'
+import { CodeXmlIcon, FolderOpenIcon, ImageIcon, PanelRightIcon, XIcon } from 'lucide-react'
 import {
   memo,
   useEffect,
@@ -21,6 +21,7 @@ import {
   isUnsaved,
   useFilesStore,
   type FileTab,
+  type FileView,
   type OpenText,
 } from '../../store/files-store'
 import { CORNERS, LABEL, TAB, TabShade } from '../session-tabs'
@@ -181,12 +182,23 @@ const MemoTextFileEditor = memo(
 )
 
 /**
- * An open text file: its editor, with a notice above it while the file is
- * gone or could not be saved. When the file changed on disk while edits
- * were unsaved, the difference shows in the editor's place, and the user
- * picks which to keep.
+ * An open text file: its editor, or for an SVG file its image if the tab
+ * shows that, with a notice above it while the file is gone or could not be
+ * saved. When the file changed on disk while edits were unsaved, the
+ * difference shows in their place, and the user picks which to keep.
  */
-function TextTab({ folderId, path, text }: { folderId: string; path: string; text: OpenText }) {
+function TextTab({
+  folder,
+  path,
+  text,
+  view,
+}: {
+  folder: PanelFolder
+  path: string
+  text: OpenText
+  view: FileView | null
+}) {
+  const folderId = folderKey(folder)
   const resolveConflict = useFilesStore((state) => state.resolveConflict)
   const saveNow = useFilesStore((state) => state.saveNow)
   if (text.conflict !== null) {
@@ -243,25 +255,80 @@ function TextTab({ folderId, path, text }: { folderId: string; path: string; tex
           </Button>
         </Notice>
       ) : null}
-      <MemoTextFileEditor
-        key={editStateKey(folderId, path, text.generation)}
-        folderId={folderId}
-        path={path}
-        generation={text.generation}
-        initialText={text.local}
-      />
+      {view === 'image' ? (
+        <SvgImage folder={folder} path={path} text={text.local} />
+      ) : (
+        <MemoTextFileEditor
+          key={editStateKey(folderId, path, text.generation)}
+          folderId={folderId}
+          path={path}
+          generation={text.generation}
+          initialText={text.local}
+        />
+      )}
     </>
   )
 }
 
+/**
+ * An image, whole and in the middle. A picture shows at its own size, or
+ * smaller to fit the panel. An SVG image, which scales, fills the panel, on
+ * white, as it may well draw in black on nothing. When the file holds no
+ * image that can be drawn, as when it is broken, the tab says so instead.
+ */
+function ImageView({
+  folder,
+  path,
+  src,
+  svg = false,
+}: {
+  folder: PanelFolder
+  path: string
+  src: string
+  svg?: boolean
+}) {
+  // The image that could not be drawn; the file's next one may be.
+  const [broken, setBroken] = useState<string | null>(null)
+  if (broken === src) {
+    return <Unavailable folder={folder} path={path} message="This image cannot be shown here." />
+  }
+  return (
+    <div
+      className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
+      data-testid="file-image"
+    >
+      <img
+        src={src}
+        alt={entryName(path)}
+        draggable={false}
+        className={cn(
+          'max-h-full max-w-full rounded-sm object-contain shadow-sm',
+          svg && 'size-full bg-white p-3',
+        )}
+        onError={() => setBroken(src)}
+      />
+    </div>
+  )
+}
+
+/**
+ * The image an SVG file's text draws: the text in its editor, unsaved edits
+ * and all. As an image, the SVG runs no scripts and loads nothing else.
+ */
+function SvgImage({ folder, path, text }: { folder: PanelFolder; path: string; text: string }) {
+  const src = useMemo(() => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`, [text])
+  return <ImageView folder={folder} path={path} src={src} svg />
+}
+
 /** What the tab shown holds: its file, or why the file cannot be shown. */
 function TabBody({ folder, tab }: { folder: PanelFolder; tab: FileTab }) {
-  const key = folderKey(folder)
   switch (tab.content.kind) {
     case 'loading':
       return <div className="flex-1" />
     case 'text':
-      return <TextTab folderId={key} path={tab.path} text={tab.content.text} />
+      return <TextTab folder={folder} path={tab.path} text={tab.content.text} view={tab.view} />
+    case 'image':
+      return <ImageView folder={folder} path={tab.path} src={tab.content.url} />
     case 'not-text':
       return (
         <Unavailable
@@ -400,12 +467,58 @@ function FileTabButton({
   )
 }
 
-/** The open files of a folder: their tabs in the window's top row, and the current one below. */
+/**
+ * The button right of the tabs that shows the text of an SVG file in place
+ * of its image, giving its editor the keyboard focus, or its image in place
+ * of its text. Its tooltip shows as the navigation's do.
+ */
+function FileViewToggle({
+  folderId: key,
+  path,
+  view,
+}: {
+  folderId: string
+  path: string
+  view: FileView
+}) {
+  const setTabView = useFilesStore((state) => state.setTabView)
+  const showsImage = view === 'image'
+  return (
+    <div className="ms-auto flex shrink-0 items-center ps-2 [app-region:no-drag]">
+      <TooltipProvider delay={700} timeout={300}>
+        <NavigationButton label={showsImage ? 'Show source' : 'Show image'}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={BUTTON_CLASS}
+            onClick={() => {
+              setTabView(key, path, showsImage ? 'text' : 'image')
+              if (showsImage) focusEditor(key, path)
+            }}
+            aria-label={showsImage ? 'Show Source' : 'Show Image'}
+            data-testid="file-view-toggle"
+            data-view={view}
+          >
+            {showsImage ? <CodeXmlIcon /> : <ImageIcon />}
+          </Button>
+        </NavigationButton>
+      </TooltipProvider>
+    </div>
+  )
+}
+
+/**
+ * The open files of a folder: their tabs in the window's top row, and the
+ * current one below. An SVG file's tab, unless its text is at odds with the
+ * file on disk, has a button at the row's right end that switches it
+ * between its image and its text.
+ */
 function OpenFiles({ folder }: { folder: PanelFolder }) {
   const key = folderKey(folder)
   const files = useFilesStore((state) => state.folders[key])
   if (files === undefined) return null
   const tab = files.tabs.find((candidate) => candidate.path === files.active)
+  const view = tab?.content.kind === 'text' && tab.content.text.conflict === null ? tab.view : null
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="open-files">
       {/* The open files' part of the window's top row, whose blank parts drag the window. */}
@@ -425,6 +538,9 @@ function OpenFiles({ folder }: { folder: PanelFolder }) {
             />
           ))}
         </div>
+        {tab !== undefined && view !== null && (
+          <FileViewToggle folderId={key} path={tab.path} view={view} />
+        )}
       </div>
       {tab !== undefined && <TabBody key={tab.id} folder={files.folder} tab={tab} />}
     </div>

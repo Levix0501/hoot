@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MAX_OPENED_FILE_BYTES } from '../../shared/files'
-import { entryLocation, listFolder, readTextFile, writeTextFile } from './folder-files'
+import { entryLocation, listFolder, readFile, writeTextFile } from './folder-files'
 
 describe('folder files', () => {
   let root: string
@@ -89,11 +89,11 @@ describe('folder files', () => {
     )
   })
 
-  describe('readTextFile', () => {
+  describe('readFile', () => {
     it("reads a file's text and version", async () => {
       write('src/index.ts', 'export const a = 1\r\n')
       const stats = fs.statSync(path.join(folder, 'src', 'index.ts'))
-      expect(await readTextFile(folder, 'src/index.ts')).toEqual({
+      expect(await readFile(folder, 'src/index.ts')).toEqual({
         kind: 'text',
         content: 'export const a = 1\r\n',
         version: { mtimeMs: stats.mtimeMs, size: stats.size },
@@ -103,35 +103,66 @@ describe('folder files', () => {
 
     it('reads past a byte order mark, and says it was there', async () => {
       write('a.txt', '﻿hello')
-      const read = await readTextFile(folder, 'a.txt')
+      const read = await readFile(folder, 'a.txt')
       expect(read).toMatchObject({ kind: 'text', content: 'hello', bom: true })
     })
 
     it('does not read binary files, text in other encodings, or folders', async () => {
-      write('image.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]))
+      write('data.bin', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]))
       write('latin1.txt', Buffer.from([0x63, 0x61, 0x66, 0xe9]))
-      expect(await readTextFile(folder, 'image.png')).toEqual({ kind: 'not-text' })
-      expect(await readTextFile(folder, 'latin1.txt')).toEqual({ kind: 'not-text' })
-      expect(await readTextFile(folder, 'src')).toEqual({ kind: 'not-text' })
+      expect(await readFile(folder, 'data.bin')).toEqual({ kind: 'not-text' })
+      expect(await readFile(folder, 'latin1.txt')).toEqual({ kind: 'not-text' })
+      expect(await readFile(folder, 'src')).toEqual({ kind: 'not-text' })
+    })
+
+    it("reads a picture's bytes and version, whatever the case of its extension", async () => {
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])
+      write('src/Icon.PNG', bytes)
+      const stats = fs.statSync(path.join(folder, 'src', 'Icon.PNG'))
+      expect(await readFile(folder, 'src/Icon.PNG')).toEqual({
+        kind: 'image',
+        bytes,
+        version: { mtimeMs: stats.mtimeMs, size: stats.size },
+      })
+      write('photo.jpeg', Buffer.from([0xff, 0xd8, 0xff]))
+      expect(await readFile(folder, 'photo.jpeg')).toMatchObject({ kind: 'image' })
+    })
+
+    it('reads SVG files, and files named only for an extension, as text', async () => {
+      write('logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>')
+      write('.png', 'not a picture')
+      expect(await readFile(folder, 'logo.svg')).toMatchObject({ kind: 'text' })
+      expect(await readFile(folder, '.png')).toMatchObject({
+        kind: 'text',
+        content: 'not a picture',
+      })
+    })
+
+    it('does not read a picture too large to show', async () => {
+      write('big.png', Buffer.alloc(MAX_OPENED_FILE_BYTES + 1))
+      expect(await readFile(folder, 'big.png')).toEqual({
+        kind: 'too-large',
+        size: MAX_OPENED_FILE_BYTES + 1,
+      })
     })
 
     it('does not read a file too large to edit', async () => {
       write('big.txt', Buffer.alloc(MAX_OPENED_FILE_BYTES + 1, 0x61))
-      expect(await readTextFile(folder, 'big.txt')).toEqual({
+      expect(await readFile(folder, 'big.txt')).toEqual({
         kind: 'too-large',
         size: MAX_OPENED_FILE_BYTES + 1,
       })
     })
 
     it('says when the file is gone', async () => {
-      expect(await readTextFile(folder, 'gone.txt')).toEqual({ kind: 'missing' })
+      expect(await readFile(folder, 'gone.txt')).toEqual({ kind: 'missing' })
     })
   })
 
   describe('writeTextFile', () => {
     it('writes over the file it read, and returns its new version', async () => {
       write('a.txt', 'one')
-      const read = await readTextFile(folder, 'a.txt')
+      const read = await readFile(folder, 'a.txt')
       if (read.kind !== 'text') throw new Error('not read')
       const written = await writeTextFile(folder, 'a.txt', 'two!', read.version, false)
       const stats = fs.statSync(path.join(folder, 'a.txt'))
@@ -144,7 +175,7 @@ describe('folder files', () => {
 
     it('keeps the byte order mark', async () => {
       write('a.txt', '﻿one')
-      const read = await readTextFile(folder, 'a.txt')
+      const read = await readFile(folder, 'a.txt')
       if (read.kind !== 'text') throw new Error('not read')
       await writeTextFile(folder, 'a.txt', 'two', read.version, read.bom)
       expect(fs.readFileSync(path.join(folder, 'a.txt'), 'utf8')).toBe('﻿two')
@@ -152,7 +183,7 @@ describe('folder files', () => {
 
     it('leaves a file alone that changed since it was read', async () => {
       write('a.txt', 'one')
-      const read = await readTextFile(folder, 'a.txt')
+      const read = await readFile(folder, 'a.txt')
       if (read.kind !== 'text') throw new Error('not read')
       write('a.txt', 'changed by an agent')
       expect(await writeTextFile(folder, 'a.txt', 'mine', read.version, false)).toEqual({
@@ -163,7 +194,7 @@ describe('folder files', () => {
 
     it('does not bring back a file that is gone', async () => {
       write('a.txt', 'one')
-      const read = await readTextFile(folder, 'a.txt')
+      const read = await readFile(folder, 'a.txt')
       if (read.kind !== 'text') throw new Error('not read')
       fs.rmSync(path.join(folder, 'a.txt'))
       expect(await writeTextFile(folder, 'a.txt', 'mine', read.version, false)).toEqual({

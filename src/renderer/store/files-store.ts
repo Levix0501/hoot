@@ -8,6 +8,7 @@ import {
   type FilePanelLayout,
 } from '../../shared/file-panel'
 import {
+  entryExtension,
   folderKey,
   isFolderPath,
   type FileVersion,
@@ -55,6 +56,8 @@ export interface OpenText {
 export type TabContent =
   | { kind: 'loading' }
   | { kind: 'text'; text: OpenText }
+  /** A picture: an object URL of its bytes, and its file's version when it was read. */
+  | { kind: 'image'; url: string; version: FileVersion }
   | { kind: 'not-text' }
   | { kind: 'too-large'; size: number }
   | { kind: 'missing' }
@@ -71,8 +74,16 @@ export interface FileTab {
    * clicked, or its file is opened with a double click.
    */
   preview: boolean
+  /**
+   * What the tab of an SVG file shows: its image, as it does at first, or
+   * its text, which the user switches between; `null` for any other file.
+   */
+  view: FileView | null
   content: TabContent
 }
+
+/** What the tab of an SVG file shows: the image its text draws, or the text. */
+export type FileView = 'image' | 'text'
 
 /** What a folder's file panel has open. */
 export interface FolderFiles {
@@ -110,6 +121,8 @@ export interface FilesState {
   selectTab(key: string, path: string): void
   /** Keeps a preview tab, as a double click does. */
   pinTab(key: string, path: string): void
+  /** Shows the image of an SVG file's tab, or its text. */
+  setTabView(key: string, path: string, view: FileView): void
   /** Closes a tab once its edits are saved, or once the user confirms losing them. */
   closeTab(key: string, path: string): Promise<void>
   /** Closes the tab shown in the panel on screen. */
@@ -156,6 +169,12 @@ function contentOf(result: ReadFileResult): TabContent {
           deleted: false,
         },
       }
+    case 'image':
+      return {
+        kind: 'image',
+        url: URL.createObjectURL(new Blob([result.bytes])),
+        version: result.version,
+      }
     case 'not-text':
       return { kind: 'not-text' }
     case 'too-large':
@@ -165,6 +184,21 @@ function contentOf(result: ReadFileResult): TabContent {
     case 'error':
       return { kind: 'error', message: result.message }
   }
+}
+
+/** Frees what a tab's content holds once no tab shows it: a picture's bytes. */
+function release(content: TabContent): void {
+  if (content.kind === 'image') URL.revokeObjectURL(content.url)
+}
+
+/** Whether a tab shows the picture just read, unchanged since it was read before. */
+function sameImage(content: TabContent, result: ReadFileResult): boolean {
+  return (
+    content.kind === 'image' &&
+    result.kind === 'image' &&
+    content.version.mtimeMs === result.version.mtimeMs &&
+    content.version.size === result.version.size
+  )
 }
 
 let nextTabId = 1
@@ -440,9 +474,11 @@ export const useFilesStore = create<FilesState>()((set, get) => {
     const current = findTab(key, path, id)
     if (current === undefined) return
     if (current.content.kind !== 'text') {
-      // A file the tab could not show is shown as it is now.
-      if (current.content.kind !== 'loading') {
+      // A picture, or a file the tab could not show, is shown as it is now:
+      // a picture only once it changed.
+      if (current.content.kind !== 'loading' && !sameImage(current.content, result)) {
         changeTab(key, path, id, (stale) => ({ ...stale, content: contentOf(result) }))
+        release(current.content)
       }
       return
     }
@@ -499,6 +535,7 @@ export const useFilesStore = create<FilesState>()((set, get) => {
         clearAutosave(key, path)
         changeText(key, path, id, (stale) => ({ ...stale, deleted: true }))
         return
+      case 'image':
       case 'not-text':
       case 'too-large':
         // A file that is no longer text it can edit, unless it holds edits.
@@ -525,6 +562,7 @@ export const useFilesStore = create<FilesState>()((set, get) => {
     lastEdits.delete(tabKey(key, path))
     if (removed.content.kind === 'text') forgetEditState(key, path, removed.content.text.generation)
     set((state) => ({ folders: { ...state.folders, [key]: { ...files, tabs, active } } }))
+    release(removed.content)
     followShownEntries()
   }
 
@@ -621,7 +659,13 @@ export const useFilesStore = create<FilesState>()((set, get) => {
         }))
         return
       }
-      const tab: FileTab = { id: nextTabId++, path, preview, content: { kind: 'loading' } }
+      const tab: FileTab = {
+        id: nextTabId++,
+        path,
+        preview,
+        view: entryExtension(path) === 'svg' ? 'image' : null,
+        content: { kind: 'loading' },
+      }
       // A preview takes the place of the preview tab, which nothing was edited in.
       const replaced = preview ? files.tabs.find((candidate) => candidate.preview) : undefined
       let tabs: FileTab[]
@@ -631,6 +675,7 @@ export const useFilesStore = create<FilesState>()((set, get) => {
         if (replaced.content.kind === 'text') {
           forgetEditState(key, replaced.path, replaced.content.text.generation)
         }
+        release(replaced.content)
       } else {
         // Right of the tab shown, or at the end.
         const shownIndex = files.tabs.findIndex((candidate) => candidate.path === files.active)
@@ -653,6 +698,12 @@ export const useFilesStore = create<FilesState>()((set, get) => {
       const tab = findTab(key, path)
       if (tab?.preview === true)
         changeTab(key, path, tab.id, (stale) => ({ ...stale, preview: false }))
+    },
+
+    setTabView(key, path, view) {
+      const tab = findTab(key, path)
+      if (tab === undefined || tab.view === null || tab.view === view) return
+      changeTab(key, path, tab.id, (stale) => ({ ...stale, view }))
     },
 
     async closeTab(key, path) {

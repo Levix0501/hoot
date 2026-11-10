@@ -68,7 +68,7 @@ import type { AgentService } from './agents/agent-service'
 import type { ChatManager } from './chats/chat-manager'
 import type { FileWatcher } from './files/file-watcher'
 import type { FolderAccess } from './files/folder-access'
-import { entryLocation, listFolder, readTextFile, writeTextFile } from './files/folder-files'
+import { entryLocation, listFolder, readFile, writeTextFile } from './files/folder-files'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
@@ -1060,7 +1060,7 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!parsed.success) return { kind: 'error', message: 'Not a file of the panel.' }
     const [root, worktreePath, file] = parsed.data
     const folder = await deps.folderAccess.folder(root, worktreePath)
-    return folder === null ? { kind: 'error', message: notShown } : readTextFile(folder, file)
+    return folder === null ? { kind: 'error', message: notShown } : readFile(folder, file)
   })
   handle(IpcChannel.writeFile, async (_event, ...args): Promise<WriteFileResult> => {
     const parsed = z

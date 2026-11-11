@@ -1,5 +1,13 @@
 # hoot
 
+## 0.1.0-alpha.26
+
+### Patch Changes
+
+- [`60fcd34`](https://github.com/Levix0501/hoot/commit/60fcd34c5ed85004c2a4fc1c88e3685fd19a36e3) - Files and folders dragged from Finder (File Explorer on Windows) onto a session's terminal now paste their paths into it, quoted as a terminal app quotes them, so an agent such as Claude Code, Codex or OpenCode can take a dropped picture as an attachment.
+
+- [`7e0e320`](https://github.com/Levix0501/hoot/commit/7e0e320399a00fcc4de575914c0cb666315c308d) - The file panel now slides in from the window's right edge and back out when you show or hide it, or drag its edge far enough to hide it, and slides back to its default widths when you double-click one of its edges, as the sidebar does at the left edge, instead of appearing, disappearing or resizing at once.
+
 ## 0.1.0-alpha.25
 
 ### Patch Changes

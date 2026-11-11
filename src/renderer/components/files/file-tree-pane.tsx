@@ -58,6 +58,15 @@ function folderName(root: string): string {
 }
 
 /**
+ * While the file panel's parts take new widths that do not follow the
+ * pointer, as when a double click on an edge gives them their default
+ * widths back, they slide to them as the sidebar does: in 200 ms, at an even
+ * pace. The session's page says when (`data-file-panel-settling`).
+ */
+export const SETTLING_WIDTH_CLASS =
+  'in-data-[file-panel-settling]:transition-[width] in-data-[file-panel-settling]:duration-200 in-data-[file-panel-settling]:ease-linear'
+
+/**
  * The file panel's tree of a folder, with the folder's name in the window's
  * top row above it. Selecting a file, with a click or the arrow keys, shows
  * it in the preview tab; a double click, or Enter, opens it in a tab of its
@@ -80,7 +89,7 @@ export function FileTreePane({ folder }: { folder: PanelFolder }) {
 
   return (
     <div
-      className="flex h-full w-(--file-tree-width) shrink-0 flex-col"
+      className={`flex h-full w-(--file-tree-width) shrink-0 flex-col ${SETTLING_WIDTH_CLASS}`}
       data-testid="file-tree-pane"
     >
       {/* The panel's part of the window's top row, which drags the window. */}

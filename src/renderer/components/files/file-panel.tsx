@@ -4,11 +4,14 @@ import { CodeXmlIcon, FolderOpenIcon, ImageIcon, PanelRightIcon, XIcon } from 'l
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type Ref,
+  type RefObject,
 } from 'react'
 import {
   FILE_EDITOR_WIDTH,
@@ -19,6 +22,7 @@ import {
 } from '../../../shared/file-panel'
 import { entryName, folderKey, type PanelFolder } from '../../../shared/files'
 import { api } from '../../lib/api'
+import { filePanelSlideEnded } from '../../lib/sidebar-slide'
 import { cn } from '../../lib/utils'
 import {
   editStateKey,
@@ -44,7 +48,7 @@ import { Button } from '../ui/button'
 import { TooltipProvider } from '../ui/tooltip'
 import { BUTTON_CLASS, NavigationButton } from '../window-navigation'
 import { ConflictDiff, TextFileEditor } from './code-views'
-import { FileTreePane } from './file-tree-pane'
+import { FileTreePane, SETTLING_WIDTH_CLASS } from './file-tree-pane'
 
 /** Makes the editors of the panel's files. */
 const createEditor: EditorFactory<undefined, undefined> = (type, options, key) =>
@@ -72,11 +76,13 @@ type PanelEdge = 'panel' | 'tree'
  * having pressed the edge at `startX` in a session's page `pageWidth` wide,
  * are set on the page directly, so the panel follows the pointer without
  * being rendered again, and saved when the pointer is let go of. Where
- * `dragged` gives none, the panel hides, as when it is toggled, and keeps the
- * widths it had before; brought back, it shows again and follows the
- * pointer. The edge is held for as long as the pointer is down: its line
- * shows, the resize cursor shows wherever the pointer is, nothing is
- * selected, and the terminal keeps its size until the edge is let go of.
+ * `dragged` gives none, the panel slides out, as when it is toggled, and
+ * keeps the widths it had before; brought back, it slides in, then follows
+ * the pointer again. The edge is held for as long as the pointer is down:
+ * its line shows, the resize cursor shows wherever the pointer is, nothing
+ * is selected, and the terminal keeps its size until the edge is let go of.
+ * Widths still sliding to their default (see {@link slideToWidths}) follow
+ * the pointer at once.
  */
 function dragEdge(
   down: ReactPointerEvent<HTMLElement>,
@@ -88,6 +94,7 @@ function dragEdge(
   // and which stays while the panel hides.
   const page = handle.closest<HTMLElement>('[data-session-page]')
   if (!page) return
+  delete page.dataset.filePanelSettling
   const { pointerId, clientX: startX } = down
   // The pointer's events keep coming to the edge wherever the pointer goes.
   handle.setPointerCapture(pointerId)
@@ -146,6 +153,29 @@ function dragEdge(
   window.addEventListener('pointercancel', onUp)
 }
 
+/** How often the panel's parts were given widths without the pointer: only the last ends the slide. */
+let settlings = 0
+
+/**
+ * Gives the panel's parts the widths `change` sets, without the pointer, as
+ * when a double click on `edge` gives them their default widths back: they
+ * slide to them as the sidebar slides to its default width, in 200 ms at an
+ * even pace, while the terminal keeps its size until they are in place.
+ */
+function slideToWidths(edge: HTMLElement, change: () => void): void {
+  const page = edge.closest<HTMLElement>('[data-session-page]')
+  if (!page) return change()
+  const settling = ++settlings
+  page.dataset.filePanelSettling = ''
+  change()
+  // Once the page has the new widths, which React gives it, and they are in place.
+  requestAnimationFrame(() => {
+    void filePanelSlideEnded().then(() => {
+      if (settling === settlings) delete page.dataset.filePanelSettling
+    })
+  })
+}
+
 /** For each of the panel's edges, the classes that show its line while it is held. */
 const HELD_EDGE_LINE: Record<PanelEdge, string> = {
   panel: 'in-data-[file-panel-resizing=panel]:opacity-100',
@@ -155,9 +185,9 @@ const HELD_EDGE_LINE: Record<PanelEdge, string> = {
 /**
  * An edge of the panel's parts, below the window's top row: dragging it
  * resizes them (see {@link dragEdge}), and a double click gives them their
- * default widths back. It reaches 8 pixels either side of the line it sits
- * on, which a line covers while the pointer is on it or the edge is held, as
- * on the sidebar's edge.
+ * default widths back, sliding to them (see {@link slideToWidths}). It
+ * reaches 8 pixels either side of the line it sits on, which a line covers
+ * while the pointer is on it or the edge is held, as on the sidebar's edge.
  */
 function ResizeEdge({
   edge,
@@ -187,7 +217,7 @@ function ResizeEdge({
         if (event.button === 0) onPointerDown(event)
       }}
       onMouseDown={(event) => event.preventDefault()}
-      onDoubleClick={onReset}
+      onDoubleClick={(event) => slideToWidths(event.currentTarget, onReset)}
       data-testid={testId}
     >
       <div
@@ -615,16 +645,94 @@ function OpenFiles({ folder }: { folder: PanelFolder }) {
   )
 }
 
+/** How long the panel takes to slide in or out, at an even pace: as long as the sidebar takes. */
+const SLIDE_DURATION = 200
+
+/** What a slide out leaves on the panel to keep it out of sight until it leaves the page. */
+const SLID_OUT_STYLES = ['margin-right', 'min-width', 'max-width', 'flex-shrink']
+
 /**
- * The file panel of a session's folder, right of the terminal: the folder's
- * tree at the window's right edge and, once a file is open, the open files
- * left of it. Dragging the panel's left edge resizes the open files (the
- * tree, while no file is open), and past half their narrowest width hides the
- * panel, as the sidebar's edge does the sidebar; dragging the line between
- * them moves it, resizing the tree. The panel narrows, its open files first,
- * to leave the terminal room beside it.
+ * Slides the panel in from the window's right edge when `open` turns true,
+ * and back out when it turns false, as the sidebar slides at the left edge:
+ * the panel keeps the width it shows while its margin takes it in or out,
+ * and the terminal narrows or widens beside it. A slide turned back half
+ * way goes back from where it is. The panel shows, still or sliding, while
+ * `shown` is true, which lasts until it has slid out; on a page that first
+ * shows it, it is in place at once.
  */
-export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
+function usePanelSlide(open: boolean): { shown: boolean; ref: RefObject<HTMLDivElement | null> } {
+  const ref = useRef<HTMLDivElement>(null)
+  const [shown, setShown] = useState(open)
+  if (open && !shown) setShown(true)
+  // Whether the panel was open, so that only a change slides it.
+  const wasOpen = useRef(open)
+
+  useLayoutEffect(() => {
+    if (wasOpen.current === open) return
+    wasOpen.current = open
+    const panel = ref.current
+    if (!panel) return
+    const sliding = panel.getAnimations()
+    const width = panel.getBoundingClientRect().width
+    // Where the panel is: in place, or as far as the slide it turns back took it.
+    const from =
+      sliding.length > 0
+        ? Number.parseFloat(getComputedStyle(panel).marginRight)
+        : open
+          ? -width
+          : 0
+    const to = open ? 0 : -width
+    for (const animation of sliding) animation.cancel()
+    for (const property of SLID_OUT_STYLES) panel.style.removeProperty(property)
+    // The width it shows, also in a page too narrow for all of it, until it
+    // is in place; its own width, which React sets, stays as it is.
+    const fixed = { minWidth: `${width}px`, maxWidth: `${width}px`, flexShrink: '0' }
+    // At once when it has no width to slide by, as on a page not laid out.
+    const slide = panel.animate(
+      [
+        { ...fixed, marginRight: `${from}px` },
+        { ...fixed, marginRight: `${to}px` },
+      ],
+      {
+        duration: width === 0 ? 0 : (SLIDE_DURATION * Math.abs(to - from)) / width,
+        easing: 'linear',
+      },
+    )
+    slide.onfinish = () => {
+      if (open) return
+      // Out of sight until it leaves the page, not back in place for a frame.
+      Object.assign(panel.style, { ...fixed, marginRight: `${to}px` })
+      setShown(false)
+    }
+  }, [open])
+
+  return { shown, ref }
+}
+
+/**
+ * The file panel of a session's folder, right of the terminal, while `open`
+ * says it shows: it slides in from the window's right edge as it shows and
+ * back out as it hides, as the sidebar does at the left edge (see
+ * {@link usePanelSlide}).
+ */
+export function FilePanel({ open, ...folder }: PanelFolder & { open: boolean }) {
+  const { shown, ref } = usePanelSlide(open)
+  return shown ? <FilePanelContent ref={ref} {...folder} /> : null
+}
+
+/**
+ * The panel itself: the folder's tree at the window's right edge and, once
+ * a file is open, the open files left of it. Dragging the panel's left edge
+ * resizes the open files (the tree, while no file is open), and past half
+ * their narrowest width hides the panel, as the sidebar's edge does the
+ * sidebar; dragging the line between them moves it, resizing the tree. The
+ * panel narrows, its open files first, to leave the terminal room beside it.
+ */
+function FilePanelContent({
+  projectRoot,
+  worktreePath,
+  ref,
+}: PanelFolder & { ref: Ref<HTMLDivElement> }) {
   const folder = useMemo(() => ({ projectRoot, worktreePath }), [projectRoot, worktreePath])
   const key = folderKey(folder)
   const showFolder = useFilesStore((state) => state.showFolder)
@@ -662,8 +770,13 @@ export function FilePanel({ projectRoot, worktreePath }: PanelFolder) {
 
   return (
     <EditProvider createEditor={createEditor}>
+      {/*
+        Opaque, as the page under it is: the terminal, which keeps its size
+        while the panel slides or an edge is dragged, does not show through.
+      */}
       <div
-        className="relative flex h-full min-w-0 shrink border-l"
+        ref={ref}
+        className={`relative flex h-full min-w-0 shrink border-l bg-background ${SETTLING_WIDTH_CLASS}`}
         // Their widths, which the session's page holds, and the lines at the
         // panel's left edge and between them.
         style={{

@@ -119,7 +119,12 @@ export function App() {
         ) : (
           <>
             <ProjectSidebar />
-            <SidebarInset className="min-w-0 overflow-hidden">
+            {/*
+              Clipped rather than hidden: what lies past its edges, such as the
+              file panel while it slides in, cannot scroll it into view, as a
+              file's tab scrolling itself into view would.
+            */}
+            <SidebarInset className="min-w-0 overflow-clip">
               <MainArea />
             </SidebarInset>
             {/* Last, so that its buttons are cut out of the drag area of what lies under them. */}

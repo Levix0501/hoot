@@ -1,6 +1,11 @@
 import { useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
-import { sidebarSlide, sidebarSlideEnded } from '../lib/sidebar-slide'
+import {
+  filePanelSlide,
+  filePanelSlideEnded,
+  sidebarSlide,
+  sidebarSlideEnded,
+} from '../lib/sidebar-slide'
 import { getSessionTerminal, useAppStore } from '../store/app-store'
 import { useFilesStore } from '../store/files-store'
 import { droppedPathsText } from '../terminal/dropped-paths'
@@ -11,14 +16,15 @@ const launchedSessions = new Set<string>()
 
 /**
  * Whether the terminal's width is changing: while the sidebar's edge is
- * dragged, while the sidebar slides, and while an edge of the file panel is
- * dragged.
+ * dragged, while the sidebar slides, while an edge of the file panel is
+ * dragged, and while the file panel slides.
  */
 function sidebarMoving(): boolean {
   return (
     useAppStore.getState().sidebarResizing ||
     sidebarSlide().length > 0 ||
-    useFilesStore.getState().resizing
+    useFilesStore.getState().resizing ||
+    filePanelSlide().length > 0
   )
 }
 
@@ -44,12 +50,13 @@ function sidebarResizeEnded(): Promise<void> {
   })
 }
 
-/** Resolves once the sidebar's width has stopped changing. */
+/** Resolves once the terminal's width has stopped changing. */
 async function sidebarSettled(): Promise<void> {
   while (sidebarMoving()) {
     if (useAppStore.getState().sidebarResizing) await sidebarResizeEnded()
     else if (useFilesStore.getState().resizing) await filePanelResizeEnded()
-    else await sidebarSlideEnded()
+    else if (sidebarSlide().length > 0) await sidebarSlideEnded()
+    else await filePanelSlideEnded()
   }
 }
 
@@ -107,10 +114,10 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     // Fill the area, which may have changed size while the session was not shown;
     // a new size reaches the session's process through the terminal's resize event.
     fit.fit()
-    // While the sidebar slides in or out, or its edge is dragged, the area
-    // changes width on every frame: the grid keeps its size until the
-    // sidebar is in place, then takes the area's new size at once, so that
-    // its program redraws once.
+    // While the sidebar or the file panel slides in or out, or an edge of
+    // either is dragged, the area changes width on every frame: the grid
+    // keeps its size until they are in place, then takes the area's new size
+    // at once, so that its program redraws once.
     let shown = true
     let waiting = false
     const observer = new ResizeObserver(() => {

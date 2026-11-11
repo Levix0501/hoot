@@ -142,8 +142,12 @@ export function SessionPane({ session }: { session: UiSession }) {
           </div>
         )}
       </div>
-      {filesShown && (
-        <FilePanel projectRoot={session.projectRoot} worktreePath={session.worktreePath} />
+      {hasFiles && (
+        <FilePanel
+          open={filePanelOpen}
+          projectRoot={session.projectRoot}
+          worktreePath={session.worktreePath}
+        />
       )}
       {hasFiles && <FilePanelToggle />}
     </div>

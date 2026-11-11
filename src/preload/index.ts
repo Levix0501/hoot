@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import { droppedPathQuotingFor } from '../shared/dropped-path-quoting'
 import { fileManagerName } from '../shared/file-manager'
 import { IpcChannel, type HootApi } from '../shared/ipc'
 import { managesAgents } from '../shared/managed-agents'
@@ -23,6 +24,8 @@ const api: HootApi = {
   fileManager: fileManagerName(process.platform),
   manageAgents: managesAgents(process.platform),
   windowsPty: windowsPtyFor(process.platform, process.getSystemVersion()),
+  droppedPathQuoting: droppedPathQuotingFor(process.platform),
+  pathForFile: (file) => webUtils.getPathForFile(file),
   getStartupState: () => ipcRenderer.invoke(IpcChannel.getStartupState),
   getAppInfo: () => ipcRenderer.invoke(IpcChannel.getAppInfo),
   revealDatabase: () => ipcRenderer.send(IpcChannel.revealDatabase),

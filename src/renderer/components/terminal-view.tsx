@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { sidebarSlide, sidebarSlideEnded } from '../lib/sidebar-slide'
 import { getSessionTerminal, useAppStore } from '../store/app-store'
 import { useFilesStore } from '../store/files-store'
+import { droppedPathsText } from '../terminal/dropped-paths'
 import { drawWithWebgl } from '../terminal/webgl-renderer'
 
 /** Sessions whose process start has been requested, so it is requested only once. */
@@ -53,11 +54,44 @@ async function sidebarSettled(): Promise<void> {
 }
 
 /**
+ * Whether what is dragged over a session's terminal can be dropped on it:
+ * files or folders, while the session's process runs.
+ */
+function canDropFiles(sessionId: string, event: React.DragEvent): boolean {
+  if (!event.dataTransfer.types.includes('Files')) return false
+  const session = useAppStore.getState().sessions.find((entry) => entry.id === sessionId)
+  return session?.status === 'running'
+}
+
+/**
  * Shows a session's terminal, which exists for as long as the session: it is
  * moved here when the session is shown and keeps receiving output while it is not.
+ * Files and folders dropped on it, as from Finder, reach its program as
+ * their paths, pasted as a terminal application pastes them: an agent that
+ * reads pastes, as Claude Code, Codex and OpenCode do, takes a dropped
+ * picture as an attachment.
  */
 export function TerminalView({ sessionId }: { sessionId: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
+
+  const allowDrop = (event: React.DragEvent) => {
+    if (!canDropFiles(sessionId, event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const drop = (event: React.DragEvent) => {
+    if (!canDropFiles(sessionId, event)) return
+    event.preventDefault()
+    const terminal = getSessionTerminal(sessionId)?.terminal
+    const paths = Array.from(event.dataTransfer.files, (file) => api.pathForFile(file))
+    const text = droppedPathsText(paths, api.droppedPathQuoting)
+    if (!terminal || text === '') return
+    // As a paste, in brackets when the program asked for them, so that it
+    // can tell the paths from typed text.
+    terminal.paste(text)
+    terminal.focus()
+  }
 
   // A layout effect: the terminal is in place and fitted before the window
   // paints, and the terminal shown before has given up its WebGL renderer
@@ -115,6 +149,9 @@ export function TerminalView({ sessionId }: { sessionId: string }) {
     <div
       className="min-h-0 flex-1 bg-background pt-3 pr-1.5 pb-3 pl-3.5"
       data-testid="terminal-area"
+      onDragEnter={allowDrop}
+      onDragOver={allowDrop}
+      onDrop={drop}
     >
       <div ref={hostRef} className="size-full" data-testid="terminal" />
     </div>

@@ -3,6 +3,7 @@ import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { ChatInfo, SavedSessionInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
+import type { DroppedPathQuoting } from './dropped-path-quoting'
 import type { FilePanelLayout } from './file-panel'
 import type {
   FileVersion,
@@ -413,6 +414,17 @@ export interface HootApi {
    * are set up for; none elsewhere.
    */
   windowsPty: WindowsPty | undefined
+  /**
+   * How a session's terminal quotes the paths of the files and folders
+   * dropped on it: as Windows Terminal does on Windows, as a POSIX shell
+   * does elsewhere.
+   */
+  droppedPathQuoting: DroppedPathQuoting
+  /**
+   * The path of a file or folder dropped on the window from Finder (File
+   * Explorer on Windows) or another app; empty for a file that is not on disk.
+   */
+  pathForFile(file: File): string
   getStartupState(): Promise<StartupState>
   /** What the About page tells of Hoot and of what it runs on. */
   getAppInfo(): Promise<AppInfo>

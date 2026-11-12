@@ -1,0 +1,90 @@
+/*
+ * Issue descriptions (notra-editor) in the size of the interface's prose, as
+ * they were before: 14px text, blocks closer together than on a page, and
+ * no padding of their own, so that they line up with the title above them.
+ * Their height is at least what the place they are in gives them with a
+ * `[&_.tiptap]:min-h-*` class, or none: notra-editor's own minimum is left
+ * out with `revert-layer`, as it is outside the cascade layers and would
+ * otherwise win over Tailwind's classes, which are in them.
+ */
+.issue-description.notra-editor[data-block-handle] .notra-content {
+  min-height: revert-layer;
+  padding: 0;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+}
+
+.issue-description.notra-editor[data-block-handle] .notra-content h1 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.issue-description.notra-editor[data-block-handle] .notra-content h2 {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.issue-description.notra-editor[data-block-handle] .notra-content h3 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.issue-description
+  .notra-content
+  :where(
+    p,
+    ul,
+    ol,
+    blockquote,
+    pre,
+    hr,
+    .tableWrapper,
+    [data-type='details'],
+    [data-type='callout']
+  ) {
+  margin-top: 0.5rem;
+}
+
+.issue-description .notra-content :where(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1rem;
+}
+
+.issue-description
+  .notra-content
+  :where(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    ul,
+    ol,
+    blockquote,
+    pre,
+    hr,
+    .tableWrapper,
+    [data-type='details'],
+    [data-type='callout']
+  ):first-child {
+  margin-top: 0;
+}
+
+.issue-description .notra-content li {
+  margin-top: 0.125rem;
+}
+
+/*
+ * The Issues window's note: a first paragraph or heading becomes the issue's
+ * title, and shows bold; its placeholder does not.
+ */
+.issue-note.notra-editor[data-block-handle]
+  .notra-content
+  > :is(p, h1, h2, h3, h4, h5, h6):first-child {
+  font-weight: 600;
+}
+
+.issue-note.notra-editor[data-block-handle] .notra-content > :first-child.is-empty {
+  font-weight: 400;
+}

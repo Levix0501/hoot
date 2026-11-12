@@ -1,7 +1,8 @@
 /*
- * Markdown previews (notra-editor) and their menus in Hoot's colors, corners
- * and fonts, light or dark as the window is: notra-editor gives its own
- * values to these at the root without weight, so these take their place.
+ * notra-editor, in Markdown previews and in issue descriptions, and its menus
+ * in Hoot's colors, corners and fonts, light or dark as the window is:
+ * notra-editor gives its own values to these at the root without weight, so
+ * these take their place.
  */
 :root {
   --notra-background: var(--background);

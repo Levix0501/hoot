@@ -1,20 +1,5 @@
-import { Selection } from '@tiptap/pm/state'
-import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import {
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useRef,
-  type Ref,
-} from 'react'
+import { lazy, Suspense, type Ref } from 'react'
 import { cn } from '../../lib/utils'
-import { onFlushIssueEdits } from '../../store/app-store'
-import { descriptionExtensions } from './description-extensions'
-import { MARKDOWN_PROSE, openLink } from './markdown'
-
-/** How long typing pauses before what was typed is handed on. */
-const SETTLE_MS = 300
 
 export interface DescriptionEditorHandle {
   /** Puts the keyboard focus at the start of the description. */
@@ -23,22 +8,7 @@ export interface DescriptionEditorHandle {
   flush(): void
 }
 
-/**
- * An issue's description, edited in place as Linear's are: formatted as it
- * is typed (`# `, `- `, `[ ] ` and the like), and kept as GitHub Flavored
- * Markdown. What is typed is handed to `onChange` as Markdown once typing
- * pauses, when the editor loses the focus or goes away, and before an issue
- * is sent to Claude Code; never just for showing the description.
- */
-export function DescriptionEditor({
-  markdown,
-  onChange,
-  placeholder = 'Add description…',
-  escapeBlurs = false,
-  className,
-  testId,
-  ref,
-}: {
+export interface DescriptionEditorProps {
   /** What the editor starts with; later changes to it are not shown. */
   markdown: string
   onChange(markdown: string): void
@@ -49,95 +19,23 @@ export function DescriptionEditor({
   className?: string
   testId: string
   ref?: Ref<DescriptionEditorHandle>
-}) {
-  const onChangeRef = useRef(onChange)
-  const escapeBlursRef = useRef(escapeBlurs)
-  useEffect(() => {
-    onChangeRef.current = onChange
-    escapeBlursRef.current = escapeBlurs
-  })
-  /** The Markdown last handed on, or that the editor started with. */
-  const baseline = useRef<string | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const editorRef = useRef<Editor | null>(null)
+}
 
-  const flush = useCallback(() => {
-    clearTimeout(timer.current)
-    timer.current = undefined
-    const editor = editorRef.current
-    if (editor === null || editor.isDestroyed || baseline.current === null) return
-    const typed = editor.getMarkdown()
-    if (typed === baseline.current) return
-    baseline.current = typed
-    onChangeRef.current(typed)
-  }, [])
+/** The editor itself, with notra-editor, which is loaded the first time a description shows. */
+const NotraDescription = lazy(() => import('./description-notra'))
 
-  const editor = useEditor(
-    {
-      extensions: descriptionExtensions(placeholder),
-      content: markdown,
-      contentType: 'markdown',
-      shouldRerenderOnTransaction: false,
-      editorProps: {
-        attributes: {
-          class: MARKDOWN_PROSE,
-          'aria-label': 'Description',
-          'data-testid': testId,
-          'data-user-text': '',
-        },
-        handleClick: (_view, _position, event) => openLink(event),
-        handleDOMEvents: {
-          // A middle click on a link opens nothing either.
-          auxclick: (_view, event) => openLink(event),
-        },
-        handleKeyDown: (view, event) => {
-          // ⌘B makes text bold here, rather than hiding the sidebar.
-          if (event.metaKey && event.key.toLowerCase() === 'b') event.stopPropagation()
-          if (event.key === 'Escape' && escapeBlursRef.current && !event.isComposing) {
-            view.dom.blur()
-            return true
-          }
-          return false
-        },
-      },
-      onCreate: ({ editor: created }) => {
-        baseline.current = created.getMarkdown()
-      },
-      onUpdate: () => {
-        clearTimeout(timer.current)
-        timer.current = setTimeout(flush, SETTLE_MS)
-      },
-      onBlur: flush,
-    },
-    [],
+/**
+ * An issue's description, edited in place as Linear's are, in notra-editor:
+ * formatted as it is typed (`# `, `- `, `[ ] ` and the like), with a `/`
+ * menu of blocks and a toolbar over selected text, and kept as GitHub
+ * Flavored Markdown. What is typed is handed to `onChange` as Markdown once
+ * typing pauses, when the editor loses the focus or goes away, and before an
+ * issue is sent to an agent; never just for showing the description.
+ */
+export function DescriptionEditor(props: DescriptionEditorProps) {
+  return (
+    <Suspense fallback={<div className={cn('min-w-0', props.className)} />}>
+      <NotraDescription {...props} />
+    </Suspense>
   )
-
-  useEffect(() => {
-    editorRef.current = editor
-  }, [editor])
-
-  // Before the editor goes, which happens after the layout effects are cleaned up.
-  useLayoutEffect(() => flush, [flush])
-
-  useEffect(() => {
-    window.addEventListener('pagehide', flush)
-    const unregister = onFlushIssueEdits(flush)
-    return () => {
-      window.removeEventListener('pagehide', flush)
-      unregister()
-    }
-  }, [flush])
-
-  useImperativeHandle(ref, () => ({
-    focus: () => {
-      if (!editor) return
-      // Not with the focus command, which waits for the next frame: keys typed meanwhile would go astray.
-      const { state, view } = editor
-      view.dispatch(state.tr.setSelection(Selection.atStart(state.doc)).scrollIntoView())
-      view.focus()
-    },
-    flush,
-  }))
-
-  return <EditorContent editor={editor} className={cn('min-w-0', className)} />
 }

@@ -13,7 +13,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["vite/client", "vite-plugin-svgr/client"],
+    "types": ["vite/client", "vite-plugin-svgr/client", "@tiptap/markdown"],
     "paths": {
       "@/*": ["./src/renderer/*"]
     }

@@ -3,9 +3,6 @@
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist-mono';
 
-/* The look of issue descriptions, edited as they show. */
-@plugin '@tailwindcss/typography';
-
 @custom-variant dark (&:is(.dark *));
 
 /*

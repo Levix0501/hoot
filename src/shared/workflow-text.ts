@@ -136,6 +136,24 @@ export function firstMessage({
   ].join('\n\n')
 }
 
+/**
+ * The first message of a session started from an issue while no workflow
+ * runs, without one of its own: where the issue's file is, and the branch of
+ * the worktree made for the issue, in which the agent works on it.
+ */
+export function plainFirstMessage({
+  issueFile,
+  branch,
+}: {
+  issueFile: string
+  branch: string
+}): string {
+  return [
+    `The issue to work on is in \`${issueFile}\`.`,
+    `This is a Git worktree of the project, on the branch \`${branch}\`, made for this issue.`,
+  ].join('\n\n')
+}
+
 /** What an end label of a workflow does, as `workflow.md` says it. */
 function endLabelText(end: WorkflowEndLabel): string {
   if (!end.completeWithSubIssues) return `- ${labelName(end.name)}`

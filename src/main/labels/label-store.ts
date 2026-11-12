@@ -136,8 +136,10 @@ function savedDescription(description: string): string {
  * issue carries, with the activity of each issue's labels. Labels belong to
  * no project. No two labels have the same name, nor two groups, whatever the
  * case, and an issue carries at most one label of a group: given another, it
- * no longer carries the one it had. The group of a workflow and its labels
- * change only as the workflow says. It says when anything about the labels
+ * no longer carries the one it had. The group of a workflow that runs and
+ * its labels change only as the workflow says; that of a workflow that does
+ * not, such as one paused, is an ordinary group until the workflow runs
+ * again and puts it back in place. It says when anything about the labels
  * changes, once the change is saved, and gives the issues' new activity.
  */
 export class LabelStore extends EventEmitter<{
@@ -150,6 +152,8 @@ export class LabelStore extends EventEmitter<{
   /** Whether the transaction under way changed anything, and the activity it added. */
   private changedNow = false
   private eventsNow: LabelEvent[] = []
+  /** The workflows that run: those that have put their group in place. */
+  private readonly running = new Set<string>()
 
   constructor(
     private readonly db: DatabaseSync,
@@ -447,6 +451,7 @@ export class LabelStore extends EventEmitter<{
         this.statements.updateGroup.run(groupName, nameKey(groupName), workflow, group.id)
         this.changedNow = true
       }
+      this.running.add(workflow)
       const labelIds = new Map<string, number>()
       for (const label of labels) {
         const row = this.statements.labelByKey.get(nameKey(label.name)) as LabelRow | undefined
@@ -490,7 +495,15 @@ export class LabelStore extends EventEmitter<{
   }
 
   private groups(): LabelGroup[] {
-    return (this.statements.groups.all() as unknown as GroupRow[]).map((row) => ({ ...row }))
+    return (this.statements.groups.all() as unknown as GroupRow[]).map((row) => ({
+      ...row,
+      workflow: this.owner(row),
+    }))
+  }
+
+  /** The workflow that alone changes a group: the one whose group it is, while it runs. */
+  private owner(group: GroupRow): string | null {
+    return group.workflow !== null && this.running.has(group.workflow) ? group.workflow : null
   }
 
   private carriedBy(issueId: number): number[] {
@@ -535,18 +548,20 @@ export class LabelStore extends EventEmitter<{
   }
 
   private refuseWorkflowGroup(group: GroupRow): void {
-    if (group.workflow !== null) {
+    const workflow = this.owner(group)
+    if (workflow !== null) {
       throw new LabelError(
-        `The group ${group.name} belongs to the workflow ${group.workflow}, which alone changes it and its labels.`,
+        `The group ${group.name} belongs to the workflow ${workflow}, which alone changes it and its labels.`,
       )
     }
   }
 
   private refuseWorkflowLabel(row: LabelRow): void {
     const group = row.group_id === null ? undefined : this.groupRowIfAny(row.group_id)
-    if (group !== undefined && group.workflow !== null) {
+    const workflow = group === undefined ? null : this.owner(group)
+    if (workflow !== null) {
       throw new LabelError(
-        `${this.written(row)} belongs to the workflow ${group.workflow}: it can only be given to issues and taken off them.`,
+        `${this.written(row)} belongs to the workflow ${workflow}: it can only be given to issues and taken off them.`,
       )
     }
   }

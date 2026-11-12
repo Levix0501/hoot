@@ -115,5 +115,12 @@ const SPEC_DRIVEN: WorkflowDefinition = {
 /** The built-in workflow, once it has passed the check of workflow definitions. */
 export const BUILT_IN_WORKFLOW: WorkflowDefinition = checkedWorkflow(SPEC_DRIVEN)
 
-/** The workflow every issue follows: the built-in one. */
-export const ISSUE_WORKFLOW: WorkflowDefinition = BUILT_IN_WORKFLOW
+/**
+ * The workflow every issue follows, or `null` while none runs, as now: the
+ * built-in one is paused. Hoot then starts no step of it, sending agents no
+ * step's prompt, gives issues none of its labels, completes none by them,
+ * and shows no start button, which starts an issue's workflow; its group of
+ * labels, where Hoot put it in place before, is an ordinary one. Setting
+ * this to `BUILT_IN_WORKFLOW` runs it again.
+ */
+export const ISSUE_WORKFLOW: WorkflowDefinition | null = null

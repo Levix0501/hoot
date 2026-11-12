@@ -752,17 +752,17 @@ export function hootProgram(io: CliIo): Command {
   sessionCommand
     .command('start')
     .description(
-      "Start a Claude Code session for an issue of the project, in the issue's worktree, as its " +
-        'start button in Hoot starts one, and print the root of the worktree. It shows in the ' +
-        "sidebar, and Hoot's window goes on showing what it showed. Nothing starts while the " +
-        "issue's start button could not start a session either, such as while the issue waits " +
-        'on issues neither done nor canceled: hoot then says why',
+      "Start a Claude Code session for an issue of the project, in the issue's worktree, which " +
+        'Hoot creates when there is none, and print the root of the worktree. It shows in the ' +
+        "sidebar, and Hoot's window goes on showing what it showed. Nothing starts while work " +
+        'on the issue cannot start, such as while it waits on issues neither done nor ' +
+        'canceled: hoot then says why',
     )
     .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
     .option(
       '--prompt-file <file>',
       "the session's first message, from a UTF-8 file, or from standard input with -; without " +
-        'it, Hoot gives the session the first message its start button would',
+        'it, Hoot gives the session one that points the agent to the issue',
     )
     .action(async (text: string, options: { promptFile?: string }) => {
       const digits = givenIssue(text)

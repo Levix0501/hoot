@@ -162,6 +162,24 @@ describe('LabelStore', () => {
     )
   })
 
+  it("leaves a workflow's group to the user while the workflow does not run", () => {
+    const { db, labels } = start()
+    // Hoot opened again with the workflow paused: nothing puts its group in place.
+    const paused = new LabelStore(db, () => clock)
+    const group = paused.snapshot().groups.find(({ name }) => name === BUILT_IN_WORKFLOW.group)!
+    expect(group.workflow).toBeNull()
+    // Where it runs, it is the workflow's.
+    expect(labels.snapshot().groups.find(({ id }) => id === group.id)!.workflow).toBe('Spec-driven')
+    const triaging = paused.findByName('triaging')!
+    expect(paused.editLabel(triaging.id, { name: 'Sorting', color: '112233' })).toMatchObject({
+      name: 'Sorting',
+      color: '112233',
+      group: 'Spec-driven',
+    })
+    paused.deleteGroup(group.id)
+    expect(paused.findByName('Sorting')!.group).toBeNull()
+  })
+
   it('changes the name, color and description of a label, and not those of the workflow', () => {
     const { labels } = start()
     const chore = labels.createLabel({ name: 'Chore' })

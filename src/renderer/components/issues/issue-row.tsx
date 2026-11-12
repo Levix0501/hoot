@@ -11,6 +11,7 @@ import {
   UnlinkIcon,
 } from 'lucide-react'
 import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
+import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
 import {
   optionOfDigit,
@@ -182,10 +183,16 @@ export function IssueRow({
         className="group/row relative"
         onMouseEnter={() => onHover(issue.id)}
       >
-        {/* Room is left at the end of every row for the start button, so that the dates line up. */}
+        {/*
+          While the issues' workflow runs, room is left at the end of every row
+          for the start button, so that the dates line up.
+        */}
         <button
           type="button"
-          className="flex h-11 w-full items-center gap-2.5 rounded-lg pr-11 pl-3 text-left text-[13px] outline-none group-hover/row:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted"
+          className={cn(
+            'flex h-11 w-full items-center gap-2.5 rounded-lg pl-3 text-left text-[13px] outline-none group-hover/row:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted',
+            ISSUE_WORKFLOW === null ? 'pr-3' : 'pr-11',
+          )}
           onClick={() => showIssue(issue.id)}
           data-popup-open={menuOpen || undefined}
           data-testid="issue-row"
@@ -286,15 +293,19 @@ export function IssueRow({
           close={() => setMenuOpen(false)}
         />
         <ContextMenuSeparator />
-        <ContextMenuItem
-          disabled={!canStart}
-          onClick={() => void startNewSession(issue.id)}
-          data-testid="issue-menu-start-new-session"
-        >
-          <SquarePlusIcon />
-          Start new session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
+        {ISSUE_WORKFLOW !== null && (
+          <>
+            <ContextMenuItem
+              disabled={!canStart}
+              onClick={() => void startNewSession(issue.id)}
+              data-testid="issue-menu-start-new-session"
+            >
+              <SquarePlusIcon />
+              Start new session
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         <ContextMenuItem
           onClick={() => copyIssueIdentifier(issue.id)}
           data-testid="issue-menu-copy-id"

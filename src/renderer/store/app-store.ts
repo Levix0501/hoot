@@ -76,7 +76,11 @@ import { startBlockers, startBlockerText, type StartBlocker } from '../../shared
 import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
-import { workflowProgress, type WorkflowProgress } from '../../shared/workflows'
+import {
+  workflowProgress,
+  type WorkflowDefinition,
+  type WorkflowProgress,
+} from '../../shared/workflows'
 import type { CreateIssueWorktreeResult, WorktreeInfo } from '../../shared/worktrees'
 import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib/session-state'
 import { api } from '../lib/api'
@@ -1168,10 +1172,13 @@ export function issueLabelsOf(state: Pick<AppState, 'labels'>, issueId: number):
   return labels
 }
 
-/** The id of the group of the workflow every issue follows, once the labels have been read. */
-function workflowGroupId(labels: Labels): number | undefined {
-  return labels.groups.find((group) => group.workflow === ISSUE_WORKFLOW.name)?.id
+/** The id of the group of a workflow, once the labels have been read. */
+function workflowGroupId(labels: Labels, workflow: WorkflowDefinition): number | undefined {
+  return labels.groups.find((group) => group.workflow === workflow.name)?.id
 }
+
+/** Where every issue is while no workflow runs. */
+const NOT_STARTED: WorkflowProgress = { kind: 'not-started' }
 
 /** The progress of every issue, worked out once for the labels it is of. */
 let progressCache: { labels: Labels; byIssue: Map<number, WorkflowProgress> } | null = null
@@ -1184,12 +1191,13 @@ export function issueProgressOf(
   state: Pick<AppState, 'labels'>,
   issueId: number,
 ): WorkflowProgress {
+  if (ISSUE_WORKFLOW === null) return NOT_STARTED
   if (progressCache?.labels !== state.labels) {
     progressCache = { labels: state.labels, byIssue: new Map() }
   }
   const cached = progressCache.byIssue.get(issueId)
   if (cached) return cached
-  const groupId = workflowGroupId(state.labels)
+  const groupId = workflowGroupId(state.labels, ISSUE_WORKFLOW)
   const progress = workflowProgress(
     ISSUE_WORKFLOW,
     issueLabelsOf(state, issueId)

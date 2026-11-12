@@ -5,6 +5,7 @@ import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
 import { startBlockerText, type StartBlocker } from '../../../shared/start-blockers'
 import { getTool } from '../../../shared/tools'
+import type { WorkflowDefinition } from '../../../shared/workflows'
 import { startHint, startState } from '../../lib/issue-start'
 import { cn } from '../../lib/utils'
 import {
@@ -68,6 +69,21 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
 
 /**
  * The start button of an open issue, at the end of its row in the issue list
+ * and on its page, while the issues' workflow runs; none while it does not
+ * (see `ISSUE_WORKFLOW`).
+ */
+export function IssueStartButton(props: {
+  issue: Issue
+  tooltipSide: 'top' | 'bottom'
+  /** Places the button, as its row or its page needs. */
+  className?: string
+}) {
+  if (ISSUE_WORKFLOW === null) return null
+  return <StartButton {...props} workflow={ISSUE_WORKFLOW} />
+}
+
+/**
+ * The start button of an open issue, at the end of its row in the issue list
  * and on its page, where it is the same button. While a session opened from
  * the issue is in the sidebar, it shows the one opened last. Otherwise it
  * starts work on the issue with Claude Code, at the step of its workflow it
@@ -80,15 +96,17 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
  * tooltip says what it does, or why it cannot be used now, also while it is
  * disabled: the tooltip's trigger wraps the button.
  */
-export function IssueStartButton({
+function StartButton({
   issue,
   tooltipSide,
   className,
+  workflow,
 }: {
   issue: Issue
   tooltipSide: 'top' | 'bottom'
-  /** Places the button, as its row or its page needs. */
   className?: string
+  /** The workflow the issues follow, whose steps it starts. */
+  workflow: WorkflowDefinition
 }) {
   const sessionId = useAppStore((state) => latestIssueSession(state, issue.id)?.id ?? null)
   // As text, which stays the same while the reasons do.
@@ -99,7 +117,7 @@ export function IssueStartButton({
   const startIssue = useAppStore((state) => state.startIssue)
   const progress = useAppStore((state) => issueProgressOf(state, issue.id))
   const action = startState({ sessionId, blockers, worktreePath })
-  const hint = action.kind === 'blocked' ? null : startHint(action, progress, ISSUE_WORKFLOW)
+  const hint = action.kind === 'blocked' ? null : startHint(action, progress, workflow)
 
   return (
     <Tooltip>

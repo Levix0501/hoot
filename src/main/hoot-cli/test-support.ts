@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
+import { BUILT_IN_WORKFLOW } from '../../shared/built-in-workflow'
 import { waitedOnIds } from '../../shared/dependencies'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import type { ToolsState } from '../../shared/ipc'
@@ -44,7 +44,7 @@ export async function startTestHoot() {
   const projects = new ProjectStore(db)
   const issues = new IssueStore(db, () => clock)
   const labels = new LabelStore(db, () => clock)
-  const workflows = new WorkflowExecutor(db, ISSUE_WORKFLOW, labels, () => clock)
+  const workflows = new WorkflowExecutor(db, BUILT_IN_WORKFLOW, labels, () => clock)
   let tools: ToolsState = CLAUDE_FOUND
   /** The sessions asked for, in order: the issue and the first message given, if any. */
   const startedSessions: Array<{ issueId: number; prompt: string | null }> = []

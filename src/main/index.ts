@@ -442,8 +442,10 @@ function startWithDatabase(database: DatabaseSync): void {
       worktreeService.sessionClosed(session.projectRoot, session.worktreePath)
     }
   })
-  // Puts the workflow's group of labels in place, before anything reads the labels.
-  const workflows = new WorkflowExecutor(database, ISSUE_WORKFLOW, labels)
+  // Puts the workflow's group of labels in place, before anything reads the labels; none while
+  // no workflow runs.
+  const workflows =
+    ISSUE_WORKFLOW === null ? null : new WorkflowExecutor(database, ISSUE_WORKFLOW, labels)
   // hoot's sessions, which the window starts as an issue's start button does.
   const sessionStarts = new SessionStartRequests((request) => {
     const window = getWindow()
@@ -558,7 +560,7 @@ function startWithDatabase(database: DatabaseSync): void {
           issues.dependencies().links,
           issue.id,
         ),
-        workflows.progress(issue.id),
+        workflows?.progress(issue.id) ?? { kind: 'not-started' },
       ),
     startSession: (issueId, prompt) => sessionStarts.request(issueId, prompt),
     hookEvent: (sessionId, report) => sessions.reportHookEvent(sessionId, report),

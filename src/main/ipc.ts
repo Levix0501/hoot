@@ -56,6 +56,7 @@ import { browserLink } from '../shared/links'
 import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
 import type { ParentChange } from '../shared/sub-issues'
 import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
+import { plainFirstMessage } from '../shared/workflow-text'
 import type { WorkflowStep } from '../shared/workflows'
 import type {
   CreateIssueWorktreeResult,
@@ -127,7 +128,8 @@ export interface IpcDependencies {
   worktrees: WorktreeService
   /** The projects' own folders: whether each is there, and what is checked out in it. */
   projectFolders: ProjectFolders
-  workflows: WorkflowExecutor
+  /** Runs the issues' workflow; `null` while none runs. */
+  workflows: WorkflowExecutor | null
   /** The sessions hoot asked for, which the window answers. */
   sessionStarts: SessionStartRequests
   /** What adding a folder as a project takes: nothing, or a first commit after a confirmation. */
@@ -832,18 +834,24 @@ export function registerIpc(deps: IpcDependencies): void {
             message: `The worktree has no branch checked out: ${request.worktreePath}`,
           }
         }
-        // And the step of the issue's workflow the session starts at: the one
-        // of the label it carries now.
-        const start = deps.workflows.sessionStart(saved.id, issueIdentifier(saved.id))
-        if (!start.ok) return start
-        step = start.step
+        // And, while the issues' workflow runs, the step of it the session
+        // starts at: the one of the label the issue carries now.
+        let workflowFile: string | null = null
+        let first: SentIssue['firstMessage'] = plainFirstMessage
+        if (deps.workflows !== null) {
+          const start = deps.workflows.sessionStart(saved.id, issueIdentifier(saved.id))
+          if (!start.ok) return start
+          step = start.step
+          workflowFile = start.workflowFile
+          first = start.firstMessage
+        }
         const { prompt } = request
         issue = {
           title: saved.title,
           description: saved.description,
           branch: worktree.branch,
-          workflowFile: start.workflowFile,
-          firstMessage: prompt === undefined ? start.firstMessage : () => prompt,
+          workflowFile,
+          firstMessage: prompt === undefined ? first : () => prompt,
         }
       }
     }
@@ -851,7 +859,7 @@ export function registerIpc(deps: IpcDependencies): void {
       const session = await deps.sessions.start(request, issue)
       // Work on the issue goes on in the session from now on.
       if (request.issueId !== null && step !== null) {
-        deps.workflows.sessionStarted(request.issueId, step, request.startedBy ?? 'user')
+        deps.workflows?.sessionStarted(request.issueId, step, request.startedBy ?? 'user')
       }
       return { ok: true, session }
     } catch (error) {
@@ -1235,7 +1243,7 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   // Issues Hoot completed once their sub-issues were.
-  deps.workflows.on('issues-completed', (issues) => send(IpcChannel.issuesChanged, issues))
+  deps.workflows?.on('issues-completed', (issues) => send(IpcChannel.issuesChanged, issues))
 
   handle(IpcChannel.listLabels, () => deps.labels.snapshot())
   // Wherever the change came from: hoot in a session, or this window.

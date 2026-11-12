@@ -25,7 +25,8 @@ export interface LabelGroup {
   name: string
   /**
    * The name of the workflow whose group it is, which alone changes it and
-   * its labels; `null` for a group of the user's own.
+   * its labels while it runs; `null` for a group of the user's own, and for
+   * that of a workflow that does not run.
    */
   workflow: string | null
 }

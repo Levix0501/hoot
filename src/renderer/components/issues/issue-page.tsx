@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueTitle, type Issue } from '../../../shared/issues'
 import { issuePageOrder } from '../../lib/project-choices'
 import {
@@ -77,15 +78,19 @@ function IssueMenu({ issue }: { issue: Issue }) {
         className="w-auto min-w-48 [app-region:no-drag]"
         finalFocus={focusAfterOverlay}
       >
-        <DropdownMenuItem
-          disabled={!canStart}
-          onClick={() => void startNewSession(issue.id)}
-          data-testid="issue-menu-start-new-session"
-        >
-          <SquarePlusIcon />
-          Start new session
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
+        {ISSUE_WORKFLOW !== null && (
+          <>
+            <DropdownMenuItem
+              disabled={!canStart}
+              onClick={() => void startNewSession(issue.id)}
+              data-testid="issue-menu-start-new-session"
+            >
+              <SquarePlusIcon />
+              Start new session
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuItem
           onClick={() => copyIssueIdentifier(issue.id)}
           data-testid="issue-menu-copy-id"

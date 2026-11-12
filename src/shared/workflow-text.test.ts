@@ -6,6 +6,7 @@ import {
   goesOn,
   labelCommand,
   outcomeInstructions,
+  plainFirstMessage,
   workflowFileText,
 } from './workflow-text'
 import type { WorkflowDefinition, WorkflowStep } from './workflows'
@@ -241,6 +242,15 @@ describe('firstMessage', () => {
     expect(at).toContain('Make: build it.')
     expect(at).toContain("`hoot issue edit ISS-7 --add-label 'made well'`")
     expect(at).not.toContain('/w.md')
+  })
+})
+
+describe('plainFirstMessage', () => {
+  it("points to the issue's file and names the worktree's branch, a blank line apart", () => {
+    expect(plainFirstMessage({ issueFile: '/w/.hoot/tmp/issue-a/issue.md', branch: 'iss-7' })).toBe(
+      'The issue to work on is in `/w/.hoot/tmp/issue-a/issue.md`.\n\n' +
+        'This is a Git worktree of the project, on the branch `iss-7`, made for this issue.',
+    )
   })
 })
 

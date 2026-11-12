@@ -22,7 +22,7 @@
 
 Hoot is a desktop app for developers who work with coding agents such as Claude Code, Codex and
 OpenCode. Run as many agent sessions as you like in one window, keep track of the work as
-Linear-style issues, and hand an issue to an agent in a Git worktree of its own with one click.
+Linear-style issues, and hand an issue to a running agent by dragging it onto the agent's terminal.
 
 > [!NOTE]
 > Hoot is in early alpha: expect rough edges and changes between versions. Windows support is a
@@ -39,8 +39,8 @@ Linear-style issues, and hand an issue to an agent in a Git worktree of its own 
   working, waiting for your answer, stopped by an error, or done.
 - **Issues, Linear-style.** Note what to do as local issues with statuses, priorities, labels,
   sub-issues and dependencies, and work through them from the keyboard.
-- **From issue to agent in one click.** Start an issue, and Hoot creates a worktree for it and hands
-  it to Claude Code, which takes it through a built-in spec-driven workflow: triage, then design.
+- **Issues at hand.** The Issues window floats over every page: note an issue as you think of it,
+  and drag one onto a running agent's terminal to paste it into the agent's input, ready to send.
 - **A worktree for every task.** Point at a project, click `+`, and give the worktree a name or
   leave it blank for a random one. Agents work in parallel, each on a branch and in a folder of its
   own, and the sessions you start in a worktree are kept to continue after the agent exits or Hoot
@@ -79,8 +79,9 @@ at the bottom of the sidebar. To build Hoot from source, see [CONTRIBUTING.md](C
    An agent that is not installed yet can be installed from **Settings › Agents** with npm.
 3. **Note the work as issues.** Click **Issues** at the top of the sidebar, then **New issue** (or
    press C).
-4. **Hand an issue to an agent.** Click the paper plane at the end of an issue's row: Hoot creates a
-   worktree for the issue and starts Claude Code in it with the issue.
+4. **Hand an issue to an agent.** Open the **Issues** window at the bottom right, and drag an issue
+   onto the terminal of a running agent: the issue lands in the agent's input, and you decide
+   whether to send it.
 
 On macOS, ⌘1 to ⌘9 switch between sessions, and ⌘[ and ⌘] go back and forward between pages.
 

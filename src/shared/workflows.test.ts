@@ -118,8 +118,8 @@ describe('the built-in workflow', () => {
     expect(instruction).toMatch(/\nRun `hoot issue create-batch \{issue\} --file <file>`\.$/)
   })
 
-  it('is the workflow every issue follows', () => {
-    expect(ISSUE_WORKFLOW).toBe(BUILT_IN_WORKFLOW)
+  it('is paused: no workflow runs for now', () => {
+    expect(ISSUE_WORKFLOW).toBeNull()
   })
 })
 

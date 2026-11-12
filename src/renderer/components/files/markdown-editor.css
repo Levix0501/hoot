@@ -1,0 +1,41 @@
+/*
+ * Markdown previews (notra-editor) and their menus in Hoot's colors, corners
+ * and fonts, light or dark as the window is: notra-editor gives its own
+ * values to these at the root without weight, so these take their place.
+ */
+:root {
+  --notra-background: var(--background);
+  --notra-foreground: var(--foreground);
+  --notra-popover: var(--popover);
+  --notra-popover-foreground: var(--popover-foreground);
+  --notra-primary: var(--primary);
+  --notra-primary-foreground: var(--primary-foreground);
+  --notra-secondary: var(--secondary);
+  --notra-secondary-foreground: var(--secondary-foreground);
+  --notra-muted: var(--muted);
+  --notra-muted-foreground: var(--muted-foreground);
+  --notra-accent: var(--accent);
+  --notra-accent-foreground: var(--accent-foreground);
+  --notra-destructive: var(--destructive);
+  --notra-border: var(--border);
+  --notra-input: var(--input);
+  --notra-ring: var(--ring);
+  --notra-radius: var(--radius);
+  --notra-font-sans: var(--font-sans);
+  /* As code shows in the panel's text editor: in the terminal's font. */
+  --notra-font-mono: 'Geist Mono Variable', Menlo, Monaco, 'Courier New', monospace;
+}
+
+/*
+ * The menus that open over the window's top row take the clicks there,
+ * which the row would otherwise take to drag the window: the popups the
+ * editor puts at the end of the page carry `notra-scope` (as the editor
+ * does), and the toolbars that follow the selection and the `/` menu their
+ * own names.
+ */
+.notra-scope,
+.notra-bubble-menu,
+.notra-table-menu,
+[data-notra-slash-menu] {
+  app-region: no-drag;
+}

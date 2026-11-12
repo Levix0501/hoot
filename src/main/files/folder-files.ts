@@ -6,6 +6,8 @@ import {
   entryExtension,
   isEntryPath,
   isFolderPath,
+  parentPath,
+  type AddFileResult,
   type FileVersion,
   type FolderEntry,
   type ListFolderResult,
@@ -198,4 +200,80 @@ export async function writeTextFile(
     if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'missing' }
     return { kind: 'error', message: errorMessage(error) }
   }
+}
+
+/** The name an added file gets when the one it came with is not a name a file can have. */
+const ADDED_FILE_NAME = 'image.png'
+
+/** How many names an added file tries before giving up: `image.png`, `image-1.png`… */
+const ADDED_FILE_NAME_TRIES = 1000
+
+/**
+ * The name `name` keeps as the name of a file on any system: its last part,
+ * without control characters or the ones Windows does not take in names, and
+ * without the spaces and dots Windows drops at its end.
+ */
+function fileNameOf(name: string): string {
+  const last = name.split(/[\\/]/).at(-1) ?? ''
+  const kept = Array.from(last)
+    .filter((character) => {
+      const code = character.codePointAt(0) ?? 0
+      return code > 0x1f && code !== 0x7f && !'<>:"|?*'.includes(character)
+    })
+    .join('')
+    .replace(/[. ]+$/, '')
+  return kept === '' ? ADDED_FILE_NAME : kept
+}
+
+/** The names `name` tries in turn: itself, then with `-1`, `-2`… before its extension. */
+function* fileNames(name: string): Generator<string> {
+  yield name
+  const dot = name.lastIndexOf('.')
+  const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+  for (let number = 1; number < ADDED_FILE_NAME_TRIES; number++) {
+    yield `${stem}-${number}${extension}`
+  }
+}
+
+/**
+ * Puts a file pasted or dropped into the document `document` of the panel's
+ * folder next to it, as Visual Studio Code does with pictures pasted into
+ * Markdown: in the document's folder, under the name it came with, or with
+ * `-1`, `-2`… before its extension when another file has that name, which
+ * it never writes over. A dropped file that is already in the folder, at
+ * `source` (`''` when it is not on disk, as a pasted picture), is not copied:
+ * its own path is the result. Returns the path of the file from the folder.
+ */
+export async function addFileNextTo(
+  folder: string,
+  document: string,
+  name: string,
+  bytes: Uint8Array,
+  source: string,
+): Promise<AddFileResult> {
+  if (document === '' || isFolderPath(document) || entryLocation(folder, document) === null) {
+    return { kind: 'error', message: `"${document}" is not a file.` }
+  }
+  if (source !== '') {
+    const realFolder = await fs.realpath(folder).catch(() => folder)
+    const real = await fs.realpath(source).catch(() => null)
+    const stats = real === null ? null : await fs.stat(real).catch(() => null)
+    if (real !== null && stats?.isFile() === true && isWithin(realFolder, real)) {
+      const file = path.relative(realFolder, real).split(path.sep).join('/')
+      if (isEntryPath(file)) return { kind: 'added', file }
+    }
+  }
+  const directory = parentPath(document)
+  for (const candidate of fileNames(fileNameOf(name))) {
+    const file = `${directory}${candidate}`
+    const location = entryLocation(folder, file)
+    if (location === null) return { kind: 'error', message: `"${candidate}" is not a file name.` }
+    try {
+      await fs.writeFile(location, bytes, { flag: 'wx' })
+      return { kind: 'added', file }
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') return { kind: 'error', message: errorMessage(error) }
+    }
+  }
+  return { kind: 'error', message: `The folder already has files named like "${name}".` }
 }

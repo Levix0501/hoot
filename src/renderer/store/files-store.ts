@@ -1,4 +1,4 @@
-import { EditStateManager, type Editor } from '@pierre/diffs/edit'
+import { EditStateManager } from '@pierre/diffs/edit'
 import { create } from 'zustand'
 import {
   FILE_EDITOR_WIDTH,
@@ -11,16 +11,24 @@ import {
   entryExtension,
   folderKey,
   isFolderPath,
+  isMarkdownPath,
   type FileVersion,
   type PanelFolder,
   type ReadFileResult,
 } from '../../shared/files'
 import { FolderTree } from '../files/folder-tree'
 import { api } from '../lib/api'
-import { diskChange, textReplacement } from '../lib/file-sync'
+import { diskChange } from '../lib/file-sync'
 
 /** How long a file waits after its last edit before it is saved, in milliseconds. */
 export const AUTOSAVE_DELAY_MS = 3_000
+
+/**
+ * Markdown files longer than this many characters show only their text:
+ * formatting one takes more than a second for each million characters,
+ * during which nothing else happens in the window.
+ */
+export const MARKDOWN_PREVIEW_MAX_LENGTH = 500_000
 
 /**
  * How long after the last edit a change on disk that conflicts with the
@@ -75,15 +83,26 @@ export interface FileTab {
    */
   preview: boolean
   /**
-   * What the tab of an SVG file shows: its image, as it does at first, or
-   * its text, which the user switches between; `null` for any other file.
+   * What the tab of an SVG or Markdown file shows: its image or its preview,
+   * as it does at first, or its text, which the user switches between; `null`
+   * for any other file, and for a Markdown file too long to preview.
    */
   view: FileView | null
   content: TabContent
 }
 
-/** What the tab of an SVG file shows: the image its text draws, or the text. */
-export type FileView = 'image' | 'text'
+/**
+ * What the tab of an SVG or Markdown file shows: the image an SVG file's
+ * text draws, a Markdown file's text formatted (`preview`, which edits the
+ * text as it shows), or the text itself.
+ */
+export type FileView = 'image' | 'preview' | 'text'
+
+/** What a file's tab shows at first, in place of its text: `null` for a file that shows only its text. */
+export function formattedView(path: string): FileView | null {
+  if (entryExtension(path) === 'svg') return 'image'
+  return isMarkdownPath(path) ? 'preview' : null
+}
 
 /** What a folder's file panel has open. */
 export interface FolderFiles {
@@ -201,11 +220,26 @@ function sameImage(content: TabContent, result: ReadFileResult): boolean {
   )
 }
 
+/** What the panel asks of the editor a tab shows: the text editor, or a Markdown file's preview. */
+export interface PanelEditor {
+  /** The text it holds. */
+  getText(): string
+  /** Takes the file's new text in place of its own, as an edit that keeps the caret where it can. */
+  takeText(text: string): void
+  /** Takes the keyboard focus, without scrolling. */
+  focus(): void
+}
+
 let nextTabId = 1
 /** The trees of the folders the panel has shown, by folder key. */
 const trees = new Map<string, FolderTree>()
 /** The editors on screen, by tab key: one at most, the shown tab's. */
-const editors = new Map<string, Editor<'file'>>()
+const editors = new Map<string, PanelEditor>()
+/**
+ * How the editors that keep their state while their tab is not shown let it
+ * go, by the key they keep it under (see {@link editStateKey}).
+ */
+const editStateReleases = new Map<string, () => void>()
 /** The saves waiting for the end of the wait after an edit, by tab key. */
 const autosaves = new Map<string, ReturnType<typeof setTimeout>>()
 /** The saves under way, by tab key. */
@@ -234,12 +268,12 @@ export function folderTree(folder: PanelFolder): FolderTree {
 }
 
 /** Notes the editor of a tab shown, which takes a file's new text as an edit. */
-export function registerEditor(key: string, path: string, editor: Editor<'file'>): () => void {
+export function registerEditor(key: string, path: string, editor: PanelEditor): () => void {
   const at = tabKey(key, path)
   editors.set(at, editor)
   if (focusPending === at) {
     focusPending = null
-    editor.focus({ preventScroll: true })
+    editor.focus()
   }
   return () => {
     if (editors.get(at) === editor) editors.delete(at)
@@ -255,12 +289,35 @@ export function focusEditor(key: string, path: string): void {
     return
   }
   focusPending = null
-  editor.focus({ preventScroll: true })
+  editor.focus()
+}
+
+/**
+ * Gives the keyboard focus to the editor a tab shows next, once it is on
+ * screen: the one that takes the place of the editor shown now, as when the
+ * tab switches between a file's preview and its text.
+ */
+export function focusNextEditor(key: string, path: string): void {
+  focusPending = tabKey(key, path)
+}
+
+/**
+ * Notes how an editor that keeps its state while its tab is not shown lets
+ * it go, once the tab no longer needs it: `stateKey` is its edit state key.
+ */
+export function keepEditState(stateKey: string, letGo: () => void): void {
+  editStateReleases.set(stateKey, letGo)
 }
 
 /** Frees the state an editor kept under `generation`, once it no longer shows. */
 function forgetEditState(key: string, path: string, generation: number): void {
-  setTimeout(() => EditStateManager.clear('file', editStateKey(key, path, generation)), 0)
+  const stateKey = editStateKey(key, path, generation)
+  setTimeout(() => {
+    EditStateManager.clear('file', stateKey)
+    const letGo = editStateReleases.get(stateKey)
+    editStateReleases.delete(stateKey)
+    letGo?.()
+  }, 0)
 }
 
 function clearAutosave(key: string, path: string): void {
@@ -323,7 +380,12 @@ export const useFilesStore = create<FilesState>()((set, get) => {
 
   const load = async (folder: PanelFolder, path: string, id: number) => {
     const result = await api.readFile(folder, path)
-    changeTab(folderKey(folder), path, id, (tab) => ({ ...tab, content: contentOf(result) }))
+    const tooLong = result.kind === 'text' && result.content.length > MARKDOWN_PREVIEW_MAX_LENGTH
+    changeTab(folderKey(folder), path, id, (tab) => ({
+      ...tab,
+      view: tab.view === 'preview' && tooLong ? null : tab.view,
+      content: contentOf(result),
+    }))
   }
 
   const scheduleSave = (key: string, path: string) => {
@@ -420,8 +482,8 @@ export const useFilesStore = create<FilesState>()((set, get) => {
   /**
    * Gives a tab whose edits were all saved the file's new text: the editor on
    * screen takes it as an edit, which keeps its carets and scroll position;
-   * an editor that is not on screen, or cannot take the text so (its line
-   * breaks are another kind), starts over with it.
+   * an editor that is not on screen, or cannot take the text so (the text
+   * editor when its line breaks are another kind), starts over with it.
    */
   const reload = (
     key: string,
@@ -439,8 +501,7 @@ export const useFilesStore = create<FilesState>()((set, get) => {
     const editor = editors.get(tabKey(key, path))
     if (editor !== undefined) {
       try {
-        const replacement = textReplacement(editor.getText(), disk.content)
-        if (replacement !== null) editor.applyEdits([replacement], false)
+        editor.takeText(disk.content)
       } catch (error) {
         console.error('Could not take the new text of', path, error)
       }
@@ -661,7 +722,7 @@ export const useFilesStore = create<FilesState>()((set, get) => {
         id: nextTabId++,
         path,
         preview,
-        view: entryExtension(path) === 'svg' ? 'image' : null,
+        view: formattedView(path),
         content: { kind: 'loading' },
       }
       // A preview takes the place of the preview tab, which nothing was edited in.
@@ -701,7 +762,25 @@ export const useFilesStore = create<FilesState>()((set, get) => {
     setTabView(key, path, view) {
       const tab = findTab(key, path)
       if (tab === undefined || tab.view === null || tab.view === view) return
-      changeTab(key, path, tab.id, (stale) => ({ ...stale, view }))
+      // A Markdown file's preview and its text editor each keep their own
+      // state: the one shown starts over with the text as it is now, which
+      // the other may have changed.
+      const startsOver = tab.view === 'preview' || view === 'preview'
+      if (startsOver && tab.content.kind === 'text') {
+        forgetEditState(key, path, tab.content.text.generation)
+      }
+      changeTab(key, path, tab.id, (stale) =>
+        startsOver && stale.content.kind === 'text'
+          ? {
+              ...stale,
+              view,
+              content: {
+                kind: 'text',
+                text: { ...stale.content.text, generation: stale.content.text.generation + 1 },
+              },
+            }
+          : { ...stale, view },
+      )
     },
 
     async closeTab(key, path) {

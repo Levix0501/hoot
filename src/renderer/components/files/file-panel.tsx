@@ -1,15 +1,24 @@
 import { Editor, type EditorFactory } from '@pierre/diffs/edit'
 import { EditProvider } from '@pierre/diffs/react'
-import { CodeXmlIcon, FolderOpenIcon, ImageIcon, PanelRightIcon, XIcon } from 'lucide-react'
 import {
+  CodeXmlIcon,
+  EyeIcon,
+  FolderOpenIcon,
+  ImageIcon,
+  PanelRightIcon,
+  XIcon,
+} from 'lucide-react'
+import {
+  lazy,
   memo,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
+  type ReactElement,
   type Ref,
   type RefObject,
 } from 'react'
@@ -27,6 +36,8 @@ import { cn } from '../../lib/utils'
 import {
   editStateKey,
   focusEditor,
+  focusNextEditor,
+  formattedView,
   isUnsaved,
   useFilesStore,
   type FileTab,
@@ -49,6 +60,10 @@ import { TooltipProvider } from '../ui/tooltip'
 import { BUTTON_CLASS, NavigationButton } from '../window-navigation'
 import { ConflictDiff, TextFileEditor } from './code-views'
 import { FileTreePane, SETTLING_WIDTH_CLASS } from './file-tree-pane'
+import { Notice } from './notice'
+
+/** A Markdown file's preview, whose editor loads with the first one shown. */
+const MarkdownEditor = lazy(() => import('./markdown-editor'))
 
 /** Makes the editors of the panel's files. */
 const createEditor: EditorFactory<undefined, undefined> = (type, options, key) =>
@@ -230,22 +245,6 @@ function ResizeEdge({
   )
 }
 
-/** A line across the top of an open file, saying what is wrong with it, with what can be done. */
-function Notice({ tone, children }: { tone?: 'error'; children: ReactNode }) {
-  return (
-    <div
-      role="status"
-      className={cn(
-        'flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/50 px-3 py-2 text-[13px]',
-        tone === 'error' && 'text-destructive',
-      )}
-      data-testid="file-notice"
-    >
-      {children}
-    </div>
-  )
-}
-
 /** What an open file shows when it cannot be edited: why, and a way to it in Finder. */
 function Unavailable({
   folder,
@@ -280,10 +279,11 @@ const MemoTextFileEditor = memo(
 )
 
 /**
- * An open text file: its editor, or for an SVG file its image if the tab
- * shows that, with a notice above it while the file is gone or could not be
- * saved. When the file changed on disk while edits were unsaved, the
- * difference shows in their place, and the user picks which to keep.
+ * An open text file: its editor, or for an SVG file its image and for a
+ * Markdown file its preview if the tab shows that, with a notice above it
+ * while the file is gone or could not be saved. When the file changed on
+ * disk while edits were unsaved, the difference shows in their place, and
+ * the user picks which to keep.
  */
 function TextTab({
   folder,
@@ -355,6 +355,16 @@ function TextTab({
       ) : null}
       {view === 'image' ? (
         <SvgImage folder={folder} path={path} text={text.local} />
+      ) : view === 'preview' ? (
+        <Suspense fallback={<div className="flex-1" />}>
+          <MarkdownEditor
+            key={editStateKey(folderId, path, text.generation)}
+            folder={folder}
+            path={path}
+            generation={text.generation}
+            initialText={text.local}
+          />
+        </Suspense>
       ) : (
         <MemoTextFileEditor
           key={editStateKey(folderId, path, text.generation)}
@@ -565,39 +575,50 @@ function FileTabButton({
   )
 }
 
+/** What the button right of the tabs offers, by the view it switches to. */
+const VIEW_OFFERS: Record<FileView, { label: string; ariaLabel: string; icon: ReactElement }> = {
+  text: { label: 'Show source', ariaLabel: 'Show Source', icon: <CodeXmlIcon /> },
+  image: { label: 'Show image', ariaLabel: 'Show Image', icon: <ImageIcon /> },
+  preview: { label: 'Show preview', ariaLabel: 'Show Preview', icon: <EyeIcon /> },
+}
+
 /**
- * The button right of the tabs that shows the text of an SVG file in place
- * of its image, giving its editor the keyboard focus, or its image in place
- * of its text. Its tooltip shows as the navigation's do.
+ * The button right of the tabs that shows the text of an SVG or Markdown
+ * file in place of its image or preview (`formatted`), giving its editor the
+ * keyboard focus, or its image or preview in place of its text (a preview
+ * takes the focus too). Its tooltip shows as the navigation's do.
  */
 function FileViewToggle({
   folderId: key,
   path,
   view,
+  formatted,
 }: {
   folderId: string
   path: string
   view: FileView
+  formatted: FileView
 }) {
   const setTabView = useFilesStore((state) => state.setTabView)
-  const showsImage = view === 'image'
+  const next = view === 'text' ? formatted : 'text'
+  const offer = VIEW_OFFERS[next]
   return (
     <div className="ms-auto flex shrink-0 items-center ps-2 [app-region:no-drag]">
       <TooltipProvider delay={700} timeout={300}>
-        <NavigationButton label={showsImage ? 'Show source' : 'Show image'}>
+        <NavigationButton label={offer.label}>
           <Button
             variant="ghost"
             size="icon-sm"
             className={BUTTON_CLASS}
             onClick={() => {
-              setTabView(key, path, showsImage ? 'text' : 'image')
-              if (showsImage) focusEditor(key, path)
+              if (next !== 'image') focusNextEditor(key, path)
+              setTabView(key, path, next)
             }}
-            aria-label={showsImage ? 'Show Source' : 'Show Image'}
+            aria-label={offer.ariaLabel}
             data-testid="file-view-toggle"
             data-view={view}
           >
-            {showsImage ? <CodeXmlIcon /> : <ImageIcon />}
+            {offer.icon}
           </Button>
         </NavigationButton>
       </TooltipProvider>
@@ -607,9 +628,9 @@ function FileViewToggle({
 
 /**
  * The open files of a folder: their tabs in the window's top row, and the
- * current one below. An SVG file's tab, unless its text is at odds with the
- * file on disk, has a button at the row's right end that switches it
- * between its image and its text.
+ * current one below. An SVG or Markdown file's tab, unless its text is at
+ * odds with the file on disk, has a button at the row's right end that
+ * switches it between its image or preview and its text.
  */
 function OpenFiles({ folder }: { folder: PanelFolder }) {
   const key = folderKey(folder)
@@ -617,6 +638,7 @@ function OpenFiles({ folder }: { folder: PanelFolder }) {
   if (files === undefined) return null
   const tab = files.tabs.find((candidate) => candidate.path === files.active)
   const view = tab?.content.kind === 'text' && tab.content.text.conflict === null ? tab.view : null
+  const formatted = tab === undefined ? null : formattedView(tab.path)
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="open-files">
       {/* The open files' part of the window's top row, whose blank parts drag the window. */}
@@ -636,8 +658,8 @@ function OpenFiles({ folder }: { folder: PanelFolder }) {
             />
           ))}
         </div>
-        {tab !== undefined && view !== null && (
-          <FileViewToggle folderId={key} path={tab.path} view={view} />
+        {tab !== undefined && view !== null && formatted !== null && (
+          <FileViewToggle folderId={key} path={tab.path} view={view} formatted={formatted} />
         )}
       </div>
       {tab !== undefined && <TabBody key={tab.id} folder={files.folder} tab={tab} />}

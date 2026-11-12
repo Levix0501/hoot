@@ -149,6 +149,16 @@ const api: HootApi = {
       expected,
       bom,
     ),
+  addFileNextTo: (folder, document, name, bytes, source) =>
+    ipcRenderer.invoke(
+      IpcChannel.addFile,
+      folder.projectRoot,
+      folder.worktreePath,
+      document,
+      name,
+      bytes,
+      source,
+    ),
   watchFiles: (folder, entries) =>
     ipcRenderer.send(
       IpcChannel.watchFiles,

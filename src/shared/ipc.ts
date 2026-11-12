@@ -6,6 +6,7 @@ import type { Dependencies, Dependency } from './dependencies'
 import type { DroppedPathQuoting } from './dropped-path-quoting'
 import type { FilePanelLayout } from './file-panel'
 import type {
+  AddFileResult,
   FileVersion,
   ListFolderResult,
   PanelFolder,
@@ -344,6 +345,7 @@ export const IpcChannel = {
   listFolder: 'files:list-folder',
   readFile: 'files:read',
   writeFile: 'files:write',
+  addFile: 'files:add',
   watchFiles: 'files:watch',
   filesChanged: 'files:changed',
   revealFile: 'files:reveal',
@@ -702,6 +704,19 @@ export interface HootApi {
     expected: FileVersion,
     bom: boolean,
   ): Promise<WriteFileResult>
+  /**
+   * Puts a file pasted or dropped into the document `document` of a file
+   * panel's folder next to it, under `name` or a numbered name no other file
+   * there has; a dropped file already in the folder, at `source` (`''` when
+   * it is not on disk), stays where it is. Resolves with the file's path.
+   */
+  addFileNextTo(
+    folder: PanelFolder,
+    document: string,
+    name: string,
+    bytes: Uint8Array,
+    source: string,
+  ): Promise<AddFileResult>
   /**
    * Follows `entries` of a file panel's folder, its open files and expanded
    * folders, in place of what was followed before; nothing for `null`.

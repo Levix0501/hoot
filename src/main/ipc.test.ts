@@ -355,6 +355,13 @@ describe("the file panel's messages", () => {
       kind: 'error',
       message: 'Not a folder of the panel.',
     })
+    const picture = new Uint8Array([1])
+    expect(
+      await invoke(IpcChannel.addFile, '/elsewhere', null, 'a.md', 'a.png', picture, ''),
+    ).toEqual(refused)
+    expect(
+      await invoke(IpcChannel.addFile, project.root, null, 'a.md', 'a.png', 'not bytes', ''),
+    ).toEqual({ kind: 'error', message: 'Not a file of the panel.' })
   })
 
   it('follow the entries asked for, and pass on their changes to the window', async () => {

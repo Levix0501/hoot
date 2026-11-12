@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MAX_OPENED_FILE_BYTES } from '../../shared/files'
-import { entryLocation, listFolder, readFile, writeTextFile } from './folder-files'
+import { addFileNextTo, entryLocation, listFolder, readFile, writeTextFile } from './folder-files'
 
 describe('folder files', () => {
   let root: string
@@ -21,6 +21,7 @@ describe('folder files', () => {
 
   const write = (entry: string, content: string | Buffer) =>
     fs.writeFileSync(path.join(folder, ...entry.split('/')), content)
+  const bytesOf = (entry: string) => [...fs.readFileSync(path.join(folder, ...entry.split('/')))]
 
   describe('entryLocation', () => {
     it('finds the entries of the folder, and the folder itself', () => {
@@ -207,6 +208,76 @@ describe('folder files', () => {
       const result = await writeTextFile(folder, '../x.txt', 'x', { mtimeMs: 0, size: 0 }, false)
       expect(result.kind).toBe('error')
       expect(fs.existsSync(path.join(root, 'x.txt'))).toBe(false)
+    })
+  })
+
+  describe('addFileNextTo', () => {
+    const bytes = new Uint8Array([1, 2, 3])
+
+    it("puts the file in the document's folder, under the name it came with", async () => {
+      write('src/notes.md', '# Notes')
+      expect(await addFileNextTo(folder, 'src/notes.md', 'shot.png', bytes, '')).toEqual({
+        kind: 'added',
+        file: 'src/shot.png',
+      })
+      expect(bytesOf('src/shot.png')).toEqual([1, 2, 3])
+    })
+
+    it('numbers the name rather than writing over another file', async () => {
+      write('notes.md', '# Notes')
+      write('image.png', 'mine')
+      write('image-1.png', 'mine too')
+      expect(await addFileNextTo(folder, 'notes.md', 'image.png', bytes, '')).toEqual({
+        kind: 'added',
+        file: 'image-2.png',
+      })
+      expect(fs.readFileSync(path.join(folder, 'image.png'), 'utf8')).toBe('mine')
+      expect(await addFileNextTo(folder, 'notes.md', 'README', bytes, '')).toEqual({
+        kind: 'added',
+        file: 'README',
+      })
+      write('README', 'taken')
+      expect(await addFileNextTo(folder, 'notes.md', 'README', bytes, '')).toEqual({
+        kind: 'added',
+        file: 'README-1',
+      })
+    })
+
+    it('keeps only what a file name can hold', async () => {
+      write('notes.md', '# Notes')
+      expect(await addFileNextTo(folder, 'notes.md', '../a:b?.png', bytes, '')).toEqual({
+        kind: 'added',
+        file: 'ab.png',
+      })
+      for (const name of ['', '..', 'dir/', ' . ']) {
+        const added = await addFileNextTo(folder, 'notes.md', name, bytes, '')
+        expect(added.kind === 'added' && /^image(?:-\d+)?\.png$/.test(added.file)).toBe(true)
+      }
+    })
+
+    it('does not copy a dropped file that is already in the folder', async () => {
+      write('notes.md', '# Notes')
+      write('src/logo.png', 'logo')
+      const source = path.join(folder, 'src', 'logo.png')
+      expect(await addFileNextTo(folder, 'notes.md', 'logo.png', bytes, source)).toEqual({
+        kind: 'added',
+        file: 'src/logo.png',
+      })
+      expect(fs.existsSync(path.join(folder, 'logo.png'))).toBe(false)
+      const outside = path.join(root, 'elsewhere.png')
+      fs.writeFileSync(outside, 'elsewhere')
+      expect(await addFileNextTo(folder, 'notes.md', 'elsewhere.png', bytes, outside)).toEqual({
+        kind: 'added',
+        file: 'elsewhere.png',
+      })
+      expect(bytesOf('elsewhere.png')).toEqual([1, 2, 3])
+    })
+
+    it('adds nothing next to what is not a file of the folder', async () => {
+      for (const document of ['', 'src/', '../x.md']) {
+        expect((await addFileNextTo(folder, document, 'a.png', bytes, '')).kind).toBe('error')
+      }
+      expect(fs.existsSync(path.join(root, 'a.png'))).toBe(false)
     })
   })
 })

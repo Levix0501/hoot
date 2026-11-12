@@ -9,6 +9,12 @@
 /** Files larger than this many bytes are not opened: too large to edit or show here. */
 export const MAX_OPENED_FILE_BYTES = 10 * 1024 * 1024
 
+/** Files larger than this many bytes are not added to a folder: pictures pasted into a document. */
+export const MAX_ADDED_FILE_BYTES = 100 * 1024 * 1024
+
+/** The extensions of Markdown files, in lowercase, which the panel shows formatted. */
+const MARKDOWN_EXTENSIONS: ReadonlySet<string> = new Set(['markdown', 'md'])
+
 /**
  * Entries every folder listing leaves out, as Visual Studio Code's Explorer
  * does by default (its `files.exclude`): the folders where version control
@@ -74,6 +80,10 @@ export type WriteFileResult =
   | { kind: 'missing' }
   | { kind: 'error'; message: string }
 
+export type AddFileResult =
+  /** The file is in the folder, at `file`: its path from the folder. */
+  { kind: 'added'; file: string } | { kind: 'error'; message: string }
+
 /** The folder a file panel shows: a project's own folder, or one of its worktrees. */
 export interface PanelFolder {
   projectRoot: string
@@ -107,9 +117,78 @@ export function entryExtension(entry: string): string | null {
   return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : null
 }
 
+/** Whether an entry is a Markdown file, by its extension: `README.md`, `notes.markdown`. */
+export function isMarkdownPath(entry: string): boolean {
+  if (isFolderPath(entry)) return false
+  const extension = entryExtension(entry)
+  return extension !== null && MARKDOWN_EXTENSIONS.has(extension)
+}
+
 /** The path of an entry of the folder `parent` (`''` for the folder itself). */
 export function childPath(parent: string, entry: FolderEntry): string {
   return `${parent}${entry.name}${entry.directory ? '/' : ''}`
+}
+
+/** The path of the folder an entry is in: `docs/` of `docs/a.md`, `''` for one at the top. */
+export function parentPath(entry: string): string {
+  const trimmed = isFolderPath(entry) ? entry.slice(0, -1) : entry
+  const slash = trimmed.lastIndexOf('/')
+  return slash === -1 ? '' : trimmed.slice(0, slash + 1)
+}
+
+/** A reference that names its scheme, such as `https://…` or `mailto:…`, or a host (`//…`). */
+const ABSOLUTE_REFERENCE = /^(?:[A-Za-z][A-Za-z\d+.-]*:|\/\/)/
+
+/** A part of a reference with its `%xx` escapes decoded; itself when they are not valid. */
+function decodePart(part: string): string {
+  try {
+    return decodeURIComponent(part)
+  } catch {
+    return part
+  }
+}
+
+/**
+ * The entry of the folder that a link or picture of the file `document`
+ * refers to, as GitHub reads it: `docs/images/a.png` for `images/a.png` in
+ * `docs/a.md`, `images/a.png` for `../images/a.png` there, and from the top
+ * of the folder for a reference that starts with `/`. Its query and fragment
+ * are left out and its `%20`s and the like decoded. A reference ending with
+ * `/` names a folder. `null` for one with a scheme or a host, one to a place
+ * in the document itself (`#usage`), and one that leads out of the folder.
+ */
+export function referencedEntry(document: string, reference: string): string | null {
+  if (ABSOLUTE_REFERENCE.test(reference)) return null
+  const target = reference.replace(/[?#].*$/s, '')
+  if (target === '') return null
+  const parts = target.startsWith('/') ? [] : parentPath(document).split('/').filter(Boolean)
+  const steps = target.split('/')
+  for (const step of steps.map(decodePart)) {
+    if (step.includes('/') || step.includes('\0')) return null
+    if (step === '' || step === '.') continue
+    if (step === '..') {
+      if (parts.length === 0) return null
+      parts.pop()
+      continue
+    }
+    parts.push(step)
+  }
+  if (parts.length === 0) return null
+  const entry = `${parts.join('/')}${target.endsWith('/') ? '/' : ''}`
+  return isEntryPath(entry) ? entry : null
+}
+
+/**
+ * The reference from the file `document` to `entry`, another entry of the
+ * folder, which {@link referencedEntry} reads back as `entry`: `a.png` for
+ * `docs/a.png` from `docs/a.md`, `../images/a.png` for `images/a.png` there.
+ */
+export function entryReference(document: string, entry: string): string {
+  const from = parentPath(document).split('/').filter(Boolean)
+  const to = entry.split('/')
+  let shared = 0
+  while (shared < from.length && shared < to.length - 1 && from[shared] === to[shared]) shared++
+  return [...from.slice(shared).map(() => '..'), ...to.slice(shared)].join('/')
 }
 
 /**

@@ -44,7 +44,9 @@ import {
 } from '../shared/issues'
 import type { Dependency } from '../shared/dependencies'
 import {
+  MAX_ADDED_FILE_BYTES,
   MAX_OPENED_FILE_BYTES,
+  type AddFileResult,
   type ListFolderResult,
   type ReadFileResult,
   type WriteFileResult,
@@ -68,7 +70,13 @@ import type { AgentService } from './agents/agent-service'
 import type { ChatManager } from './chats/chat-manager'
 import type { FileWatcher } from './files/file-watcher'
 import type { FolderAccess } from './files/folder-access'
-import { entryLocation, listFolder, readFile, writeTextFile } from './files/folder-files'
+import {
+  addFileNextTo,
+  entryLocation,
+  listFolder,
+  readFile,
+  writeTextFile,
+} from './files/folder-files'
 import { issueDescription, issuePriority, issueStatus, issueTitle } from './issues/issue-schemas'
 import type { IssueStore } from './issues/issue-store'
 import { LabelError, type LabelStore } from './labels/label-store'
@@ -248,6 +256,10 @@ const entryPath = z.string().max(4_096)
 const fileVersion = z.object({ mtimeMs: z.number(), size: z.number() })
 /** What the file panel saves to a file: the text of a file it opened, edited. */
 const fileContent = z.string().max(2 * MAX_OPENED_FILE_BYTES)
+/** What the file panel adds to its folder: a picture pasted or dropped into a document. */
+const addedFile = z
+  .instanceof(Uint8Array)
+  .refine((bytes) => bytes.byteLength <= MAX_ADDED_FILE_BYTES)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -1071,6 +1083,16 @@ export function registerIpc(deps: IpcDependencies): void {
     const folder = await deps.folderAccess.folder(root, worktreePath)
     if (folder === null) return { kind: 'error', message: notShown }
     return writeTextFile(folder, file, content, expected, bom)
+  })
+  handle(IpcChannel.addFile, async (_event, ...args): Promise<AddFileResult> => {
+    const parsed = z
+      .tuple([...panelFolder, entryPath, z.string().max(1_024), addedFile, z.string().max(4_096)])
+      .safeParse(args)
+    if (!parsed.success) return { kind: 'error', message: 'Not a file of the panel.' }
+    const [root, worktreePath, document, name, bytes, source] = parsed.data
+    const folder = await deps.folderAccess.folder(root, worktreePath)
+    if (folder === null) return { kind: 'error', message: notShown }
+    return addFileNextTo(folder, document, name, bytes, source)
   })
   // Only the last request counts, also when the folder of an earlier one is
   // found out about after it.

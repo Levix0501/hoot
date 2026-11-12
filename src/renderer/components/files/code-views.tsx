@@ -9,6 +9,7 @@ import {
 } from '@pierre/diffs/react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { entryName } from '../../../shared/files'
+import { textReplacement } from '../../lib/file-sync'
 import { TERMINAL_FONT_FAMILY } from '../../terminal/terminal-font'
 import { editStateKey, registerEditor, useFilesStore } from '../../store/files-store'
 
@@ -60,7 +61,7 @@ const FILE_STYLE = { flex: '1 1 auto', minWidth: '100%' } as const
 const SCROLLER_CONTENT_STYLE = { display: 'flex', minHeight: '100%', width: '100%' } as const
 
 /** Whether a key press is ⌘S (Ctrl+S on Windows), which saves at once. */
-function isSaveShortcut(event: KeyboardEvent): boolean {
+export function isSaveShortcut(event: KeyboardEvent): boolean {
   return (
     (event.metaKey || event.ctrlKey) &&
     !event.altKey &&
@@ -100,7 +101,14 @@ export function TextFileEditor({
   const [editorOptions] = useState<EditorOptions<'file', undefined, undefined>>(() => ({
     onAttach(editor) {
       unregister.current?.()
-      unregister.current = registerEditor(folderId, path, editor)
+      unregister.current = registerEditor(folderId, path, {
+        getText: () => editor.getText(),
+        takeText: (text) => {
+          const replacement = textReplacement(editor.getText(), text)
+          if (replacement !== null) editor.applyEdits([replacement], false)
+        },
+        focus: () => editor.focus({ preventScroll: true }),
+      })
     },
   }))
   useEffect(

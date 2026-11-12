@@ -89,6 +89,7 @@ import { SessionError, type SessionManager } from './session/session-manager'
 import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
 import type { FilePanelStore } from './settings/file-panel-store'
+import type { IssueWindowStore } from './settings/issue-window-store'
 import type { LaunchSettingsStore } from './settings/launch-settings-store'
 import type { SidebarStateStore } from './settings/sidebar-state-store'
 import type { ToolService } from './tools/tool-service'
@@ -111,6 +112,8 @@ export interface IpcDependencies {
   sidebar: SidebarStateStore
   /** Whether the file panel is shown, and how wide its parts are. */
   filePanel: FilePanelStore
+  /** Whether the Issues window is open, and where it sits. */
+  issueWindow: IssueWindowStore
   /** Which folders the file panel may read and write files in. */
   folderAccess: FolderAccess
   /** The entries the file panel follows: its open files and expanded folders. */
@@ -139,6 +142,13 @@ export interface IpcDependencies {
 const sessionId = z.string().min(1).max(100)
 const terminalDimension = z.number().int().positive().max(9_999)
 const rowId = z.number().int().positive()
+/** Where the Issues window sits, as the window says it moved it. */
+const issueWindowPosition = z.object({
+  side: z.enum(['left', 'right']),
+  x: z.number().nonnegative().max(100_000),
+  edge: z.enum(['top', 'bottom']),
+  y: z.number().nonnegative().max(100_000),
+})
 const startSessionRequest = z.object({
   id: sessionId,
   projectRoot: z.string().min(1),
@@ -521,6 +531,7 @@ export function registerIpc(deps: IpcDependencies): void {
     collapsedWorktrees: deps.sidebar.collapsedWorktrees,
     collapsedLocal: deps.sidebar.collapsedLocal,
     filePanel: deps.filePanel.layout,
+    issueWindow: deps.issueWindow.layout,
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
     focused: deps.getWindow()?.isFocused() ?? false,
   }))
@@ -543,6 +554,14 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.setFileEditorWidth, (width) => {
     const parsed = z.number().safeParse(width)
     if (parsed.success) deps.filePanel.setEditorWidth(parsed.data)
+  })
+  on(IpcChannel.setIssueWindowOpen, (open) => {
+    const parsed = z.boolean().safeParse(open)
+    if (parsed.success) deps.issueWindow.setOpen(parsed.data)
+  })
+  on(IpcChannel.setIssueWindowPosition, (position) => {
+    const parsed = issueWindowPosition.safeParse(position)
+    if (parsed.success) deps.issueWindow.setPosition(parsed.data)
   })
   on(IpcChannel.setGroupExpanded, (...args) => {
     const parsed = z.tuple([z.enum(SIDEBAR_GROUPS), z.boolean()]).safeParse(args)

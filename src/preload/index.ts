@@ -94,6 +94,9 @@ const api: HootApi = {
   setFileEditorWidth: (width) => ipcRenderer.send(IpcChannel.setFileEditorWidth, width),
   onToggleFilePanelRequested: (listener) =>
     subscribe(IpcChannel.toggleFilePanelRequested, listener),
+  setIssueWindowOpen: (open) => ipcRenderer.send(IpcChannel.setIssueWindowOpen, open),
+  setIssueWindowPosition: (position) =>
+    ipcRenderer.send(IpcChannel.setIssueWindowPosition, position),
   onFullScreenChanged: (listener) => subscribe(IpcChannel.fullScreenChanged, listener),
   onWindowFocusChanged: (listener) => subscribe(IpcChannel.windowFocusChanged, listener),
   onShowSettingsRequested: (listener) => subscribe(IpcChannel.showSettingsRequested, listener),

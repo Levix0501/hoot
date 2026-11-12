@@ -44,6 +44,7 @@ import { SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
 import { AppearanceStore } from './settings/appearance-store'
 import { FilePanelStore } from './settings/file-panel-store'
+import { IssueWindowStore } from './settings/issue-window-store'
 import { LaunchSettingsStore } from './settings/launch-settings-store'
 import { SidebarStateStore } from './settings/sidebar-state-store'
 import { defaultShell } from './tools/default-shell'
@@ -98,6 +99,7 @@ const shell = defaultShell(baseEnv)
 const launchSettings = new LaunchSettingsStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const filePanel = new FilePanelStore(app.getPath('userData'))
+const issueWindow = new IssueWindowStore(app.getPath('userData'))
 /** The open files and expanded folders of the file panel, which it follows. */
 const fileWatcher = new FileWatcher()
 const appearance = new AppearanceStore(app.getPath('userData'))
@@ -468,6 +470,7 @@ function startWithDatabase(database: DatabaseSync): void {
     launchSettings,
     sidebar,
     filePanel,
+    issueWindow,
     folderAccess: new FolderAccess({
       isProject: (root) => projects.find(root) !== undefined,
       isWorktreeOf: (root, worktreePath) => worktreeService.isWorktreeOf(root, worktreePath),

@@ -5,6 +5,7 @@ import type { ChatInfo, SavedSessionInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
 import type { DroppedPathQuoting } from './dropped-path-quoting'
 import type { FilePanelLayout } from './file-panel'
+import type { IssueWindowLayout, IssueWindowPosition } from './issue-window'
 import type {
   AddFileResult,
   FileVersion,
@@ -231,6 +232,8 @@ export interface WindowState {
   collapsedLocal: string[]
   /** Whether the file panel is shown and how wide its parts are, as they were left. */
   filePanel: FilePanelLayout
+  /** Whether the Issues window is open and where it sits, as it was left. */
+  issueWindow: IssueWindowLayout
   /** Whether the window is in full screen, where macOS hides the traffic lights. */
   fullScreen: boolean
   /** Whether the window is the system's active window. */
@@ -311,6 +314,8 @@ export const IpcChannel = {
   setFileTreeWidth: 'window:set-file-tree-width',
   setFileEditorWidth: 'window:set-file-editor-width',
   toggleFilePanelRequested: 'window:toggle-file-panel-requested',
+  setIssueWindowOpen: 'window:set-issue-window-open',
+  setIssueWindowPosition: 'window:set-issue-window-position',
   fullScreenChanged: 'window:full-screen-changed',
   windowFocusChanged: 'window:focus-changed',
   showSettingsRequested: 'settings:show-requested',
@@ -567,6 +572,10 @@ export interface HootApi {
   setFileEditorWidth(width: number): void
   /** The application menu asked to show or hide the file panel. */
   onToggleFilePanelRequested(listener: () => void): () => void
+  /** Saves whether the Issues window is open, so that Hoot opens with it as it was left. */
+  setIssueWindowOpen(open: boolean): void
+  /** Saves where the Issues window sits, so that Hoot opens with it where it was left. */
+  setIssueWindowPosition(position: IssueWindowPosition): void
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
   /** The window became the system's active window, or stopped being it. */
   onWindowFocusChanged(listener: (focused: boolean) => void): () => void

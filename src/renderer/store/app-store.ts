@@ -32,6 +32,7 @@ import type {
   SessionStartAnswer,
   ToolsState,
 } from '../../shared/ipc'
+import { DEFAULT_ISSUE_WINDOW_POSITION, type IssueWindowPosition } from '../../shared/issue-window'
 import { issueWorktree } from '../../shared/issue-worktrees'
 import {
   isCompleted,
@@ -44,6 +45,7 @@ import {
   type IssuePriority,
   type IssueStatus,
   type IssueView,
+  type NewIssue,
 } from '../../shared/issues'
 import {
   labelsOfIssue,
@@ -420,6 +422,10 @@ export interface AppState {
   updateCheck: UpdateCheck | null
   /** What the About page tells of Hoot and of what it runs on; `null` until it has been read. */
   appInfo: AppInfo | null
+  /** Whether the Issues window is open, rather than closed to its button. */
+  issueWindowOpen: boolean
+  /** Where the Issues window sits, as it was last moved. */
+  issueWindowPosition: IssueWindowPosition
   /** Whether the sidebar is expanded, also while the settings are shown in its place. */
   sidebarOpen: boolean
   /**
@@ -670,6 +676,16 @@ export interface AppState {
    * none was created.
    */
   createIssue(options?: { open?: boolean }): Promise<Issue | null>
+  /**
+   * Creates an issue noted in the Issues window, apart from what is entered
+   * in the new issue dialog, and says so. Settles with the new issue, or
+   * `null` when none was created.
+   */
+  noteIssue(issue: NewIssue): Promise<Issue | null>
+  /** Opens the Issues window, or closes it to its button, and saves which. */
+  setIssueWindowOpen(open: boolean): void
+  /** Moves the Issues window, and saves where it sits. */
+  setIssueWindowPosition(position: IssueWindowPosition): void
   /**
    * Changes an issue at once and saves the change in the background, one
    * save at a time for each issue, so that the latest change is saved last.
@@ -2139,6 +2155,43 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
   }
 
+  /**
+   * Creates an issue and adds it to the issues shown; `null` when it could
+   * not be created, which a toast says, or when its project left the list
+   * while it was being created.
+   */
+  const saveNewIssue = async (newIssue: NewIssue): Promise<Issue | null> => {
+    const result = await api
+      .createIssue(newIssue)
+      .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    if (!result.ok) {
+      toast.error('Could not create the issue.', { description: result.message })
+      return null
+    }
+    const { issue } = result
+    if (
+      issue.projectId !== null &&
+      !get().projects.some((project) => project.id === issue.projectId)
+    ) {
+      return null
+    }
+    set((state) => ({
+      // Unless the issues were read again meanwhile, with it.
+      issues: state.issues.some((entry) => entry.id === issue.id)
+        ? state.issues
+        : [...state.issues, issue],
+    }))
+    return issue
+  }
+
+  /** Says that an issue was created, with a button that shows it. */
+  const announceIssue = (issue: Issue) => {
+    toast.success(`${issueIdentifier(issue.id)} created`, {
+      description: userText(issue.title),
+      action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
+    })
+  }
+
   /** How each session opened from an issue is to start, by its id, until it starts. */
   const launchOptions = new Map<string, { by: LabelActor; prompt: string | null }>()
   /** The sessions whose process has been asked to start, which is asked only once. */
@@ -2280,6 +2333,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     update: { kind: 'none' },
     updateCheck: null,
     appInfo: null,
+    issueWindowOpen: false,
+    issueWindowPosition: DEFAULT_ISSUE_WINDOW_POSITION,
     sidebarOpen: true,
     sidebarWidth: SIDEBAR_WIDTH.default,
     sidebarResizing: false,
@@ -2312,6 +2367,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           collapsedWorktrees,
           collapsedLocal,
           filePanel,
+          issueWindow,
           fullScreen,
           focused,
         },
@@ -2319,6 +2375,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       ] = await Promise.all([api.getWindowState(), api.getAppearance()])
       useFilesStore.getState().setLayout(filePanel)
       set({
+        issueWindowOpen: issueWindow.open,
+        issueWindowPosition: issueWindow.position,
         sidebarOpen,
         sidebarWidth,
         collapsedGroups: new Set(collapsedGroups),
@@ -3147,29 +3205,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     async createIssue({ open = false } = {}) {
       let created: Issue | null = null
       await once('create', async () => {
-        const draft = get().newIssueDraft
-        const result = await api
-          .createIssue(draft)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        if (!result.ok) {
-          toast.error('Could not create the issue.', { description: result.message })
-          return
-        }
-        const { issue } = result
-        // Unless its project left the list while the issue was being created.
-        if (
-          issue.projectId !== null &&
-          !get().projects.some((project) => project.id === issue.projectId)
-        ) {
-          return
-        }
+        const issue = await saveNewIssue(get().newIssueDraft)
+        if (issue === null) return
         created = issue
         const more = get().createMore && !open
         set((state) => ({
-          // Unless the issues were read again meanwhile, with it.
-          issues: state.issues.some((entry) => entry.id === issue.id)
-            ? state.issues
-            : [...state.issues, issue],
           newIssueDraft: more
             ? { ...state.newIssueDraft, title: '', description: '' }
             : emptyNewIssueDraft,
@@ -3179,12 +3219,29 @@ export const useAppStore = create<AppState>()((set, get) => {
           get().showIssue(issue.id)
           return
         }
-        toast.success(`${issueIdentifier(issue.id)} created`, {
-          description: userText(issue.title),
-          action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
-        })
+        announceIssue(issue)
       })
       return created
+    },
+
+    async noteIssue(newIssue) {
+      let created: Issue | null = null
+      await once('note', async () => {
+        created = await saveNewIssue(newIssue)
+        if (created !== null) announceIssue(created)
+      })
+      return created
+    },
+
+    setIssueWindowOpen(open) {
+      if (open === get().issueWindowOpen) return
+      set({ issueWindowOpen: open })
+      api.setIssueWindowOpen(open)
+    },
+
+    setIssueWindowPosition(position) {
+      set({ issueWindowPosition: position })
+      api.setIssueWindowPosition(position)
     },
 
     updateIssue(issueId, changes) {

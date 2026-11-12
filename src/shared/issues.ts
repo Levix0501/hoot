@@ -174,3 +174,18 @@ export function listOrder<T extends Issue>(issues: readonly T[], view: IssueView
 export function issueIdentifier(id: number): string {
   return `ISS-${id}`
 }
+
+/**
+ * What an issue dropped on an agent's terminal pastes into the agent's
+ * input, as separate pastes: its identifier and title, on a line of their
+ * own, then its description, if any. Agents take a short paste as it is and
+ * fold a long one into a placeholder, such as Claude Code's `[Pasted text #1
+ * +6 lines]`, so the issue shows by its title above the folded description.
+ * Starting with the identifier, the text never starts as a command or a
+ * mode of the agent's input would, such as `/` or `!`.
+ */
+export function issuePasteParts(issue: Pick<Issue, 'id' | 'title' | 'description'>): string[] {
+  const head = `${issueIdentifier(issue.id)} ${issue.title}`
+  const description = issue.description.trim()
+  return description === '' ? [head] : [`${head}\n`, description]
+}

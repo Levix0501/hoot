@@ -249,6 +249,10 @@ const filePanel = {
   setTreeWidth: vi.fn<(width: number) => void>(),
   setEditorWidth: vi.fn<(width: number) => void>(),
 }
+const issueWindow = {
+  setOpen: vi.fn<(open: boolean) => void>(),
+  setPosition: vi.fn<(position: unknown) => void>(),
+}
 /** The file panel may show the project's own folder only. */
 const folderAccess = {
   folder: vi.fn<(root: string, worktreePath: string | null) => Promise<string | null>>(
@@ -327,6 +331,7 @@ beforeEach(() => {
     sessionStarts,
     sidebar,
     filePanel,
+    issueWindow,
     folderAccess,
     fileWatcher,
   } as unknown as Parameters<typeof registerIpc>[0])
@@ -384,6 +389,21 @@ describe("the file panel's messages", () => {
     expect(filePanel.setOpen).toHaveBeenCalledWith(true)
     expect(filePanel.setTreeWidth).toHaveBeenCalledWith(300)
     expect(filePanel.setEditorWidth).not.toHaveBeenCalled()
+  })
+})
+
+describe('the messages of the Issues window', () => {
+  it('save whether it is open and where it sits, refusing what is not a position', () => {
+    electron.listeners.get(IpcChannel.setIssueWindowOpen)!(trusted, true)
+    electron.listeners.get(IpcChannel.setIssueWindowOpen)!(trusted, 'yes')
+    expect(issueWindow.setOpen).toHaveBeenCalledTimes(1)
+    expect(issueWindow.setOpen).toHaveBeenCalledWith(true)
+    const position = { side: 'left', x: 40, edge: 'top', y: 60 }
+    electron.listeners.get(IpcChannel.setIssueWindowPosition)!(trusted, position)
+    electron.listeners.get(IpcChannel.setIssueWindowPosition)!(trusted, { ...position, x: -5 })
+    electron.listeners.get(IpcChannel.setIssueWindowPosition)!(trusted, { ...position, side: 'up' })
+    expect(issueWindow.setPosition).toHaveBeenCalledTimes(1)
+    expect(issueWindow.setPosition).toHaveBeenCalledWith(position)
   })
 })
 

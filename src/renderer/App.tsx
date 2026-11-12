@@ -7,6 +7,7 @@ import { DiscardChangesDialog } from './components/files/file-panel'
 import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
 import { DependentIssueDialogView } from './components/issues/dependent-issue-dialog'
 import { IssuePickerDialog } from './components/issues/issue-picker-dialog'
+import { IssueWindow } from './components/issues/issue-window'
 import { NewIssueDialog } from './components/issues/new-issue-dialog'
 import { MainArea } from './components/main-area'
 import { NewWorktreeDialog } from './components/new-worktree-dialog'
@@ -129,6 +130,8 @@ export function App() {
             </SidebarInset>
             {/* Last, so that its buttons are cut out of the drag area of what lies under them. */}
             <WindowNavigation />
+            {/* After it, as it may be moved over the window's top row. */}
+            <IssueWindow />
           </>
         )}
       </SidebarProvider>

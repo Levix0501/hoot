@@ -508,7 +508,7 @@ describe('AgentService detection times', () => {
       () => expect(service.getState().detectedAt).toBe(start + 20 * 60 * 60 * 1000),
       { timeout: 10_000 },
     )
-    await vi.waitFor(() => expect(service.getState().detecting).toBe(false))
+    await vi.waitFor(() => expect(service.getState().detecting).toBe(false), { timeout: 10_000 })
   })
 
   it('checks again when Re-detect asks, and counts the 20 hours from that detection', async () => {

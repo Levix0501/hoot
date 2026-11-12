@@ -7,5 +7,8 @@ export default defineConfig({
     testTimeout: 30_000,
     // As long for the hooks, which build Git repositories for the worktree tests.
     hookTimeout: 30_000,
+    // What a test polls for is often done by Git or another process, which on
+    // a busy Windows runner can take longer than the default second.
+    expect: { poll: { timeout: 10_000 } },
   },
 })

@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.27
+
+### Patch Changes
+
+- [`9c61953`](https://github.com/Levix0501/hoot/commit/9c619536b51980cdff1f6bb6e344fd66b516c7ef) - The file panel now opens Markdown files formatted, where you edit them as they show and pictures you paste are saved next to the file, while what you leave alone keeps its Markdown exactly as it was, with a button right of the tabs that switches to their source and back.
+
 ## 0.1.0-alpha.26
 
 ### Patch Changes

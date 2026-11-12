@@ -1,5 +1,15 @@
 # hoot
 
+## 0.1.0-alpha.28
+
+### Patch Changes
+
+- [`9f00b68`](https://github.com/Levix0501/hoot/commit/9f00b6840d3ccfeb0f69569ece623ad3f2744939) - An Issues window now floats at the bottom right of every page, where you note an issue as in a chat, its first line the title, and drag one onto a running agent's terminal to paste it into the agent's input without sending it; drag the window anywhere, and it stays there.
+
+- [`3c69e71`](https://github.com/Levix0501/hoot/commit/3c69e7108fe62db738c1e2f1ed9f6b50a4be4ff6) - Issue descriptions are now written in the same editor as Markdown files in the file panel, with a `/` menu of blocks and a toolbar over selected text, and what you leave alone keeps its Markdown exactly as it was.
+
+- [`8ac4afc`](https://github.com/Levix0501/hoot/commit/8ac4afc0e154bc68cbe95ef1157e91253c67a47e) - The built-in spec-driven workflow is paused for now, and with it the paper plane that started Claude Code on an issue in a worktree of its own: hand issues to agents by dragging them from the Issues window, and the labels it gave issues stay as ordinary ones you can change.
+
 ## 0.1.0-alpha.27
 
 ### Patch Changes

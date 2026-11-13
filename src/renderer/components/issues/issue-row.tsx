@@ -10,15 +10,10 @@ import {
   Trash2Icon,
   UnlinkIcon,
 } from 'lucide-react'
-import { useMemo, useState, type ComponentType, type KeyboardEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { isIssueOpen, issueIdentifier, type Issue } from '../../../shared/issues'
-import {
-  optionOfDigit,
-  PRIORITY_OPTIONS,
-  STATUS_OPTIONS,
-  type PropertyOption,
-} from '../../lib/issue-properties'
+import { PRIORITY_OPTIONS, STATUS_OPTIONS } from '../../lib/issue-properties'
 import { projectOptions } from '../../lib/project-choices'
 import { dateTime, shortDate } from '../../lib/time'
 import { cn } from '../../lib/utils'
@@ -34,8 +29,6 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuRadioGroup,
-  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuSub,
@@ -46,6 +39,7 @@ import {
 import { PriorityIcon, StatusIcon } from './issue-icons'
 import { IssueStartButton } from './issue-start-button'
 import { LabelChip } from './labels'
+import { pickByDigit, PropertyMenuItems, type PropertyMenu } from './property-menu'
 import { PriorityOptionIcon, ProjectOptionIcon, StatusOptionIcon } from './property-picker'
 
 /**
@@ -54,55 +48,20 @@ import { PriorityOptionIcon, ProjectOptionIcon, StatusOptionIcon } from './prope
  */
 function PropertySubmenu<T extends string | number | null>({
   label,
-  Icon,
-  options,
-  value,
-  onChange,
   close,
-}: {
-  label: string
-  Icon: ComponentType<{ value: T }>
-  options: ReadonlyArray<PropertyOption<T>>
-  value: T
-  onChange(value: T): void
-  close(): void
-}) {
-  const pick = (next: T) => {
-    if (next !== value) onChange(next)
-  }
+  ...menu
+}: PropertyMenu<T> & { label: string; close(): void }) {
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid={`issue-menu-${label.toLowerCase()}`}>
-        <Icon value={value} />
+        <menu.Icon value={menu.value} />
         {label}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent
         className="shadow-lg [app-region:no-drag]"
-        onKeyDown={(event: KeyboardEvent) => {
-          if (event.metaKey || event.ctrlKey || event.altKey) return
-          const option = optionOfDigit(options, event.key)
-          if (option === null) return
-          event.preventDefault()
-          pick(option.value)
-          close()
-        }}
+        onKeyDown={pickByDigit(menu, close)}
       >
-        <ContextMenuRadioGroup value={value} onValueChange={(next: T) => pick(next)}>
-          {options.map((option) => (
-            <ContextMenuRadioItem
-              key={String(option.value)}
-              value={option.value}
-              closeOnClick
-              data-value={String(option.value)}
-            >
-              <Icon value={option.value} />
-              <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {option.shortcut !== undefined && (
-                <ContextMenuShortcut>{option.shortcut}</ContextMenuShortcut>
-              )}
-            </ContextMenuRadioItem>
-          ))}
-        </ContextMenuRadioGroup>
+        <PropertyMenuItems {...menu} />
       </ContextMenuSubContent>
     </ContextMenuSub>
   )

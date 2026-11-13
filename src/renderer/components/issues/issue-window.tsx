@@ -9,7 +9,15 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { ArrowUpRightIcon, ChevronDownIcon, CircleDotIcon, MinusIcon } from 'lucide-react'
-import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type ReactNode,
+} from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ISSUE_WINDOW_MARGIN,
@@ -17,19 +25,23 @@ import {
   type IssueWindowPosition,
 } from '../../../shared/issue-window'
 import {
+  isCompleted,
   isIssueOpen,
   issueGroups,
   issueIdentifier,
   listOrder,
+  STATUS_GROUP_ORDER,
   type Issue,
   type IssueGroup,
+  type IssueStatus,
 } from '../../../shared/issues'
-import { endIssueDrag, startIssueDrag } from '../../lib/issue-drag'
-import { statusLabel } from '../../lib/issue-properties'
+import { endIssueDrag, ISSUE_DRAG_TYPE, startIssueDrag, useIssueDrag } from '../../lib/issue-drag'
+import { STATUS_OPTIONS, statusLabel } from '../../lib/issue-properties'
 import { shortTimeAgo } from '../../lib/time'
 import { cn } from '../../lib/utils'
 import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '../ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +53,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { StatusIcon } from './issue-icons'
 import { focusNoteOnShow, IssueNote } from './issue-note'
+import { pickByDigit, PropertyMenuItems, type PropertyMenu } from './property-menu'
+import { StatusOptionIcon } from './property-picker'
 import { useNow } from './relative-time'
 
 /** What moves the window, from `useDraggable`. */
@@ -90,6 +104,9 @@ function useOpenIssues(): Issue[] {
   const issues = useAppStore(useShallow((state) => state.issues.filter(isIssueOpen)))
   return useMemo(() => listOrder(issues, 'all'), [issues])
 }
+
+/** The statuses of open issues, which the window groups them by, in the order of the issue list. */
+const OPEN_STATUSES = STATUS_GROUP_ORDER.filter((status) => !isCompleted(status))
 
 /** The issues the window lists: all of them, a project's, or those of no project. */
 type ProjectFilterValue = 'all' | number | null
@@ -188,69 +205,103 @@ function HeaderButton({
 
 /**
  * An issue in the window: its identifier, status, title and age. A click
- * shows the issue's page. Dragged onto the terminal of a running agent, it
- * pastes the issue into the agent's input, unsent.
+ * shows the issue's page, and a right-click changes its status. Dragged
+ * into another group of the window, it takes that group's status; onto the
+ * terminal of a running agent, it pastes the issue into the agent's input,
+ * unsent.
  */
 function IssueWindowRow({
   issue,
   identifierWidth,
   now,
+  focusAfterMenu,
 }: {
   issue: Issue
   /** How wide the identifiers of the window are, in characters, so that they line up. */
   identifierWidth: number
   now: number
+  /** What takes the keyboard focus once the row's menu closes. */
+  focusAfterMenu(issueId: number): HTMLElement | boolean
 }) {
   const showIssue = useAppStore((state) => state.showIssue)
+  const updateIssue = useAppStore((state) => state.updateIssue)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const status: PropertyMenu<IssueStatus> = {
+    Icon: StatusOptionIcon,
+    options: STATUS_OPTIONS,
+    value: issue.status,
+    onChange: (next) => updateIssue(issue.id, { status: next }),
+  }
   return (
-    <li>
-      <button
-        type="button"
-        draggable
-        onDragStart={(event) => startIssueDrag(event, issue)}
-        onDragEnd={endIssueDrag}
-        onClick={() => showIssue(issue.id)}
-        className="flex h-8 w-full cursor-default items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
-        data-testid="issue-window-row"
-        data-issue-id={issue.id}
+    <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <ContextMenuTrigger render={<li />}>
+        <button
+          type="button"
+          draggable
+          onDragStart={(event) => startIssueDrag(event, issue)}
+          onDragEnd={endIssueDrag}
+          onClick={() => showIssue(issue.id)}
+          className="flex h-8 w-full cursor-default items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent data-popup-open:bg-accent"
+          data-popup-open={menuOpen || undefined}
+          data-testid="issue-window-row"
+          data-issue-id={issue.id}
+          data-status={issue.status}
+        >
+          <span
+            className="shrink-0 text-xs text-muted-foreground tabular-nums"
+            style={{ width: `${identifierWidth}ch` }}
+          >
+            {issueIdentifier(issue.id)}
+          </span>
+          <StatusIcon status={issue.status} className="size-3.5" />
+          <span className="min-w-0 flex-1 truncate text-[13px]" data-user-text="">
+            {issue.title}
+          </span>
+          <time
+            className="shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
+            dateTime={new Date(issue.createdAt).toISOString()}
+          >
+            {shortTimeAgo(issue.createdAt, now)}
+          </time>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        className="min-w-44 [app-region:no-drag]"
+        finalFocus={() => focusAfterMenu(issue.id)}
+        onKeyDown={pickByDigit(status, () => setMenuOpen(false))}
       >
-        <span
-          className="shrink-0 text-xs text-muted-foreground tabular-nums"
-          style={{ width: `${identifierWidth}ch` }}
-        >
-          {issueIdentifier(issue.id)}
-        </span>
-        <StatusIcon status={issue.status} className="size-3.5" />
-        <span className="min-w-0 flex-1 truncate text-[13px]" data-user-text="">
-          {issue.title}
-        </span>
-        <time
-          className="shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
-          dateTime={new Date(issue.createdAt).toISOString()}
-        >
-          {shortTimeAgo(issue.createdAt, now)}
-        </time>
-      </button>
-    </li>
+        <PropertyMenuItems {...status} />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
 /**
  * The open issues of one status, under a header that stays at the top while
- * they scroll by.
+ * they scroll by. While an issue of another status is dragged over it, it
+ * shows that dropping the issue there gives the issue its status.
  */
 function IssueWindowGroup({
   group,
+  target,
   identifierWidth,
   now,
+  focusAfterMenu,
 }: {
   group: IssueGroup
+  target: boolean
   identifierWidth: number
   now: number
+  focusAfterMenu(issueId: number): HTMLElement | boolean
 }) {
   const label = statusLabel(group.status)
   return (
-    <div className="pb-1" data-testid="issue-window-group" data-status={group.status}>
+    <div
+      className="relative pb-1"
+      data-drop-status={group.status}
+      data-testid="issue-window-group"
+      data-status={group.status}
+    >
       <div className="sticky top-0 z-10 bg-popover">
         <div className="flex h-7 items-center gap-2 rounded-md bg-muted/70 px-2 text-xs font-medium">
           <StatusIcon status={group.status} className="size-3.5" />
@@ -260,18 +311,110 @@ function IssueWindowGroup({
           </span>
         </div>
       </div>
-      <ul className="pt-0.5" aria-label={label}>
-        {group.issues.map((issue) => (
-          <IssueWindowRow
-            key={issue.id}
-            issue={issue}
-            identifierWidth={identifierWidth}
-            now={now}
-          />
-        ))}
-      </ul>
+      {group.issues.length > 0 && (
+        <ul className="pt-0.5" aria-label={label}>
+          {group.issues.map((issue) => (
+            <IssueWindowRow
+              key={issue.id}
+              issue={issue}
+              identifierWidth={identifierWidth}
+              now={now}
+              focusAfterMenu={focusAfterMenu}
+            />
+          ))}
+        </ul>
+      )}
+      {target && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 bottom-1 z-20 rounded-lg border-2 border-dashed border-primary/40 bg-primary/5"
+          data-testid="issue-window-drop"
+        />
+      )}
     </div>
   )
+}
+
+/**
+ * The status of the window's group an issue is dragged over, if the issue
+ * can take it: any but its own.
+ */
+function dropTargetOf(event: DragEvent): IssueStatus | null {
+  if (!event.dataTransfer.types.includes(ISSUE_DRAG_TYPE)) return null
+  const group =
+    event.target instanceof Element ? event.target.closest<HTMLElement>('[data-drop-status]') : null
+  const status = group?.dataset.dropStatus as IssueStatus | undefined
+  const { issueId } = useIssueDrag.getState()
+  const issue = useAppStore.getState().issues.find((entry) => entry.id === issueId)
+  return status !== undefined && issue !== undefined && issue.status !== status ? status : null
+}
+
+/**
+ * How the window's groups take an issue dragged from one of them. Once the
+ * drag has started, every open status has a group, empty or not, so that an
+ * issue can be given any of them; the group the issue is over, if not its
+ * own, is the target, and the issue dropped on it takes its status.
+ */
+function useGroupDrop() {
+  const updateIssue = useAppStore((state) => state.updateIssue)
+  /** Whether an issue is being dragged, and every open status has a group. */
+  const [dragging, setDragging] = useState(false)
+  /** The status of the group the issue would be dropped on. */
+  const [target, setTarget] = useState<IssueStatus | null>(null)
+  /** How many parts of the list the drag is over. */
+  const depth = useRef(0)
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const unsubscribe = useIssueDrag.subscribe(({ issueId }) => {
+      clearTimeout(timer)
+      if (issueId === null) {
+        depth.current = 0
+        setTarget(null)
+        setDragging(false)
+        return
+      }
+      // Once the drag has started, so that the rows do not move under the pointer as it starts.
+      timer = setTimeout(() => setDragging(true))
+    })
+    return () => {
+      clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [])
+
+  const allowDrop = (event: DragEvent) => {
+    const status = dropTargetOf(event)
+    setTarget(status)
+    if (status === null) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  return {
+    dragging,
+    target,
+    handlers: {
+      onDragEnter: (event: DragEvent) => {
+        if (event.dataTransfer.types.includes(ISSUE_DRAG_TYPE)) depth.current += 1
+        allowDrop(event)
+      },
+      onDragOver: allowDrop,
+      onDragLeave: (event: DragEvent) => {
+        if (!event.dataTransfer.types.includes(ISSUE_DRAG_TYPE)) return
+        depth.current = Math.max(0, depth.current - 1)
+        if (depth.current === 0) setTarget(null)
+      },
+      onDrop: (event: DragEvent) => {
+        const status = dropTargetOf(event)
+        if (status === null) return
+        event.preventDefault()
+        const issueId = Number(event.dataTransfer.getData(ISSUE_DRAG_TYPE))
+        // Here: its row moves into the other group, a new element the drag's end does not reach.
+        endIssueDrag()
+        updateIssue(issueId, { status })
+      },
+    },
+  }
 }
 
 /**
@@ -311,7 +454,14 @@ function OpenWindow({
     () => (filter === 'all' ? issues : issues.filter((issue) => issue.projectId === filter)),
     [issues, filter],
   )
-  const groups = useMemo(() => issueGroups(shown, 'all'), [shown])
+  const drop = useGroupDrop()
+  const groups = useMemo(() => {
+    const listed = issueGroups(shown, 'all')
+    if (!drop.dragging) return listed
+    return OPEN_STATUSES.map(
+      (status) => listed.find((group) => group.status === status) ?? { status, issues: [] },
+    )
+  }, [shown, drop.dragging])
   const identifierWidth = useMemo(
     () => Math.max(0, ...shown.map((issue) => issueIdentifier(issue.id).length)),
     [shown],
@@ -326,6 +476,18 @@ function OpenWindow({
     const target = focusAfterOverlay()
     if (target instanceof HTMLElement) target.focus()
   }
+
+  /**
+   * Back to an issue's row once its menu closes, wherever its status now
+   * lists it, or to the note once it has left the window: the window stays,
+   * and Esc should close it rather than reach an agent's terminal.
+   */
+  const focusAfterMenu = (issueId: number) =>
+    panel.current?.querySelector<HTMLElement>(
+      `[data-testid="issue-window-row"][data-issue-id="${issueId}"]`,
+    ) ??
+    panel.current?.querySelector<HTMLElement>('[data-testid="issue-note-title"]') ??
+    true
 
   return (
     <section
@@ -378,7 +540,11 @@ function OpenWindow({
           </HeaderButton>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1" data-testid="issue-window-issues">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1"
+        {...drop.handlers}
+        data-testid="issue-window-issues"
+      >
         {groups.length === 0 ? (
           <div className="flex flex-col items-center gap-1 px-6 py-10 text-center text-[13px] text-muted-foreground">
             <span>No open issues</span>
@@ -389,8 +555,10 @@ function OpenWindow({
             <IssueWindowGroup
               key={group.status}
               group={group}
+              target={drop.target === group.status}
               identifierWidth={identifierWidth}
               now={now}
+              focusAfterMenu={focusAfterMenu}
             />
           ))
         )}
@@ -449,7 +617,7 @@ function IssueWindowBody() {
  * bottom right until it is moved, and keeps to its corner of the window as
  * the window is resized. Closed, it is a button with how many issues are
  * open. Open, it lists the open issues, of a project or of all, grouped by
- * status, to show or to drag onto a running agent,
+ * status, to show, to give another status or to drag onto a running agent,
  * and notes new ones. Moved by its button or its title row, it stays where
  * it is let go of, also when Hoot is opened again, as it stays open or closed.
  */

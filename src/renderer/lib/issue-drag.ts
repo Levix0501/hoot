@@ -12,11 +12,12 @@ export const useIssueDrag = create<{ issueId: number | null }>(() => ({ issueId:
 
 /**
  * Starts dragging an issue: for Hoot as its id, and for other programs as
- * the text it pastes into an agent. Under the pointer it shows as a small
- * card with its identifier and title.
+ * the text it pastes into an agent. It is copied into an agent's input, or
+ * moved into another group of the Issues window. Under the pointer it shows
+ * as a small card with its identifier and title.
  */
 export function startIssueDrag(event: React.DragEvent, issue: Issue): void {
-  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.effectAllowed = 'copyMove'
   event.dataTransfer.setData(ISSUE_DRAG_TYPE, String(issue.id))
   event.dataTransfer.setData('text/plain', issuePasteParts(issue).join(''))
   // Drawn once, as the drag starts, from where it lies out of sight.

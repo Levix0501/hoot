@@ -8,35 +8,27 @@ import {
   type Modifier,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  CircleDotIcon,
-  GripVerticalIcon,
-  MinusIcon,
-  SquareArrowOutUpRightIcon,
-  FolderIcon,
-} from 'lucide-react'
-import {
-  lazy,
-  Suspense,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react'
+import { ArrowUpRightIcon, ChevronDownIcon, CircleDotIcon, MinusIcon } from 'lucide-react'
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ISSUE_WINDOW_MARGIN,
   issueWindowPositionOf,
   type IssueWindowPosition,
 } from '../../../shared/issue-window'
-import { isIssueOpen, issueIdentifier, listOrder, type Issue } from '../../../shared/issues'
+import {
+  isIssueOpen,
+  issueGroups,
+  issueIdentifier,
+  listOrder,
+  type Issue,
+  type IssueGroup,
+} from '../../../shared/issues'
 import { endIssueDrag, startIssueDrag } from '../../lib/issue-drag'
-import { timeAgo } from '../../lib/time'
+import { statusLabel } from '../../lib/issue-properties'
+import { shortTimeAgo } from '../../lib/time'
 import { cn } from '../../lib/utils'
-import { currentSessionId, focusAfterOverlay, useAppStore } from '../../store/app-store'
+import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -46,21 +38,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
-import { Kbd } from '../ui/kbd'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { PriorityIcon, StatusIcon } from './issue-icons'
-import type { IssueNoteEditorHandle } from './issue-note-editor'
-import { ProjectPicker } from './property-picker'
+import { StatusIcon } from './issue-icons'
+import { focusNoteOnShow, IssueNote } from './issue-note'
 import { useNow } from './relative-time'
-
-/** The note's editor, with notra-editor, which is loaded the first time the window opens. */
-const IssueNoteEditor = lazy(() => import('./issue-note-editor'))
-
-/** What is written in the note and not yet made an issue, kept while the window is closed. */
-let noteDraft = ''
-
-/** Whether the note takes the keyboard focus once it shows: when the window was opened by hand. */
-let focusNoteOnOpen = false
 
 /** What moves the window, from `useDraggable`. */
 type Draggable = ReturnType<typeof useDraggable>
@@ -108,20 +89,6 @@ function placement(position: IssueWindowPosition): CSSProperties {
 function useOpenIssues(): Issue[] {
   const issues = useAppStore(useShallow((state) => state.issues.filter(isIssueOpen)))
   return useMemo(() => listOrder(issues, 'all'), [issues])
-}
-
-/** The project of what the main area shows: a session's, or an issue's; `null` for none. */
-function useShownProjectId(): number | null {
-  return useAppStore((state) => {
-    const page = state.currentPage
-    if (page?.kind === 'issue') {
-      return state.issues.find((issue) => issue.id === page.issueId)?.projectId ?? null
-    }
-    const id = currentSessionId(state)
-    const session = state.sessions.find((entry) => entry.id === id)
-    if (!session || session.chatId !== null) return null
-    return state.projects.find((project) => project.root === session.projectRoot)?.id ?? null
-  })
 }
 
 /** The issues the window lists: all of them, a project's, or those of no project. */
@@ -220,18 +187,18 @@ function HeaderButton({
 }
 
 /**
- * An issue in the window: its status and title, then its priority,
- * identifier, project and age. A click shows the issue's page. Dragged onto
- * the terminal of a running agent, it pastes the issue into the agent's
- * input, unsent.
+ * An issue in the window: its identifier, status, title and age. A click
+ * shows the issue's page. Dragged onto the terminal of a running agent, it
+ * pastes the issue into the agent's input, unsent.
  */
 function IssueWindowRow({
   issue,
-  project,
+  identifierWidth,
   now,
 }: {
   issue: Issue
-  project: string | null
+  /** How wide the identifiers of the window are, in characters, so that they line up. */
+  identifierWidth: number
   now: number
 }) {
   const showIssue = useAppStore((state) => state.showIssue)
@@ -243,167 +210,111 @@ function IssueWindowRow({
         onDragStart={(event) => startIssueDrag(event, issue)}
         onDragEnd={endIssueDrag}
         onClick={() => showIssue(issue.id)}
-        className="group/row mx-1 grid w-[calc(100%-0.5rem)] cursor-default gap-0.5 rounded-md px-2.5 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+        className="flex h-8 w-full cursor-default items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
         data-testid="issue-window-row"
         data-issue-id={issue.id}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <StatusIcon status={issue.status} className="size-3.5" />
-          <span className="min-w-0 flex-1 truncate text-sm" data-user-text="">
-            {issue.title}
-          </span>
-          <GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground/60 opacity-0 group-hover/row:opacity-100" />
+        <span
+          className="shrink-0 text-xs text-muted-foreground tabular-nums"
+          style={{ width: `${identifierWidth}ch` }}
+        >
+          {issueIdentifier(issue.id)}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 pl-5.5 text-xs text-muted-foreground">
-          <PriorityIcon priority={issue.priority} className="size-3" />
-          <span className="tabular-nums">{issueIdentifier(issue.id)}</span>
-          {project !== null && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="min-w-0 truncate" data-path="">
-                {project}
-              </span>
-            </>
-          )}
-          <span aria-hidden>·</span>
-          <span className="shrink-0">{timeAgo(issue.createdAt, now)}</span>
+        <StatusIcon status={issue.status} className="size-3.5" />
+        <span className="min-w-0 flex-1 truncate text-[13px]" data-user-text="">
+          {issue.title}
         </span>
+        <time
+          className="shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
+          dateTime={new Date(issue.createdAt).toISOString()}
+        >
+          {shortTimeAgo(issue.createdAt, now)}
+        </time>
       </button>
     </li>
   )
 }
 
 /**
- * The note at the window's bottom, written as in a chat: its first line is
- * the new issue's title and what follows its description. ⌘ Enter creates
- * the issue, in the project of what the main area shows unless another is
- * picked, and empties the note for the next one.
+ * The open issues of one status, under a header that stays at the top while
+ * they scroll by.
  */
-function IssueNote({ onEscape }: { onEscape(): void }) {
-  const shownProject = useShownProjectId()
-  const noteIssue = useAppStore((state) => state.noteIssue)
-  /** The project picked by hand, which the next issues keep; `undefined` follows the main area. */
-  const [picked, setPicked] = useState<number | null | undefined>(undefined)
-  const project = useAppStore((state) => {
-    const id = picked === undefined ? shownProject : picked
-    return state.projects.find((entry) => entry.id === id) ?? null
-  })
-  const [hasText, setHasText] = useState(() => noteDraft.trim() !== '')
-  const [autoFocus] = useState(() => {
-    const focus = focusNoteOnOpen
-    focusNoteOnOpen = false
-    return focus
-  })
-  const editor = useRef<IssueNoteEditorHandle>(null)
-
-  const create = async () => {
-    const note = editor.current?.note()
-    if (!note) return
-    const created = await noteIssue({
-      title: note.title,
-      description: note.description,
-      projectId: project?.id ?? null,
-      status: 'backlog',
-      priority: 0,
-    })
-    if (created === null) return
-    noteDraft = ''
-    editor.current?.clear()
-    setHasText(false)
-  }
-
+function IssueWindowGroup({
+  group,
+  identifierWidth,
+  now,
+}: {
+  group: IssueGroup
+  identifierWidth: number
+  now: number
+}) {
+  const label = statusLabel(group.status)
   return (
-    <div
-      className="shrink-0 border-t p-2"
-      // Before the editor, where ⌘ Enter would otherwise break the line.
-      onKeyDownCapture={(event) => {
-        if (event.nativeEvent.isComposing) return
-        if (event.key === 'Enter' && event.metaKey && !event.ctrlKey && !event.shiftKey) {
-          event.preventDefault()
-          event.stopPropagation()
-          void create()
-        }
-      }}
-    >
-      <div className="rounded-lg bg-background px-3 pt-2 pb-1.5 ring-1 ring-input focus-within:ring-2 focus-within:ring-ring/60">
-        <div className="max-h-48 min-h-10 cursor-text overflow-y-auto">
-          <Suspense fallback={null}>
-            <IssueNoteEditor
-              ref={editor}
-              initial={noteDraft}
-              placeholder="Note an issue… the first line is its title"
-              autoFocus={autoFocus}
-              onEscape={onEscape}
-              onChange={(markdown, text) => {
-                noteDraft = markdown
-                setHasText(text)
-              }}
-            />
-          </Suspense>
-        </div>
-        <div className="mt-1 flex items-center gap-1.5">
-          <ProjectPicker
-            value={project?.id ?? null}
-            onChange={setPicked}
-            triggerProps={{
-              render: (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="max-w-40 rounded-full"
-                  aria-label={`Project: ${project?.name ?? 'No project'}`}
-                  data-testid="issue-note-project"
-                />
-              ),
-            }}
-          >
-            <FolderIcon className="size-3.5 text-muted-foreground" />
-            <span className="min-w-0 truncate" data-path={project ? '' : undefined}>
-              {project ? project.name : 'Project'}
-            </span>
-          </ProjectPicker>
-          <div className="flex-1" />
-          <span className="flex items-center gap-0.5 text-muted-foreground">
-            <Kbd>⌘</Kbd>
-            <Kbd>Enter</Kbd>
+    <div className="pb-1" data-testid="issue-window-group" data-status={group.status}>
+      <div className="sticky top-0 z-10 bg-popover">
+        <div className="flex h-7 items-center gap-2 rounded-md bg-muted/70 px-2 text-xs font-medium">
+          <StatusIcon status={group.status} className="size-3.5" />
+          <span>{label}</span>
+          <span className="font-normal text-muted-foreground tabular-nums">
+            {group.issues.length}
           </span>
-          <Button
-            size="icon-xs"
-            className="rounded-full"
-            disabled={!hasText}
-            aria-label="Create issue"
-            onClick={() => void create()}
-            data-testid="issue-note-create"
-          >
-            <ArrowUpIcon />
-          </Button>
         </div>
       </div>
+      <ul className="pt-0.5" aria-label={label}>
+        {group.issues.map((issue) => (
+          <IssueWindowRow
+            key={issue.id}
+            issue={issue}
+            identifierWidth={identifierWidth}
+            now={now}
+          />
+        ))}
+      </ul>
     </div>
   )
 }
 
-/** The frame of the open window: a popover's colors, ring and corners. */
+/**
+ * The frame of the open window: a popover's colors and ring, round corners,
+ * and as tall as what it lists, up to `openHeight`.
+ */
 const PANEL =
-  'fixed z-40 flex h-[min(680px,calc(100vh-96px))] w-[340px] flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 [app-region:no-drag]'
+  'fixed z-40 flex w-[380px] flex-col overflow-hidden rounded-[20px] bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 duration-150 animate-in fade-in-0 zoom-in-95 [app-region:no-drag]'
+
+/** The highest the open window grows: 580px, less in a small window or far from its corner. */
+function openHeight(position: IssueWindowPosition): string {
+  return `min(580px, 100vh - 96px, 100vh - ${position.y + ISSUE_WINDOW_MARGIN}px)`
+}
 
 /**
- * The window, open: its title row, which moves it, with the Project filter,
- * a button that shows the issue list and one that closes the window to its
- * button; the open issues; and the note.
+ * The window, open, growing from its corner: its title row, which moves
+ * it, with the Project filter, a button that shows the issue list and one
+ * that closes the window to its button; the open issues, grouped by status;
+ * and the note.
  */
-function OpenWindow({ style, draggable }: { style: CSSProperties; draggable: Draggable }) {
-  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: dragging } = draggable
+function OpenWindow({
+  style,
+  draggable,
+  position,
+}: {
+  style: CSSProperties
+  draggable: Draggable
+  position: IssueWindowPosition
+}) {
+  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: moving } = draggable
   const setOpen = useAppStore((state) => state.setIssueWindowOpen)
   const showIssueList = useAppStore((state) => state.showIssueList)
-  const projects = useAppStore((state) => state.projects)
   const issues = useOpenIssues()
   const now = useNow()
   const [filter, setFilter] = useState<ProjectFilterValue>('all')
-  const shown = filter === 'all' ? issues : issues.filter((issue) => issue.projectId === filter)
-  const names = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.name])),
-    [projects],
+  const shown = useMemo(
+    () => (filter === 'all' ? issues : issues.filter((issue) => issue.projectId === filter)),
+    [issues, filter],
+  )
+  const groups = useMemo(() => issueGroups(shown, 'all'), [shown])
+  const identifierWidth = useMemo(
+    () => Math.max(0, ...shown.map((issue) => issueIdentifier(issue.id).length)),
+    [shown],
   )
   const panel = useRef<HTMLElement>(null)
 
@@ -422,13 +333,19 @@ function OpenWindow({ style, draggable }: { style: CSSProperties; draggable: Dra
         setNodeRef(node)
         panel.current = node
       }}
-      style={style}
+      style={{
+        ...style,
+        maxHeight: openHeight(position),
+        transformOrigin: `${position.edge} ${position.side}`,
+      }}
       aria-label="Issues"
-      className={cn(PANEL, dragging && 'shadow-xl')}
-      // Esc from anywhere in it but the note, which says so itself (see `IssueNote`).
+      className={cn(PANEL, moving && 'shadow-2xl')}
+      // Esc from anywhere in it but the note, which says so itself (see `IssueNote`), and its
+      // menus, which Esc closes.
       onKeyDown={(event) => {
         if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing)
           return
+        if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
         event.preventDefault()
         close()
       }}
@@ -438,12 +355,11 @@ function OpenWindow({ style, draggable }: { style: CSSProperties; draggable: Dra
         ref={setActivatorNodeRef}
         {...listeners}
         className={cn(
-          'flex h-10 shrink-0 cursor-grab items-center gap-1 border-b pr-1.5 pl-3 select-none',
-          dragging && 'cursor-grabbing',
+          'flex h-10 shrink-0 cursor-grab items-center gap-1 px-1.5 select-none',
+          moving && 'cursor-grabbing',
         )}
         data-testid="issue-window-header"
       >
-        <span className="text-sm font-medium">Issues</span>
         {/* Its controls are pressed, not moved with. */}
         <div className="flex min-w-0" onPointerDown={(event) => event.stopPropagation()}>
           <ProjectFilter value={filter} onChange={setFilter} />
@@ -455,30 +371,28 @@ function OpenWindow({ style, draggable }: { style: CSSProperties; draggable: Dra
             onClick={() => showIssueList()}
             testId="issue-window-list"
           >
-            <SquareArrowOutUpRightIcon />
+            <ArrowUpRightIcon />
           </HeaderButton>
           <HeaderButton label="Minimize" onClick={close} testId="issue-window-minimize">
             <MinusIcon />
           </HeaderButton>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
-        {shown.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center text-sm text-muted-foreground">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1" data-testid="issue-window-issues">
+        {groups.length === 0 ? (
+          <div className="flex flex-col items-center gap-1 px-6 py-10 text-center text-[13px] text-muted-foreground">
             <span>No open issues</span>
             <span className="text-xs">Note one below, then drag it onto a running agent.</span>
           </div>
         ) : (
-          <ul>
-            {shown.map((issue) => (
-              <IssueWindowRow
-                key={issue.id}
-                issue={issue}
-                now={now}
-                project={issue.projectId === null ? null : (names.get(issue.projectId) ?? null)}
-              />
-            ))}
-          </ul>
+          groups.map((group) => (
+            <IssueWindowGroup
+              key={group.status}
+              group={group}
+              identifierWidth={identifierWidth}
+              now={now}
+            />
+          ))
         )}
       </div>
       <IssueNote onEscape={close} />
@@ -488,7 +402,7 @@ function OpenWindow({ style, draggable }: { style: CSSProperties; draggable: Dra
 
 /** The window, closed: a button with how many issues are open, which opens it and moves it. */
 function ClosedWindow({ style, draggable }: { style: CSSProperties; draggable: Draggable }) {
-  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: dragging } = draggable
+  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: moving } = draggable
   const setOpen = useAppStore((state) => state.setIssueWindowOpen)
   const count = useOpenIssues().length
   return (
@@ -501,19 +415,18 @@ function ClosedWindow({ style, draggable }: { style: CSSProperties; draggable: D
       style={style}
       {...listeners}
       onClick={() => {
-        focusNoteOnOpen = true
+        focusNoteOnShow()
         setOpen(true)
       }}
       aria-label={`Issues, ${count} open`}
       className={cn(
-        'fixed z-40 flex h-8 cursor-default items-center gap-1.5 rounded-full bg-background pr-3 pl-2.5 text-sm font-medium shadow-lg ring-1 ring-foreground/10 select-none [app-region:no-drag] hover:bg-accent',
-        dragging && 'shadow-xl',
+        'fixed z-40 flex h-8 cursor-default items-center gap-1.5 rounded-lg bg-popover pr-2.5 pl-2 text-[13px] font-medium shadow-md ring-1 ring-foreground/10 select-none [app-region:no-drag] hover:[background-image:linear-gradient(var(--accent),var(--accent))]',
+        moving && 'shadow-xl',
       )}
       data-testid="issue-window-button"
     >
-      <CircleDotIcon className="size-4" />
-      Issues
-      <span className="font-normal text-muted-foreground tabular-nums">{count}</span>
+      <CircleDotIcon className="size-4 text-muted-foreground" />
+      <span className="tabular-nums">{count}</span>
     </button>
   )
 }
@@ -525,7 +438,7 @@ function IssueWindowBody() {
   const draggable = useDraggable({ id: 'issue-window' })
   const style = { ...placement(position), transform: CSS.Translate.toString(draggable.transform) }
   return open ? (
-    <OpenWindow style={style} draggable={draggable} />
+    <OpenWindow style={style} draggable={draggable} position={position} />
   ) : (
     <ClosedWindow style={style} draggable={draggable} />
   )
@@ -535,10 +448,10 @@ function IssueWindowBody() {
  * The Issues window, which floats over every page but the settings, at the
  * bottom right until it is moved, and keeps to its corner of the window as
  * the window is resized. Closed, it is a button with how many issues are
- * open. Open, it lists the open issues, of a project or of all, to show or
- * to drag onto a running agent, and notes new ones. Moved by its button or
- * its title row, it stays where it is let go of, also when Hoot is opened
- * again, as it stays open or closed.
+ * open. Open, it lists the open issues, of a project or of all, grouped by
+ * status, to show or to drag onto a running agent,
+ * and notes new ones. Moved by its button or its title row, it stays where
+ * it is let go of, also when Hoot is opened again, as it stays open or closed.
  */
 export function IssueWindow() {
   const setPosition = useAppStore((state) => state.setIssueWindowPosition)

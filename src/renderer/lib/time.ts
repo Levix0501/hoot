@@ -25,6 +25,19 @@ export function timeAgo(time: number, now: number): string {
   return `on ${dateFormat.format(time)}`
 }
 
+/**
+ * How long before `now` a moment was, in a few characters, as an inbox says
+ * it: "now", "5m", "3h", "2d", or the date as `shortDate` gives it after a month.
+ */
+export function shortTimeAgo(time: number, now: number): string {
+  const elapsed = Math.max(0, now - time)
+  if (elapsed < MINUTE) return 'now'
+  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)}m`
+  if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)}h`
+  if (elapsed < 30 * DAY) return `${Math.floor(elapsed / DAY)}d`
+  return shortDate(time, now)
+}
+
 /** A moment's date and time of day, in the 24-hour clock: "Oct 10, 2026, 22:42". */
 export function dateTime(time: number): string {
   return dateTimeFormat.format(time)

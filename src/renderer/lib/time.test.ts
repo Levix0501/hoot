@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { dateTime, shortDate, timeAgo } from './time'
+import { dateTime, shortDate, shortTimeAgo, timeAgo } from './time'
 
 const now = new Date(2026, 9, 10, 22, 42, 30).getTime()
 const ago = (milliseconds: number) => timeAgo(now - milliseconds, now)
+const short = (milliseconds: number) => shortTimeAgo(now - milliseconds, now)
 
 describe('timeAgo', () => {
   it('says how long ago, in the largest whole unit', () => {
@@ -19,6 +20,25 @@ describe('timeAgo', () => {
   it('gives the date after a month, and treats a moment after now as now', () => {
     expect(timeAgo(new Date(2026, 6, 4, 9).getTime(), now)).toBe('on Jul 4, 2026')
     expect(timeAgo(now + 5_000, now)).toBe('just now')
+  })
+})
+
+describe('shortTimeAgo', () => {
+  it('says how long ago in the largest whole unit, in a few characters', () => {
+    expect(short(0)).toBe('now')
+    expect(short(59_999)).toBe('now')
+    expect(short(60_000)).toBe('1m')
+    expect(short(59 * 60_000 + 59_000)).toBe('59m')
+    expect(short(60 * 60_000)).toBe('1h')
+    expect(short(23 * 60 * 60_000)).toBe('23h')
+    expect(short(24 * 60 * 60_000)).toBe('1d')
+    expect(short(29 * 24 * 60 * 60_000)).toBe('29d')
+  })
+
+  it('gives the short date after a month, and treats a moment after now as now', () => {
+    expect(shortTimeAgo(new Date(2026, 6, 4, 9).getTime(), now)).toBe('Jul 4')
+    expect(shortTimeAgo(new Date(2025, 11, 31, 23).getTime(), now)).toBe('Dec 31, 2025')
+    expect(shortTimeAgo(now + 5_000, now)).toBe('now')
   })
 })
 

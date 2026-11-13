@@ -2,8 +2,8 @@ import { lazy, Suspense, type Ref } from 'react'
 import { cn } from '../../lib/utils'
 
 export interface DescriptionEditorHandle {
-  /** Puts the keyboard focus at the start of the description. */
-  focus(): void
+  /** Puts the keyboard focus at the start of the description, or at its end. */
+  focus(at?: 'start' | 'end'): void
   /** Hands on what was typed and not handed on yet. */
   flush(): void
 }

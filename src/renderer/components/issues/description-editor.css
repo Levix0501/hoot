@@ -76,15 +76,19 @@
 }
 
 /*
- * The Issues window's note: a first paragraph or heading becomes the issue's
- * title, and shows bold; its placeholder does not.
+ * The description in the Issues window's note: in the 13px of the window's
+ * rows, on 20px lines, on the note's own surface; its placeholder shows only
+ * while the cursor is in it, as Notion's does.
  */
-.issue-note.notra-editor[data-block-handle]
-  .notra-content
-  > :is(p, h1, h2, h3, h4, h5, h6):first-child {
-  font-weight: 600;
+.issue-note.notra-editor[data-block-handle] {
+  background-color: transparent;
 }
 
-.issue-note.notra-editor[data-block-handle] .notra-content > :first-child.is-empty {
-  font-weight: 400;
+.issue-note.notra-editor[data-block-handle] .notra-content {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.issue-note .notra-content:not(.ProseMirror-focused) .is-empty::before {
+  content: none;
 }

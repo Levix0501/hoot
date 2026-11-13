@@ -156,11 +156,12 @@ export default function DescriptionNotra({
   }, [flush])
 
   useImperativeHandle(ref, () => ({
-    focus: () => {
+    focus: (at = 'start') => {
       if (!editor) return
       // Not with the focus command, which waits for the next frame: keys typed meanwhile would go astray.
       const { state, view } = editor
-      view.dispatch(state.tr.setSelection(Selection.atStart(state.doc)).scrollIntoView())
+      const selection = at === 'end' ? Selection.atEnd(state.doc) : Selection.atStart(state.doc)
+      view.dispatch(state.tr.setSelection(selection).scrollIntoView())
       view.focus()
     },
     flush,

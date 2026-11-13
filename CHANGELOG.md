@@ -1,5 +1,13 @@
 # hoot
 
+## 0.1.0-alpha.29
+
+### Patch Changes
+
+- [`2672b64`](https://github.com/Levix0501/hoot/commit/2672b6426832bb733135447b53896343303f7a45) - The Issues window has a new look: issues grouped by status, one line each, and a note whose title is typed apart from its description, where `/` inserts blocks and Esc on the `/` menu no longer closes the window.
+
+- [`9b10bc5`](https://github.com/Levix0501/hoot/commit/9b10bc5432771a20ea29fda34c81371fd34b8def) - In the Issues window, right-click an issue to change its status, or drag it into the group of another status.
+
 ## 0.1.0-alpha.28
 
 ### Patch Changes

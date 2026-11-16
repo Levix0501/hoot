@@ -6,10 +6,13 @@ import {
   useSensors,
   type DragEndEvent,
   type Modifier,
+  type PointerSensorProps,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { ArrowUpRightIcon, ChevronDownIcon, CircleDotIcon, MinusIcon } from 'lucide-react'
 import {
+  memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -17,7 +20,9 @@ import {
   type CSSProperties,
   type DragEvent,
   type ReactNode,
+  type RefObject,
 } from 'react'
+import { flushSync } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import {
   ISSUE_WINDOW_MARGIN,
@@ -419,10 +424,13 @@ function useGroupDrop() {
 
 /**
  * The frame of the open window: a popover's colors and ring, round corners,
- * and as tall as what it lists, up to `openHeight`.
+ * and as tall as what it lists, up to `openHeight`. It grows in over
+ * `animate-in`'s own 150ms: `duration-150` would also make each move's
+ * transform a transition, which holds the window still while the pointer
+ * keeps moving.
  */
 const PANEL =
-  'fixed z-40 flex w-[380px] flex-col overflow-hidden rounded-[20px] bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 duration-150 animate-in fade-in-0 zoom-in-95 [app-region:no-drag]'
+  'fixed z-40 flex w-[380px] flex-col overflow-hidden rounded-[20px] bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95 [app-region:no-drag]'
 
 /** The highest the open window grows: 580px, less in a small window or far from its corner. */
 function openHeight(position: IssueWindowPosition): string {
@@ -430,26 +438,58 @@ function openHeight(position: IssueWindowPosition): string {
 }
 
 /**
- * The window, open, growing from its corner: its title row, which moves
- * it, with the Project filter, a button that shows the issue list and one
- * that closes the window to its button; the open issues, grouped by status;
- * and the note.
+ * The controls of the open window's title row, pressed rather than moved
+ * with: the Project filter, a button that shows the issue list and one that
+ * closes the window to its button. Memoized, as the window's issues and
+ * note are: moving the window renders it again at every move of the
+ * pointer, which should only move it.
  */
-function OpenWindow({
-  style,
-  draggable,
-  position,
+const IssueWindowControls = memo(function IssueWindowControls({
+  filter,
+  onFilterChange,
+  onClose,
 }: {
-  style: CSSProperties
-  draggable: Draggable
-  position: IssueWindowPosition
+  filter: ProjectFilterValue
+  onFilterChange(value: ProjectFilterValue): void
+  onClose(): void
 }) {
-  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: moving } = draggable
-  const setOpen = useAppStore((state) => state.setIssueWindowOpen)
   const showIssueList = useAppStore((state) => state.showIssueList)
+  return (
+    <>
+      <div className="flex min-w-0" onPointerDown={(event) => event.stopPropagation()}>
+        <ProjectFilter value={filter} onChange={onFilterChange} />
+      </div>
+      <div className="flex-1" />
+      <div className="flex items-center" onPointerDown={(event) => event.stopPropagation()}>
+        <HeaderButton
+          label="Open the issue list"
+          onClick={() => showIssueList()}
+          testId="issue-window-list"
+        >
+          <ArrowUpRightIcon />
+        </HeaderButton>
+        <HeaderButton label="Minimize" onClick={onClose} testId="issue-window-minimize">
+          <MinusIcon />
+        </HeaderButton>
+      </div>
+    </>
+  )
+})
+
+/**
+ * The open issues of the window, of a project or of all, grouped by status.
+ * Memoized, see `IssueWindowControls`.
+ */
+const IssueWindowIssues = memo(function IssueWindowIssues({
+  filter,
+  panel,
+}: {
+  filter: ProjectFilterValue
+  /** The window, where the keyboard focus goes once a row's menu closes. */
+  panel: RefObject<HTMLElement | null>
+}) {
   const issues = useOpenIssues()
   const now = useNow()
-  const [filter, setFilter] = useState<ProjectFilterValue>('all')
   const shown = useMemo(
     () => (filter === 'all' ? issues : issues.filter((issue) => issue.projectId === filter)),
     [issues, filter],
@@ -466,16 +506,6 @@ function OpenWindow({
     () => Math.max(0, ...shown.map((issue) => issueIdentifier(issue.id).length)),
     [shown],
   )
-  const panel = useRef<HTMLElement>(null)
-
-  const close = () => {
-    const hadFocus = panel.current?.contains(document.activeElement) === true
-    setOpen(false)
-    if (!hadFocus) return
-    // Back to the terminal of the session shown, rather than to nowhere.
-    const target = focusAfterOverlay()
-    if (target instanceof HTMLElement) target.focus()
-  }
 
   /**
    * Back to an issue's row once its menu closes, wherever its status now
@@ -488,6 +518,61 @@ function OpenWindow({
     ) ??
     panel.current?.querySelector<HTMLElement>('[data-testid="issue-note-title"]') ??
     true
+
+  return (
+    <div
+      className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1"
+      {...drop.handlers}
+      data-testid="issue-window-issues"
+    >
+      {groups.length === 0 ? (
+        <div className="flex flex-col items-center gap-1 px-6 py-10 text-center text-[13px] text-muted-foreground">
+          <span>No open issues</span>
+          <span className="text-xs">Note one below, then drag it onto a running agent.</span>
+        </div>
+      ) : (
+        groups.map((group) => (
+          <IssueWindowGroup
+            key={group.status}
+            group={group}
+            target={drop.target === group.status}
+            identifierWidth={identifierWidth}
+            now={now}
+            focusAfterMenu={focusAfterMenu}
+          />
+        ))
+      )}
+    </div>
+  )
+})
+
+/**
+ * The window, open, growing from its corner: its title row, which moves
+ * it, with its controls; the open issues, grouped by status; and the note.
+ */
+function OpenWindow({
+  style,
+  draggable,
+  position,
+}: {
+  style: CSSProperties
+  draggable: Draggable
+  position: IssueWindowPosition
+}) {
+  const { setNodeRef, setActivatorNodeRef, listeners, isDragging: moving } = draggable
+  const setOpen = useAppStore((state) => state.setIssueWindowOpen)
+  const [filter, setFilter] = useState<ProjectFilterValue>('all')
+  const panel = useRef<HTMLElement>(null)
+
+  // The same from one move to the next, for the memoized parts it is given to.
+  const close = useCallback(() => {
+    const hadFocus = panel.current?.contains(document.activeElement) === true
+    setOpen(false)
+    if (!hadFocus) return
+    // Back to the terminal of the session shown, rather than to nowhere.
+    const target = focusAfterOverlay()
+    if (target instanceof HTMLElement) target.focus()
+  }, [setOpen])
 
   return (
     <section
@@ -522,47 +607,9 @@ function OpenWindow({
         )}
         data-testid="issue-window-header"
       >
-        {/* Its controls are pressed, not moved with. */}
-        <div className="flex min-w-0" onPointerDown={(event) => event.stopPropagation()}>
-          <ProjectFilter value={filter} onChange={setFilter} />
-        </div>
-        <div className="flex-1" />
-        <div className="flex items-center" onPointerDown={(event) => event.stopPropagation()}>
-          <HeaderButton
-            label="Open the issue list"
-            onClick={() => showIssueList()}
-            testId="issue-window-list"
-          >
-            <ArrowUpRightIcon />
-          </HeaderButton>
-          <HeaderButton label="Minimize" onClick={close} testId="issue-window-minimize">
-            <MinusIcon />
-          </HeaderButton>
-        </div>
+        <IssueWindowControls filter={filter} onFilterChange={setFilter} onClose={close} />
       </div>
-      <div
-        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1"
-        {...drop.handlers}
-        data-testid="issue-window-issues"
-      >
-        {groups.length === 0 ? (
-          <div className="flex flex-col items-center gap-1 px-6 py-10 text-center text-[13px] text-muted-foreground">
-            <span>No open issues</span>
-            <span className="text-xs">Note one below, then drag it onto a running agent.</span>
-          </div>
-        ) : (
-          groups.map((group) => (
-            <IssueWindowGroup
-              key={group.status}
-              group={group}
-              target={drop.target === group.status}
-              identifierWidth={identifierWidth}
-              now={now}
-              focusAfterMenu={focusAfterMenu}
-            />
-          ))
-        )}
-      </div>
+      <IssueWindowIssues filter={filter} panel={panel} />
       <IssueNote onEscape={close} />
     </section>
   )
@@ -613,6 +660,17 @@ function IssueWindowBody() {
 }
 
 /**
+ * dnd-kit's pointer sensor, rendering each move as it comes in rather than
+ * in a task of its own after the frame it came in: the window is then drawn
+ * under the pointer in that frame, not one frame behind it.
+ */
+class InFramePointerSensor extends PointerSensor {
+  constructor(props: PointerSensorProps) {
+    super({ ...props, onMove: (coordinates) => flushSync(() => props.onMove(coordinates)) })
+  }
+}
+
+/**
  * The Issues window, which floats over every page but the settings, at the
  * bottom right until it is moved, and keeps to its corner of the window as
  * the window is resized. Closed, it is a button with how many issues are
@@ -624,7 +682,9 @@ function IssueWindowBody() {
 export function IssueWindow() {
   const setPosition = useAppStore((state) => state.setIssueWindowPosition)
   // A press that moves the pointer less than 4px is a click.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const sensors = useSensors(
+    useSensor(InFramePointerSensor, { activationConstraint: { distance: 4 } }),
+  )
   const onDragEnd = ({ active }: DragEndEvent) => {
     const rect = active.rect.current.translated
     if (rect) setPosition(issueWindowPositionOf(rect, window.innerWidth, window.innerHeight))

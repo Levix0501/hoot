@@ -1,5 +1,5 @@
 import { ArrowUpIcon, FolderIcon } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { issueTitle } from '../../../shared/issues'
 import { currentSessionId, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
@@ -56,8 +56,9 @@ function inEmptyDescription(target: EventTarget): boolean {
  * creates the issue: in the project of what the main area shows unless
  * another is picked, which the next issues keep. The note then empties for
  * the next one. Esc in the text calls `onEscape`, unless it closes the `/` menu.
+ * Memoized: the window it is in renders again at every move while it is moved.
  */
-export function IssueNote({ onEscape }: { onEscape(): void }) {
+export const IssueNote = memo(function IssueNote({ onEscape }: { onEscape(): void }) {
   const shownProject = useShownProjectId()
   const noteIssue = useAppStore((state) => state.noteIssue)
   /** The project picked by hand, which the next issues keep; `undefined` follows the main area. */
@@ -225,4 +226,4 @@ export function IssueNote({ onEscape }: { onEscape(): void }) {
       </div>
     </div>
   )
-}
+})

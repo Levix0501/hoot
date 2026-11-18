@@ -1,12 +1,17 @@
 /*
  * Issue descriptions (notra-editor) in the size of the interface's prose, as
  * they were before: 14px text, blocks closer together than on a page, and
- * no padding of their own, so that they line up with the title above them.
- * Their height is at least what the place they are in gives them with a
- * `[&_.tiptap]:min-h-*` class, or none: notra-editor's own minimum is left
- * out with `revert-layer`, as it is outside the cascade layers and would
- * otherwise win over Tailwind's classes, which are in them.
+ * no padding of their own, so that they line up with the title above them,
+ * on the surface of what they are in. Their height is at least what the
+ * place they are in gives them with a `[&_.tiptap]:min-h-*` class, or none:
+ * notra-editor's own minimum is left out with `revert-layer`, as it is
+ * outside the cascade layers and would otherwise win over Tailwind's
+ * classes, which are in them.
  */
+.issue-description.notra-editor[data-block-handle] {
+  background-color: transparent;
+}
+
 .issue-description.notra-editor[data-block-handle] .notra-content {
   min-height: revert-layer;
   padding: 0;
@@ -75,18 +80,28 @@
   margin-top: 0.125rem;
 }
 
-/*
- * The description in the Issues window's note: in the 13px of the window's
- * rows, on 20px lines, on the note's own surface; its placeholder shows only
- * while the cursor is in it, as Notion's does.
- */
-.issue-note.notra-editor[data-block-handle] {
-  background-color: transparent;
+/* A task's box in the middle of its first line, which is shorter than on notra-editor's pages. */
+.issue-description .notra-content ul[data-type='taskList'] li > label {
+  height: 1.5rem;
 }
 
+/* Table cells as close around their text as the rest of the description is. */
+.issue-description .notra-content :is(th, td) {
+  padding: 0.25em 0.5em;
+}
+
+/*
+ * The description in the Issues window's note: in the 13px of the window's
+ * rows, on 20px lines; its placeholder shows only while the cursor is in
+ * it, as Notion's does.
+ */
 .issue-note.notra-editor[data-block-handle] .notra-content {
   font-size: 13px;
   line-height: 20px;
+}
+
+.issue-note .notra-content ul[data-type='taskList'] li > label {
+  height: 20px;
 }
 
 .issue-note .notra-content:not(.ProseMirror-focused) .is-empty::before {

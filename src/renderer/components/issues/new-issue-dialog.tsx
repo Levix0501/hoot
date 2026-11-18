@@ -1,29 +1,27 @@
-import { FolderIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react'
+import { ChevronRightIcon, FolderIcon, XIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { issueTitle } from '../../../shared/issues'
 import { priorityLabel, statusLabel } from '../../lib/issue-properties'
-import { cn } from '../../lib/utils'
 import { focusAfterOverlay, useAppStore } from '../../store/app-store'
 import { Button } from '../ui/button'
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTitle } from '../ui/dialog'
-import { Kbd } from '../ui/kbd'
-import { Label } from '../ui/label'
-import { Switch } from '../ui/switch'
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog'
+import { Kbd, KbdGroup } from '../ui/kbd'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { DescriptionEditor, type DescriptionEditorHandle } from './description-editor'
 import { PriorityIcon, StatusIcon } from './issue-icons'
 import { PriorityPicker, ProjectPicker, StatusPicker } from './property-picker'
 import { TitleField } from './title-field'
 
-/** The small rounded buttons of the properties, under the description. */
-const PROPERTY_CHIP = 'rounded-full'
+/** The small rounded buttons of the status and the priority, in the footer. */
+const PROPERTY_CHIP = 'rounded-full px-2.5'
 
 /**
- * Linear's new issue dialog: a title, a description, a status, a priority
- * and a project, or none. There is one draft, wherever the dialog opens: what
- * is entered stays when the dialog closes, until the issue is created. ⌘
- * Enter creates the issue and ⌘⌥ Enter creates it and shows it; with Create
- * more on, the dialog stays for the next issue.
+ * Linear's new issue dialog: the project the issue goes to over a page with
+ * its title and its description, which has block handles, and its status and
+ * priority beside the button that creates it. There is one draft, wherever
+ * the dialog opens: what is entered stays when the dialog closes, until the
+ * issue is created. ⌘ Enter creates the issue and ⌘⌥ Enter creates it and
+ * shows it.
  */
 export function NewIssueDialog() {
   const open = useAppStore((state) => state.newIssueDialogOpen)
@@ -31,12 +29,9 @@ export function NewIssueDialog() {
   const project = useAppStore((state) =>
     state.projects.find(({ id }) => id === state.newIssueDraft.projectId),
   )
-  const createMore = useAppStore((state) => state.createMore)
-  const setCreateMore = useAppStore((state) => state.setCreateMore)
   const updateNewIssueDraft = useAppStore((state) => state.updateNewIssueDraft)
   const createIssue = useAppStore((state) => state.createIssue)
   const closeNewIssue = useAppStore((state) => state.closeNewIssue)
-  const [expanded, setExpanded] = useState(false)
   const [creating, setCreating] = useState(false)
   // A new editor for each issue, since an editor only shows what it starts with.
   const [editorKey, setEditorKey] = useState(0)
@@ -51,10 +46,8 @@ export function NewIssueDialog() {
     setCreating(true)
     try {
       const created = await createIssue({ open: andShow })
-      if (created !== null && useAppStore.getState().newIssueDialogOpen) {
-        setEditorKey((key) => key + 1)
-        title.current?.focus()
-      }
+      // Also when the dialog opens again while it is still fading out.
+      if (created !== null) setEditorKey((key) => key + 1)
     } finally {
       setCreating(false)
     }
@@ -71,11 +64,8 @@ export function NewIssueDialog() {
         showCloseButton={false}
         initialFocus={title}
         finalFocus={focusAfterOverlay}
-        className={cn(
-          // Below the window's top row, whose blank parts drag the window.
-          'top-[max(3.5rem,12vh)] translate-y-0 gap-0 p-0 sm:max-w-2xl',
-          expanded && 'sm:max-w-4xl',
-        )}
+        // Below the window's top row, whose blank parts drag the window; the same height whatever is written.
+        className="top-[max(3rem,7vh)] flex h-[min(80vh,720px)] translate-y-0 flex-col gap-0 overflow-hidden p-0 shadow-2xl sm:max-w-3xl"
         // Before the description's editor, where ⌘ Enter would otherwise break the line.
         onKeyDownCapture={(event) => {
           if (event.nativeEvent.isComposing) return
@@ -87,27 +77,33 @@ export function NewIssueDialog() {
         }}
         data-testid="new-issue-dialog"
       >
-        <div className="flex items-center gap-1 px-4 pt-3">
-          <DialogTitle className="min-w-0 text-sm font-normal" data-testid="new-issue-heading">
+        <div className="flex shrink-0 items-center gap-1 pt-3 pr-3 pl-4">
+          <ProjectPicker
+            value={project ? project.id : null}
+            onChange={(projectId) => updateNewIssueDraft({ projectId })}
+            triggerProps={{
+              render: (
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  className="max-w-56 gap-1.5 rounded-md px-1.5 font-normal"
+                  aria-label={`Project: ${project?.name ?? 'No project'}`}
+                  data-testid="new-issue-project"
+                  data-project-id={project?.id}
+                />
+              ),
+            }}
+          >
+            <FolderIcon className="size-3.5 text-muted-foreground" />
+            <span className="min-w-0 truncate" data-path={project ? '' : undefined}>
+              {project ? project.name : 'No project'}
+            </span>
+          </ProjectPicker>
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <DialogTitle className="min-w-0 text-[13px] font-normal" data-testid="new-issue-heading">
             New issue
           </DialogTitle>
           <div className="flex-1" />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={expanded ? 'Collapse' : 'Expand'}
-                  onClick={() => setExpanded((value) => !value)}
-                  data-testid="new-issue-expand"
-                />
-              }
-            >
-              {expanded ? <Minimize2Icon /> : <Maximize2Icon />}
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{expanded ? 'Collapse' : 'Expand'}</TooltipContent>
-          </Tooltip>
           <DialogClose
             render={
               <Button
@@ -122,10 +118,20 @@ export function NewIssueDialog() {
           </DialogClose>
         </div>
         <div
-          className={cn(
-            'grid min-h-0 content-start gap-2 overflow-y-auto px-4 pt-3 pb-3',
-            expanded ? 'max-h-[60vh]' : 'max-h-[min(40vh,22rem)]',
-          )}
+          className="min-h-0 flex-1 cursor-text overflow-y-auto pt-5 pr-10 pb-6 pl-14"
+          // A press around the text writes in the title beside it, or at the description's end under it.
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) return
+            const field = title.current
+            const editor = event.currentTarget.querySelector('.notra-editor')
+            if (field && event.clientY <= field.getBoundingClientRect().bottom) {
+              event.preventDefault()
+              field.focus()
+            } else if (editor && event.clientY > editor.getBoundingClientRect().bottom) {
+              event.preventDefault()
+              description.current?.focus('end')
+            }
+          }}
         >
           <TitleField
             ref={title}
@@ -134,7 +140,7 @@ export function NewIssueDialog() {
             onEnter={() => description.current?.focus()}
             placeholder="Issue title"
             aria-label="Title"
-            className="text-lg font-semibold md:text-lg"
+            className="text-2xl leading-tight font-semibold md:text-2xl"
             data-user-text=""
             data-testid="new-issue-title"
           />
@@ -143,11 +149,13 @@ export function NewIssueDialog() {
             ref={description}
             markdown={draft.description}
             onChange={(markdown) => updateNewIssueDraft({ description: markdown })}
-            className={expanded ? '[&_.tiptap]:min-h-64' : '[&_.tiptap]:min-h-16'}
+            placeholder="Press / to insert blocks"
+            blockHandle
+            className="mt-4 [&_.tiptap]:min-h-40"
             testId="new-issue-description"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+        <div className="flex shrink-0 items-center gap-1.5 border-t px-4 py-3">
           <StatusPicker
             value={draft.status}
             onChange={(status) => updateNewIssueDraft({ status })}
@@ -186,41 +194,11 @@ export function NewIssueDialog() {
             <PriorityIcon priority={draft.priority} className="size-3.5" />
             {draft.priority === 0 ? 'Priority' : priorityLabel(draft.priority)}
           </PriorityPicker>
-          <ProjectPicker
-            value={project ? project.id : null}
-            onChange={(projectId) => updateNewIssueDraft({ projectId })}
-            triggerProps={{
-              render: (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className={cn(PROPERTY_CHIP, 'max-w-48')}
-                  aria-label={`Project: ${project?.name ?? 'No project'}`}
-                  data-testid="new-issue-project"
-                  data-project-id={project?.id}
-                />
-              ),
-            }}
-          >
-            <FolderIcon className="size-3.5 text-muted-foreground" />
-            <span className="min-w-0 truncate" data-path={project ? '' : undefined}>
-              {project ? project.name : 'Project'}
-            </span>
-          </ProjectPicker>
-        </div>
-        <DialogFooter className="m-0 flex-row items-center justify-end gap-4 px-4 py-3 sm:flex-row">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="new-issue-create-more"
-              checked={createMore}
-              onCheckedChange={setCreateMore}
-              size="sm"
-              data-testid="new-issue-create-more"
-            />
-            <Label htmlFor="new-issue-create-more" className="font-normal text-muted-foreground">
-              Create more
-            </Label>
-          </div>
+          <div className="flex-1" />
+          <KbdGroup aria-hidden className="mr-1.5">
+            <Kbd>⌘</Kbd>
+            <Kbd>↵</Kbd>
+          </KbdGroup>
           <Tooltip>
             <TooltipTrigger render={<span className="flex" />}>
               {/* While it cannot create, it is still what the pointer is on, like any other button. */}
@@ -248,7 +226,7 @@ export function NewIssueDialog() {
               </span>
             </TooltipContent>
           </Tooltip>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )

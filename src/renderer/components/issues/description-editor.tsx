@@ -15,6 +15,8 @@ export interface DescriptionEditorProps {
   placeholder?: string
   /** Whether Esc takes the focus out of the editor, instead of reaching the dialog it is in. */
   escapeBlurs?: boolean
+  /** Whether the block under the pointer shows its handle (+ and the grip that drags it) at its left. */
+  blockHandle?: boolean
   /** Classes of the element around the editor; `[&_.tiptap]:` ones reach the editor itself. */
   className?: string
   testId: string

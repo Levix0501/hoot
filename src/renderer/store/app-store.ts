@@ -396,8 +396,6 @@ export interface AppState {
    * issue is created or Hoot quits.
    */
   newIssueDraft: NewIssueDraft
-  /** Whether the new issue dialog stays open after it creates an issue, for the next one. */
-  createMore: boolean
   /** An issue the user asked to delete, while Hoot asks for confirmation. */
   issueDeletion: number | null
   /** The session the rename dialog is open for. */
@@ -671,13 +669,10 @@ export interface AppState {
   /** Closes the new issue dialog, keeping what is entered in it. */
   closeNewIssue(): void
   updateNewIssueDraft(changes: Partial<NewIssueDraft>): void
-  setCreateMore(createMore: boolean): void
   /**
-   * Creates an issue from what is entered in the new issue dialog, and says
-   * so. The dialog closes, unless it is to create more, when it keeps the
-   * status, the priority and the project for the next issue; with `open`, it
-   * shows the new issue instead. Settles with the new issue, or `null` when
-   * none was created.
+   * Creates an issue from what is entered in the new issue dialog, closes
+   * the dialog and says so; with `open`, it shows the new issue instead.
+   * Settles with the new issue, or `null` when none was created.
    */
   createIssue(options?: { open?: boolean }): Promise<Issue | null>
   /**
@@ -2330,7 +2325,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     collapsedIssueGroups: [],
     newIssueDialogOpen: false,
     newIssueDraft: emptyNewIssueDraft,
-    createMore: false,
     issueDeletion: null,
     renamingSessionId: null,
     renamingChatId: null,
@@ -3206,23 +3200,13 @@ export const useAppStore = create<AppState>()((set, get) => {
       set((state) => ({ newIssueDraft: { ...state.newIssueDraft, ...changes } }))
     },
 
-    setCreateMore(createMore) {
-      set({ createMore })
-    },
-
     async createIssue({ open = false } = {}) {
       let created: Issue | null = null
       await once('create', async () => {
         const issue = await saveNewIssue(get().newIssueDraft)
         if (issue === null) return
         created = issue
-        const more = get().createMore && !open
-        set((state) => ({
-          newIssueDraft: more
-            ? { ...state.newIssueDraft, title: '', description: '' }
-            : emptyNewIssueDraft,
-          newIssueDialogOpen: more && state.newIssueDialogOpen,
-        }))
+        set({ newIssueDraft: emptyNewIssueDraft, newIssueDialogOpen: false })
         if (open) {
           get().showIssue(issue.id)
           return

@@ -10,7 +10,14 @@ import {
   createNotraExtensions,
   markdownFeatures,
 } from 'notra-editor'
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+} from 'react'
 import { browserLink } from '../../../shared/links'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
@@ -37,6 +44,35 @@ const NoUnderline = Extension.create({
 })
 
 /**
+ * Whether the editor is up: notra-editor's block handle reads its view as
+ * it mounts and throws once there is none, which leaves the window blank,
+ * and `useEditor` can destroy the editor it has just made before the handle
+ * mounts. An editor says it is created a moment after it is made.
+ */
+function useViewMounted(editor: Editor | null): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (editor === null) return () => {}
+      // `create` comes just before `isInitialized` is set.
+      const created = () => queueMicrotask(onChange)
+      editor.on('create', created)
+      editor.on('unmount', onChange)
+      editor.on('destroy', onChange)
+      return () => {
+        editor.off('create', created)
+        editor.off('unmount', onChange)
+        editor.off('destroy', onChange)
+      }
+    },
+    [editor],
+  )
+  return useSyncExternalStore(
+    subscribe,
+    () => editor !== null && editor.isInitialized && !editor.isDestroyed,
+  )
+}
+
+/**
  * The editor of `DescriptionEditor`. Blocks still as they were loaded are
  * written back as the description had them, so that only what is edited
  * changes. Links open in the default browser when clicked, and from the
@@ -47,6 +83,7 @@ export default function DescriptionNotra({
   onChange,
   placeholder = 'Add description…',
   escapeBlurs = false,
+  blockHandle = false,
   className,
   testId,
   ref,
@@ -143,6 +180,8 @@ export default function DescriptionNotra({
     editorRef.current = editor
   }, [editor])
 
+  const viewMounted = useViewMounted(editor)
+
   // Before the editor goes, which happens after the layout effects are cleaned up.
   useLayoutEffect(() => flush, [flush])
 
@@ -170,7 +209,7 @@ export default function DescriptionNotra({
   return (
     <NotraEditorView
       editor={editor}
-      blockHandle={false}
+      blockHandle={blockHandle && viewMounted}
       className={cn('issue-description min-w-0', className)}
     />
   )

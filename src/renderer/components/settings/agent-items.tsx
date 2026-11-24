@@ -112,13 +112,19 @@ function modelChoices(
   return provider.models.map((model) => ({ value: model, label: model, efforts: [] }))
 }
 
+/**
+ * The effort levels OpenCode takes for a model of the user's at an
+ * Anthropic-compatible address, as its variants.
+ */
+const OPENCODE_VARIANTS = ['low', 'medium', 'high']
+
 /** The effort levels of a model, or of the default model, on a provider. */
 function effortsOf(
   model: string | null,
   provider: Provider | undefined,
   state: AgentState | undefined,
 ): string[] {
-  if (provider?.own === null) return []
+  if (provider?.own === null) return state?.id === 'opencode' ? OPENCODE_VARIANTS : []
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
   return options?.models.find((option) => option.value === model)?.efforts ?? []
@@ -146,9 +152,14 @@ function modelOn(model: string | null, provider: Provider | undefined): string |
   return provider.models[0] ?? null
 }
 
+/** Whether a segment's setting is picked: its arguments are in the command, or it says so. */
+function isPicked(segment: CommandSegment): boolean {
+  return segment.args.length > 0 || segment.picked === true
+}
+
 /** What a picker shows: what it puts in the command, or what it would pick. */
 function PickerText({ segment, placeholder }: { segment: CommandSegment; placeholder: string }) {
-  if (segment.args.length > 0) return <span className="truncate">{segment.text}</span>
+  if (isPicked(segment)) return <span className="truncate">{segment.text}</span>
   return (
     <span className="flex items-center gap-1">
       <PlusIcon className="size-3" />
@@ -498,8 +509,8 @@ function AgentCommand({ agent, state }: { agent: Agent; state: AgentState | unde
           }
           testId={`agent-provider-${agent.id}`}
         />
-        {model && model.args.length > 0 && modelPicker}
-        {effort && effort.args.length > 0 && effortPicker}
+        {model && isPicked(model) && modelPicker}
+        {effort && isPicked(effort) && effortPicker}
         {agent.extraArgs.map((argument, index) => (
           <span
             // Extra arguments are positional: their texts may repeat.
@@ -517,8 +528,8 @@ function AgentCommand({ agent, state }: { agent: Agent; state: AgentState | unde
             </button>
           </span>
         ))}
-        {model && model.args.length === 0 && modelPicker}
-        {effort && effort.args.length === 0 && effortPicker}
+        {model && !isPicked(model) && modelPicker}
+        {effort && !isPicked(effort) && effortPicker}
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}

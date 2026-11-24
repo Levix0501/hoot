@@ -72,6 +72,25 @@ describe('ProviderService', () => {
   it('makes an agent of each installed harness’s global as Hoot opens, and keeps them', async () => {
     configs.claude = keyed(DEEPSEEK_URL, 'sk-global', 'deepseek-pro')
     configs.codex = own(false)
+    // Reading Claude Code's configuration takes a while, until which Hoot is not ready.
+    const pending: { read?: () => void } = {}
+    const slowDb = openDatabase(':memory:')
+    const slow = new ProviderService({
+      store: new ProviderStore(slowDb),
+      readGlobal: (harness) =>
+        new Promise((resolve) => {
+          pending.read = () => resolve(configs[harness] ?? own())
+        }),
+      writeGlobal: async () => {},
+    })
+    const reading = slow.installedChanged(['claude'])
+    await Promise.resolve()
+    expect(slow.getState().ready).toBe(false)
+    pending.read?.()
+    await reading
+    expect(slow.getState().ready).toBe(true)
+    slowDb.close()
+
     const providers = service()
     expect(providers.getState().ready).toBe(false)
     const pass = await providers.installedChanged(['claude', 'codex', 'opencode'])

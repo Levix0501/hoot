@@ -9,11 +9,12 @@ export type WireFormat = 'anthropic' | 'responses'
 /**
  * The formats in which each agent can run a provider of the user's, the one
  * it takes first leading; an agent with none runs only on its own models.
+ * OpenCode runs a provider at its Anthropic-compatible address.
  */
 export const FORMATS_OF: Readonly<Record<CodingToolId, readonly WireFormat[]>> = {
   claude: ['anthropic'],
   codex: [],
-  opencode: [],
+  opencode: ['anthropic'],
 }
 
 /**
@@ -209,6 +210,31 @@ export function ownProvider(harness: CodingToolId): Provider {
     models: [],
     own: harness,
   }
+}
+
+/** The model OpenCode's free models start with, when none is picked. */
+export const OPENCODE_DEFAULT_FREE_MODEL = 'big-pickle'
+
+/**
+ * OpenCode's id of a provider, under which Hoot writes one of the user's into
+ * OpenCode's own configuration: `opencode` for its free models.
+ */
+export function openCodeProviderId(provider: Pick<Provider, 'id' | 'own'>): string {
+  return provider.own === 'opencode' ? 'opencode' : `hoot-${provider.id}`
+}
+
+/** The provider of Hoot's that OpenCode's id stands for; `null` for one that is not Hoot's. */
+export function providerOfOpenCodeId(openCodeId: string): string | null {
+  if (openCodeId === 'opencode') return OWN_PROVIDER_IDS.opencode
+  return openCodeId.startsWith('hoot-') && openCodeId.length > 5 ? openCodeId.slice(5) : null
+}
+
+/**
+ * A model as OpenCode takes it: without the mark at its end that tells Claude
+ * Code its context, such as `[1m]`.
+ */
+export function openCodeModel(model: string): string {
+  return model.replace(/\[[^\]]*\]$/, '')
 }
 
 /** Whether an agent's own models need it signed in: OpenCode's free ones do not. */

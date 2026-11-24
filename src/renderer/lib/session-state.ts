@@ -137,6 +137,8 @@ export function afterHookEvent(session: StateSource, report: HookEventReport): S
       return afterTurnStarted(session, report.turn)
     case 'StopFailure':
       return report.subagent ? {} : afterTurnFailed(session, report.turn)
+    case 'ModelSelected':
+      return {}
   }
   if (session.workingSince !== null && report.startedAt < session.workingSince) return {}
   // A subagent's events name the main agent's turn of the moment, which tells nothing of its start.

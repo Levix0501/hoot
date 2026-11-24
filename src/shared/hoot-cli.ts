@@ -220,7 +220,17 @@ export const HOOK_EVENTS = [
   'StopFailure',
 ] as const
 
-export type HookEvent = (typeof HOOK_EVENTS)[number]
+/**
+ * The event the plugin Hoot gives OpenCode reports when the user picks
+ * another model in a session, as `/models` does: the session goes on with
+ * that model, of that provider, which Hoot then shows.
+ */
+export const MODEL_EVENT = 'ModelSelected'
+
+/** Every event hoot reports: those of `HOOK_EVENTS`, and `MODEL_EVENT`. */
+export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT] as const
+
+export type HookEvent = (typeof REPORTED_EVENTS)[number]
 
 /**
  * An event of a hook of the session's Claude Code or Codex, or of the plugin
@@ -259,6 +269,10 @@ export interface HookEventReport {
    * which can be another than the session's.
    */
   folder?: string | null
+  /** For `MODEL_EVENT`, the provider of the model picked, by the agent's own id of it. */
+  provider?: string | null
+  /** For `MODEL_EVENT`, the model picked, by the agent's own id of it. */
+  model?: string | null
 }
 
 /** What Hoot answers: what was asked for, with the session's project, or why it could not be done. */

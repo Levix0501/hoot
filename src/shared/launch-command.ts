@@ -152,6 +152,12 @@ export interface CommandSegment {
   note?: string
   /** Whether the segment opens a choice. */
   selectable?: boolean
+  /**
+   * Whether its setting is picked where its arguments do not say so, as
+   * OpenCode's model and effort, which go into the conversation Hoot makes
+   * for it rather than into its command.
+   */
+  picked?: boolean
   /** Where an extra argument is in the extra arguments, from 0. */
   extraIndex?: number
 }
@@ -205,7 +211,16 @@ export function commandSegments(input: {
     })
   }
 
-  if (tool !== 'opencode' && !kinds.model) {
+  if (tool === 'opencode') {
+    segments.push({
+      kind: 'model',
+      args: [],
+      text: settings.model ?? '+ model',
+      selectable: true,
+      picked: settings.model !== null,
+      note: 'Choose a model for new sessions.',
+    })
+  } else if (!kinds.model) {
     if (settings.model === null) {
       segments.push({
         kind: 'model',
@@ -227,7 +242,16 @@ export function commandSegments(input: {
 
   const efforts = settings.model === null ? input.defaultEfforts : input.modelEfforts
   const hasEffortChoice = efforts.length > 0 || settings.effort !== null
-  if (tool !== 'opencode' && !kinds.effort && hasEffortChoice) {
+  if (tool === 'opencode' && hasEffortChoice) {
+    segments.push({
+      kind: 'effort',
+      args: [],
+      text: settings.effort === null ? '+ effort' : `variant ${settings.effort}`,
+      selectable: true,
+      picked: settings.effort !== null,
+      note: 'Choose an effort level for new sessions.',
+    })
+  } else if (tool !== 'opencode' && !kinds.effort && hasEffortChoice) {
     if (settings.effort === null) {
       segments.push({
         kind: 'effort',

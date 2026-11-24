@@ -357,6 +357,18 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
+   * Records the conversation Hoot made for a chat's agent to start in, as it
+   * makes OpenCode's on the chat's provider and model, until the agent
+   * reports a message in it.
+   */
+  giveConversation(id: string, conversationId: string): void {
+    const chat = this.chats.get(id)
+    if (!chat || chat.deleted) return
+    this.chats.update(id, { conversationId, conversationReported: false })
+    this.emitChanged()
+  }
+
+  /**
    * Records that a chat's agent went on with another provider and model, as
    * OpenCode's `/models` can switch to, which its sessions then take.
    */

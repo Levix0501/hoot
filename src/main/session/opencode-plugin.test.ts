@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import plugin, {
   HOOT_OPENCODE_PLUGIN,
   messageReport,
+  modelReport,
   type OpenCodeEvent,
   type PluginContext,
 } from '../../../resources/opencode-plugin/tui'
@@ -266,6 +267,14 @@ const inSession = (record: string) => {
   vi.stubEnv('RECORD_FILE', record)
 }
 
+/** That a model was picked in a conversation, as OpenCode's server tells every window. */
+function picked(sessionID: string, providerID?: string): OpenCodeEvent {
+  return {
+    type: 'session.model.selected',
+    data: { sessionID, model: { id: 'kimi-k3.1-pro', providerID } },
+  }
+}
+
 describe('the plugin Hoot gives OpenCode', () => {
   it('tells of a message the user sent in the conversation its window shows, with its folder', () => {
     const { opencode } = context(
@@ -287,6 +296,20 @@ describe('the plugin Hoot gives OpenCode', () => {
     expect(
       messageReport(fresh, { type: 'session.inbox.enqueued', data: enqueued('ses_new').data }),
     ).toEqual({ hook_event_name: 'UserPromptSubmit', session_id: 'ses_new' })
+  })
+
+  it('tells of a model picked in the conversation its window shows, with its provider', () => {
+    const { opencode } = context({ type: 'session', sessionID: 'ses_one' })
+    expect(modelReport(opencode, picked('ses_one', 'hoot-p1'))).toEqual({
+      hook_event_name: 'ModelSelected',
+      session_id: 'ses_one',
+      provider_id: 'hoot-p1',
+      model_id: 'kimi-k3.1-pro',
+    })
+    // Another window's, which OpenCode's background server sends this one too.
+    expect(modelReport(opencode, picked('ses_other', 'hoot-p1'))).toBeNull()
+    expect(modelReport(opencode, picked('ses_one'))).toBeNull()
+    expect(modelReport(opencode, enqueued('ses_one'))).toBeNull()
   })
 
   it('tells of nothing else', () => {

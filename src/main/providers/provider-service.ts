@@ -30,8 +30,11 @@ export interface GlobalReading {
 
 export interface ProviderServiceOptions {
   store: ProviderStore
-  /** Reads a harness's own configuration. */
-  readGlobal(harness: CodingToolId): Promise<GlobalReading>
+  /**
+   * Reads a harness's own configuration; `null` for one that names a provider
+   * Hoot cannot run the harness on, which gives it no global.
+   */
+  readGlobal(harness: CodingToolId): Promise<GlobalReading | null>
   /** Writes a provider and a model into a harness's own configuration, as its global. */
   writeGlobal(harness: CodingToolId, provider: Provider, model: string | null): Promise<void>
   /**
@@ -99,6 +102,8 @@ export class ProviderService extends EventEmitter<{
   private globals: Partial<Record<CodingToolId, HarnessGlobal>> = {}
   /** The harnesses installed, as the last detection found them; `null` before the first. */
   private installed: Set<CodingToolId> | null = null
+  /** Whether Hoot's opening has read the globals and made the agents it makes. */
+  private opened = false
   /** Keeps reads and writes of the harnesses' configurations from overlapping. */
   private queue: Promise<unknown> = Promise.resolve()
 
@@ -116,7 +121,7 @@ export class ProviderService extends EventEmitter<{
       providers: this.providers.map((provider) => ({ ...provider })),
       agents: this.agents.map((agent) => ({ ...agent })),
       globals: { ...this.globals },
-      ready: this.installed !== null,
+      ready: this.opened,
     }
   }
 
@@ -146,6 +151,7 @@ export class ProviderService extends EventEmitter<{
       this.installed = now
       for (const harness of added) await this.readGlobal(harness)
       const made = this.makeAgents(added)
+      this.opened = true
       if (opening || added.length > 0 || before.size !== now.size) this.emitChanged()
       return { opening, made }
     })
@@ -313,11 +319,15 @@ export class ProviderService extends EventEmitter<{
    * that cannot be read leaves the global as it was.
    */
   private async readGlobal(harness: CodingToolId): Promise<void> {
-    let reading: GlobalReading
+    let reading: GlobalReading | null
     try {
       reading = await this.options.readGlobal(harness)
     } catch (error) {
       console.error(`Could not read the configuration of ${harness}:`, error)
+      return
+    }
+    if (reading === null) {
+      delete this.globals[harness]
       return
     }
     const current = this.globals[harness]?.providerId ?? null

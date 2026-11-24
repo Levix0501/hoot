@@ -1,7 +1,8 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander'
 import { MAX_BLOCKED_BY, MAX_BLOCKING } from '../shared/dependencies'
 import {
-  HOOK_EVENTS,
+  MODEL_EVENT,
+  REPORTED_EVENTS,
   HOOT_ENV,
   MAX_PROMPT_LENGTH,
   type BatchIssue,
@@ -275,6 +276,8 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     source,
     reason,
     cwd: folder,
+    provider_id: provider,
+    model_id: model,
   } = value as {
     hook_event_name?: unknown
     agent_id?: unknown
@@ -283,10 +286,20 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     source?: unknown
     reason?: unknown
     cwd?: unknown
+    provider_id?: unknown
+    model_id?: unknown
   }
-  const event = HOOK_EVENTS.find((candidate) => candidate === name)
+  const event = REPORTED_EVENTS.find((candidate) => candidate === name)
   if (event === undefined) return null
+  const picked =
+    event === MODEL_EVENT
+      ? {
+          provider: typeof provider === 'string' && provider !== '' ? provider : null,
+          model: typeof model === 'string' && model !== '' ? model : null,
+        }
+      : {}
   return {
+    ...picked,
     event,
     subagent: typeof agent === 'string' && agent !== '',
     turn: typeof turn === 'string' && turn !== '' ? turn : null,

@@ -1,5 +1,6 @@
 // Hoot's plugin for OpenCode 2, which tells Hoot which conversation each message
-// the user sends in an OpenCode session of Hoot's goes to. Hoot gives it to
+// the user sends in an OpenCode session of Hoot's goes to, and the model the
+// user picks in it, as with /models, whose provider Hoot shows. Hoot gives it to
 // every OpenCode session it starts, in the session's OPENCODE_CLI_CONFIG_CONTENT,
 // and OpenCode's terminal interface runs it in the session's own process,
 // TypeScript and all. It reports a message by running hoot's `hook` command
@@ -23,6 +24,8 @@ export interface OpenCodeEvent {
   readonly data?: {
     readonly sessionID?: string
     readonly item?: { readonly type?: string }
+    /** For a model picked, that model and its provider. */
+    readonly model?: { readonly id?: string; readonly providerID?: string }
   }
 }
 
@@ -79,13 +82,45 @@ export function messageReport(context: PluginContext, event: OpenCodeEvent): Mes
   }
 }
 
+/** What tells hoot's `hook` command of a model picked in a conversation, with its provider. */
+export interface ModelReport {
+  readonly hook_event_name: 'ModelSelected'
+  readonly session_id: string
+  readonly provider_id: string
+  readonly model_id: string
+}
+
+/**
+ * What tells Hoot of the model the user picked in the conversation this
+ * session's OpenCode shows, as `/models` picks one, for an event of OpenCode's
+ * server that tells of it: as with messages, every window gets the events of
+ * all of them. `null` for any other event.
+ */
+export function modelReport(context: PluginContext, event: OpenCodeEvent): ModelReport | null {
+  if (event.type !== 'session.model.selected') return null
+  const sessionID = event.data?.sessionID
+  const providerID = event.data?.model?.providerID
+  const modelID = event.data?.model?.id
+  if (typeof sessionID !== 'string' || sessionID === '') return null
+  if (typeof providerID !== 'string' || providerID === '') return null
+  if (typeof modelID !== 'string' || modelID === '') return null
+  const route = context.ui.router.current()
+  if (route.type !== 'session' || route.sessionID !== sessionID) return null
+  return {
+    hook_event_name: 'ModelSelected',
+    session_id: sessionID,
+    provider_id: providerID,
+    model_id: modelID,
+  }
+}
+
 /**
  * Runs hoot's `hook` command with a report on its input, as the launchers of
  * hoot run hoot: with Hoot's executable as Node.js, without the options of
  * the user's own Node.js. It shows nothing of what it prints, and goes on in
  * the background.
  */
-function send(node: string, cli: string, report: MessageReport): void {
+function send(node: string, cli: string, report: MessageReport | ModelReport): void {
   const env: Record<string, string> = {}
   for (const [name, value] of Object.entries(process.env)) {
     const upper = name.toUpperCase()
@@ -115,7 +150,7 @@ export default {
     try {
       return context.data.listen(({ details }) => {
         try {
-          const report = messageReport(context, details)
+          const report = messageReport(context, details) ?? modelReport(context, details)
           if (report !== null) send(node, cli, report)
         } catch {
           // Hoot learns no conversation from this message; OpenCode goes on as it would.

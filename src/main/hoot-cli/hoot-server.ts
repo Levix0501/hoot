@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import { z } from 'zod'
 import {
-  HOOK_EVENTS,
+  REPORTED_EVENTS,
   SESSION_HEADER,
   type BatchAnswer,
   type BatchIssue,
@@ -123,7 +123,7 @@ const sessionRequest = z.strictObject({
 }) satisfies z.ZodType<SessionRequest>
 
 const hookEventReport = z.strictObject({
-  event: z.enum(HOOK_EVENTS),
+  event: z.enum(REPORTED_EVENTS),
   startedAt: z.number().finite(),
   subagent: z.boolean(),
   turn: z.string().min(1).nullable(),
@@ -131,6 +131,8 @@ const hookEventReport = z.strictObject({
   source: z.string().min(1).nullable().optional(),
   reason: z.string().min(1).nullable().optional(),
   folder: z.string().min(1).nullable().optional(),
+  provider: z.string().min(1).max(1_000).nullable().optional(),
+  model: z.string().min(1).max(1_000).nullable().optional(),
 }) satisfies z.ZodType<HookEventReport>
 
 /** The project a session runs for, or why there is none. */

@@ -62,6 +62,7 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
       )
     case 'waiting':
       return <WaitingNote issueIds={blocker.issueIds} />
+    case 'no-agent':
     case 'finished':
       return <p>{startBlockerText(blocker)}</p>
   }

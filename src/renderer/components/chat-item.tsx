@@ -5,7 +5,7 @@ import { currentSessionId, isSessionRunning, useAppStore } from '../store/app-st
 import { LIGHT_UNDER_CLOSE, ROW_WITH_CLOSE, SessionCloseButton } from './session-close-button'
 import { ChatMenu } from './session-menus'
 import { StateLight } from './state-light'
-import { ToolIcon } from './tool-icon'
+import { AgentIcon } from './provider-icon'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
@@ -48,7 +48,7 @@ export function ChatItem({ chat }: { chat: ChatInfo }) {
           onDoubleClick={() => startRenamingChat(chat.id)}
           data-testid="chat-item-button"
         >
-          <ToolIcon toolId={chat.toolId} />
+          <AgentIcon toolId={chat.toolId} providerId={chat.providerId} className="size-4" />
           <span
             className="min-w-0 flex-1 truncate"
             data-session-name=""

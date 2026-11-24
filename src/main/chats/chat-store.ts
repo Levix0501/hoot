@@ -17,11 +17,14 @@ interface ChatRow {
   deleted_at: number | null
   conversation_reported: number
   unreported_run_started_at: number | null
+  provider_id: string | null
+  model: string | null
+  agent_id: string | null
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
                  custom_name, has_messages, created_at, opened_at, deleted_at,
-                 conversation_reported, unreported_run_started_at`
+                 conversation_reported, unreported_run_started_at, provider_id, model, agent_id`
 
 /**
  * A run of the agent of a Codex or OpenCode chat whose conversation its agent
@@ -65,6 +68,9 @@ function chatFromRow(row: ChatRow): ChatInfo {
     hasMessages: row.has_messages === 1,
     createdAt: row.created_at,
     lastOpenedAt: row.opened_at,
+    providerId: row.provider_id,
+    model: row.model,
+    agentId: row.agent_id,
   }
 }
 
@@ -93,6 +99,8 @@ export interface ChatChanges {
   customName?: string | null
   hasMessages?: boolean
   lastOpenedAt?: number
+  providerId?: string | null
+  model?: string | null
 }
 
 /**
@@ -131,14 +139,20 @@ export class ChatStore {
       ),
       insert: db.prepare(
         `INSERT INTO chats (id, tool_id, folder, project_root, worktree_path, conversation_id,
-                            title, custom_name, has_messages, created_at, opened_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            title, custom_name, has_messages, created_at, opened_at, deleted_at,
+                            provider_id, model, agent_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
       update: db.prepare(
         `UPDATE chats
          SET conversation_id = ?, conversation_reported = ?, unreported_run_started_at = ?,
-             title = ?, custom_name = ?, has_messages = ?, opened_at = ?
+             title = ?, custom_name = ?, has_messages = ?, opened_at = ?, provider_id = ?,
+             model = ?
          WHERE id = ?`,
+      ),
+      assignProvider: db.prepare(
+        `UPDATE chats SET provider_id = ?, agent_id = coalesce(agent_id, ?)
+         WHERE provider_id IS NULL AND tool_id = ?`,
       ),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
       delete: db.prepare('DELETE FROM chats WHERE id = ?'),
@@ -190,6 +204,9 @@ export class ChatStore {
       chat.createdAt,
       chat.lastOpenedAt,
       deletedAt,
+      chat.providerId,
+      chat.model,
+      chat.agentId,
     )
   }
 
@@ -207,9 +224,21 @@ export class ChatStore {
       changes.customName === undefined ? chat.customName : changes.customName,
       (changes.hasMessages ?? chat.hasMessages) ? 1 : 0,
       changes.lastOpenedAt ?? chat.lastOpenedAt,
+      changes.providerId === undefined ? chat.providerId : changes.providerId,
+      changes.model === undefined ? chat.model : changes.model,
       id,
     )
     return true
+  }
+
+  /**
+   * Gives the chats and saved sessions of an agent made before providers,
+   * which have none, the provider its configuration names, and an agent of
+   * it, which their sessions take their launch settings from; the number of
+   * them.
+   */
+  assignProvider(toolId: CodingToolId, providerId: string, agentId: string | null): number {
+    return Number(this.statements.assignProvider.run(providerId, agentId, toolId).changes)
   }
 
   /** Leaves a chat or saved session out of the lists from now on, keeping its row. */

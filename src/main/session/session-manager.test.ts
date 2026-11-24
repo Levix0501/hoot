@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionInfo } from '../../shared/session'
-import type { ChatLaunch, SentIssue } from './launch'
+import type { AgentLaunch, ChatLaunch, SentIssue } from './launch'
 import {
   programName,
   SessionError,
@@ -49,6 +49,7 @@ function setup(
       cwd: string,
       issue: SentIssue | null,
       chat: ChatLaunch | null,
+      agent: AgentLaunch | null,
       sessionId: string,
     ) => Promise<SessionLaunch>
   } = {},
@@ -146,6 +147,7 @@ describe('SessionManager', () => {
       chatId: null,
       savedSessionId: null,
       toolId: 'claude',
+      providerId: null,
       issueId: null,
       status: 'running',
       exit: null,
@@ -164,6 +166,35 @@ describe('SessionManager', () => {
     expect(manager.isRunningIn('/work/other')).toBe(false)
   })
 
+  it('records the provider its agent runs on, and the one it goes on with', async () => {
+    const seen: Array<AgentLaunch | null> = []
+    const { manager, updates } = setup({
+      resolveLaunch: async (toolId, _cwd, _issue, _chat, agent) => {
+        seen.push(agent)
+        return { file: toolId, args: [], env: { PATH: '/bin' } }
+      },
+    })
+    const agent: AgentLaunch = {
+      settings: { enabled: true, model: 'kimi-k3.1-pro', effort: null, extraArgs: [] },
+      provider: {
+        id: 'p-kimi',
+        name: 'Kimi',
+        presetId: 'kimi',
+        apiKey: 'sk-kimi',
+        keyHeader: 'bearer',
+        urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
+        models: ['kimi-k3.1-pro'],
+        own: null,
+      },
+    }
+    const session = await manager.start(request('s1', 'opencode'), null, null, agent)
+    expect(seen).toEqual([agent])
+    expect(session.providerId).toBe('p-kimi')
+    manager.setProvider('s1', 'opencode-free')
+    manager.setProvider('s1', 'opencode-free')
+    expect(updates.map((update) => update.providerId)).toEqual(['p-kimi', 'opencode-free'])
+    expect(manager.list()[0]?.providerId).toBe('opencode-free')
+  })
   it('runs any number of sessions at once, in the same project and in others', async () => {
     const { host, manager } = setup()
     for (let index = 1; index <= 12; index++) await manager.start(request(`g${index}`))
@@ -299,7 +330,7 @@ describe('SessionManager', () => {
   it('passes on the events of the hooks of a running Claude Code or Codex session, or of the plugin of an OpenCode one, in order with its output', async () => {
     const { promise: launched, resolve: release } = Promise.withResolvers<void>()
     const { manager, host } = setup({
-      resolveLaunch: async (toolId, _cwd, _issue, _chat, sessionId) => {
+      resolveLaunch: async (toolId, _cwd, _issue, _chat, _agent, sessionId) => {
         if (sessionId === 'c3') await launched
         return { file: toolId, args: [], env: {} }
       },
@@ -434,7 +465,7 @@ describe('SessionManager', () => {
     const launched: string[] = []
     const launch = pendingLaunch()
     const { manager, host } = setup({
-      resolveLaunch: async (toolId, _cwd, _issue, _chat, sessionId) => {
+      resolveLaunch: async (toolId, _cwd, _issue, _chat, _agent, sessionId) => {
         launched.push(sessionId)
         return launch.resolveLaunch(toolId)
       },

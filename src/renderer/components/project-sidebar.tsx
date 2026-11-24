@@ -418,7 +418,7 @@ function ChatsGroup() {
           <ContextMenuContent className="w-auto min-w-48">
             <ChatAgentMenuEntries
               components={contextComponents}
-              onSelect={(toolId) => void newChat(toolId)}
+              onSelect={(agentId) => void newChat(agentId)}
               testId="chats-agent"
             />
           </ContextMenuContent>

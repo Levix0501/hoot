@@ -5,6 +5,7 @@ import { quote } from 'shell-quote'
 import { parse as parseToml } from 'smol-toml'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
+import { ownProvider, type Provider } from '../../shared/providers'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
@@ -14,7 +15,8 @@ import type { WorkflowStep } from '../../shared/workflows'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import {
   CODEX_HOOK_SETTING,
-  claudeCodeHookSettings,
+  claudeCodeSettings,
+  claudeSettingsFilePath,
   firstMessageArguments,
   issueFileText,
   resolveLaunch,
@@ -104,9 +106,23 @@ function context(
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
+    provider: null,
+    claudeUserVariables: async () => [],
+    settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
   }
+}
+
+/** Where the test's Claude Code sessions get their settings files. */
+function settingsFolder(): string {
+  return path.join(root, 'session-settings')
+}
+
+/** The settings file of the test's Claude Code session, as it was written. */
+function writtenSettings(): Record<string, unknown> {
+  const file = claudeSettingsFilePath(settingsFolder(), hoot.sessionId)
+  return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
 }
 
 const hootVariables = {
@@ -116,8 +132,11 @@ const hootVariables = {
   HOOT_CLI: hoot.script,
 }
 
-/** The arguments that give Claude Code the hooks that report what it is doing to Hoot. */
-const hookSettings = ['--settings', claudeCodeHookSettings(path.join(hoot.binDirectory, 'hoot'))]
+/**
+ * The arguments that give Claude Code its settings file, with the hooks that
+ * report what it is doing to Hoot.
+ */
+const hookSettings = () => ['--settings', claudeSettingsFilePath(settingsFolder(), hoot.sessionId)]
 
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
@@ -159,7 +178,7 @@ describe('resolveLaunch', () => {
     expect((await resolveLaunch(context(loginEnv), 'claude', project)).args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
-      ...hookSettings,
+      ...hookSettings(),
     ])
     await writeNodeCommand(path.join(bin, 'opencode'), '')
     expect((await resolveLaunch(context(loginEnv), 'opencode', project)).args).toEqual([
@@ -173,7 +192,7 @@ describe('resolveLaunch', () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     expect((await resolveLaunch(context(loginEnv, {}, false), 'claude', project)).args).toEqual([
       ...program(bin, 'claude').args,
-      ...hookSettings,
+      ...hookSettings(),
     ])
     expect((await resolveLaunch(context(loginEnv, {}, false), 'codex', project)).args).toEqual([
       ...program(bin, 'codex').args,
@@ -201,7 +220,7 @@ describe('resolveLaunch', () => {
       '--effort',
       'max',
       '--verbose',
-      ...hookSettings,
+      ...hookSettings(),
     ])
     const codex = await resolveLaunch(
       context(loginEnv, {
@@ -242,7 +261,7 @@ describe('resolveLaunch', () => {
       'sonnet',
       '--effort',
       'low',
-      ...hookSettings,
+      ...hookSettings(),
     ])
     const codex = await resolveLaunch(
       context(loginEnv, {
@@ -302,7 +321,7 @@ describe('resolveLaunch', () => {
       '--dangerously-skip-permissions',
       '--model',
       'opus',
-      ...hookSettings,
+      ...hookSettings(),
     ])
   })
 
@@ -316,7 +335,7 @@ describe('resolveLaunch', () => {
     expect(claudeNew.args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
-      ...hookSettings,
+      ...hookSettings(),
     ])
     const claudeAgain = await resolveLaunch(context(loginEnv), 'claude', project, null, {
       conversationId: 'claude-id',
@@ -325,7 +344,7 @@ describe('resolveLaunch', () => {
     expect(claudeAgain.args).toEqual([
       ...program(bin, 'claude').args,
       '--dangerously-skip-permissions',
-      ...hookSettings,
+      ...hookSettings(),
       '--resume',
       'claude-id',
     ])
@@ -390,7 +409,7 @@ describe('resolveLaunch', () => {
       '--dangerously-skip-permissions',
       '--add-dir',
       '/extra',
-      ...hookSettings,
+      ...hookSettings(),
       '--',
       message,
     ])
@@ -469,14 +488,16 @@ describe('resolveLaunch', () => {
   it("gives Claude Code, and only Claude Code, hooks that report its turns and dialogs through Hoot's hoot", async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const claude = await resolveLaunch(context(loginEnv), 'claude', project)
-    const hookSettingsValue = claude.args[claude.args.indexOf('--settings') + 1]!
+    // In a file of the session's own, which only the user can read.
+    const file = claude.args[claude.args.indexOf('--settings') + 1]!
+    expect(file).toBe(claudeSettingsFilePath(settingsFolder(), hoot.sessionId))
     const hook = {
       type: 'command',
       // hoot's path, quoted for the shell that runs the hook.
       command: `${quote([path.join(hoot.binDirectory, 'hoot')])} hook`,
       async: true,
     }
-    expect(JSON.parse(hookSettingsValue)).toEqual({
+    expect(writtenSettings()).toEqual({
       hooks: {
         SessionStart: [{ hooks: [hook] }],
         SessionEnd: [{ hooks: [hook] }],
@@ -493,9 +514,93 @@ describe('resolveLaunch', () => {
       )
     }
     // A folder with a space in its path is still one word of the command.
-    expect(JSON.parse(claudeCodeHookSettings('/Users/me/My Apps/Hoot/bin/hoot'))).toMatchObject({
+    expect(claudeCodeSettings('/Users/me/My Apps/Hoot/bin/hoot')).toMatchObject({
       hooks: { Stop: [{ hooks: [{ command: "'/Users/me/My Apps/Hoot/bin/hoot' hook" }] }] },
     })
+    claude.cleanup?.()
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    "writes a Claude Code session's settings readable by the user alone",
+    async () => {
+      const launch = await resolveLaunch(
+        context({ PATH: onPath(bin, '/usr/bin') }),
+        'claude',
+        project,
+      )
+      const file = claudeSettingsFilePath(settingsFolder(), hoot.sessionId)
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+      launch.cleanup?.()
+    },
+  )
+
+  it("runs Claude Code on its session's provider, over the user's own, in its settings file", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const kimi: Provider = {
+      id: 'p-kimi',
+      name: 'Kimi',
+      presetId: 'kimi',
+      apiKey: 'sk-kimi',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
+      models: ['kimi-k3.1-pro', 'kimi-k3'],
+      own: null,
+    }
+    // The user's settings name another provider, with a variable this one does not set.
+    const userVariables = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS']
+    const onKimi = await resolveLaunch(
+      {
+        ...context(loginEnv, { claude: { model: 'kimi-k3' } }),
+        provider: kimi,
+        claudeUserVariables: async () => userVariables,
+      },
+      'claude',
+      project,
+    )
+    expect(onKimi.args).toContain('kimi-k3')
+    expect(writtenSettings().env).toEqual({
+      ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic',
+      ANTHROPIC_AUTH_TOKEN: 'sk-kimi',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_MODEL: '',
+      ANTHROPIC_SMALL_FAST_MODEL: '',
+      ANTHROPIC_CUSTOM_HEADERS: '',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k3',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k3',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
+    })
+    onKimi.cleanup?.()
+    // Its default model is the provider's first; a key in Anthropic's own header goes as its API key.
+    await resolveLaunch(
+      { ...context(loginEnv), provider: { ...kimi, keyHeader: 'x-api-key' } },
+      'claude',
+      project,
+    )
+    expect(writtenSettings().env).toMatchObject({
+      ANTHROPIC_API_KEY: 'sk-kimi',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3.1-pro',
+    })
+    // On its subscription, every provider variable is unset, and none is set.
+    await resolveLaunch(
+      {
+        ...context(loginEnv),
+        provider: ownProvider('claude'),
+        claudeUserVariables: async () => userVariables,
+      },
+      'claude',
+      project,
+    )
+    const own = writtenSettings().env as Record<string, string>
+    expect(Object.values(own).every((value) => value === '')).toBe(true)
+    expect(own).toHaveProperty('ANTHROPIC_CUSTOM_HEADERS', '')
+    // An agent on its own configuration, as a chat from before providers, gets none of it.
+    await resolveLaunch(context(loginEnv), 'claude', project)
+    expect(writtenSettings()).not.toHaveProperty('env')
   })
 
   it('gives a Codex that runs hooks in the background, and only such a Codex, the hook that reports its conversations', async () => {
@@ -604,7 +709,7 @@ describe('resolveLaunch', () => {
       '--effort',
       'max',
       '--verbose',
-      ...hookSettings,
+      ...hookSettings(),
       '--name=Fix the login bug',
       '--',
       messageAt(triage)({
@@ -626,9 +731,11 @@ describe('resolveLaunch', () => {
       '--effort',
       'max',
       '--verbose',
-      ...hookSettings,
+      ...hookSettings(),
     ])
-    expect(other.cleanup).toBeUndefined()
+    // Its cleanup removes its settings file alone.
+    other.cleanup?.()
+    expect(fs.existsSync(claudeSettingsFilePath(settingsFolder(), hoot.sessionId))).toBe(false)
     expect(issueFolders(project)).toEqual([])
   })
 

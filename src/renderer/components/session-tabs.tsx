@@ -43,7 +43,7 @@ import { dropdownMenuParts } from './menu-parts'
 import { NewWorktreeSessionButton } from './new-worktree-session-button'
 import { ChatMenu, SavedSessionMenu, SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
-import { ToolIcon } from './tool-icon'
+import { AgentIcon } from './provider-icon'
 import { Button } from './ui/button'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -117,11 +117,14 @@ export function TabShade({ shaded }: { shaded: boolean }) {
  */
 function TabLabel({
   toolId,
+  providerId,
   name,
   state,
   closable = false,
 }: {
   toolId: ToolId
+  /** The provider its agent runs on, whose mark the icon carries. */
+  providerId: string | null
   name: string
   state: SessionState
   closable?: boolean
@@ -142,7 +145,7 @@ function TabLabel({
 
   return (
     <>
-      <ToolIcon toolId={toolId} className="size-4 shrink-0" />
+      <AgentIcon toolId={toolId} providerId={providerId} className="size-4 shrink-0" />
       <span className="flex min-w-0 flex-1">
         <span
           ref={nameRef}
@@ -245,7 +248,13 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
             aria-selected={current}
             className={cn(LABEL, current ? 'text-foreground' : 'text-foreground/70')}
           >
-            <TabLabel toolId={session.toolId} name={name} state={sessionState(session)} closable />
+            <TabLabel
+              toolId={session.toolId}
+              providerId={session.providerId}
+              name={name}
+              state={sessionState(session)}
+              closable
+            />
           </div>
           <Button
             variant="ghost"
@@ -305,7 +314,12 @@ function DraggedTab({ id, shown }: { id: string; shown: string }) {
       <div className={TAB}>
         <TabShade shaded />
         <div className={cn(LABEL, session.id === shown ? 'text-foreground' : 'text-foreground/70')}>
-          <TabLabel toolId={session.toolId} name={name} state={sessionState(session)} />
+          <TabLabel
+            toolId={session.toolId}
+            providerId={session.providerId}
+            name={name}
+            state={sessionState(session)}
+          />
         </div>
       </div>
     </div>
@@ -363,7 +377,7 @@ function NewChatButton({ render, children }: { render: ReactElement; children: R
       <DropdownMenuContent className="w-auto min-w-48" finalFocus={focusAfterOverlay}>
         <ChatAgentMenuEntries
           components={dropdownMenuParts}
-          onSelect={(toolId) => void newChat(toolId)}
+          onSelect={(agentId) => void newChat(agentId)}
           testId="session-tabs-chat-agent"
         />
       </DropdownMenuContent>

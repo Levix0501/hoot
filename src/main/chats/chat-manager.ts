@@ -13,6 +13,17 @@ import type { ChatLaunch } from '../session/launch'
 import { ChatStore, type StoredChat } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
+/**
+ * What a chat or saved session is made with: its agent's harness, the
+ * provider and model it runs on, and the agent itself.
+ */
+export interface ChatAgent {
+  toolId: CodingToolId
+  providerId: string
+  model: string | null
+  agentId: string | null
+}
+
 /** What a saved session is made with, besides its folder and its agent. */
 export interface SavedSessionOptions {
   /** The name it shows, as one the user gave it with Rename… would be. */
@@ -24,10 +35,17 @@ export interface SavedSessionOptions {
   firstMessage?: string
 }
 
-/** What a chat session runs: the folder its agent runs in, and how to continue its conversation. */
+/**
+ * What a chat session runs: the folder its agent runs in, how to continue its
+ * conversation, and the provider, model and agent it runs with (see
+ * `ChatInfo`).
+ */
 export interface PreparedChatSession {
   folder: string
   launch: ChatLaunch
+  providerId: string | null
+  model: string | null
+  agentId: string | null
 }
 
 export interface ChatManagerOptions {
@@ -208,7 +226,8 @@ export class ChatManager extends EventEmitter<{
    * for Codex and OpenCode, and in `~/.hoot/chats/claude-code`, which they
    * share, for Claude Code.
    */
-  async create(toolId: CodingToolId): Promise<ChatInfo> {
+  async create(agent: ChatAgent): Promise<ChatInfo> {
+    const { toolId } = agent
     const folder = await this.newFolder(toolId)
     const at = this.now()
     const chat: ChatInfo = {
@@ -224,6 +243,9 @@ export class ChatManager extends EventEmitter<{
       hasMessages: false,
       createdAt: at,
       lastOpenedAt: at,
+      providerId: agent.providerId,
+      model: agent.model,
+      agentId: agent.agentId,
     }
     this.chats.insert(chat)
     this.emitChanged()
@@ -239,13 +261,13 @@ export class ChatManager extends EventEmitter<{
   createSavedSession(
     projectRoot: string,
     worktreePath: string | null,
-    toolId: CodingToolId,
+    agent: ChatAgent,
     options: SavedSessionOptions = {},
   ): SavedSessionInfo {
     const at = this.now()
-    const session = {
+    const session: SavedSessionInfo = {
       id: this.newId(),
-      toolId,
+      toolId: agent.toolId,
       folder: worktreePath ?? projectRoot,
       projectRoot,
       worktreePath,
@@ -255,6 +277,9 @@ export class ChatManager extends EventEmitter<{
       hasMessages: false,
       createdAt: at,
       lastOpenedAt: at,
+      providerId: agent.providerId,
+      model: agent.model,
+      agentId: agent.agentId,
     }
     this.chats.insert(session)
     if (options.firstMessage !== undefined) this.firstMessages.set(session.id, options.firstMessage)
@@ -316,7 +341,30 @@ export class ChatManager extends EventEmitter<{
         resume,
         ...(firstMessage === undefined || resume ? {} : { firstMessage }),
       },
+      providerId: chat.providerId,
+      model: chat.model,
+      agentId: chat.agentId,
     }
+  }
+
+  /**
+   * Gives the chats and saved sessions of an agent made before providers the
+   * provider its configuration names, and an agent, as Hoot reads that
+   * configuration (see `ChatStore.assignProvider`).
+   */
+  assignProvider(toolId: CodingToolId, providerId: string, agentId: string | null): void {
+    if (this.chats.assignProvider(toolId, providerId, agentId) > 0) this.emitChanged()
+  }
+
+  /**
+   * Records that a chat's agent went on with another provider and model, as
+   * OpenCode's `/models` can switch to, which its sessions then take.
+   */
+  setProvider(id: string, providerId: string, model: string | null): void {
+    const chat = this.chats.get(id)
+    if (!chat || (chat.providerId === providerId && chat.model === model)) return
+    this.chats.update(id, { providerId, model })
+    this.emitChanged()
   }
 
   /**

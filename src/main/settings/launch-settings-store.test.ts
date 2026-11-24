@@ -27,42 +27,61 @@ function writeSettings(content: unknown): void {
 const saved = () => JSON.parse(fs.readFileSync(file, 'utf8')) as unknown
 
 describe('LaunchSettingsStore', () => {
-  it('starts with YOLO mode on and every agent enabled, without writing anything', () => {
+  it('starts with no default agent, YOLO mode on and closing asking first, without writing anything', () => {
     const store = new LaunchSettingsStore(directory)
     expect(store.all()).toEqual(defaultLaunchSettings())
+    expect(store.all().defaultAgent).toBeNull()
+    expect(store.legacyAgent('claude')).toBeNull()
     expect(fs.existsSync(file)).toBe(false)
   })
 
-  it('saves the default agent, YOLO mode and agent settings for later instances', () => {
+  it('saves the default agent and YOLO mode for later instances', () => {
     const store = new LaunchSettingsStore(directory)
-    store.setDefaultAgent('codex')
+    store.setDefaultAgent('agent-1')
     store.setYoloMode(false)
-    store.change('claude', {
-      enabled: false,
-      model: 'opus',
-      effort: 'max',
-      extraArgs: ['--verbose'],
+    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: false, confirmClose: true })
+    expect(saved()).toMatchObject({
+      launchSettings: { defaultAgentId: 'agent-1', yoloMode: false },
     })
-    store.change('codex', { model: 'deepseek-v4-pro' })
-    expect(store.all()).toEqual({
-      defaultAgent: 'codex',
-      yoloMode: false,
-      confirmClose: true,
-      agents: {
-        claude: {
-          enabled: false,
-          model: 'opus',
-          effort: 'max',
-          extraArgs: ['--verbose'],
-        },
-        codex: { ...defaultAgentLaunchSettings(), model: 'deepseek-v4-pro' },
-        opencode: defaultAgentLaunchSettings(),
-      },
-    })
-    expect(saved()).toMatchObject({ launchSettings: { defaultAgent: 'codex', yoloMode: false } })
-
     const reopened = new LaunchSettingsStore(directory)
     expect(reopened.all()).toEqual(store.all())
+    store.setDefaultAgent(null)
+    expect(new LaunchSettingsStore(directory).all().defaultAgent).toBeNull()
+  })
+
+  it('keeps what an earlier Hoot kept for each coding tool until the agents took it', () => {
+    writeSettings({
+      launchSettings: {
+        defaultAgent: 'codex',
+        yoloMode: false,
+        agents: {
+          claude: { enabled: 'yes', model: 4, effort: null, extraArgs: ['--verbose', 3] },
+          codex: { enabled: false, model: 'x', effort: 'high', extraArgs: ['--foo'] },
+        },
+      },
+    })
+    const store = new LaunchSettingsStore(directory)
+    // A tool id was the default agent then; agents have ids of their own now.
+    expect(store.all()).toEqual({ defaultAgent: null, yoloMode: false, confirmClose: true })
+    expect(store.legacyDefaultTool()).toBe('codex')
+    expect(store.legacyAgent('claude')).toEqual(defaultAgentLaunchSettings())
+    expect(store.legacyAgent('codex')).toEqual({
+      enabled: false,
+      model: 'x',
+      effort: 'high',
+      extraArgs: ['--foo'],
+    })
+    expect(store.legacyAgent('opencode')).toBeNull()
+    // Kept while other settings change.
+    store.setConfirmClose(false)
+    expect(new LaunchSettingsStore(directory).legacyAgent('codex')?.model).toBe('x')
+
+    store.dropLegacy()
+    expect(store.legacyAgent('codex')).toBeNull()
+    expect(store.legacyDefaultTool()).toBeNull()
+    const reopened = new LaunchSettingsStore(directory)
+    expect(reopened.legacyAgent('codex')).toBeNull()
+    expect(reopened.all()).toEqual({ defaultAgent: null, yoloMode: false, confirmClose: false })
   })
 
   it('ignores the permission levels earlier versions saved, and keeps them in the file', () => {
@@ -77,31 +96,14 @@ describe('LaunchSettingsStore', () => {
   })
 
   it('replaces saved values that are not what a setting can be with the defaults', () => {
-    writeSettings({
-      launchSettings: {
-        defaultAgent: 'shell',
-        yoloMode: 'yes',
-        agents: {
-          claude: { enabled: 'yes', model: 4, effort: null, extraArgs: ['--verbose', 3] },
-          codex: { enabled: false, model: 'x', effort: 'high', extraArgs: [] },
-        },
-      },
-    })
+    writeSettings({ launchSettings: { defaultAgentId: 4, yoloMode: 'yes' } })
     const settings: LaunchSettings = new LaunchSettingsStore(directory).all()
-    expect(settings.defaultAgent).toBe('claude')
+    expect(settings.defaultAgent).toBeNull()
     expect(settings.yoloMode).toBe(true)
-    expect(settings.agents.claude).toEqual(defaultAgentLaunchSettings())
-    expect(settings.agents.codex).toEqual({
-      enabled: false,
-      model: 'x',
-      effort: 'high',
-      extraArgs: [],
-    })
-    expect(settings.agents.opencode).toEqual(defaultAgentLaunchSettings())
   })
 
   it('asks before closing a running session until told not to, also after other settings changed', () => {
-    writeSettings({ launchSettings: { defaultAgent: 'codex', yoloMode: false } })
+    writeSettings({ launchSettings: { defaultAgentId: 'agent-1', yoloMode: false } })
     const store = new LaunchSettingsStore(directory)
     expect(store.all().confirmClose).toBe(true)
     const changes: LaunchSettings[] = []
@@ -124,16 +126,12 @@ describe('LaunchSettingsStore', () => {
     const changes: LaunchSettings[] = []
     store.on('changed', (settings) => changes.push(settings))
     store.setYoloMode(true)
-    store.setDefaultAgent('claude')
-    store.change('claude', { model: null })
-    store.change('claude', { model: 'opus' })
-    store.change('claude', { model: 'opus' })
+    store.setDefaultAgent(null)
     store.setYoloMode(false)
-    store.setDefaultAgent('opencode')
-    store.setDefaultAgent('opencode')
-    expect(changes).toHaveLength(3)
-    expect(changes[0]?.agents.claude.model).toBe('opus')
-    expect(changes[1]?.yoloMode).toBe(false)
-    expect(changes[2]?.defaultAgent).toBe('opencode')
+    store.setDefaultAgent('agent-2')
+    store.setDefaultAgent('agent-2')
+    expect(changes).toHaveLength(2)
+    expect(changes[0]?.yoloMode).toBe(false)
+    expect(changes[1]?.defaultAgent).toBe('agent-2')
   })
 })

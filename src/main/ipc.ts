@@ -55,7 +55,8 @@ import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
 import type { ParentChange } from '../shared/sub-issues'
-import { CODING_TOOL_IDS, TOOL_IDS } from '../shared/tools'
+import { canRun, type KeyHeader, type WireFormat } from '../shared/providers'
+import { CODING_TOOL_IDS, TOOL_IDS, type CodingToolId } from '../shared/tools'
 import { plainFirstMessage } from '../shared/workflow-text'
 import type { WorkflowStep } from '../shared/workflows'
 import type {
@@ -68,7 +69,7 @@ import type {
   StartMergeResult,
 } from '../shared/worktrees'
 import type { AgentService } from './agents/agent-service'
-import type { ChatManager } from './chats/chat-manager'
+import type { ChatAgent, ChatManager, PreparedChatSession } from './chats/chat-manager'
 import type { FileWatcher } from './files/file-watcher'
 import type { FolderAccess } from './files/folder-access'
 import {
@@ -85,7 +86,8 @@ import type { AddProjectInspection } from './projects/add-project'
 import type { ProjectFolders } from './projects/project-folders'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
-import type { SentIssue } from './session/launch'
+import type { ProviderService } from './providers/provider-service'
+import type { AgentLaunch, SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
@@ -110,6 +112,8 @@ export interface IpcDependencies {
   tools: ToolService
   agents: AgentService
   launchSettings: LaunchSettingsStore
+  /** The user's providers, the agents made of them, and each installed agent's global. */
+  providers: ProviderService
   sidebar: SidebarStateStore
   /** Whether the file panel is shown, and how wide its parts are. */
   filePanel: FilePanelStore
@@ -158,6 +162,7 @@ const startSessionRequest = z.object({
   chatId: z.string().min(1).max(100).nullable().optional(),
   savedSessionId: z.string().min(1).max(100).nullable().optional(),
   toolId: z.enum(TOOL_IDS),
+  agentId: z.string().min(1).max(100).nullable().optional(),
   issueId: rowId.nullable(),
   startedBy: z.enum(['user', 'agent']).optional(),
   prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
@@ -171,7 +176,7 @@ const newWorktreeOptionsArguments = z.tuple([projectRoot, z.string().min(1).opti
 const createWorktreeRequest = z.object({
   projectRoot,
   name: z.string().max(10_000),
-  toolId: z.enum(CODING_TOOL_IDS),
+  agentId: z.string().min(1).max(100),
   base: z.string().min(1),
   nested: z
     .array(z.object({ relativePath: z.string().min(1), base: z.string().min(1) }))
@@ -181,13 +186,11 @@ const addProjectConfirmation = z.object({
   folder: z.string().min(1),
   mode: z.enum(['init', 'first-commit']),
 }) satisfies z.ZodType<AddProjectConfirmation>
-const savedSessionArguments = z.tuple([
-  projectRoot,
-  z.string().min(1).nullable(),
-  z.enum(CODING_TOOL_IDS),
-])
+/** An agent, by its id. */
+const agentId = z.string().min(1).max(100)
+const savedSessionArguments = z.tuple([projectRoot, z.string().min(1).nullable(), agentId])
 /** A project, the root of one of its worktrees, and the agent of a session that works on it. */
-const worktreeAgentArguments = z.tuple([projectRoot, z.string().min(1), z.enum(CODING_TOOL_IDS)])
+const worktreeAgentArguments = z.tuple([projectRoot, z.string().min(1), agentId])
 const submoduleArguments = z.tuple([
   projectRoot,
   z.array(z.object({ relativePath: z.string(), base: z.string().min(1) })).max(1_000),
@@ -246,10 +249,43 @@ const sessionStartAnswer = z.union([
   z.strictObject({ ok: z.literal(true), worktreePath: z.string() }),
   z.strictObject({ ok: z.literal(false), message: z.string().max(100_000) }),
 ]) satisfies z.ZodType<SessionStartAnswer>
-const agentId = z.enum(CODING_TOOL_IDS)
-const agentLaunchSettingsChange = z.strictObject({
+/** A coding tool, whose program the Agents page installs and updates. */
+const toolId = z.enum(CODING_TOOL_IDS)
+const providerText = z.string().max(10_000)
+const providerUrls = z.strictObject({
+  anthropic: providerText.optional(),
+  responses: providerText.optional(),
+}) satisfies z.ZodType<Partial<Record<WireFormat, string>>>
+const keyHeader = z.enum(['bearer', 'x-api-key']) satisfies z.ZodType<KeyHeader>
+const providerModels = z.array(z.string().max(1_000)).max(1_000)
+const newProvider = z.strictObject({
+  name: providerText,
+  presetId: z.string().max(100).nullable(),
+  apiKey: providerText,
+  keyHeader,
+  urls: providerUrls,
+  models: providerModels,
+})
+const providerChange = z.strictObject({
+  name: providerText.optional(),
+  presetId: z.string().max(100).nullable().optional(),
+  apiKey: providerText.optional(),
+  keyHeader: keyHeader.optional(),
+  urls: providerUrls.optional(),
+  models: providerModels.optional(),
+})
+const agentModel = z.string().max(1_000).nullable()
+const newAgent = z.strictObject({
+  harness: toolId,
+  providerId: z.string().min(1).max(100),
+  model: agentModel,
+  name: z.string().max(1_000).nullable().optional(),
+})
+const agentChange = z.strictObject({
+  providerId: z.string().min(1).max(100).optional(),
+  name: z.string().max(1_000).nullable().optional(),
   enabled: z.boolean().optional(),
-  model: z.string().min(1).max(1_000).nullable().optional(),
+  model: agentModel.optional(),
   effort: z.string().min(1).max(100).nullable().optional(),
   extraArgs: z.array(z.string().min(1).max(10_000)).max(1_000).optional(),
 })
@@ -493,22 +529,22 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.detectAgents, () => void deps.agents.detect())
   deps.agents.on('changed', (state) => send(IpcChannel.agentsChanged, state))
   on(IpcChannel.installAgent, (id) => {
-    const parsed = agentId.safeParse(id)
+    const parsed = toolId.safeParse(id)
     if (parsed.success) deps.agents.install(parsed.data)
   })
   on(IpcChannel.updateAgent, (id) => {
-    const parsed = agentId.safeParse(id)
+    const parsed = toolId.safeParse(id)
     if (parsed.success) deps.agents.update(parsed.data)
   })
   on(IpcChannel.updateAllAgents, () => deps.agents.updateAll())
   on(IpcChannel.cancelAgentOperation, (id) => {
-    const parsed = agentId.safeParse(id)
+    const parsed = toolId.safeParse(id)
     if (parsed.success) deps.agents.cancel(parsed.data)
   })
 
   handle(IpcChannel.getLaunchSettings, () => deps.launchSettings.all())
   on(IpcChannel.setDefaultAgent, (id) => {
-    const parsed = agentId.safeParse(id)
+    const parsed = agentId.nullable().safeParse(id)
     if (parsed.success) deps.launchSettings.setDefaultAgent(parsed.data)
   })
   on(IpcChannel.setYoloMode, (value) => {
@@ -519,11 +555,107 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.boolean().safeParse(value)
     if (parsed.success) deps.launchSettings.setConfirmClose(parsed.data)
   })
-  on(IpcChannel.setAgentLaunchSettings, (...args) => {
-    const parsed = z.tuple([agentId, agentLaunchSettingsChange]).safeParse(args)
-    if (parsed.success) deps.launchSettings.change(...parsed.data)
-  })
   deps.launchSettings.on('changed', (settings) => send(IpcChannel.launchSettingsChanged, settings))
+
+  handle(IpcChannel.getProviders, () => deps.providers.getState())
+  deps.providers.on('changed', (state) => send(IpcChannel.providersChanged, state))
+  handle(IpcChannel.addProvider, (_event, value) => {
+    const parsed = newProvider.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
+    return deps.providers.addProvider(parsed.data)
+  })
+  handle(IpcChannel.updateProvider, (_event, ...args) => {
+    const parsed = z.tuple([agentId, providerChange]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
+    return deps.providers.updateProvider(...parsed.data)
+  })
+  handle(IpcChannel.removeProvider, (_event, value) => {
+    const parsed = agentId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
+    return deps.providers.removeProvider(parsed.data)
+  })
+  handle(IpcChannel.setGlobalProvider, (_event, ...args) => {
+    const parsed = z.tuple([toolId, agentId]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
+    return deps.providers.setGlobal(...parsed.data)
+  })
+  handle(IpcChannel.setGlobalModel, (_event, ...args) => {
+    const parsed = z.tuple([toolId, agentModel]).safeParse(args)
+    if (!parsed.success) return { ok: false, message: 'Invalid model.' }
+    return deps.providers.setGlobalModel(...parsed.data)
+  })
+  handle(IpcChannel.makeAgent, (_event, value) => {
+    const parsed = newAgent.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid agent.' }
+    return deps.providers.addAgent(parsed.data)
+  })
+  on(IpcChannel.changeAgent, (...args) => {
+    const parsed = z.tuple([agentId, agentChange]).safeParse(args)
+    if (parsed.success) deps.providers.updateAgent(...parsed.data)
+  })
+  on(IpcChannel.deleteAgent, (value) => {
+    const parsed = agentId.safeParse(value)
+    if (parsed.success) deps.providers.removeAgent(parsed.data)
+  })
+
+  /**
+   * What a new chat or saved session of an agent is made with, by the agent's
+   * id: its harness, and the provider and model it runs on. `null` for an
+   * agent that is gone, or whose provider is gone or cannot run it.
+   */
+  const chatAgentOf = (id: string): ChatAgent | null => {
+    const agent = deps.providers.agent(id)
+    if (agent === undefined) return null
+    const provider = deps.providers.provider(agent.providerId)
+    if (provider === undefined || !canRun(provider, agent.harness)) return null
+    return { toolId: agent.harness, providerId: provider.id, model: agent.model, agentId: agent.id }
+  }
+
+  /**
+   * What the agent of a chat or saved session starts with: the provider it
+   * runs on, which it keeps, or with that gone, its agent's own
+   * configuration; its model, else its agent's; and its agent's effort
+   * level and extra arguments, while that agent is there.
+   */
+  const preparedAgent = (prepared: PreparedChatSession): AgentLaunch => {
+    const agent = prepared.agentId === null ? undefined : deps.providers.agent(prepared.agentId)
+    return {
+      settings: {
+        enabled: true,
+        model: prepared.model ?? agent?.model ?? null,
+        effort: agent?.effort ?? null,
+        extraArgs: agent?.extraArgs ?? [],
+      },
+      provider:
+        prepared.providerId === null
+          ? null
+          : (deps.providers.provider(prepared.providerId) ?? null),
+    }
+  }
+
+  /**
+   * What the agent of a session that is no chat's starts with, by the agent's
+   * id, which must be of the session's tool; `null` for a Terminal session.
+   */
+  const requestedAgent = (
+    tool: CodingToolId | 'shell',
+    id: string | null | undefined,
+  ): AgentLaunch | null | 'invalid' => {
+    if (tool === 'shell') return null
+    const agent = id === null || id === undefined ? undefined : deps.providers.agent(id)
+    if (agent === undefined || agent.harness !== tool) return 'invalid'
+    const provider = deps.providers.provider(agent.providerId)
+    if (provider === undefined || !canRun(provider, tool)) return 'invalid'
+    return {
+      settings: {
+        enabled: true,
+        model: agent.model,
+        effort: agent.effort,
+        extraArgs: agent.extraArgs,
+      },
+      provider,
+    }
+  }
 
   handle(IpcChannel.getWindowState, (): WindowState => ({
     sidebarOpen: deps.sidebar.open,
@@ -610,8 +742,10 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.createChat, async (_event, value): Promise<CreateChatResult> => {
     const parsed = agentId.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid agent.' }
+    const agent = chatAgentOf(parsed.data)
+    if (agent === null) return { ok: false, message: 'The agent no longer exists.' }
     try {
-      return { ok: true, chat: await deps.chats.create(parsed.data) }
+      return { ok: true, chat: await deps.chats.create(agent) }
     } catch (error) {
       return { ok: false, message: `Could not make the chat's folder: ${errorMessage(error)}` }
     }
@@ -669,14 +803,16 @@ export function registerIpc(deps: IpcDependencies): void {
     async (_event, ...args): Promise<CreateSavedSessionResult> => {
       const parsed = savedSessionArguments.safeParse(args)
       if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-      const [root, worktreePath, toolId] = parsed.data
+      const [root, worktreePath, id] = parsed.data
       if (!deps.projects.find(root))
         return { ok: false, message: 'The project is not in the list.' }
+      const agent = chatAgentOf(id)
+      if (agent === null) return { ok: false, message: 'The agent no longer exists.' }
       if (worktreePath === null) {
         // As it is now: a project folder gone since its menu showed cannot start a session.
         const problem = await projectFolderProblem(root)
         if (problem !== null) return { ok: false, message: problem }
-        return { ok: true, session: deps.chats.createSavedSession(root, null, toolId) }
+        return { ok: true, session: deps.chats.createSavedSession(root, null, agent) }
       }
       // As it is now: a worktree deleted or missing since its row showed cannot start a session.
       const worktree = await deps.worktrees.currentWorktree(root, worktreePath)
@@ -686,7 +822,7 @@ export function registerIpc(deps: IpcDependencies): void {
       if (worktree.missing) {
         return { ok: false, message: `The folder of the worktree is missing: ${worktreePath}` }
       }
-      return { ok: true, session: deps.chats.createSavedSession(root, worktreePath, toolId) }
+      return { ok: true, session: deps.chats.createSavedSession(root, worktreePath, agent) }
     },
   )
 
@@ -732,6 +868,7 @@ export function registerIpc(deps: IpcDependencies): void {
           { ...request, projectRoot: prepared.folder },
           null,
           prepared.launch,
+          preparedAgent(prepared),
         )
         // The chat was opened: it goes to the top of Chats.
         deps.chats.opened(chat.id)
@@ -784,7 +921,12 @@ export function registerIpc(deps: IpcDependencies): void {
       }
       if (!prepared) return { ok: false, message: 'The saved session no longer exists.' }
       try {
-        const session = await deps.sessions.start(request, null, prepared.launch)
+        const session = await deps.sessions.start(
+          request,
+          null,
+          prepared.launch,
+          preparedAgent(prepared),
+        )
         // Opening it again does not move its row: saved sessions stay in the
         // order they were made.
         deps.chats.opened(saved.id)
@@ -798,6 +940,8 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!project) {
       return { ok: false, message: 'The project is not in the list.' }
     }
+    const agent = requestedAgent(request.toolId, request.agentId)
+    if (agent === 'invalid') return { ok: false, message: 'The agent no longer exists.' }
     let saved: Issue | null = null
     if (request.issueId !== null) {
       // Only Claude Code is sent issues, in one of the project's worktrees.
@@ -856,7 +1000,7 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     try {
-      const session = await deps.sessions.start(request, issue)
+      const session = await deps.sessions.start(request, issue, null, agent)
       // Work on the issue goes on in the session from now on.
       if (request.issueId !== null && step !== null) {
         deps.workflows?.sessionStarted(request.issueId, step, request.startedBy ?? 'user')
@@ -947,14 +1091,14 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!deps.projects.find(request.projectRoot)) {
       return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
     }
+    const agent = chatAgentOf(request.agentId)
+    if (agent === null) {
+      return { ok: false, reason: 'invalid', message: 'The agent no longer exists.' }
+    }
     const created = await deps.worktrees.createNamed(request)
     if (!created.ok) return { ok: false, reason: created.reason, message: created.message }
     try {
-      const session = deps.chats.createSavedSession(
-        request.projectRoot,
-        created.path,
-        request.toolId,
-      )
+      const session = deps.chats.createSavedSession(request.projectRoot, created.path, agent)
       return {
         ok: true,
         path: created.path,
@@ -1011,8 +1155,10 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.startMerge, async (_event, ...args): Promise<StartMergeResult> => {
     const parsed = worktreeAgentArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-    const [root, worktreePath, toolId] = parsed.data
+    const [root, worktreePath, id] = parsed.data
     if (!deps.projects.find(root)) return { ok: false, message: 'The project is not in the list.' }
+    const agent = chatAgentOf(id)
+    if (agent === null) return { ok: false, message: 'The agent no longer exists.' }
     // Nothing stops the merge but a project folder or worktree that is gone:
     // what to do about anything else in the way is the agent's to judge.
     const planned = await deps.worktrees.planMerge(root, worktreePath)
@@ -1020,7 +1166,7 @@ export function registerIpc(deps: IpcDependencies): void {
     // A session in the project's own folder, named after the worktree, whose
     // agent is told what to merge as it first starts, and nothing of how.
     // Hoot follows the merge no further.
-    const session = deps.chats.createSavedSession(root, null, toolId, {
+    const session = deps.chats.createSavedSession(root, null, agent, {
       name: `Merge ${planned.plan.worktreeName}`,
       firstMessage: mergeInstruction(planned.plan),
     })
@@ -1030,8 +1176,10 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.startDeletion, async (_event, ...args): Promise<StartDeletionResult> => {
     const parsed = worktreeAgentArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
-    const [root, worktreePath, toolId] = parsed.data
+    const [root, worktreePath, id] = parsed.data
     if (!deps.projects.find(root)) return { ok: false, message: 'The project is not in the list.' }
+    const agent = chatAgentOf(id)
+    if (agent === null) return { ok: false, message: 'The agent no longer exists.' }
     // Nothing stops the deletion but a project folder or worktree that is
     // gone: what to do about anything else in the way is the agent's to judge.
     const planned = await deps.worktrees.planDeletion(root, worktreePath)
@@ -1040,7 +1188,7 @@ export function registerIpc(deps: IpcDependencies): void {
     // leaves, named after the worktree, whose agent is told what to delete as
     // it first starts, and nothing of how. Hoot follows the deletion no
     // further: the worktree's row goes once Git no longer lists it.
-    const session = deps.chats.createSavedSession(root, null, toolId, {
+    const session = deps.chats.createSavedSession(root, null, agent, {
       name: `Delete ${planned.plan.worktreeName}`,
       firstMessage: deletionInstruction(planned.plan),
     })

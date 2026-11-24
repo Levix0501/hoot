@@ -1,6 +1,4 @@
-import { CODING_TOOL_IDS, type CodingToolId } from './tools'
-
-/** How one agent starts the sessions Hoot opens with it. */
+/** How an agent starts the sessions Hoot opens with it. */
 export interface AgentLaunchSettings {
   /** Whether the agent appears in the new session menu. */
   enabled: boolean
@@ -13,16 +11,17 @@ export interface AgentLaunchSettings {
 }
 
 /**
- * What the Agents page keeps for every agent, the default agent, the YOLO
- * mode switch, and whether closing a running session asks first.
+ * What the Agents page keeps besides the agents themselves: the default
+ * agent, the YOLO mode switch, and whether closing a running session asks
+ * first.
  */
 export interface LaunchSettings {
   /**
-   * The agent a new chat starts with while it can be used; `null` never. A
-   * new chat falls back to the first agent that can be used when this one
-   * cannot.
+   * The agent a new chat starts with while it can be used, by its id; `null`
+   * for none. A new chat starts with the first agent that can be used while
+   * this one cannot (see `sessionAgent`).
    */
-  defaultAgent: CodingToolId
+  defaultAgent: string | null
   /** Whether each agent gets the arguments that make it act without asking. */
   yoloMode: boolean
   /**
@@ -30,7 +29,6 @@ export interface LaunchSettings {
    * does until the user tells it not to.
    */
   confirmClose: boolean
-  agents: Readonly<Record<CodingToolId, AgentLaunchSettings>>
 }
 
 /** The settings an agent starts with until the user changes one. */
@@ -38,51 +36,15 @@ export function defaultAgentLaunchSettings(): AgentLaunchSettings {
   return { enabled: true, model: null, effort: null, extraArgs: [] }
 }
 
-/**
- * The settings Hoot starts with: Claude Code the default agent, YOLO mode on,
- * closing a running session asking first, every agent enabled and unchanged.
- */
+/** The settings Hoot starts with: no default agent, YOLO mode on, closing a running session asking first. */
 export function defaultLaunchSettings(): LaunchSettings {
-  return {
-    defaultAgent: 'claude',
-    yoloMode: true,
-    confirmClose: true,
-    agents: Object.fromEntries(
-      CODING_TOOL_IDS.map((id) => [id, defaultAgentLaunchSettings()]),
-    ) as Record<CodingToolId, AgentLaunchSettings>,
-  }
-}
-
-/** What changes about an agent's launch settings; what is left out stays as it is. */
-export interface AgentLaunchSettingsChange {
-  enabled?: boolean
-  model?: string | null
-  effort?: string | null
-  extraArgs?: string[]
-}
-
-/** An agent's settings with `change` applied. */
-export function withLaunchSettingsChange(
-  settings: AgentLaunchSettings,
-  change: AgentLaunchSettingsChange,
-): AgentLaunchSettings {
-  return {
-    enabled: change.enabled ?? settings.enabled,
-    model: change.model === undefined ? settings.model : change.model,
-    effort: change.effort === undefined ? settings.effort : change.effort,
-    extraArgs: change.extraArgs === undefined ? settings.extraArgs : change.extraArgs,
-  }
-}
-
-/** Whether a coding tool is enabled, as the settings say; unknown ones are. */
-export function agentEnabled(settings: LaunchSettings | null, id: CodingToolId): boolean {
-  return settings === null || settings.agents[id]?.enabled !== false
+  return { defaultAgent: null, yoloMode: true, confirmClose: true }
 }
 
 /** The settings with another default agent, or `null` while the settings are not known. */
 export function withDefaultAgent(
   settings: LaunchSettings | null,
-  id: CodingToolId,
+  id: string | null,
 ): LaunchSettings | null {
   return settings === null ? null : { ...settings, defaultAgent: id }
 }
@@ -101,20 +63,4 @@ export function withConfirmClose(
   on: boolean,
 ): LaunchSettings | null {
   return settings === null ? null : { ...settings, confirmClose: on }
-}
-
-/** The settings with an agent's change applied, or `null` while they are not known. */
-export function withAgentLaunchSettingsChange(
-  settings: LaunchSettings | null,
-  id: CodingToolId,
-  change: AgentLaunchSettingsChange,
-): LaunchSettings | null {
-  if (settings === null) return null
-  return {
-    ...settings,
-    agents: {
-      ...settings.agents,
-      [id]: withLaunchSettingsChange(settings.agents[id], change),
-    },
-  }
 }

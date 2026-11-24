@@ -1,4 +1,4 @@
-import { getTool, type CodingToolId } from '../../shared/tools'
+import { getTool } from '../../shared/tools'
 import { useAppStore } from '../store/app-store'
 import { ChatAgentMenuEntries } from './chat-agent-menu'
 import type { MenuParts } from './menu-parts'
@@ -28,7 +28,7 @@ export function NewSessionMenuEntries({
   const newTerminalSession = useAppStore((state) => state.newTerminalSession)
   const { Item, Separator } = components
 
-  const start = (toolId: CodingToolId) => void newWorktreeSession(projectRoot, worktreePath, toolId)
+  const start = (agentId: string) => void newWorktreeSession(projectRoot, worktreePath, agentId)
 
   return (
     <>

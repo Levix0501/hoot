@@ -10,6 +10,14 @@ import type { ParentChange, SubIssues } from '../shared/sub-issues'
 import type { Labels } from '../shared/labels'
 import type { ChatInfo, SavedSessionInfo } from '../shared/chats'
 import type { ProjectFolderInfo } from '../shared/project-folders'
+import {
+  findProvider,
+  OWN_PROVIDER_IDS,
+  ownProvider,
+  type Agent,
+  type Provider,
+  type ProvidersState,
+} from '../shared/providers'
 import type { SessionInfo } from '../shared/session'
 import type { UpdateStatus } from '../shared/updates'
 import { LabelError } from './labels/label-store'
@@ -146,6 +154,9 @@ const chat: ChatInfo = {
   hasMessages: false,
   createdAt: 1_000,
   lastOpenedAt: 1_000,
+  providerId: OWN_PROVIDER_IDS.claude,
+  model: null,
+  agentId: 'claude',
 }
 const saved: SavedSessionInfo = {
   id: 'saved-1',
@@ -159,6 +170,9 @@ const saved: SavedSessionInfo = {
   hasMessages: true,
   createdAt: 2_000,
   lastOpenedAt: 2_000,
+  providerId: OWN_PROVIDER_IDS.claude,
+  model: null,
+  agentId: 'claude',
 }
 /** A saved session in the project's own folder, which its Local row lists. */
 const local: SavedSessionInfo = {
@@ -173,28 +187,37 @@ const local: SavedSessionInfo = {
   hasMessages: true,
   createdAt: 3_000,
   lastOpenedAt: 3_000,
+  providerId: OWN_PROVIDER_IDS.claude,
+  model: null,
+  agentId: 'claude',
 }
 const chats = Object.assign(emitter(), {
   list: vi.fn<() => ChatInfo[]>(() => [chat]),
   listSavedSessions: vi.fn<() => SavedSessionInfo[]>(() => [saved, local]),
   createSavedSession: vi.fn<
-    (root: string, worktreePath: string | null, toolId: string) => SavedSessionInfo
+    (root: string, worktreePath: string | null, agent: unknown) => SavedSessionInfo
   >((_root, worktreePath) => (worktreePath === null ? local : saved)),
   removeForWorktree: vi.fn<(path: string) => void>(),
   get: vi.fn<(id: string) => ChatInfo | undefined>((id) =>
     id === chat.id ? chat : id === saved.id ? saved : id === local.id ? local : undefined,
   ),
-  create: vi.fn<(toolId: ChatInfo['toolId']) => Promise<ChatInfo>>(async () => chat),
+  create: vi.fn<(agent: unknown) => Promise<ChatInfo>>(async () => chat),
   prepareSession: vi.fn<
     (id: string) => Promise<{
       folder: string
       launch: { conversationId: string | null; resume: boolean }
+      providerId: string | null
+      model: string | null
+      agentId: string | null
     }>
   >(async (id: string) => {
     const record = id === saved.id ? saved : id === local.id ? local : chat
     return {
       folder: record.folder,
       launch: { conversationId: record.conversationId, resume: record.hasMessages },
+      providerId: record.providerId,
+      model: record.model,
+      agentId: record.agentId,
     }
   }),
   opened: vi.fn<(id: string) => void>(),
@@ -284,12 +307,64 @@ const sessionManager = Object.assign(emitter(), {
     chatId: request.chatId ?? null,
     savedSessionId: request.savedSessionId ?? null,
     toolId: request.toolId,
+    providerId: null,
     issueId: request.issueId,
     status: 'running' as const,
     exit: null,
     program: null,
   })),
 })
+
+/** An agent of a harness on its own models, by the harness's id. */
+function ownAgent(harness: Agent['harness']): Agent {
+  return {
+    id: harness,
+    harness,
+    providerId: OWN_PROVIDER_IDS[harness],
+    name: null,
+    enabled: true,
+    model: null,
+    effort: 'high',
+    extraArgs: ['--verbose'],
+    createdAt: 1,
+  }
+}
+const madeAgents = [ownAgent('claude'), ownAgent('codex')]
+const providersState: ProvidersState = {
+  providers: [],
+  agents: madeAgents,
+  globals: {},
+  ready: true,
+}
+const providers = Object.assign(emitter(), {
+  getState: vi.fn<() => ProvidersState>(() => providersState),
+  agent: vi.fn<(id: string) => Agent | undefined>((id) => madeAgents.find((a) => a.id === id)),
+  provider: vi.fn<(id: string) => Provider | undefined>((id) => findProvider([], id)),
+  addProvider: vi.fn<(input: unknown) => unknown>(() => ({ ok: true })),
+  updateProvider: vi.fn<(id: string, change: unknown) => Promise<unknown>>(async () => ({
+    ok: true,
+  })),
+  removeProvider: vi.fn<(id: string) => unknown>(() => ({ ok: true })),
+  setGlobal: vi.fn<(harness: string, id: string) => Promise<unknown>>(async () => ({ ok: true })),
+  setGlobalModel: vi.fn<(harness: string, model: string | null) => Promise<unknown>>(async () => ({
+    ok: true,
+  })),
+  addAgent: vi.fn<(input: unknown) => unknown>(() => ({ ok: true })),
+  updateAgent: vi.fn<(id: string, change: unknown) => void>(),
+  removeAgent: vi.fn<(id: string) => void>(),
+})
+/** What a chat or saved session of Claude Code's own agent is made with. */
+const claudeChatAgent = {
+  toolId: 'claude',
+  providerId: OWN_PROVIDER_IDS.claude,
+  model: null,
+  agentId: 'claude',
+}
+/** What a session of Claude Code's own agent starts with. */
+const claudeLaunch = {
+  settings: { enabled: true, model: null, effort: 'high', extraArgs: ['--verbose'] },
+  provider: ownProvider('claude'),
+}
 
 beforeEach(() => {
   electron.handlers.clear()
@@ -320,6 +395,7 @@ beforeEach(() => {
     tools: emitter(),
     agents,
     launchSettings,
+    providers,
     appearance: emitter(),
     sessions: sessionManager,
     chats,
@@ -495,7 +571,13 @@ describe('the messages of chats', () => {
   it('give the chats, make a chat, and pass on every change of them to the window', async () => {
     expect(await invoke(IpcChannel.listChats)).toEqual([chat])
     expect(await invoke(IpcChannel.createChat, 'claude')).toEqual({ ok: true, chat })
-    expect(chats.create).toHaveBeenCalledWith('claude')
+    expect(chats.create).toHaveBeenCalledWith(claudeChatAgent)
+    // An agent that is gone makes none.
+    expect(await invoke(IpcChannel.createChat, 'gone')).toEqual({
+      ok: false,
+      message: 'The agent no longer exists.',
+    })
+    expect(chats.create).toHaveBeenCalledOnce()
     const changed = [{ ...chat, title: 'Fix the login' }]
     chats.emit('changed', changed)
     expect(webContents.send).toHaveBeenCalledWith(IpcChannel.chatsChanged, changed)
@@ -526,6 +608,7 @@ describe('the messages of chats', () => {
       expect.objectContaining({ id: 's1', projectRoot: chat.folder, chatId: chat.id }),
       null,
       { conversationId: chat.conversationId, resume: false },
+      claudeLaunch,
     )
     expect(chats.opened).toHaveBeenCalledWith(chat.id)
   })
@@ -541,7 +624,7 @@ describe('the messages of chats', () => {
     expect(chats.createSavedSession).toHaveBeenCalledWith(
       project.root,
       saved.worktreePath,
-      'claude',
+      claudeChatAgent,
     )
     electron.listeners.get(IpcChannel.renameSavedSession)!(trusted, saved.id, 'Login')
     electron.listeners.get(IpcChannel.setSavedSessionTitle)!(trusted, saved.id, '✳ Fix the login')
@@ -607,7 +690,7 @@ describe('the messages of chats', () => {
     const request = {
       projectRoot: project.root,
       name: 'Fix login bug',
-      toolId: 'claude',
+      agentId: 'claude',
       base: 'main',
       nested: [],
     }
@@ -623,7 +706,7 @@ describe('the messages of chats', () => {
     expect(chats.createSavedSession).toHaveBeenCalledWith(
       project.root,
       saved.worktreePath,
-      'claude',
+      claudeChatAgent,
     )
   })
 
@@ -649,6 +732,7 @@ describe('the messages of chats', () => {
       }),
       null,
       { conversationId: saved.conversationId, resume: true },
+      claudeLaunch,
     )
     expect(chats.opened).toHaveBeenCalledWith(saved.id)
   })
@@ -738,7 +822,12 @@ describe("the messages of a project's own folder", () => {
       ok: true,
       session: local,
     })
-    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex')
+    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, {
+      toolId: 'codex',
+      providerId: OWN_PROVIDER_IDS.codex,
+      model: null,
+      agentId: 'codex',
+    })
     expect(projectFolders.current).toHaveBeenCalledWith(project.root)
     expect(worktrees.currentWorktree).not.toHaveBeenCalled()
   })
@@ -763,6 +852,7 @@ describe("the messages of a project's own folder", () => {
       expect.objectContaining({ projectRoot: project.root, worktreePath: null }),
       null,
       { conversationId: local.conversationId, resume: true },
+      claudeLaunch,
     )
     expect(chats.opened).toHaveBeenCalledWith(local.id)
     expect(worktrees.currentWorktree).not.toHaveBeenCalled()
@@ -899,10 +989,20 @@ describe('the messages of worktrees', () => {
       ok: true,
       session: local,
     })
-    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex', {
-      name: 'Merge Fix login bug',
-      firstMessage: mergeInstruction(plan),
-    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(
+      project.root,
+      null,
+      {
+        toolId: 'codex',
+        providerId: OWN_PROVIDER_IDS.codex,
+        model: null,
+        agentId: 'codex',
+      },
+      {
+        name: 'Merge Fix login bug',
+        firstMessage: mergeInstruction(plan),
+      },
+    )
 
     vi.clearAllMocks()
     expect(await invoke(IpcChannel.startMerge, '/work/other', at, 'codex')).toMatchObject({
@@ -935,10 +1035,20 @@ describe('the messages of worktrees', () => {
       ok: true,
       session: local,
     })
-    expect(chats.createSavedSession).toHaveBeenCalledWith(project.root, null, 'codex', {
-      name: 'Delete Fix login bug',
-      firstMessage: deletionInstruction(plan),
-    })
+    expect(chats.createSavedSession).toHaveBeenCalledWith(
+      project.root,
+      null,
+      {
+        toolId: 'codex',
+        providerId: OWN_PROVIDER_IDS.codex,
+        model: null,
+        agentId: 'codex',
+      },
+      {
+        name: 'Delete Fix login bug',
+        firstMessage: deletionInstruction(plan),
+      },
+    )
     // Hoot deletes nothing itself, and closes none of the worktree's sessions.
     expect(sessionManager.closeIn).not.toHaveBeenCalled()
     expect(chats.removeForWorktree).not.toHaveBeenCalled()
@@ -1132,10 +1242,10 @@ describe('the messages of the Agents page', () => {
     expect(await electron.handlers.get(IpcChannel.getLaunchSettings)?.(trusted)).toBe(
       launchSettingsState,
     )
-    send(IpcChannel.setDefaultAgent, 'codex')
-    send(IpcChannel.setDefaultAgent, 'shell')
+    send(IpcChannel.setDefaultAgent, 'agent-1')
+    send(IpcChannel.setDefaultAgent, 4)
     send(IpcChannel.setDefaultAgent, null)
-    expect(launchSettings.setDefaultAgent.mock.calls).toEqual([['codex']])
+    expect(launchSettings.setDefaultAgent.mock.calls).toEqual([['agent-1'], [null]])
     send(IpcChannel.setYoloMode, false)
     send(IpcChannel.setYoloMode, 'yes')
     expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])
@@ -1143,29 +1253,53 @@ describe('the messages of the Agents page', () => {
     send(IpcChannel.setConfirmClose, 'no')
     expect(launchSettings.setConfirmClose.mock.calls).toEqual([[false]])
 
-    send(IpcChannel.setAgentLaunchSettings, 'claude', {
-      model: 'opus',
-      effort: 'max',
-      extraArgs: ['--verbose'],
-    })
-    expect(launchSettings.change.mock.calls).toEqual([
-      ['claude', { model: 'opus', effort: 'max', extraArgs: ['--verbose'] }],
-    ])
-    for (const args of [
-      ['shell', { model: 'opus' }],
-      ['claude', { model: 4 }],
-      ['claude', { extraArgs: [3] }],
-      ['claude', { unknown: true }],
-    ]) {
-      send(IpcChannel.setAgentLaunchSettings, ...args)
-    }
-    expect(launchSettings.change).toHaveBeenCalledOnce()
-
     launchSettings.emit('changed', launchSettingsState)
     expect(webContents.send).toHaveBeenCalledWith(
       IpcChannel.launchSettingsChanged,
       launchSettingsState,
     )
+  })
+
+  it('pass providers and agents on to the provider service, as far as they are valid', async () => {
+    expect(await invoke(IpcChannel.getProviders)).toBe(providersState)
+    const kimi = {
+      name: 'Kimi',
+      presetId: 'kimi',
+      apiKey: 'sk-kimi',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
+      models: ['kimi-k3.1-pro'],
+    }
+    expect(await invoke(IpcChannel.addProvider, kimi)).toEqual({ ok: true })
+    expect(await invoke(IpcChannel.addProvider, { ...kimi, keyHeader: 'cookie' })).toEqual({
+      ok: false,
+      message: 'Invalid provider.',
+    })
+    expect(providers.addProvider.mock.calls).toEqual([[kimi]])
+    await invoke(IpcChannel.updateProvider, 'p-kimi', { apiKey: 'sk-new' })
+    expect(providers.updateProvider).toHaveBeenCalledWith('p-kimi', { apiKey: 'sk-new' })
+    await invoke(IpcChannel.removeProvider, 'p-kimi')
+    expect(providers.removeProvider).toHaveBeenCalledWith('p-kimi')
+    await invoke(IpcChannel.setGlobalProvider, 'claude', 'p-kimi')
+    await invoke(IpcChannel.setGlobalProvider, 'shell', 'p-kimi')
+    expect(providers.setGlobal.mock.calls).toEqual([['claude', 'p-kimi']])
+    await invoke(IpcChannel.setGlobalModel, 'claude', null)
+    expect(providers.setGlobalModel).toHaveBeenCalledWith('claude', null)
+
+    const agent = { harness: 'claude', providerId: 'p-kimi', model: 'kimi-k3.1-pro' }
+    await invoke(IpcChannel.makeAgent, agent)
+    await invoke(IpcChannel.makeAgent, { ...agent, harness: 'shell' })
+    expect(providers.addAgent.mock.calls).toEqual([[agent]])
+    send(IpcChannel.changeAgent, 'agent-1', { enabled: false, extraArgs: ['--verbose'] })
+    send(IpcChannel.changeAgent, 'agent-1', { extraArgs: [3] })
+    expect(providers.updateAgent.mock.calls).toEqual([
+      ['agent-1', { enabled: false, extraArgs: ['--verbose'] }],
+    ])
+    send(IpcChannel.deleteAgent, 'agent-1')
+    expect(providers.removeAgent).toHaveBeenCalledWith('agent-1')
+
+    providers.emit('changed', providersState)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.providersChanged, providersState)
   })
 
   it('pass on every change of the agents to the window', () => {

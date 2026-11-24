@@ -51,9 +51,18 @@ const api: HootApi = {
   setDefaultAgent: (id) => ipcRenderer.send(IpcChannel.setDefaultAgent, id),
   setYoloMode: (on) => ipcRenderer.send(IpcChannel.setYoloMode, on),
   setConfirmClose: (on) => ipcRenderer.send(IpcChannel.setConfirmClose, on),
-  setAgentLaunchSettings: (id, change) =>
-    ipcRenderer.send(IpcChannel.setAgentLaunchSettings, id, change),
   onLaunchSettingsChanged: (listener) => subscribe(IpcChannel.launchSettingsChanged, listener),
+  getProviders: () => ipcRenderer.invoke(IpcChannel.getProviders),
+  onProvidersChanged: (listener) => subscribe(IpcChannel.providersChanged, listener),
+  addProvider: (provider) => ipcRenderer.invoke(IpcChannel.addProvider, provider),
+  updateProvider: (id, change) => ipcRenderer.invoke(IpcChannel.updateProvider, id, change),
+  removeProvider: (id) => ipcRenderer.invoke(IpcChannel.removeProvider, id),
+  setGlobalProvider: (harness, providerId) =>
+    ipcRenderer.invoke(IpcChannel.setGlobalProvider, harness, providerId),
+  setGlobalModel: (harness, model) => ipcRenderer.invoke(IpcChannel.setGlobalModel, harness, model),
+  makeAgent: (agent) => ipcRenderer.invoke(IpcChannel.makeAgent, agent),
+  changeAgent: (id, change) => ipcRenderer.send(IpcChannel.changeAgent, id, change),
+  deleteAgent: (id) => ipcRenderer.send(IpcChannel.deleteAgent, id),
   listSessions: () => ipcRenderer.invoke(IpcChannel.listSessions),
   startSession: (request) => ipcRenderer.invoke(IpcChannel.startSession, request),
   closeSession: (id) => ipcRenderer.invoke(IpcChannel.closeSession, id),
@@ -65,14 +74,14 @@ const api: HootApi = {
   onSessionHookEvent: (listener) => subscribe(IpcChannel.sessionHookEvent, listener),
   onSessionCommand: (listener) => subscribe(IpcChannel.sessionCommand, listener),
   listChats: () => ipcRenderer.invoke(IpcChannel.listChats),
-  createChat: (toolId) => ipcRenderer.invoke(IpcChannel.createChat, toolId),
+  createChat: (agentId) => ipcRenderer.invoke(IpcChannel.createChat, agentId),
   renameChat: (id, name) => ipcRenderer.send(IpcChannel.renameChat, id, name),
   setChatTitle: (id, title) => ipcRenderer.send(IpcChannel.setChatTitle, id, title),
   deleteChat: (id) => ipcRenderer.invoke(IpcChannel.deleteChat, id),
   onChatsChanged: (listener) => subscribe(IpcChannel.chatsChanged, listener),
   listSavedSessions: () => ipcRenderer.invoke(IpcChannel.listSavedSessions),
-  createSavedSession: (projectRoot, worktreePath, toolId) =>
-    ipcRenderer.invoke(IpcChannel.createSavedSession, projectRoot, worktreePath, toolId),
+  createSavedSession: (projectRoot, worktreePath, agentId) =>
+    ipcRenderer.invoke(IpcChannel.createSavedSession, projectRoot, worktreePath, agentId),
   renameSavedSession: (id, name) => ipcRenderer.send(IpcChannel.renameSavedSession, id, name),
   setSavedSessionTitle: (id, title) => ipcRenderer.send(IpcChannel.setSavedSessionTitle, id, title),
   deleteSavedSession: (id) => ipcRenderer.invoke(IpcChannel.deleteSavedSession, id),
@@ -124,10 +133,10 @@ const api: HootApi = {
   readWorktrees: (projectRoot) => ipcRenderer.invoke(IpcChannel.readWorktrees, projectRoot),
   removeWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.invoke(IpcChannel.removeWorktree, projectRoot, worktreePath),
-  startMerge: (projectRoot, worktreePath, toolId) =>
-    ipcRenderer.invoke(IpcChannel.startMerge, projectRoot, worktreePath, toolId),
-  startDeletion: (projectRoot, worktreePath, toolId) =>
-    ipcRenderer.invoke(IpcChannel.startDeletion, projectRoot, worktreePath, toolId),
+  startMerge: (projectRoot, worktreePath, agentId) =>
+    ipcRenderer.invoke(IpcChannel.startMerge, projectRoot, worktreePath, agentId),
+  startDeletion: (projectRoot, worktreePath, agentId) =>
+    ipcRenderer.invoke(IpcChannel.startDeletion, projectRoot, worktreePath, agentId),
   revealWorktree: (projectRoot, worktreePath) =>
     ipcRenderer.send(IpcChannel.revealWorktree, projectRoot, worktreePath),
   copyWorktreePath: (projectRoot, worktreePath) =>

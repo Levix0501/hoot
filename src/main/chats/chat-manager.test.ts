@@ -4,9 +4,10 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HookEventReport } from '../../shared/hoot-cli'
+import { OWN_PROVIDER_IDS } from '../../shared/providers'
 import type { SessionInfo } from '../../shared/session'
 import { openDatabase } from '../database/database'
-import { ChatManager, ownConversations, visibleInput } from './chat-manager'
+import { ChatManager, ownConversations, visibleInput, type ChatAgent } from './chat-manager'
 import { ChatStore } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
 
@@ -43,6 +44,11 @@ const hook = (
   reason: null,
 })
 
+/** What a chat or saved session of a harness's own agent is made with, by the harness. */
+function agentOf(toolId: 'claude' | 'codex' | 'opencode'): ChatAgent {
+  return { toolId, providerId: OWN_PROVIDER_IDS[toolId], model: null, agentId: `agent-${toolId}` }
+}
+
 /** A saved session's process that ended. */
 const endedSaved = (
   savedSessionId: string,
@@ -55,6 +61,7 @@ const endedSaved = (
   chatId: null,
   savedSessionId,
   toolId,
+  providerId: null,
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
@@ -73,6 +80,7 @@ const endedLocal = (
   chatId: null,
   savedSessionId,
   toolId,
+  providerId: null,
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
@@ -86,6 +94,7 @@ const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): Session
   chatId,
   savedSessionId: null,
   toolId,
+  providerId: null,
   issueId: null,
   status: 'exited',
   exit: { code: 0, signal: null, abnormal: false },
@@ -175,7 +184,7 @@ describe('ChatManager', () => {
    * its own, which their agents recorded and ended: the second made later.
    */
   const twoSavedSessions = async (toolId: 'codex' | 'opencode', folder: string) => {
-    const first = manager.createSavedSession('/work/project', folder, toolId)
+    const first = manager.createSavedSession('/work/project', folder, agentOf(toolId))
     const firstConversation = first.conversationId ?? 'thread-1'
     const record = (list: AgentConversation[]) => {
       if (toolId === 'codex') conversations.codex = list
@@ -186,7 +195,7 @@ describe('ChatManager', () => {
     record([{ id: firstConversation, title: 'First', createdAt: 1 }])
     manager.sessionEnded(endedSaved(first.id, folder, toolId))
     await manager.flush()
-    const second = manager.createSavedSession('/work/project', folder, toolId)
+    const second = manager.createSavedSession('/work/project', folder, agentOf(toolId))
     const secondConversation = second.conversationId ?? 'thread-2'
     manager.opened(second.id)
     manager.typed(second.id, 'session-second', 'second question\r')
@@ -202,10 +211,10 @@ describe('ChatManager', () => {
   }
 
   it('gives every Codex and OpenCode chat a new folder, and Claude Code chats the shared one', async () => {
-    const claude = await manager.create('claude')
-    const codex = await manager.create('codex')
-    const opencode = await manager.create('opencode')
-    const codexAgain = await manager.create('codex')
+    const claude = await manager.create(agentOf('claude'))
+    const codex = await manager.create(agentOf('codex'))
+    const opencode = await manager.create(agentOf('opencode'))
+    const codexAgain = await manager.create(agentOf('codex'))
 
     expect(claude.folder).toBe(path.join(chatsRoot(), 'claude-code'))
     expect(fs.statSync(claude.folder).isDirectory()).toBe(true)
@@ -229,8 +238,8 @@ describe('ChatManager', () => {
   })
 
   it('keeps a chat name, title and position in the database', async () => {
-    const first = await manager.create('claude')
-    const second = await manager.create('codex')
+    const first = await manager.create(agentOf('claude'))
+    const second = await manager.create(agentOf('codex'))
     manager.setTitle(first.id, '✳ Fix the login')
     manager.rename(first.id, 'Login')
     manager.opened(first.id)
@@ -245,18 +254,18 @@ describe('ChatManager', () => {
   })
 
   it('keeps the last title an agent set when its program clears it on exit', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.setTitle(chat.id, '✳ Fix the login')
     manager.setTitle(chat.id, '')
     expect(manager.get(chat.id)?.title).toBe('✳ Fix the login')
   })
 
   it('makes a chat folder again when it was deleted, and starts its conversation anew or resumes it', async () => {
-    const codex = await manager.create('codex')
+    const codex = await manager.create(agentOf('codex'))
     fs.rmSync(codex.folder, { recursive: true })
     const prepared = await manager.prepareSession(codex.id)
     expect(fs.statSync(codex.folder).isDirectory()).toBe(true)
-    expect(prepared).toEqual({
+    expect(prepared).toMatchObject({
       folder: codex.folder,
       launch: { conversationId: null, resume: false },
     })
@@ -269,14 +278,14 @@ describe('ChatManager', () => {
       launch: { conversationId: 'thread-1', resume: true },
     })
 
-    const claude = await manager.create('claude')
+    const claude = await manager.create(agentOf('claude'))
     expect(await manager.prepareSession(claude.id)).toMatchObject({
       launch: { conversationId: null, resume: false },
     })
   })
 
   it('goes on in the conversation Claude Code went to at /clear once a message is sent there, adding no chat', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     const first = 'first-conversation'
     manager.setTitle(chat.id, '✳ Fix the login')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
@@ -309,7 +318,7 @@ describe('ChatManager', () => {
   })
 
   it('names a chat after the title Claude Code gives the conversation it went on to', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.setTitle(chat.id, '✳ Old conversation')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     await manager.flush()
@@ -334,7 +343,7 @@ describe('ChatManager', () => {
   })
 
   it('keeps the name the user gave a chat that goes on to another conversation', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.rename(chat.id, 'My task')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     manager.typed(chat.id, 'session-1', '/clear\r')
@@ -344,7 +353,7 @@ describe('ChatManager', () => {
   })
 
   it('keeps a Claude Code chat in its conversation when the next one gets no message', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     const first = 'first-conversation'
     manager.setTitle(chat.id, '✳ Old conversation')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first))
@@ -371,8 +380,8 @@ describe('ChatManager', () => {
   })
 
   it('goes on in the conversation Claude Code resumes or branches to, another chat’s too', async () => {
-    const one = await manager.create('claude')
-    const two = await manager.create('claude')
+    const one = await manager.create(agentOf('claude'))
+    const two = await manager.create(agentOf('claude'))
     const theirs = 'their-conversation'
     manager.noteHookEvent(one.id, hook('UserPromptSubmit', 'own-conversation'))
     manager.noteHookEvent(two.id, hook('UserPromptSubmit', theirs))
@@ -395,7 +404,7 @@ describe('ChatManager', () => {
   })
 
   it('leaves a chat in the conversation it went on to when a message of the one it left is told late', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     const first = 'first-conversation'
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', first, null, 1_000))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'next', null, 3_000))
@@ -405,7 +414,7 @@ describe('ChatManager', () => {
   })
 
   it('does not change the conversation of a Claude Code chat that compacts it', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'first-conversation'))
     await manager.flush()
     manager.typed(chat.id, 'session-1', '/compact\r')
@@ -418,7 +427,7 @@ describe('ChatManager', () => {
   })
 
   it('removes a Claude Code chat whose agent told of no conversation with a message, as with its hooks off', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
     manager.typed(chat.id, 'session-1', 'one\r')
@@ -430,13 +439,13 @@ describe('ChatManager', () => {
     expect(manager.list()).toEqual([])
 
     // So does one left without a conversation when Hoot starts again.
-    const left = await manager.create('claude')
+    const left = await manager.create(agentOf('claude'))
     const again = await restarted()
     expect(again.get(left.id)).toBeUndefined()
   })
 
   it('keeps a Claude Code chat in its conversation while its agent tells of none', async () => {
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))
     await manager.flush()
     await manager.prepareSession(chat.id)
@@ -466,6 +475,10 @@ describe('ChatManager', () => {
       hasMessages: true,
       createdAt: at,
       lastOpenedAt: at,
+      // Made before providers.
+      providerId: null,
+      model: null,
+      agentId: null,
     }
     store.insert(chat)
     // One whose conversation Hoot had not yet seen a message of, which the
@@ -503,7 +516,7 @@ describe('ChatManager', () => {
   })
 
   it('goes on in the newest Codex conversation when the process ends, listing no other', async () => {
-    const chat = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
     manager.typed(chat.id, 'session-1', 'first question\r')
     manager.typed(chat.id, 'session-1', '/new\r')
     manager.typed(chat.id, 'session-1', 'second question\r')
@@ -520,7 +533,7 @@ describe('ChatManager', () => {
   })
 
   it('keeps an OpenCode chat in its conversation after /new until a message is sent in the next one', async () => {
-    const chat = await manager.create('opencode')
+    const chat = await manager.create(agentOf('opencode'))
     const old = 'ses_first'
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
@@ -552,7 +565,7 @@ describe('ChatManager', () => {
   })
 
   it('leaves a chat in its conversation after a run whose agent recorded no other conversation, whatever was typed', async () => {
-    const chat = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
     conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
@@ -581,7 +594,7 @@ describe('ChatManager', () => {
     }
 
     // OpenCode's the same way.
-    const openCode = await manager.create('opencode')
+    const openCode = await manager.create(agentOf('opencode'))
     await manager.prepareSession(openCode.id)
     manager.opened(openCode.id)
     conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
@@ -596,7 +609,7 @@ describe('ChatManager', () => {
   })
 
   it('goes on to a conversation that started in its folder in the run, whatever was typed', async () => {
-    const chat = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
     await manager.prepareSession(chat.id)
     manager.opened(chat.id)
     conversations.codex = [{ id: 'thread-1', title: 'One', createdAt: clock }]
@@ -626,7 +639,7 @@ describe('ChatManager', () => {
     }
 
     // A new chat whose agent recorded none takes up the one that started.
-    const fresh = await manager.create('codex')
+    const fresh = await manager.create(agentOf('codex'))
     await manager.prepareSession(fresh.id)
     manager.opened(fresh.id)
     conversations.codex = [{ id: 'outside-fresh', title: 'Outside', createdAt: clock + 1 }]
@@ -635,7 +648,7 @@ describe('ChatManager', () => {
     expect(manager.get(fresh.id)).toMatchObject({ conversationId: 'outside-fresh' })
 
     // OpenCode's the same way.
-    const openCode = await manager.create('opencode')
+    const openCode = await manager.create(agentOf('opencode'))
     await manager.prepareSession(openCode.id)
     manager.opened(openCode.id)
     conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
@@ -655,7 +668,7 @@ describe('ChatManager', () => {
 
   it('goes on to no conversation that started before its agent did', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await manager.prepareSession(saved.id)
     manager.opened(saved.id)
     manager.typed(saved.id, 'session-1', 'a question\r')
@@ -679,7 +692,7 @@ describe('ChatManager', () => {
   })
 
   it('removes a chat whose agent only ran slash commands, without a message', async () => {
-    const chat = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
     manager.typed(chat.id, 'session-1', '/model\r')
     await manager.flush()
     expect(manager.get(chat.id)?.hasMessages).toBe(false)
@@ -691,7 +704,7 @@ describe('ChatManager', () => {
 
   it('removes a chat whose agent recorded no message, whatever was typed', async () => {
     for (const toolId of ['codex', 'opencode'] as const) {
-      const chat = await manager.create(toolId)
+      const chat = await manager.create(agentOf(toolId))
       await manager.prepareSession(chat.id)
       manager.opened(chat.id)
       manager.typed(chat.id, 'session-1', 'Reply with the single word: ok\r')
@@ -705,7 +718,7 @@ describe('ChatManager', () => {
   })
 
   it('removes a chat whose conversation never got a message, and its empty folder', async () => {
-    const chat = await manager.create('opencode')
+    const chat = await manager.create(agentOf('opencode'))
     conversations.opencode = []
     manager.sessionEnded(ended(chat.id, 'opencode'))
     await manager.flush()
@@ -715,14 +728,14 @@ describe('ChatManager', () => {
   })
 
   it('keeps a folder that holds a file, and Claude Code’s shared folder', async () => {
-    const opencode = await manager.create('opencode')
+    const opencode = await manager.create(agentOf('opencode'))
     fs.writeFileSync(path.join(opencode.folder, 'notes.txt'), 'keep')
     manager.sessionEnded(ended(opencode.id, 'opencode'))
     await manager.flush()
     expect(manager.list()).toEqual([])
     expect(fs.readdirSync(opencode.folder)).toEqual(['notes.txt'])
 
-    const claude = await manager.create('claude')
+    const claude = await manager.create(agentOf('claude'))
     conversations.claude = false
     manager.sessionEnded(ended(claude.id, 'claude'))
     await manager.flush()
@@ -755,7 +768,7 @@ describe('ChatManager', () => {
   })
 
   it('reads when it starts an OpenCode chat in a conversation an earlier version of Hoot gave OpenCode the id of', async () => {
-    const chat = await manager.create('opencode')
+    const chat = await manager.create(agentOf('opencode'))
     // As an earlier version of Hoot made it, which saw no message yet.
     new ChatStore(db).update(chat.id, { conversationId: 'ses_given' })
     conversations.opencode = [
@@ -763,7 +776,7 @@ describe('ChatManager', () => {
       { id: 'ses_second', title: 'Second', createdAt: 2 },
     ]
     // And one made since, which never ran.
-    const fresh = await manager.create('opencode')
+    const fresh = await manager.create(agentOf('opencode'))
 
     await manager.reconcileAll()
     expect(manager.list()).toEqual([
@@ -784,8 +797,8 @@ describe('ChatManager', () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
 
-    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
-    const later = manager.createSavedSession('/work/project', worktree, 'codex')
+    const saved = manager.createSavedSession('/work/project', worktree, agentOf('claude'))
+    const later = manager.createSavedSession('/work/project', worktree, agentOf('codex'))
 
     expect(saved).toMatchObject({
       folder: worktree,
@@ -803,9 +816,9 @@ describe('ChatManager', () => {
   it('removes the saved sessions of a worktree that is deleted, and no others', () => {
     const first = path.join(root, 'worktrees', 'first')
     const second = path.join(root, 'worktrees', 'second')
-    const kept = manager.createSavedSession('/work/project', second, 'claude')
-    manager.createSavedSession('/work/project', first, 'claude')
-    manager.createSavedSession('/work/project', first, 'codex')
+    const kept = manager.createSavedSession('/work/project', second, agentOf('claude'))
+    manager.createSavedSession('/work/project', first, agentOf('claude'))
+    manager.createSavedSession('/work/project', first, agentOf('codex'))
 
     manager.removeForWorktree(first)
 
@@ -815,7 +828,7 @@ describe('ChatManager', () => {
   it('removes a saved session that never got a message when its agent ends, keeping the worktree', async () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
-    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
+    const saved = manager.createSavedSession('/work/project', worktree, agentOf('claude'))
     conversations.claude = false
 
     manager.sessionEnded({
@@ -825,6 +838,7 @@ describe('ChatManager', () => {
       chatId: null,
       savedSessionId: saved.id,
       toolId: 'claude',
+      providerId: null,
       issueId: null,
       status: 'exited',
       exit: { code: 0, signal: null, abnormal: false },
@@ -839,7 +853,7 @@ describe('ChatManager', () => {
   it('keeps a saved session that got a message, and opens it again on its conversation', async () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
-    const saved = manager.createSavedSession('/work/project', worktree, 'claude')
+    const saved = manager.createSavedSession('/work/project', worktree, agentOf('claude'))
     manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'conversation-1'))
     await manager.flush()
 
@@ -848,7 +862,7 @@ describe('ChatManager', () => {
       hasMessages: true,
     })
     const prepared = await manager.prepareSession(saved.id)
-    expect(prepared).toEqual({
+    expect(prepared).toMatchObject({
       folder: worktree,
       launch: { conversationId: 'conversation-1', resume: true },
     })
@@ -857,7 +871,7 @@ describe('ChatManager', () => {
   it('makes a saved session with a name, and sends its first message only until its agent has started', async () => {
     const project = path.join(root, 'project')
     fs.mkdirSync(project)
-    const saved = manager.createSavedSession(project, null, 'codex', {
+    const saved = manager.createSavedSession(project, null, agentOf('codex'), {
       name: 'Merge feature-x',
       firstMessage: 'Merge it.',
     })
@@ -866,7 +880,7 @@ describe('ChatManager', () => {
       { id: saved.id, customName: 'Merge feature-x' },
     ])
     // A start that did not go ahead sends it the next time.
-    expect(await manager.prepareSession(saved.id)).toEqual({
+    expect(await manager.prepareSession(saved.id)).toMatchObject({
       folder: project,
       launch: { conversationId: null, resume: false, firstMessage: 'Merge it.' },
     })
@@ -874,7 +888,7 @@ describe('ChatManager', () => {
       launch: { firstMessage: 'Merge it.' },
     })
     manager.opened(saved.id)
-    expect(await manager.prepareSession(saved.id)).toEqual({
+    expect(await manager.prepareSession(saved.id)).toMatchObject({
       folder: project,
       launch: { conversationId: null, resume: false },
     })
@@ -883,14 +897,18 @@ describe('ChatManager', () => {
     expect(manager.get(saved.id)).toMatchObject({ customName: 'Mine' })
 
     // Nor is a first message sent to a conversation that is continued, nor kept for one deleted.
-    const other = manager.createSavedSession(project, null, 'claude', { firstMessage: 'Hi.' })
+    const other = manager.createSavedSession(project, null, agentOf('claude'), {
+      firstMessage: 'Hi.',
+    })
     manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'conversation-1'))
     await manager.flush()
     expect((await manager.prepareSession(other.id))?.launch).toEqual({
       conversationId: 'conversation-1',
       resume: true,
     })
-    const gone = manager.createSavedSession(project, null, 'opencode', { firstMessage: 'Hi.' })
+    const gone = manager.createSavedSession(project, null, agentOf('opencode'), {
+      firstMessage: 'Hi.',
+    })
     await manager.delete(gone.id)
     expect(await manager.prepareSession(gone.id)).toBeNull()
   })
@@ -898,7 +916,7 @@ describe('ChatManager', () => {
   it('goes on in a saved session’s next conversation, adding no session below its worktree', async () => {
     const worktree = path.join(root, 'worktrees', 'fix-login-bug')
     fs.mkdirSync(worktree, { recursive: true })
-    const saved = manager.createSavedSession('/work/project', worktree, 'codex')
+    const saved = manager.createSavedSession('/work/project', worktree, agentOf('codex'))
     conversations.codex = [
       { id: 'first', title: 'First', createdAt: 1 },
       { id: 'second', title: 'Second', createdAt: 2 },
@@ -915,8 +933,8 @@ describe('ChatManager', () => {
   })
 
   it('deletes a Claude Code chat for good, leaving the shared folder and what is in it', async () => {
-    const chat = await manager.create('claude')
-    const other = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
+    const other = await manager.create(agentOf('claude'))
     fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))
     manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'conversation-2'))
@@ -935,7 +953,7 @@ describe('ChatManager', () => {
   })
 
   it('no longer starts, renames or opens a deleted chat', async () => {
-    const chat = await manager.create('opencode')
+    const chat = await manager.create(agentOf('opencode'))
     manager.typed(chat.id, 'session-1', 'question\r')
     await manager.flush()
     await manager.delete(chat.id)
@@ -980,7 +998,7 @@ describe('ChatManager', () => {
 
       await manager.delete(first.id)
       // A new session, closed without a message.
-      const third = manager.createSavedSession('/work/project', folder, toolId)
+      const third = manager.createSavedSession('/work/project', folder, agentOf(toolId))
       manager.opened(third.id)
       manager.sessionEnded(endedSaved(third.id, folder, toolId))
       await manager.flush()
@@ -995,13 +1013,13 @@ describe('ChatManager', () => {
 
   it('learns the conversation of a Codex saved session deleted while it ran, before any other takes it', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const first = manager.createSavedSession('/work/project', folder, 'codex')
+    const first = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     conversations.codex = [{ id: 'thread-1', title: 'First', createdAt: 1 }]
     manager.opened(first.id)
     manager.typed(first.id, 'session-first', 'first question\r')
     manager.sessionEnded(endedSaved(first.id, folder, 'codex'))
     await manager.flush()
-    const second = manager.createSavedSession('/work/project', folder, 'codex')
+    const second = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     manager.opened(second.id)
     manager.typed(second.id, 'session-second', 'second question\r')
     // The first is opened again after it, so that it is the one opened last.
@@ -1021,7 +1039,7 @@ describe('ChatManager', () => {
     ])
 
     // Deleted once its agent ended, it takes its conversation along at once.
-    const third = again.createSavedSession('/work/project', folder, 'codex')
+    const third = again.createSavedSession('/work/project', folder, agentOf('codex'))
     again.opened(third.id)
     again.typed(third.id, 'session-third', 'third question\r')
     conversations.codex = [
@@ -1039,7 +1057,7 @@ describe('ChatManager', () => {
   })
 
   it('moves the folder of a deleted chat to the Trash with what is in it, once no other chat runs in it', async () => {
-    const chat = await manager.create('opencode')
+    const chat = await manager.create(agentOf('opencode'))
     const old = 'ses_first'
     manager.typed(chat.id, 'session-1', 'first question\r')
     conversations.opencode = [{ id: old, title: 'First', createdAt: 1 }]
@@ -1066,7 +1084,7 @@ describe('ChatManager', () => {
   })
 
   it('deletes a chat whose folder cannot go to the Trash, leaving the folder as it is', async () => {
-    const chat = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
     manager.typed(chat.id, 'session-1', 'question\r')
     conversations.codex = [{ id: 'thread-1', title: 'Question', createdAt: 1 }]
     manager.sessionEnded(ended(chat.id, 'codex'))
@@ -1088,7 +1106,7 @@ describe('ChatManager', () => {
     const folder = worktreeFolder('fix-login-bug')
     const { first, second } = await twoSavedSessions('opencode', folder)
     manager.rename(second.id, 'Second one')
-    const chat = await manager.create('claude')
+    const chat = await manager.create(agentOf('claude'))
     manager.rename(chat.id, 'Chat')
     const before = { chats: manager.list(), saved: manager.listSavedSessions() }
 
@@ -1104,12 +1122,12 @@ describe('ChatManager', () => {
     const folder = worktreeFolder('fix-login-bug')
     // A session an earlier version of Hoot kept without a conversation, as
     // one whose message its agent did not record.
-    const broken = manager.createSavedSession('/work/project', folder, 'codex')
+    const broken = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     new ChatStore(db).update(broken.id, { hasMessages: true })
     expect(manager.get(broken.id)).toEqual(
       expect.objectContaining({ conversationId: null, hasMessages: true }),
     )
-    const running = manager.createSavedSession('/work/project', folder, 'codex')
+    const running = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     manager.opened(running.id)
     manager.typed(running.id, 'session-running', 'question\r')
     conversations.codex = [{ id: 'thread-1', title: 'Question', createdAt: 1 }]
@@ -1129,7 +1147,7 @@ describe('ChatManager', () => {
 
   it('leaves a later conversation to the session it is of when the session opened last is deleted', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const deleted = manager.createSavedSession('/work/project', folder, 'codex')
+    const deleted = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     manager.opened(deleted.id)
     manager.typed(deleted.id, 'session-1', 'first question\r')
     conversations.codex = [{ id: 'thread-1', title: 'First', createdAt: 1 }]
@@ -1137,7 +1155,7 @@ describe('ChatManager', () => {
     await manager.flush()
     // Codex's records cannot be read when the other's agent ends, nor when
     // the first is opened again, last, and ends.
-    const other = manager.createSavedSession('/work/project', folder, 'codex')
+    const other = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     manager.opened(other.id)
     manager.typed(other.id, 'session-2', 'second question\r')
     conversations.codex = null
@@ -1162,8 +1180,8 @@ describe('ChatManager', () => {
   for (const toolId of ['codex', 'opencode'] as const) {
     it(`keeps a ${toolId} saved session deleted while another of its worktree ran out of Hoot`, async () => {
       const folder = worktreeFolder('fix-login-bug')
-      const deleted = manager.createSavedSession('/work/project', folder, toolId)
-      const other = manager.createSavedSession('/work/project', folder, toolId)
+      const deleted = manager.createSavedSession('/work/project', folder, agentOf(toolId))
+      const other = manager.createSavedSession('/work/project', folder, agentOf(toolId))
       // Both start a conversation Hoot does not know while both run.
       for (const [saved, message] of [
         [deleted, 'first question\r'],
@@ -1209,7 +1227,7 @@ describe('ChatManager', () => {
 
   it('keeps a saved session in the project folder apart from the chats, and never makes the folder', async () => {
     const folder = projectFolder()
-    const local = manager.createSavedSession(folder, null, 'claude')
+    const local = manager.createSavedSession(folder, null, agentOf('claude'))
 
     expect(local).toMatchObject({
       folder,
@@ -1223,7 +1241,7 @@ describe('ChatManager', () => {
 
     // One whose folder is gone, as when it was renamed, does not make it again.
     fs.renameSync(folder, `${folder}-renamed`)
-    expect(await manager.prepareSession(local.id)).toEqual({
+    expect(await manager.prepareSession(local.id)).toMatchObject({
       folder,
       launch: { conversationId: local.conversationId, resume: false },
     })
@@ -1232,7 +1250,7 @@ describe('ChatManager', () => {
 
   it('keeps a Claude Code session of the project folder that got a message, and resumes it', async () => {
     const folder = projectFolder()
-    const local = manager.createSavedSession(folder, null, 'claude')
+    const local = manager.createSavedSession(folder, null, agentOf('claude'))
     manager.opened(local.id)
     manager.noteHookEvent(local.id, hook('UserPromptSubmit', 'conversation-1'))
     conversations.claude = true
@@ -1243,7 +1261,7 @@ describe('ChatManager', () => {
     expect(again.listSavedSessions()).toEqual([
       expect.objectContaining({ id: local.id, worktreePath: null, hasMessages: true }),
     ])
-    expect(await again.prepareSession(local.id)).toEqual({
+    expect(await again.prepareSession(local.id)).toMatchObject({
       folder,
       launch: { conversationId: 'conversation-1', resume: true },
     })
@@ -1252,13 +1270,13 @@ describe('ChatManager', () => {
   it('leaves the project folder as it is when its sessions go', async () => {
     const folder = projectFolder()
     // One that never got a message goes once its agent ends.
-    const empty = manager.createSavedSession(folder, null, 'codex')
+    const empty = manager.createSavedSession(folder, null, agentOf('codex'))
     manager.opened(empty.id)
     manager.sessionEnded(endedLocal(empty.id, folder, 'codex'))
     await manager.flush()
     expect(manager.get(empty.id)).toBeUndefined()
     // One the user deletes goes too.
-    const deleted = manager.createSavedSession(folder, null, 'opencode')
+    const deleted = manager.createSavedSession(folder, null, agentOf('opencode'))
     await manager.delete(deleted.id)
     expect(manager.listSavedSessions()).toEqual([])
 
@@ -1275,7 +1293,7 @@ describe('ChatManager', () => {
     it(`gives a ${toolId} session of the project folder none of the conversations from before it`, async () => {
       const folder = projectFolder()
       record(outside)
-      const local = manager.createSavedSession(folder, null, toolId)
+      const local = manager.createSavedSession(folder, null, agentOf(toolId))
       const own = local.conversationId ?? 'thread-own'
       manager.opened(local.id)
       manager.typed(local.id, 'session-local', 'a question\r')
@@ -1297,7 +1315,7 @@ describe('ChatManager', () => {
     it(`goes on in what a ${toolId} session of the project folder went on to at /new, and nothing older`, async () => {
       const folder = projectFolder()
       record(outside)
-      const local = manager.createSavedSession(folder, null, toolId)
+      const local = manager.createSavedSession(folder, null, agentOf(toolId))
       const first = local.conversationId ?? 'thread-1'
       manager.opened(local.id)
       manager.typed(local.id, 'session-local', 'first question\r')
@@ -1321,7 +1339,7 @@ describe('ChatManager', () => {
     it(`gives a new ${toolId} session of the project folder nothing from before it, once the others are deleted`, async () => {
       const folder = projectFolder()
       record(outside)
-      const deleted = manager.createSavedSession(folder, null, toolId)
+      const deleted = manager.createSavedSession(folder, null, agentOf(toolId))
       const deletedOwn = deleted.conversationId ?? 'thread-deleted'
       manager.opened(deleted.id)
       manager.typed(deleted.id, 'session-deleted', 'a question\r')
@@ -1336,7 +1354,7 @@ describe('ChatManager', () => {
       // Another conversation out of Hoot, before the next session.
       recorded.push({ id: 'outside-3', title: 'Outside 3', createdAt: clock })
 
-      const local = manager.createSavedSession(folder, null, toolId)
+      const local = manager.createSavedSession(folder, null, agentOf(toolId))
       const own = local.conversationId ?? 'thread-own'
       manager.opened(local.id)
       manager.typed(local.id, 'session-local', 'another question\r')
@@ -1353,8 +1371,8 @@ describe('ChatManager', () => {
     it(`gives ${toolId} sessions of the project folder that ran side by side nothing from before them`, async () => {
       const folder = projectFolder()
       record(outside)
-      const first = manager.createSavedSession(folder, null, toolId)
-      const second = manager.createSavedSession(folder, null, toolId)
+      const first = manager.createSavedSession(folder, null, agentOf(toolId))
+      const second = manager.createSavedSession(folder, null, agentOf(toolId))
       // Both start a conversation Hoot does not know while both run.
       for (const [saved, message] of [
         [first, 'first question\r'],
@@ -1391,7 +1409,7 @@ describe('ChatManager', () => {
         await manager.prepareSession(id)
         manager.opened(id)
       }
-      const earlier = manager.createSavedSession(folder, null, toolId)
+      const earlier = manager.createSavedSession(folder, null, agentOf(toolId))
       const own = earlier.conversationId ?? 'thread-earlier'
       await start(earlier.id)
       manager.typed(earlier.id, 'session-earlier-1', 'a question\r')
@@ -1402,7 +1420,7 @@ describe('ChatManager', () => {
       manager.sessionEnded(endedLocal(earlier.id, folder, toolId))
       await manager.flush()
 
-      const later = manager.createSavedSession(folder, null, toolId)
+      const later = manager.createSavedSession(folder, null, agentOf(toolId))
       await start(later.id)
       manager.typed(later.id, 'session-later', 'another question\r')
       recorded.push({ id: 'thread-later', title: 'Later', createdAt: ++clock })
@@ -1485,8 +1503,8 @@ describe('ChatManager', () => {
   for (const order of ['first', 'second'] as const) {
     it(`keeps Codex sessions side by side in a worktree on the conversations Codex reported, closing the ${order} first`, async () => {
       const folder = worktreeFolder('fix-login-bug')
-      const one = manager.createSavedSession('/work/project', folder, 'codex')
-      const two = manager.createSavedSession('/work/project', folder, 'codex')
+      const one = manager.createSavedSession('/work/project', folder, agentOf('codex'))
+      const two = manager.createSavedSession('/work/project', folder, agentOf('codex'))
       await start(one.id)
       await start(two.id)
       manager.typed(one.id, 'session-one', 'one\r')
@@ -1520,8 +1538,8 @@ describe('ChatManager', () => {
 
   it('keeps a Codex session on the conversation Codex reported when another of its worktree is deleted', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const one = manager.createSavedSession('/work/project', folder, 'codex')
-    const two = manager.createSavedSession('/work/project', folder, 'codex')
+    const one = manager.createSavedSession('/work/project', folder, agentOf('codex'))
+    const two = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await start(one.id)
     await start(two.id)
     manager.typed(one.id, 'session-one', 'one\r')
@@ -1550,7 +1568,7 @@ describe('ChatManager', () => {
 
   it('keeps a Codex session of the project folder on the conversation Codex reported, whatever starts out of Hoot', async () => {
     const folder = projectFolder()
-    const local = manager.createSavedSession(folder, null, 'codex')
+    const local = manager.createSavedSession(folder, null, agentOf('codex'))
     await start(local.id)
     manager.typed(local.id, 'session-local', 'one\r')
     manager.noteHookEvent(local.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
@@ -1576,8 +1594,8 @@ describe('ChatManager', () => {
   })
 
   it('goes on in the conversation Codex reports a message in after /new, /resume or /fork', async () => {
-    const chat = await manager.create('codex')
-    const other = await manager.create('codex')
+    const chat = await manager.create(agentOf('codex'))
+    const other = await manager.create(agentOf('codex'))
     await start(chat.id)
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
     manager.noteHookEvent(other.id, hook('UserPromptSubmit', 'thread-theirs', null, ++clock))
@@ -1616,7 +1634,7 @@ describe('ChatManager', () => {
 
   it('keeps a Codex session in the conversation Codex reported after later runs that reported none', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await start(saved.id)
     manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
     manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
@@ -1656,7 +1674,7 @@ describe('ChatManager', () => {
 
   it('reads at its next start what a run of a Codex session Hoot did not see end did, when Codex never reported its conversation', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await start(saved.id)
     conversations.codex = [{ id: 'thread-one', title: 'One', createdAt: clock }]
     manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
@@ -1674,7 +1692,7 @@ describe('ChatManager', () => {
 
   it('keeps at its next start the conversation Codex reported for a session, whatever its runs Hoot did not see end did', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await start(saved.id)
     manager.typed(saved.id, 'session-1', 'one\r')
     manager.noteHookEvent(saved.id, hook('UserPromptSubmit', 'thread-one', null, ++clock))
@@ -1715,7 +1733,7 @@ describe('ChatManager', () => {
 
   it('reads at its next start only the runs of a Codex session in a conversation that Hoot did not see end', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     await start(saved.id)
     conversations.codex = [{ id: 'thread-one', title: 'One', createdAt: clock }]
     manager.sessionEnded(endedSaved(saved.id, folder, 'codex'))
@@ -1757,8 +1775,8 @@ describe('ChatManager', () => {
   for (const order of ['first', 'second'] as const) {
     it(`keeps OpenCode sessions side by side in a worktree on the conversations OpenCode reported, closing the ${order} first`, async () => {
       const folder = worktreeFolder('fix-login-bug')
-      const one = manager.createSavedSession('/work/project', folder, 'opencode')
-      const two = manager.createSavedSession('/work/project', folder, 'opencode')
+      const one = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
+      const two = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
       await start(one.id)
       await start(two.id)
       manager.noteHookEvent(one.id, openCodeMessage('ses_one', folder))
@@ -1797,8 +1815,8 @@ describe('ChatManager', () => {
 
   it('keeps an OpenCode session on the conversation OpenCode reported when another of its worktree is deleted', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const one = manager.createSavedSession('/work/project', folder, 'opencode')
-    const two = manager.createSavedSession('/work/project', folder, 'opencode')
+    const one = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
+    const two = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
     await start(one.id)
     await start(two.id)
     manager.noteHookEvent(one.id, openCodeMessage('ses_one', folder))
@@ -1831,7 +1849,7 @@ describe('ChatManager', () => {
     const sub = path.join(folder, 'sub')
     fs.mkdirSync(sub)
     const elsewhere = worktreeFolder('another-project')
-    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
     await start(saved.id)
     manager.noteHookEvent(saved.id, openCodeMessage('ses_one', folder))
     await manager.flush()
@@ -1875,7 +1893,7 @@ describe('ChatManager', () => {
 
   it('keeps an OpenCode session in the conversation OpenCode reported after later runs that reported none', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
     await start(saved.id)
     manager.noteHookEvent(saved.id, openCodeMessage('ses_one', folder))
     manager.sessionEnded(endedSaved(saved.id, folder, 'opencode'))
@@ -1915,7 +1933,7 @@ describe('ChatManager', () => {
 
   it('learns from OpenCode that a conversation an earlier version of Hoot gave it the id of got a message', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
     new ChatStore(db).update(saved.id, { conversationId: 'ses_given' })
     expect((await manager.prepareSession(saved.id))?.launch).toEqual({
       conversationId: 'ses_given',
@@ -1933,7 +1951,7 @@ describe('ChatManager', () => {
 
   it('reads at its next start only the runs of an OpenCode session that Hoot did not see end', async () => {
     const folder = worktreeFolder('fix-login-bug')
-    const saved = manager.createSavedSession('/work/project', folder, 'opencode')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
     // Its first run, which Hoot does not see end, starts a conversation.
     await start(saved.id)
     conversations.opencode = [{ id: 'ses_one', title: 'One', createdAt: clock }]
@@ -1956,7 +1974,7 @@ describe('ChatManager', () => {
   it('lists none of the earlier conversations of a worktree as a session of its own', async () => {
     const folder = worktreeFolder('fix-login-bug')
     conversations.codex = outside
-    const saved = manager.createSavedSession('/work/project', folder, 'codex')
+    const saved = manager.createSavedSession('/work/project', folder, agentOf('codex'))
     manager.opened(saved.id)
     manager.typed(saved.id, 'session-saved', 'a question\r')
     conversations.codex = [...outside, { id: 'own', title: 'Own', createdAt: saved.createdAt + 1 }]

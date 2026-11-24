@@ -323,12 +323,19 @@ describe('the upgrade to dependencies', () => {
 })
 
 /**
+ * The columns the upgrade to providers adds to a chat, as they are for one
+ * made before them: no provider, model or agent recorded.
+ */
+const PROVIDER_COLUMNS = { provider_id: null, model: null, agent_id: null }
+
+/**
  * The columns an upgrade from before version 9 adds to a chat, as they are
  * for one whose agent reported no conversation, in no run Hoot did not see end.
  */
 const REPORT_COLUMNS = {
   conversation_reported: 0,
   unreported_run_started_at: null,
+  ...PROVIDER_COLUMNS,
 }
 
 describe('the upgrade to labels', () => {
@@ -429,8 +436,46 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({ ...row, unreported_run_started_at: null })),
+      before.map((row) => ({ ...row, unreported_run_started_at: null, ...PROVIDER_COLUMNS })),
     )
+    db.close()
+  })
+
+  it('keeps the chats of the version before providers, recording none for them, and adds the providers and agents', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 10))
+    db.exec(`
+      INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
+          created_at, opened_at, project_root, worktree_path, deleted_at, conversation_reported,
+          unreported_run_started_at)
+        VALUES ('chat', 'claude', '/home/.hoot/chats/claude-code', 'c', 'T', NULL, 1, 1, 2, NULL,
+          NULL, NULL, 1, NULL);
+    `)
+    const before = db.prepare('SELECT * FROM chats').all()
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
+    expect(db.prepare('SELECT * FROM chats').all()).toEqual(
+      before.map((row) => ({ ...row, ...PROVIDER_COLUMNS })),
+    )
+    db.exec(`
+      INSERT INTO providers (id, name, preset_id, api_key, key_header, urls, models, created_at)
+        VALUES ('p', 'Kimi', 'kimi', 'sk', 'bearer', '{}', '[]', 1);
+      INSERT INTO agents (id, harness, provider_id, model, created_at)
+        VALUES ('a', 'claude', 'p', NULL, 1);
+    `)
+    expect(db.prepare('SELECT enabled, extra_args FROM agents').get()).toEqual({
+      enabled: 1,
+      extra_args: '[]',
+    })
+    expect(() =>
+      db.exec(
+        "INSERT INTO agents (id, harness, provider_id, created_at) VALUES ('b', 'shell', 'p', 1)",
+      ),
+    ).toThrow(/CHECK constraint/)
+    expect(() =>
+      db.exec(`INSERT INTO providers (id, name, api_key, key_header, urls, models, created_at)
+        VALUES ('q', '', 'sk', 'bearer', '{}', '[]', 1)`),
+    ).toThrow(/CHECK constraint/)
     db.close()
   })
 

@@ -1,8 +1,9 @@
 import type { ToolsState } from './ipc'
-import { agentEnabled, type LaunchSettings } from './launch-settings'
+import type { LaunchSettings } from './launch-settings'
+import { sessionAgent, usableAgents, type Agent, type ProvidersState } from './providers'
 import { sessionName } from './session'
 import { toolStatus } from './tool-status'
-import { CODING_TOOL_IDS, getTool, type CodingToolId, type ToolId } from './tools'
+import { getTool, type CodingToolId, type ToolId } from './tools'
 
 /**
  * A chat: a conversation with an agent that belongs to no project, which Hoot
@@ -36,6 +37,20 @@ export interface ChatInfo {
   createdAt: number
   /** Milliseconds since the Unix epoch, when the chat was last opened. */
   lastOpenedAt: number
+  /**
+   * The provider its agent runs on (see `Provider`), which it keeps when its
+   * agent changes or goes, so that its conversation goes on where it began;
+   * `null` for one made before providers, which runs on its agent's own
+   * configuration until Hoot records the provider that names.
+   */
+  providerId: string | null
+  /** The model it started with; `null` for its agent's default. */
+  model: string | null
+  /**
+   * The agent it was made with, whose effort level and extra arguments its
+   * sessions take while that agent is there; `null` for none.
+   */
+  agentId: string | null
 }
 
 /**
@@ -73,17 +88,13 @@ export function chatName(chat: {
 }
 
 /**
- * The agents a new chat can use: those the last detection found installed,
- * which the Agents page does not have turned off, in the order Claude Code,
- * Codex and OpenCode. Until the first detection has finished, none is.
+ * The agents a new chat can use (see `usableAgents`): those of the coding
+ * tools the last detection found installed. Until the first detection has
+ * finished, and until the agents are known, none is.
  */
-export function usableChatAgents(
-  tools: ToolsState,
-  launchSettings: LaunchSettings | null,
-): CodingToolId[] {
-  return CODING_TOOL_IDS.filter(
-    (id) => agentEnabled(launchSettings, id) && toolStatus(tools, getTool(id)) === 'available',
-  )
+export function usableChatAgents(tools: ToolsState, providers: ProvidersState | null): Agent[] {
+  if (providers === null) return []
+  return usableAgents(providers, (harness) => toolStatus(tools, getTool(harness)) === 'available')
 }
 
 /**
@@ -96,27 +107,29 @@ export function firstDetectionRunning(tools: ToolsState): boolean {
 }
 
 /**
- * The agent a new chat uses: the one asked for when it is among the usable
- * ones, else the default agent while it is usable, else the first usable
- * agent in the order of `usableChatAgents`; `null` when no agent is usable.
+ * Whether the agents are still being found for the first time since Hoot
+ * started: the coding tools installed (see `firstDetectionRunning`), and the
+ * agents Hoot makes of their globals as it opens.
+ */
+export function agentsChecking(tools: ToolsState, providers: ProvidersState | null): boolean {
+  return firstDetectionRunning(tools) || providers === null || !providers.ready
+}
+
+/**
+ * The agent a new chat uses: the one asked for, by id, when it is among the
+ * usable ones, else the default agent while it is usable, else the first
+ * usable agent in the order of `usableChatAgents`; `null` when no agent is
+ * usable. Without one asked for, the agent the menus mark Default.
  */
 export function chatAgent(
   tools: ToolsState,
+  providers: ProvidersState | null,
   launchSettings: LaunchSettings | null,
-  asked: CodingToolId | null = null,
-): CodingToolId | null {
-  const usable = usableChatAgents(tools, launchSettings)
-  if (asked !== null && usable.includes(asked)) return asked
-  const preferred = launchSettings?.defaultAgent ?? 'claude'
-  if (usable.includes(preferred)) return preferred
-  return usable[0] ?? null
-}
-
-/** Whether the default agent is among the usable agents, which the agent menu marks Default. */
-export function defaultAgentUsable(
-  tools: ToolsState,
-  launchSettings: LaunchSettings | null,
-): boolean {
-  const preferred = launchSettings?.defaultAgent ?? 'claude'
-  return usableChatAgents(tools, launchSettings).includes(preferred)
+  asked: string | null = null,
+): Agent | null {
+  return sessionAgent(
+    usableChatAgents(tools, providers),
+    launchSettings?.defaultAgent ?? null,
+    asked,
+  )
 }

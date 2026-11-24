@@ -43,14 +43,14 @@ export function NewChatItem() {
         <DropdownMenuContent align="start" className="w-auto min-w-48">
           <ChatAgentMenuEntries
             components={dropdownComponents}
-            onSelect={(toolId) => void newChat(toolId)}
+            onSelect={(agentId) => void newChat(agentId)}
           />
         </DropdownMenuContent>
       </DropdownMenu>
       <ContextMenuContent className="w-auto min-w-48">
         <ChatAgentMenuEntries
           components={contextComponents}
-          onSelect={(toolId) => void newChat(toolId)}
+          onSelect={(agentId) => void newChat(agentId)}
         />
       </ContextMenuContent>
     </ContextMenu>

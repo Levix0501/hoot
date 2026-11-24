@@ -247,4 +247,57 @@ export const MIGRATIONS: readonly string[] = [
   -- NULL when there is no such run.
   ALTER TABLE chats ADD COLUMN unreported_run_started_at INTEGER;
   `,
+  // 11: model providers, the agents made of them, and the provider each chat runs on.
+  `
+  -- The user's model providers, in the order they were made. The agents' own
+  -- models, their subscriptions and OpenCode's free models, have no row.
+  CREATE TABLE providers (
+    -- A UUID that Hoot picks.
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK (name <> ''),
+    -- The preset it was made from, which gives its mark; NULL for one Hoot does not know.
+    preset_id TEXT,
+    -- In plain text, as the agents' own configuration files keep it.
+    api_key TEXT NOT NULL,
+    -- How it takes the key: as a bearer token, or in an x-api-key header.
+    key_header TEXT NOT NULL CHECK (key_header IN ('bearer', 'x-api-key')),
+    -- A JSON object: its address for each format it serves, such as 'anthropic'.
+    urls TEXT NOT NULL,
+    -- A JSON array of model ids, the one a new agent takes first leading.
+    models TEXT NOT NULL,
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL
+  ) STRICT;
+
+  -- The agents the new session menus offer: a coding tool, run on a provider's
+  -- model, in the order they were made.
+  CREATE TABLE agents (
+    -- A UUID that Hoot picks.
+    id TEXT PRIMARY KEY,
+    harness TEXT NOT NULL CHECK (harness IN ('claude', 'codex', 'opencode')),
+    -- A row of providers, or the id of the harness's own models.
+    provider_id TEXT NOT NULL,
+    -- The name the user gave it; NULL for the one made from its provider.
+    name TEXT,
+    -- Whether the new session menus list it.
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    -- The model and effort level its sessions start with; NULL for the harness's default.
+    model TEXT,
+    effort TEXT,
+    -- A JSON array of the arguments added to the end of its sessions' own.
+    extra_args TEXT NOT NULL DEFAULT '[]',
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL
+  ) STRICT;
+
+  -- The provider and model a chat or saved session runs on, which it keeps
+  -- when its agent changes or goes: a row of providers, or the id of the
+  -- harness's own models. NULL for one made before providers, which runs on
+  -- its agent's own configuration until Hoot records the provider it names.
+  ALTER TABLE chats ADD COLUMN provider_id TEXT;
+  ALTER TABLE chats ADD COLUMN model TEXT;
+  -- The agent it was made with, whose effort level and extra arguments its
+  -- sessions take while it is there; NULL for none.
+  ALTER TABLE chats ADD COLUMN agent_id TEXT;
+  `,
 ]

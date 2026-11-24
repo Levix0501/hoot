@@ -4,10 +4,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CopyIcon,
-  LockIcon,
-  PlusIcon,
   RefreshCwIcon,
-  XIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -21,23 +18,11 @@ import {
   type AgentState,
   type InstallTarget,
 } from '../../../shared/agents'
-import {
-  commandSegments,
-  displayArgument,
-  displayCommand,
-  splitArguments,
-  type CommandSegment,
-} from '../../../shared/launch-command'
-import type {
-  AgentLaunchSettings,
-  AgentLaunchSettingsChange,
-} from '../../../shared/launch-settings'
-import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../../shared/tools'
+import { CODING_TOOLS, type CodingToolDefinition } from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { agentRowStatus, updateAllIncludes, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 import {
@@ -48,15 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select'
+import { AgentItem, DefaultAgentPicker, HarnessAgents, useCopied } from './agent-items'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
@@ -184,365 +161,6 @@ function RunsTooltip({ command, children }: { command: string | null; children: 
         Runs {command}
       </TooltipContent>
     </Tooltip>
-  )
-}
-
-/** Whether something was copied a moment ago, and a way to say that it just was. */
-function useCopied(): [copied: boolean, markCopied: () => void] {
-  const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    if (!copied) return
-    const timer = window.setTimeout(() => setCopied(false), 1200)
-    return () => window.clearTimeout(timer)
-  }, [copied])
-  return [copied, () => setCopied(true)]
-}
-
-/** A chip of the command editor. */
-const CHIP = 'inline-flex h-6 max-w-full items-center gap-1 rounded-md px-1.5 font-mono text-xs'
-
-/** A chip that is a picker: filled once something is picked, dashed while it is not. */
-const PICKER_CHIP =
-  'h-6 gap-1 rounded-md py-0 pr-1 pl-1.5 font-mono text-xs data-[size=sm]:h-6 dark:bg-transparent'
-const PICKED =
-  'border-transparent bg-chart-1/10 text-chart-1 hover:bg-chart-1/15 dark:bg-chart-1/15'
-const NOT_PICKED = 'border-dashed text-muted-foreground'
-/** A picked model that the agent's configuration no longer offers. */
-const PICKED_MISSING =
-  'border-transparent bg-destructive/10 text-destructive hover:bg-destructive/15 dark:bg-destructive/15'
-
-/** The choice of a picker that leaves it to the agent's own configuration. */
-const DEFAULT_CHOICE = '\u0000default'
-
-/** What a picker shows: what it puts in the command, or what it would pick. */
-function PickerText({ segment, placeholder }: { segment: CommandSegment; placeholder: string }) {
-  if (segment.args.length > 0) return <span className="truncate">{segment.text}</span>
-  return (
-    <span className="flex items-center gap-1">
-      <PlusIcon className="size-3" />
-      {placeholder}
-    </span>
-  )
-}
-
-/** The Default choice of a picker, with what the agent's configuration sets, if it names it. */
-function DefaultChoice({
-  tool,
-  configured,
-}: {
-  tool: CodingToolDefinition
-  configured: { value: string; source: string } | null
-}) {
-  return (
-    <SelectItem value={DEFAULT_CHOICE}>
-      <span>{configured === null ? 'Default' : `Default · ${configured.value}`}</span>
-      <span className="text-muted-foreground">
-        {configured === null ? `${tool.label}'s own setting` : configured.source}
-      </span>
-    </SelectItem>
-  )
-}
-
-/** The model chip, which picks a model from the agent's configuration. */
-function ModelPicker({
-  tool,
-  agent,
-  settings,
-  segment,
-  onChange,
-}: {
-  tool: CodingToolDefinition
-  agent: AgentState
-  settings: AgentLaunchSettings
-  segment: CommandSegment
-  onChange: (change: AgentLaunchSettingsChange) => void
-}) {
-  const options = agent.launchOptions
-  const models = options?.models ?? []
-  const current = settings.model
-  const missing = current !== null && options !== null && !models.some((m) => m.value === current)
-  const pick = (value: string) => {
-    const model = value === DEFAULT_CHOICE ? null : value
-    const efforts =
-      model === null
-        ? (options?.defaultEfforts ?? [])
-        : (models.find((option) => option.value === model)?.efforts ?? [])
-    // An effort level the new model does not take goes back to Default.
-    const effort =
-      settings.effort !== null && efforts.includes(settings.effort) ? settings.effort : null
-    onChange({ model, effort })
-  }
-  return (
-    <Select
-      value={current ?? DEFAULT_CHOICE}
-      onValueChange={(value) => {
-        if (typeof value === 'string') pick(value)
-      }}
-    >
-      <SelectTrigger
-        size="sm"
-        aria-label="Model"
-        className={cn(
-          PICKER_CHIP,
-          current === null ? NOT_PICKED : missing ? PICKED_MISSING : PICKED,
-        )}
-        data-testid={`agent-model-${tool.id}`}
-      >
-        {missing && <CircleAlertIcon className="size-3" />}
-        <PickerText segment={segment} placeholder="model" />
-      </SelectTrigger>
-      {/* As wide as its longest choice, so that the check never covers one. */}
-      <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-64">
-        <SelectGroup>
-          <DefaultChoice tool={tool} configured={options?.defaultModel ?? null} />
-        </SelectGroup>
-        {missing && (
-          <SelectGroup>
-            <SelectLabel>Not in the current configuration</SelectLabel>
-            <SelectItem value={current}>
-              <span className="font-mono text-xs">{current}</span>
-            </SelectItem>
-          </SelectGroup>
-        )}
-        {models.length > 0 && (
-          <SelectGroup>
-            <SelectLabel>From your configuration</SelectLabel>
-            {models.map((model) => (
-              <SelectItem
-                key={model.value}
-                value={model.value}
-                data-testid={`agent-model-${tool.id}-option-${model.value}`}
-              >
-                <span className="font-mono text-xs">{model.value}</span>
-                {model.label !== model.value && (
-                  <span className="text-xs text-muted-foreground">{model.label}</span>
-                )}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        )}
-      </SelectContent>
-    </Select>
-  )
-}
-
-/** The effort chip, which picks one of the levels the selected model takes. */
-function EffortPicker({
-  tool,
-  agent,
-  settings,
-  segment,
-  onChange,
-}: {
-  tool: CodingToolDefinition
-  agent: AgentState
-  settings: AgentLaunchSettings
-  segment: CommandSegment
-  onChange: (change: AgentLaunchSettingsChange) => void
-}) {
-  const options = agent.launchOptions
-  const efforts =
-    settings.model === null
-      ? (options?.defaultEfforts ?? [])
-      : (options?.models.find((option) => option.value === settings.model)?.efforts ?? [])
-  return (
-    <Select
-      value={settings.effort ?? DEFAULT_CHOICE}
-      onValueChange={(value) => {
-        if (typeof value === 'string') onChange({ effort: value === DEFAULT_CHOICE ? null : value })
-      }}
-    >
-      <SelectTrigger
-        size="sm"
-        aria-label="Effort"
-        className={cn(PICKER_CHIP, settings.effort === null ? NOT_PICKED : PICKED)}
-        data-testid={`agent-effort-${tool.id}`}
-      >
-        <PickerText segment={segment} placeholder="effort" />
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-48">
-        <DefaultChoice tool={tool} configured={options?.defaultEffort ?? null} />
-        {efforts.map((effort) => (
-          <SelectItem
-            key={effort}
-            value={effort}
-            data-testid={`agent-effort-${tool.id}-option-${effort}`}
-          >
-            <span className="font-mono text-xs">{effort}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-/** The button that copies a command, and says for a moment that it did. */
-function CopyCommandButton({ command, testId }: { command: string; testId: string }) {
-  const [copied, markCopied] = useCopied()
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground"
-            aria-label="Copy command"
-            onClick={() => {
-              api.writeClipboardText(command)
-              markCopied()
-            }}
-            data-testid={testId}
-          />
-        }
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </TooltipTrigger>
-      <TooltipContent>{copied ? 'Copied' : 'Copy command'}</TooltipContent>
-    </Tooltip>
-  )
-}
-
-/**
- * The command a new session runs, as chips: the program, the permission flag
- * that YOLO mode adds, the model and effort, which open their pickers, and the
- * extra arguments, typed at the end and removed with their ×.
- */
-function CommandEditor({
-  tool,
-  agent,
-  settings,
-  yoloMode,
-}: {
-  tool: CodingToolDefinition
-  agent: AgentState
-  settings: AgentLaunchSettings
-  yoloMode: boolean
-}) {
-  const changeAgentLaunchSettings = useAppStore((state) => state.changeAgentLaunchSettings)
-  const [draft, setDraft] = useState('')
-  const options = agent.launchOptions
-  const modelEfforts =
-    settings.model === null
-      ? []
-      : (options?.models.find((option) => option.value === settings.model)?.efforts ?? [])
-  const segments = commandSegments({
-    tool: tool.id,
-    program: tool.command,
-    yoloMode,
-    settings,
-    modelEfforts,
-    defaultEfforts: options?.defaultEfforts ?? [],
-  })
-  const command = displayCommand(segments)
-  const change = (update: AgentLaunchSettingsChange) => changeAgentLaunchSettings(tool.id, update)
-  const commit = () => {
-    const parts = splitArguments(draft)
-    if (parts.length === 0) return
-    change({ extraArgs: [...settings.extraArgs, ...parts] })
-    setDraft('')
-  }
-
-  const program = segments.find((segment) => segment.kind === 'program')
-  const permission = segments.find((segment) => segment.kind === 'permission')
-  const model = segments.find((segment) => segment.kind === 'model')
-  const effort = segments.find((segment) => segment.kind === 'effort')
-  // A picked model or effort stands where its arguments are; one not picked
-  // waits at the end, before the field that adds arguments.
-  const modelPicker = model && (
-    <ModelPicker tool={tool} agent={agent} settings={settings} segment={model} onChange={change} />
-  )
-  const effortPicker = effort && (
-    <EffortPicker
-      tool={tool}
-      agent={agent}
-      settings={settings}
-      segment={effort}
-      onChange={change}
-    />
-  )
-
-  return (
-    <div className="flex items-start gap-1">
-      {/* Lit while its field has focus, not while a chip keeps it after its picker closed. */}
-      <div
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-lg border border-input px-1.5 py-1 has-[input:focus]:border-ring has-[input:focus]:ring-3 has-[input:focus]:ring-ring/50 dark:bg-input/30"
-        role="group"
-        aria-label={`Command for ${tool.label}: ${command}`}
-        data-command={command}
-        data-testid={`agent-command-${tool.id}`}
-      >
-        {program && (
-          <span
-            className={cn(CHIP, 'px-1 font-semibold')}
-            data-testid={`agent-command-program-${tool.id}`}
-          >
-            {program.text}
-          </span>
-        )}
-        {permission && (
-          <Tooltip>
-            <TooltipTrigger render={<span className="inline-flex max-w-full" />}>
-              <span
-                className={cn(CHIP, 'bg-chart-3/10 text-chart-3 dark:bg-chart-3/15')}
-                data-testid={`agent-permission-${tool.id}`}
-              >
-                <LockIcon className="size-3 shrink-0" />
-                <span className="truncate">{permission.text}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{permission.note}</TooltipContent>
-          </Tooltip>
-        )}
-        {model && model.args.length > 0 && modelPicker}
-        {effort && effort.args.length > 0 && effortPicker}
-        {settings.extraArgs.map((argument, index) => (
-          <span
-            // Extra arguments are positional: their texts may repeat.
-            key={`${argument}-${index}`}
-            className={cn(CHIP, 'bg-muted pr-0.5 text-foreground')}
-            data-testid={`agent-extra-${tool.id}-${index}`}
-          >
-            <span className="truncate">{displayArgument(argument)}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${argument}`}
-              className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-              onClick={() =>
-                change({ extraArgs: settings.extraArgs.filter((_, at) => at !== index) })
-              }
-              data-testid={`agent-extra-remove-${tool.id}-${index}`}
-            >
-              <XIcon className="size-3" />
-            </button>
-          </span>
-        ))}
-        {model && model.args.length === 0 && modelPicker}
-        {effort && effort.args.length === 0 && effortPicker}
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              commit()
-            } else if (event.key === 'Backspace' && draft === '' && settings.extraArgs.length > 0) {
-              change({ extraArgs: settings.extraArgs.slice(0, -1) })
-            }
-          }}
-          onBlur={commit}
-          placeholder="Add arguments…"
-          spellCheck={false}
-          aria-label={`Add arguments for ${tool.label}`}
-          className="h-6 min-w-28 flex-1 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-muted-foreground"
-          data-testid={`agent-extra-input-${tool.id}`}
-        />
-      </div>
-      <span className="pt-1">
-        <CopyCommandButton command={command} testId={`agent-copy-${tool.id}`} />
-      </span>
-    </div>
   )
 }
 
@@ -842,37 +460,24 @@ function InstallationDetails({ agent }: { agent: AgentState }) {
 }
 
 /** The mark beside the name of the default agent. */
-function DefaultBadge({ id }: { id: CodingToolId }) {
-  return (
-    <Badge variant="secondary" data-testid={`agent-default-${id}`}>
-      Default
-    </Badge>
-  )
-}
-
-/** An installed agent's row, with its command editor below it while it is enabled. */
+/**
+ * An installed harness's row: the program alone, its installation and
+ * updates. Its agents follow it (see `HarnessAgents`).
+ */
 function AgentRow({
   tool,
   agent,
   target,
-  launchSettings,
-  isDefault,
-  yoloMode,
   onFailure,
 }: {
   tool: CodingToolDefinition
   agent: AgentState
   target: InstallTarget | null
-  launchSettings: AgentLaunchSettings
-  isDefault: boolean
-  yoloMode: boolean
   onFailure: (failure: AgentFailure) => void
 }) {
-  const changeAgentLaunchSettings = useAppStore((state) => state.changeAgentLaunchSettings)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const status = agentRowStatus(agent, target)
   const id = tool.id
-  const enabled = launchSettings.enabled
   const version = agent.installation?.version ?? null
   return (
     <Collapsible
@@ -881,24 +486,14 @@ function AgentRow({
       className="flex flex-col gap-2.5 px-4 py-3"
       data-testid={`agent-row-${id}`}
       data-status={agent.operation?.status === 'failed' ? 'failed' : status.kind}
-      data-enabled={enabled}
     >
       {/* As tall as a button, so that rows line up whether they have one or not. */}
       <div className="flex min-h-7 items-center gap-3">
-        <ToolIcon toolId={id} className={cn('size-5 shrink-0', !enabled && 'opacity-50')} />
+        <ToolIcon toolId={id} className="size-5 shrink-0" />
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span
-            className={cn('text-sm font-medium', !enabled && 'text-muted-foreground')}
-            data-testid={`agent-name-${id}`}
-          >
+          <span className="text-sm font-medium" data-testid={`agent-name-${id}`}>
             {tool.label}
           </span>
-          {isDefault && <DefaultBadge id={id} />}
-          {!enabled && (
-            <span className="text-xs text-muted-foreground" data-testid={`agent-disabled-${id}`}>
-              Off
-            </span>
-          )}
         </span>
         <AgentActions agent={agent} status={status} onFailure={onFailure} />
         {version !== null && (
@@ -916,19 +511,6 @@ function AgentRow({
             <Chevron open={detailsOpen} className="size-3" />
           </CollapsibleTrigger>
         )}
-        <Tooltip>
-          <TooltipTrigger render={<span className="inline-flex" />}>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => changeAgentLaunchSettings(id, { enabled: checked })}
-              aria-label={`Use ${tool.label}`}
-              data-testid={`agent-enabled-${id}`}
-            />
-          </TooltipTrigger>
-          <TooltipContent>
-            {enabled ? 'Shown in the new session menu' : 'Hidden from the new session menu'}
-          </TooltipContent>
-        </Tooltip>
       </div>
       <CollapsibleContent>
         <InstallationDetails agent={agent} />
@@ -941,30 +523,27 @@ function AgentRow({
           ])}
         </p>
       )}
-      {enabled && (
-        <div className="min-w-0 sm:pl-8">
-          <CommandEditor tool={tool} agent={agent} settings={launchSettings} yoloMode={yoloMode} />
-        </div>
-      )}
     </Collapsible>
   )
 }
 
-/** The agents that are not installed, in a group that ends the list and opens to show them. */
+/**
+ * The harnesses that are not installed, each with its agents, which wait for
+ * it, in a group that ends the list and opens to show them.
+ */
 function NotInstalledGroup({
   tools,
   states,
   target,
-  defaultAgent,
   onFailure,
 }: {
   tools: CodingToolDefinition[]
   states: Map<string, AgentState>
   target: InstallTarget | null
-  defaultAgent: CodingToolId
   onFailure: (failure: AgentFailure) => void
 }) {
   const [open, setOpen] = useState(false)
+  const agents = useAppStore((state) => state.providers?.agents)
   if (tools.length === 0) return null
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -980,37 +559,41 @@ function NotInstalledGroup({
           {tools.map((tool) => {
             const agent = states.get(tool.id) ?? unknownAgent(tool.id)
             const description = notInstalledDescription(agent, target)
+            const waiting = (agents ?? []).filter((made) => made.harness === tool.id)
             return (
-              <div
-                key={tool.id}
-                className="flex items-center gap-3 px-4 py-3"
-                data-testid={`agent-row-${tool.id}`}
-                data-status={
-                  agent.operation?.status === 'failed'
-                    ? 'failed'
-                    : agentRowStatus(agent, target).kind
-                }
-              >
-                <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
-                      {tool.label}
+              <div key={tool.id} data-testid={`agent-group-${tool.id}`}>
+                <div
+                  className="flex items-center gap-3 px-4 py-3"
+                  data-testid={`agent-row-${tool.id}`}
+                  data-status={
+                    agent.operation?.status === 'failed'
+                      ? 'failed'
+                      : agentRowStatus(agent, target).kind
+                  }
+                >
+                  <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
+                        {tool.label}
+                      </span>
                     </span>
-                    {tool.id === defaultAgent && <DefaultBadge id={tool.id} />}
+                    <span
+                      className="text-xs text-muted-foreground"
+                      data-testid={`agent-description-${tool.id}`}
+                    >
+                      {description ?? 'Not installed'}
+                    </span>
                   </span>
-                  <span
-                    className="text-xs text-muted-foreground"
-                    data-testid={`agent-description-${tool.id}`}
-                  >
-                    {description ?? 'Not installed'}
-                  </span>
-                </span>
-                <AgentActions
-                  agent={agent}
-                  status={agentRowStatus(agent, target)}
-                  onFailure={onFailure}
-                />
+                  <AgentActions
+                    agent={agent}
+                    status={agentRowStatus(agent, target)}
+                    onFailure={onFailure}
+                  />
+                </div>
+                {waiting.map((made) => (
+                  <AgentItem key={made.id} agent={made} state={agent} dormant />
+                ))}
               </div>
             )
           })}
@@ -1020,57 +603,12 @@ function NotInstalledGroup({
   )
 }
 
-/** The agents as the default agent picker lists them, each with its icon. */
-const AGENT_CHOICES = CODING_TOOLS.map((tool) => ({
-  value: tool.id,
-  // A row of its own, which keeps the icon centered on the name in the list too.
-  label: (
-    <span className="flex items-center gap-2">
-      <ToolIcon toolId={tool.id} className="size-4" />
-      {tool.label}
-    </span>
-  ),
-}))
-
-/** The picker of the default agent, which marks the agent's row Default. */
-function DefaultAgentPicker({ value, disabled }: { value: CodingToolId; disabled: boolean }) {
-  const setDefaultAgent = useAppStore((state) => state.setDefaultAgent)
-  return (
-    <Select
-      items={AGENT_CHOICES}
-      value={value}
-      onValueChange={(id) => {
-        if (id !== null) setDefaultAgent(id)
-      }}
-      disabled={disabled}
-    >
-      <SelectTrigger
-        className="min-w-40"
-        aria-labelledby="default-agent-label"
-        data-testid="default-agent"
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="end">
-        {AGENT_CHOICES.map((choice) => (
-          <SelectItem
-            key={choice.value}
-            value={choice.value}
-            data-testid={`default-agent-option-${choice.value}`}
-          >
-            {choice.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
 /**
  * The settings' Agents page: the default agent, the YOLO mode switch and the
- * switch for asking before a running session is closed, the installed agents
- * with the command each new session runs and the settings in it, Update all
- * and Re-detect, and below a group of the agents that are not installed.
+ * switch for asking before a running session is closed, the installed
+ * harnesses, each with its agents and the command each new session of theirs
+ * runs, Update all and Re-detect, and below a group of the harnesses that are
+ * not installed.
  */
 export function AgentsPage() {
   const agents = useAppStore((state) => state.agents)
@@ -1115,7 +653,6 @@ export function AgentsPage() {
   const updating = updatingAll && pending
   const showUpdateAll = updateAllCandidates.length >= 2 || updating
   const detecting = agents?.detecting ?? false
-  const defaultAgent = launchSettings?.defaultAgent ?? 'claude'
   const yoloMode = launchSettings?.yoloMode ?? true
   const confirmClose = launchSettings?.confirmClose ?? true
   const updateAllButton = (
@@ -1181,7 +718,7 @@ export function AgentsPage() {
                 </span>
                 <span className="text-xs text-muted-foreground">New chats use it.</span>
               </span>
-              <DefaultAgentPicker value={defaultAgent} disabled={launchSettings === null} />
+              <DefaultAgentPicker />
             </div>
             <label className="flex items-center gap-4 px-4 py-3">
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -1222,39 +759,30 @@ export function AgentsPage() {
           <div className="flex flex-col divide-y rounded-xl border" data-testid="agents-list">
             {installed.map((tool) => {
               const agent = states.get(tool.id) ?? unknownAgent(tool.id)
-              const settings = launchSettings?.agents[tool.id]
-              if (agents === null || settings === undefined) {
-                return (
-                  <div
-                    className="flex items-center gap-3 px-4 py-3"
-                    key={tool.id}
-                    data-testid={`agent-row-${tool.id}`}
-                    data-status="checking"
-                  >
-                    <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
-                    <span className="min-w-0 flex-1 text-sm font-medium">{tool.label}</span>
-                    <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
-                  </div>
-                )
-              }
               return (
-                <AgentRow
-                  key={tool.id}
-                  tool={tool}
-                  agent={agent}
-                  target={target}
-                  launchSettings={settings}
-                  isDefault={tool.id === defaultAgent}
-                  yoloMode={yoloMode}
-                  onFailure={setFailure}
-                />
+                // The harness's row, the program alone, and its agents below it.
+                <div key={tool.id} data-testid={`agent-group-${tool.id}`}>
+                  {agents === null ? (
+                    <div
+                      className="flex items-center gap-3 px-4 py-3"
+                      data-testid={`agent-row-${tool.id}`}
+                      data-status="checking"
+                    >
+                      <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
+                      <span className="min-w-0 flex-1 text-sm font-medium">{tool.label}</span>
+                      <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
+                    </div>
+                  ) : (
+                    <AgentRow tool={tool} agent={agent} target={target} onFailure={setFailure} />
+                  )}
+                  <HarnessAgents harness={tool.id} state={states.get(tool.id)} />
+                </div>
               )
             })}
             <NotInstalledGroup
               tools={notInstalled}
               states={states}
               target={target}
-              defaultAgent={defaultAgent}
               onFailure={setFailure}
             />
           </div>

@@ -7,6 +7,7 @@ import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS, HOOT_ENV } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
+import type { Provider } from '../../shared/providers'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import { readVersion } from '../agents/version'
 import { setEnvVariable, type Env } from '../env/env'
@@ -18,6 +19,7 @@ import {
 import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
 import { findCommand } from '../tools/find-command'
+import { claudeSessionEnv } from '../providers/claude-config'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
@@ -30,15 +32,38 @@ export interface LaunchContext {
   baseEnv: Env
   terminal(): TerminalEnvOptions
   getLoginEnvironment(): Promise<LoginEnvironment>
-  /** How coding tools start their new sessions, as the Agents page has them. */
+  /** How the session's agent starts, as the Agents page has it. */
   launchSettings(tool: CodingToolId): {
     yoloMode: boolean
     agent: AgentLaunchSettings
   }
+  /**
+   * The provider the session's agent runs on; `null` for the agent's own
+   * configuration, as for a chat made before providers.
+   */
+  provider: Provider | null
+  /**
+   * The variables of Claude Code's environment that say which provider it
+   * runs on, as the user's settings and the login shell's environment set
+   * them, which a session on another provider unsets (see `claudeSessionEnv`).
+   */
+  claudeUserVariables(): Promise<string[]>
+  /** The folder Hoot writes the settings of its Claude Code sessions in, a file each. */
+  settingsFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
   /** The folder of the plugin Hoot gives OpenCode (see `openCodePluginFolder`). */
   openCodePlugin: string
+}
+
+/**
+ * What an agent's session starts with: the agent's launch settings, and the
+ * provider it runs on, `null` for the agent's own configuration, as a chat
+ * made before providers runs.
+ */
+export interface AgentLaunch {
+  settings: AgentLaunchSettings
+  provider: Provider | null
 }
 
 /**
@@ -100,13 +125,48 @@ function withoutNul(text: string): string {
  * the background, so that it neither delays nor shows anything in Claude
  * Code; it prints nothing and always succeeds, so that it decides nothing.
  * The user's own hooks run as well, and a user who turned off all hooks
- * turns off these too.
+ * turns off these too. With an environment, that of the provider the session
+ * runs on (see `claudeSessionEnv`), which takes precedence over the user's.
  */
-export function claudeCodeHookSettings(hoot: string): string {
+export function claudeCodeSettings(
+  hoot: string,
+  env: Record<string, string> | null = null,
+): Record<string, unknown> {
   const hook = { type: 'command', command: quote([hoot, 'hook']), async: true }
-  return JSON.stringify({
+  return {
     hooks: Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [hook] }]])),
-  })
+    ...(env === null ? {} : { env }),
+  }
+}
+
+/**
+ * The file of a Claude Code session's settings (see `claudeCodeSettings`),
+ * named after the session in `folder`. Readable by the user alone, as it can
+ * hold the provider's key; its launch's cleanup removes it.
+ */
+export function claudeSettingsFilePath(folder: string, sessionId: string): string {
+  return path.join(folder, `${sessionId}.json`)
+}
+
+/** Writes a Claude Code session's settings into its file, and returns where that is. */
+async function writeClaudeSettings(context: LaunchContext, model: string | null): Promise<string> {
+  const env =
+    context.provider === null
+      ? null
+      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables())
+  const settings = claudeCodeSettings(path.join(context.hoot.binDirectory, 'hoot'), env)
+  const file = claudeSettingsFilePath(context.settingsFolder, context.hoot.sessionId)
+  try {
+    await fs.mkdir(context.settingsFolder, { recursive: true, mode: 0o700 })
+    await fs.writeFile(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 })
+    await fs.chmod(file, 0o600)
+  } catch (error) {
+    await fs.rm(file, { force: true }).catch(() => {})
+    throw new SessionError(
+      `Could not write the session's settings: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  return file
 }
 
 /** The first version of Codex that runs a hook in the background, rather than skipping it. */
@@ -343,13 +403,16 @@ export async function resolveLaunch(
   }
   const chatArguments = chatLaunchArguments(tool.id, chat)
   let hookArguments: string[] = []
+  /** The file of a Claude Code session's settings, which its cleanup removes. */
+  let settingsFile: string | null = null
   if (tool.id === 'claude') {
-    hookArguments = [
-      '--settings',
-      claudeCodeHookSettings(path.join(context.hoot.binDirectory, 'hoot')),
-    ]
+    settingsFile = await writeClaudeSettings(context, launch.agent.model)
+    hookArguments = ['--settings', settingsFile]
   } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
     hookArguments = ['-c', CODEX_HOOK_SETTING]
+  }
+  const removeSettings = () => {
+    if (settingsFile !== null) rmSync(settingsFile, { force: true })
   }
   const args = [
     ...program.args,
@@ -363,13 +426,29 @@ export async function resolveLaunch(
     ...chatArguments.after,
     ...(chat?.firstMessage === undefined ? [] : firstMessageArguments(tool.id, chat.firstMessage)),
   ]
-  if (issue === null) return { file: program.file, args, env }
+  if (issue === null) {
+    return {
+      file: program.file,
+      args,
+      env,
+      ...(settingsFile === null ? {} : { cleanup: removeSettings }),
+    }
+  }
   // Written last, so that a launch that fails leaves no folder of its own behind.
-  const issueFolder = await writeIssueFolder(cwd, issue)
+  let issueFolder: string
+  try {
+    issueFolder = await writeIssueFolder(cwd, issue)
+  } catch (error) {
+    removeSettings()
+    throw error
+  }
   return {
     file: program.file,
     args: [...args, ...sentIssueArgs(issueFolder, issue)],
     env,
-    cleanup: () => rmSync(issueFolder, { recursive: true, force: true }),
+    cleanup: () => {
+      removeSettings()
+      rmSync(issueFolder, { recursive: true, force: true })
+    },
   }
 }

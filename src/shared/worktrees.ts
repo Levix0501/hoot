@@ -1,5 +1,4 @@
 import type { SavedSessionInfo } from './chats'
-import type { CodingToolId } from './tools'
 
 /**
  * A worktree of a project: a linked worktree of the project's repository (its
@@ -228,8 +227,8 @@ export interface CreateWorktreeRequest {
   projectRoot: string
   /** The name typed for the worktree; blank, or only spaces, for a random one. */
   name: string
-  /** The agent to open a saved session with in the new worktree. */
-  toolId: CodingToolId
+  /** The agent to open a saved session with in the new worktree, by its id. */
+  agentId: string
   /** The local branch of the project repository to start from. */
   base: string
   /** The inner repositories to include, each with the local branch to start from. */

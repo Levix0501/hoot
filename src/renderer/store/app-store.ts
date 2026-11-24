@@ -6,9 +6,9 @@ import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
 import {
+  agentsChecking,
   chatAgent,
   chatName,
-  firstDetectionRunning,
   usableChatAgents,
   type ChatInfo,
   type SavedSessionInfo,
@@ -25,9 +25,12 @@ import {
 import type {
   AddProjectConfirmation,
   AddProjectResult,
+  AgentResult,
   LabelChangeRequest,
   NewLabelRequest,
   Project,
+  ProviderChangeResult,
+  ProviderResult,
   SessionCommand,
   SessionStartAnswer,
   ToolsState,
@@ -55,13 +58,21 @@ import {
   type NamedLabel,
 } from '../../shared/labels'
 import {
-  withAgentLaunchSettingsChange,
   withConfirmClose,
   withDefaultAgent,
   withYoloMode,
-  type AgentLaunchSettingsChange,
   type LaunchSettings,
 } from '../../shared/launch-settings'
+import {
+  issueAgent,
+  withAgentChange,
+  type Agent,
+  type AgentChange,
+  type NewAgent,
+  type NewProvider,
+  type ProviderChange,
+  type ProvidersState,
+} from '../../shared/providers'
 import {
   isNormalExit,
   sessionName,
@@ -123,7 +134,7 @@ import {
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
 /** The pages of the settings: Agents where Hoot manages them, Appearance, Labels, and About. */
-export type SettingsSection = 'agents' | 'appearance' | 'labels' | 'about'
+export type SettingsSection = 'agents' | 'providers' | 'appearance' | 'labels' | 'about'
 
 /**
  * How the issue list's Label filter matches the labels checked in it: issues
@@ -148,6 +159,17 @@ export interface UiSession {
    */
   savedSessionId: string | null
   toolId: ToolId
+  /**
+   * The agent a session that is no chat's or saved session's starts with, by
+   * its id, as one sent an issue does; `null` for every other session.
+   */
+  agentId: string | null
+  /**
+   * The provider its agent runs on, whose mark its icon carries (see
+   * `SessionInfo.providerId`); `null` for a Terminal session, and for an
+   * agent on its own configuration.
+   */
+  providerId: string | null
   /**
    * The issue the session was opened from, which Claude Code is sent when it
    * starts; `null` for any other session.
@@ -300,11 +322,13 @@ export interface AppState {
   tools: ToolsState
   /** The agents of the Agents page and their operations; `null` until they are known. */
   agents: AgentsState | null
-  /**
-   * The default agent, the YOLO mode switch and each agent's launch settings;
-   * `null` until they are known.
-   */
+  /** The default agent and the YOLO mode switch; `null` until they are known. */
   launchSettings: LaunchSettings | null
+  /**
+   * The user's providers, the agents made of them, and each installed
+   * agent's global; `null` until they are known.
+   */
+  providers: ProvidersState | null
   /** Every session, in the order they were started. */
   sessions: UiSession[]
   /** Every chat, in the order of the sidebar's Chats group. */
@@ -471,6 +495,12 @@ export interface AppState {
    * history.
    */
   settingsSection: SettingsSection | null
+  /**
+   * Whether another page asked the Providers page to add a provider, as an
+   * agent's provider picker does with Add provider…, which it does once it
+   * shows.
+   */
+  addingProvider: boolean
 
   /**
    * Reads the window's state and the appearance picked, and follows their
@@ -496,8 +526,8 @@ export interface AppState {
   /** Updates every agent that can be updated, one after another. */
   updateAllAgents(): void
   cancelAgentOperation(id: CodingToolId): void
-  /** Makes an agent the default agent. */
-  setDefaultAgent(id: CodingToolId): void
+  /** Makes an agent the default agent, by its id, or none. */
+  setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
   /**
@@ -505,16 +535,27 @@ export interface AppState {
    * ways to close a single session.
    */
   setConfirmClose(on: boolean): void
-  /** Changes an agent's launch settings for the sessions that start from now on. */
-  changeAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
+  addProvider(provider: NewProvider): Promise<ProviderResult>
+  /** Changes a provider; one that is a global is written into its agent's configuration too. */
+  updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
+  removeProvider(id: string): Promise<ProviderChangeResult>
+  /** Makes a provider an agent's global, writing it into the agent's own configuration. */
+  setGlobalProvider(harness: CodingToolId, providerId: string): Promise<ProviderChangeResult>
+  /** Writes another model into an agent's own configuration. */
+  setGlobalModel(harness: CodingToolId, model: string | null): Promise<ProviderChangeResult>
+  /** Makes an agent of a harness and a provider. */
+  makeAgent(agent: NewAgent): Promise<AgentResult>
+  /** Changes an agent for the sessions that start from now on. */
+  changeAgent(id: string, change: AgentChange): void
+  deleteAgent(id: string): void
   /**
-   * Opens a new chat with `toolId`, or with the default agent while it can be
-   * used, else the first agent that can: a chat of the agent, shown in the
-   * main area, and its agent's process started. Without an agent that can be
-   * used, opens the Agents page and says that one must be installed or turned
-   * on. Until the first detection of the agents finishes, nothing happens.
+   * Opens a new chat with an agent, by its id, or with the default agent
+   * while it can be used, else the first agent that can: a chat of the agent,
+   * shown in the main area, and its agent's process started. Without an
+   * agent that can be used, opens the Agents page and says that one must be
+   * set up. Until the first detection of the agents finishes, nothing happens.
    */
-  newChat(toolId?: CodingToolId): Promise<void>
+  newChat(agentId?: string): Promise<void>
   /**
    * Shows a chat's page and, when no process of it runs, starts its agent in
    * the chat's folder, continuing its conversation; a chat that ended
@@ -532,15 +573,15 @@ export interface AppState {
   resumeSavedSession(id: string): void
   /**
    * Makes a saved session in a worktree, or with `null` for the worktree, in
-   * the project's own folder, and opens it: of `toolId`, or without one, of
-   * the agent a new chat would start with. Without an agent that can be used,
-   * opens the Agents page and says that one must be installed or turned on.
-   * Until the first detection of the agents finishes, nothing happens.
+   * the project's own folder, and opens it: of an agent, by its id, or
+   * without one, of the agent a new chat would start with. Without an agent
+   * that can be used, opens the Agents page and says that one must be set
+   * up. Until the first detection of the agents finishes, nothing happens.
    */
   newWorktreeSession(
     projectRoot: string,
     worktreePath: string | null,
-    toolId?: CodingToolId,
+    agentId?: string,
   ): Promise<void>
   /**
    * Starts a Terminal session in a worktree, or with `null` for the worktree,
@@ -632,6 +673,10 @@ export interface AppState {
   showSettings(section?: SettingsSection): void
   /** Shows another page of the settings, without recording it in the history. */
   selectSettingsSection(section: SettingsSection): void
+  /** Shows the Providers page, adding a provider (see `addingProvider`). */
+  startAddingProvider(): void
+  /** The Providers page took the request to add a provider. */
+  tookAddingProvider(): void
   /**
    * Leaves the settings as going back does. Without a page before them, shows
    * the empty page instead, and takes the settings out of the history.
@@ -813,7 +858,7 @@ export interface AppState {
    * the rest itself, with nothing checked first. Only a project folder or
    * worktree that is gone stops it, which Hoot says.
    */
-  mergeWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
+  mergeWorktree(projectRoot: string, worktreePath: string, agentId: string): Promise<void>
   /**
    * Deletes a worktree and its branch with an agent, as its Delete menu
    * does. While the deletion session it last opened for the worktree has its
@@ -824,7 +869,7 @@ export interface AppState {
    * worktree that is gone stops it, which Hoot says. The worktree's row goes
    * once Git no longer lists it.
    */
-  deleteWorktree(projectRoot: string, worktreePath: string, toolId: CodingToolId): Promise<void>
+  deleteWorktree(projectRoot: string, worktreePath: string, agentId: string): Promise<void>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
    * its registrations and what Hoot keeps of it, such as its saved
@@ -1035,6 +1080,7 @@ export function shownSessionName(
 function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
   return {
     ...info,
+    agentId: null,
     title: record?.title ?? '',
     workingSince: null,
     attention: null,
@@ -1236,7 +1282,10 @@ let shownIssueCache: { issues: readonly Issue[]; shown: Map<number, Issue> } | n
  * its workflow is finished. None when it can be.
  */
 export function startBlockersOf(
-  state: Pick<AppState, 'tools' | 'issues' | 'dependencies' | 'labels'>,
+  state: Pick<
+    AppState,
+    'tools' | 'issues' | 'dependencies' | 'labels' | 'providers' | 'launchSettings'
+  >,
   issue: Pick<Issue, 'id' | 'projectId'>,
 ): StartBlocker[] {
   if (shownIssueCache?.issues !== state.issues) {
@@ -1251,6 +1300,17 @@ export function startBlockersOf(
     issue,
     waitedOnIds(shown, state.dependencies.links, issue.id),
     issueProgressOf(state, issue.id),
+    issueAgentOf(state) !== null,
+  )
+}
+
+/** The agent work on an issue starts with (see `issueAgent`); `null` while there is none. */
+export function issueAgentOf(
+  state: Pick<AppState, 'tools' | 'providers' | 'launchSettings'>,
+): Agent | null {
+  return issueAgent(
+    usableChatAgents(state.tools, state.providers),
+    state.launchSettings?.defaultAgent ?? null,
   )
 }
 
@@ -1899,7 +1959,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     job: WorktreeJob,
     projectRoot: string,
     worktreePath: string,
-    toolId: CodingToolId,
+    agentId: string,
   ) => {
     const key = worktreeJobKey(job, projectRoot, worktreePath)
     const shown = jobSessions.get(key)
@@ -1912,9 +1972,9 @@ export const useAppStore = create<AppState>()((set, get) => {
     }
     jobSessions.delete(key)
     // As for a new session: an agent turned off since the menu showed starts nothing.
-    const { tools, launchSettings } = get()
-    if (firstDetectionRunning(tools)) return
-    if (!usableChatAgents(tools, launchSettings).includes(toolId)) {
+    const { tools, providers } = get()
+    if (agentsChecking(tools, get().providers)) return
+    if (!usableChatAgents(tools, providers).some((agent) => agent.id === agentId)) {
       toast.error('Could not start a session.', {
         description: 'Install an agent or turn one on in the Agents page first.',
       })
@@ -1926,8 +1986,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     jobsStarting.add(key)
     const result = await (
       job === 'merge'
-        ? api.startMerge(projectRoot, worktreePath, toolId)
-        : api.startDeletion(projectRoot, worktreePath, toolId)
+        ? api.startMerge(projectRoot, worktreePath, agentId)
+        : api.startDeletion(projectRoot, worktreePath, agentId)
     )
       .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
       .finally(() => jobsStarting.delete(key))
@@ -2039,6 +2099,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     chat: ChatInfo | null = null,
     saved: SavedSessionInfo | null = null,
     createdAt = Date.now(),
+    agent: Agent | null = null,
   ): string => {
     const id = crypto.randomUUID()
     openTerminal(id)
@@ -2053,6 +2114,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           chatId: chat?.id ?? null,
           savedSessionId: saved?.id ?? null,
           toolId,
+          agentId: agent?.id ?? null,
+          providerId: saved?.providerId ?? chat?.providerId ?? agent?.providerId ?? null,
           issueId,
           status: 'starting',
           exit: null,
@@ -2281,7 +2344,27 @@ export const useAppStore = create<AppState>()((set, get) => {
           setStarting(issueId, false)
         }
       }
-      const id = addSession(project.root, 'claude', worktreePath, issueId, show)
+      // The agent it starts with, as its start button showed it: it may have gone meanwhile.
+      const agent = issueAgentOf(get())
+      if (agent === null) {
+        if (!quiet) {
+          toast.error(`Could not start work on ${identifier}.`, {
+            description: startBlockerText({ kind: 'no-agent' }),
+          })
+        }
+        return fail(startBlockerText({ kind: 'no-agent' }))
+      }
+      const id = addSession(
+        project.root,
+        'claude',
+        worktreePath,
+        issueId,
+        show,
+        null,
+        null,
+        Date.now(),
+        agent,
+      )
       launchOptions.set(id, { by, prompt })
       if (show) return { ok: true, worktreePath }
       // Not shown, its terminal view does not start it: it starts with the terminal's size.
@@ -2302,6 +2385,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     tools: { detecting: true, tools: [], error: null },
     agents: null,
     launchSettings: null,
+    providers: null,
     sessions: [],
     chats: [],
     savedSessions: [],
@@ -2349,6 +2433,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
     settingsSection: null,
+    addingProvider: false,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
@@ -2456,6 +2541,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       // Set as soon as it arrives: a change reported after it is newer.
       void api.getAgents().then((agents) => set((state) => ({ agents: state.agents ?? agents })))
       api.onLaunchSettingsChanged((launchSettings) => set({ launchSettings }))
+      api.onProvidersChanged((providers) => set({ providers }))
+      // Set as soon as it arrives: a change reported after it is newer.
+      void api
+        .getProviders()
+        .then((providers) => set((state) => ({ providers: state.providers ?? providers })))
       api.onSessionUpdated((info) => {
         if (!findSession(info.id)) return
         set((state) => ({
@@ -2463,6 +2553,7 @@ export const useAppStore = create<AppState>()((set, get) => {
             status: info.status,
             exit: info.exit,
             program: info.program,
+            ...(info.providerId === null ? {} : { providerId: info.providerId }),
           }),
         }))
         if (info.status !== 'exited') return
@@ -2646,28 +2737,89 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.setConfirmClose(on)
     },
 
-    changeAgentLaunchSettings(id, change) {
-      const launchSettings = withAgentLaunchSettingsChange(get().launchSettings, id, change)
-      if (launchSettings !== null) set({ launchSettings })
-      api.setAgentLaunchSettings(id, change)
+    addProvider(provider) {
+      return api
+        .addProvider(provider)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
     },
 
-    async newChat(toolId) {
-      const { tools, launchSettings } = get()
+    updateProvider(id, change) {
+      return api
+        .updateProvider(id, change)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    },
+
+    removeProvider(id) {
+      return api
+        .removeProvider(id)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    },
+
+    setGlobalProvider(harness, providerId) {
+      return api
+        .setGlobalProvider(harness, providerId)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    },
+
+    setGlobalModel(harness, model) {
+      return api
+        .setGlobalModel(harness, model)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    },
+
+    makeAgent(agent) {
+      return api
+        .makeAgent(agent)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+    },
+
+    changeAgent(id, change) {
+      // Shown at once; the main process reports the agents as they are kept.
+      set((state) =>
+        state.providers === null
+          ? {}
+          : {
+              providers: {
+                ...state.providers,
+                agents: state.providers.agents.map((agent) =>
+                  agent.id === id ? withAgentChange(agent, change) : agent,
+                ),
+              },
+            },
+      )
+      api.changeAgent(id, change)
+    },
+
+    deleteAgent(id) {
+      set((state) =>
+        state.providers === null
+          ? {}
+          : {
+              providers: {
+                ...state.providers,
+                agents: state.providers.agents.filter((agent) => agent.id !== id),
+              },
+            },
+      )
+      api.deleteAgent(id)
+    },
+
+    async newChat(agentId) {
+      const { tools, providers, launchSettings } = get()
       // The first detection of the agents says which can start a chat; until
       // it has finished, a click does nothing. A later detection leaves the
       // last one's agents usable meanwhile.
-      if (firstDetectionRunning(tools)) return
-      const agent = chatAgent(tools, launchSettings, toolId ?? null)
+      if (agentsChecking(tools, get().providers)) return
+      const agent = chatAgent(tools, providers, launchSettings, agentId ?? null)
       if (agent === null) {
         toast.error('Could not start a chat.', {
-          description: 'Install an agent or turn one on in the Agents page first.',
+          description: 'Set up an agent in the Agents page first.',
         })
         get().showSettings('agents')
         return
       }
       const result = await api
-        .createChat(agent)
+        .createChat(agent.id)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
       if (!result.ok) {
         toast.error('Could not start a chat.', { description: result.message })
@@ -2784,19 +2936,19 @@ export const useAppStore = create<AppState>()((set, get) => {
       get().openSavedSession(id)
     },
 
-    async newWorktreeSession(projectRoot, worktreePath, toolId) {
-      const { tools, launchSettings } = get()
-      if (firstDetectionRunning(tools)) return
-      const agent = toolId ?? chatAgent(tools, launchSettings)
-      if (agent === null || !usableChatAgents(tools, launchSettings).includes(agent)) {
+    async newWorktreeSession(projectRoot, worktreePath, agentId) {
+      const { tools, providers, launchSettings } = get()
+      if (agentsChecking(tools, get().providers)) return
+      const agent = chatAgent(tools, providers, launchSettings, agentId ?? null)
+      if (agent === null || (agentId !== undefined && agent.id !== agentId)) {
         toast.error('Could not start a session.', {
-          description: 'Install an agent or turn one on in the Agents page first.',
+          description: 'Set up an agent in the Agents page first.',
         })
         get().showSettings('agents')
         return
       }
       const result = await api
-        .createSavedSession(projectRoot, worktreePath, agent)
+        .createSavedSession(projectRoot, worktreePath, agent.id)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
       if (!result.ok) {
         toast.error('Could not start a session.', { description: result.message })
@@ -2815,12 +2967,12 @@ export const useAppStore = create<AppState>()((set, get) => {
       addSession(projectRoot, 'shell', worktreePath)
     },
 
-    mergeWorktree(projectRoot, worktreePath, toolId) {
-      return startWorktreeJob('merge', projectRoot, worktreePath, toolId)
+    mergeWorktree(projectRoot, worktreePath, agentId) {
+      return startWorktreeJob('merge', projectRoot, worktreePath, agentId)
     },
 
-    deleteWorktree(projectRoot, worktreePath, toolId) {
-      return startWorktreeJob('delete', projectRoot, worktreePath, toolId)
+    deleteWorktree(projectRoot, worktreePath, agentId) {
+      return startWorktreeJob('delete', projectRoot, worktreePath, agentId)
     },
 
     openCreatedSession(session) {
@@ -2991,6 +3143,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         ...(session.chatId === null ? {} : { chatId: session.chatId }),
         ...(session.savedSessionId === null ? {} : { savedSessionId: session.savedSessionId }),
         toolId: session.toolId,
+        ...(session.agentId === null ? {} : { agentId: session.agentId }),
         issueId: session.issueId,
         ...(options === undefined ? {} : { startedBy: options.by }),
         ...(options === undefined || options.prompt === null ? {} : { prompt: options.prompt }),
@@ -3109,6 +3262,15 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (isSettingsPage(get().currentPage)) return
       blurBeforeSettings()
       showPage(settingsPage)
+    },
+
+    startAddingProvider() {
+      set({ addingProvider: true })
+      get().showSettings('providers')
+    },
+
+    tookAddingProvider() {
+      set({ addingProvider: false })
     },
 
     selectSettingsSection(section) {
@@ -3589,12 +3751,12 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     openNewWorktreeDialog(projectRoot, from = null) {
       if (!get().projects.some((project) => project.root === projectRoot)) return
-      const { tools, launchSettings } = get()
+      const { tools, providers } = get()
       // Until the first detection has finished, nothing happens.
-      if (firstDetectionRunning(tools)) return
-      if (usableChatAgents(tools, launchSettings).length === 0) {
+      if (agentsChecking(tools, get().providers)) return
+      if (usableChatAgents(tools, providers).length === 0) {
         toast.error('Could not create a worktree.', {
-          description: 'Install an agent or turn one on in the Agents page first.',
+          description: 'Set up an agent in the Agents page first.',
         })
         get().showSettings('agents')
         return

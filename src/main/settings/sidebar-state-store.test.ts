@@ -56,12 +56,12 @@ describe('SidebarStateStore', () => {
     const sidebar = new SidebarStateStore(directory)
     launch.setYoloMode(false)
     sidebar.setOpen(false)
-    launch.change('claude', { model: 'opus' })
+    launch.setDefaultAgent('agent-1')
     expect(saved()).toMatchObject({
-      launchSettings: { yoloMode: false, agents: { claude: { model: 'opus' } } },
+      launchSettings: { yoloMode: false, defaultAgentId: 'agent-1' },
       sidebarCollapsed: true,
     })
-    expect(new LaunchSettingsStore(directory).agent('claude').model).toBe('opus')
+    expect(new LaunchSettingsStore(directory).all().defaultAgent).toBe('agent-1')
     expect(new SidebarStateStore(directory).open).toBe(false)
   })
 

@@ -5,7 +5,7 @@ import { cn } from '../lib/utils'
 import { LIGHT_UNDER_CLOSE, ROW_WITH_CLOSE, SessionCloseButton } from './session-close-button'
 import { SessionMenu } from './session-menus'
 import { StateLight } from './state-light'
-import { ToolIcon } from './tool-icon'
+import { AgentIcon } from './provider-icon'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { SidebarMenuButton, SidebarMenuItem } from './ui/sidebar'
 
@@ -47,7 +47,11 @@ export function SessionItem({ session }: { session: UiSession }) {
           data-testid="session-item-button"
         >
           {/* As much smaller as its name, centered where a full-size icon would be. */}
-          <ToolIcon toolId={session.toolId} className="mx-px size-3.5" />
+          <AgentIcon
+            toolId={session.toolId}
+            providerId={session.providerId}
+            className="mx-px size-3.5"
+          />
           <span
             className="min-w-0 flex-1 truncate"
             data-session-name=""

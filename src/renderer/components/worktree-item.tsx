@@ -9,7 +9,6 @@ import {
   Trash2Icon,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import type { CodingToolId } from '../../shared/tools'
 import { api } from '../lib/api'
 import { sessionsSummary, sessionState } from '../lib/session-state'
 import { cn } from '../lib/utils'
@@ -84,12 +83,11 @@ function WorktreeMenuEntries({
       path: worktree.path,
       name: worktree.name ?? worktree.displayName,
     })
-  const merge = (toolId: CodingToolId) => void mergeWorktree(projectRoot, worktree.path, toolId)
+  const merge = (agentId: string) => void mergeWorktree(projectRoot, worktree.path, agentId)
   const reveal = () => api.revealWorktree(projectRoot, worktree.path)
   const copyPath = () => api.copyWorktreePath(projectRoot, worktree.path)
   const remove = () => void removeMissingWorktree(projectRoot, worktree.path)
-  const deleteWith = (toolId: CodingToolId) =>
-    void deleteWorktree(projectRoot, worktree.path, toolId)
+  const deleteWith = (agentId: string) => void deleteWorktree(projectRoot, worktree.path, agentId)
 
   // A missing worktree can always be removed: also a locked one, whose lock
   // note shows below Remove, one Git no longer lists, and one with open

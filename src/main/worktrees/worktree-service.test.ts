@@ -472,7 +472,7 @@ describe('WorktreeService', () => {
     const request = {
       projectRoot: project,
       name: 'Fix login bug',
-      toolId: 'claude' as const,
+      agentId: 'agent-1' as const,
       base: 'main',
       nested: [],
     }
@@ -504,7 +504,7 @@ describe('WorktreeService', () => {
     const blank = await service.createNamed({
       projectRoot: project,
       name: '   ',
-      toolId: 'codex',
+      agentId: 'agent-1',
       base: 'main',
       nested: [],
     })
@@ -517,7 +517,7 @@ describe('WorktreeService', () => {
     const typed = await service.createNamed({
       projectRoot: project,
       name: '修复登录 bug',
-      toolId: 'claude',
+      agentId: 'agent-1',
       base: 'main',
       nested: [],
     })
@@ -533,7 +533,7 @@ describe('WorktreeService', () => {
     const created = await service.createNamed({
       projectRoot: project,
       name: 'same',
-      toolId: 'claude',
+      agentId: 'agent-1',
       base: 'main',
       nested: [{ relativePath: 'inner', base: 'main' }],
     })
@@ -976,7 +976,7 @@ describe('WorktreeService', () => {
     const created = await service.createNamed({
       projectRoot: project,
       name,
-      toolId: 'claude',
+      agentId: 'agent-1',
       base: 'main',
       nested,
     })
@@ -1285,7 +1285,7 @@ describe('WorktreeService', () => {
     const created = await service.createNamed({
       projectRoot: project,
       name: 'Feature X',
-      toolId: 'claude',
+      agentId: 'agent-1',
       base: 'main',
       nested: [{ relativePath: 'inner', base: 'main' }],
     })

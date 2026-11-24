@@ -19,19 +19,27 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { SidebarMenuAction, SidebarMenuButton } from './ui/sidebar'
 
-export const dropdownComponents: ChatMenuComponents = { Item: DropdownMenuItem }
+export const dropdownComponents: ChatMenuComponents = {
+  Item: DropdownMenuItem,
+  Separator: DropdownMenuSeparator,
+}
 
-export const contextComponents: ChatMenuComponents = { Item: ContextMenuItem }
+export const contextComponents: ChatMenuComponents = {
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+}
 
 /**
  * What a project's `⋯` menu and its context menu hold, the same in both: the

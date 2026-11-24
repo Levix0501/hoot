@@ -31,6 +31,11 @@ export interface SessionInfo {
   savedSessionId: string | null
   toolId: ToolId
   /**
+   * The provider its agent runs on (see `Provider`); `null` for a Terminal
+   * session, and for an agent on its own configuration.
+   */
+  providerId: string | null
+  /**
    * The issue whose start button started the session, which Claude Code was
    * sent when it started; `null` for any other session.
    */

@@ -7,14 +7,9 @@ import {
   XIcon,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  defaultAgentUsable,
-  chatAgent,
-  usableChatAgents,
-  type SavedSessionInfo,
-} from '../../shared/chats'
+import { chatAgent, usableChatAgents, type SavedSessionInfo } from '../../shared/chats'
 import type { Project } from '../../shared/ipc'
-import { getTool, type CodingToolId } from '../../shared/tools'
+import { agentName, type Agent } from '../../shared/providers'
 import {
   defaultNestedBase,
   initialWorktreeChoices,
@@ -36,7 +31,7 @@ import {
   type NewWorktreeRequest,
 } from '../store/app-store'
 import { Spinner } from './ui/spinner'
-import { ToolIcon } from './tool-icon'
+import { AgentIcon } from './provider-icon'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
@@ -155,28 +150,29 @@ function BranchSelect({
   )
 }
 
-/** The agent choices of the dialog: the usable agents, with the default one marked. */
-function AgentPicker({
-  value,
-  onChange,
-}: {
-  value: CodingToolId
-  onChange: (toolId: CodingToolId) => void
-}) {
+/**
+ * The agent choices of the dialog: the usable agents, by their ids, in the
+ * menus' order, with the one a new chat starts with marked Default.
+ */
+function AgentPicker({ value, onChange }: { value: string; onChange: (agentId: string) => void }) {
   const tools = useAppStore((state) => state.tools)
+  const providers = useAppStore((state) => state.providers)
   const launchSettings = useAppStore((state) => state.launchSettings)
-  const usable = usableChatAgents(tools, launchSettings)
-  const marked = defaultAgentUsable(tools, launchSettings)
-  const defaultAgent = launchSettings?.defaultAgent ?? 'claude'
-  const selected = usable.includes(value) ? value : (usable[0] ?? value)
+  const usable = usableChatAgents(tools, providers)
+  const marked = chatAgent(tools, providers, launchSettings)
+  const selected = usable.find((agent) => agent.id === value) ?? usable[0]
+  const nameOf = (agent: Agent) => (providers === null ? '' : agentName(agent, providers))
+  if (selected === undefined) return null
 
   return (
     <Combobox
-      items={usable as CodingToolId[]}
+      items={usable}
       value={selected}
-      onValueChange={(toolId: CodingToolId | null) => {
-        if (toolId !== null) onChange(toolId)
+      onValueChange={(agent: Agent | null) => {
+        if (agent !== null) onChange(agent.id)
       }}
+      itemToStringLabel={nameOf}
+      isItemEqualToValue={(item: Agent, current: Agent) => item.id === current.id}
       autoHighlight
     >
       <ComboboxTrigger
@@ -185,14 +181,19 @@ function AgentPicker({
             variant="outline"
             size="xs"
             className={CHIP}
-            aria-label={`Agent: ${getTool(selected).label}`}
+            aria-label={`Agent: ${nameOf(selected)}`}
             data-testid="worktree-agent-button"
-            data-tool={selected}
+            data-tool={selected.harness}
+            data-agent={selected.id}
           />
         }
       >
-        <ToolIcon toolId={selected} className="size-3.5" />
-        <span>{getTool(selected).label}</span>
+        <AgentIcon
+          toolId={selected.harness}
+          providerId={selected.providerId}
+          className="size-3.5"
+        />
+        <span>{nameOf(selected)}</span>
       </ComboboxTrigger>
       <ComboboxContent className="w-56">
         <ComboboxInput
@@ -203,19 +204,19 @@ function AgentPicker({
         />
         <ComboboxEmpty>No matches.</ComboboxEmpty>
         <ComboboxList>
-          {(toolId: CodingToolId) => (
+          {(agent: Agent) => (
             <ComboboxItem
-              key={toolId}
-              value={toolId}
-              data-testid={`worktree-dialog-agent-${toolId}`}
+              key={agent.id}
+              value={agent}
+              data-testid={`worktree-dialog-agent-${agent.id}`}
             >
-              <ToolIcon toolId={toolId} />
-              <span className="min-w-0 flex-1 truncate">{getTool(toolId).label}</span>
-              {marked && defaultAgent === toolId && (
+              <AgentIcon toolId={agent.harness} providerId={agent.providerId} className="size-4" />
+              <span className="min-w-0 flex-1 truncate">{nameOf(agent)}</span>
+              {marked?.id === agent.id && (
                 <Badge
                   variant="secondary"
                   className="ml-auto"
-                  data-testid={`worktree-dialog-agent-default-${toolId}`}
+                  data-testid={`worktree-dialog-agent-default-${agent.id}`}
                 >
                   Default
                 </Badge>
@@ -491,8 +492,9 @@ function NewWorktreeForm({
   sourceName: string | null
   name: string
   onNameChange: (name: string) => void
-  agent: CodingToolId
-  onAgentChange: (agent: CodingToolId) => void
+  /** The agent's id. */
+  agent: string
+  onAgentChange: (agent: string) => void
   /** The project's branches and inner repositories, or `null` while they load. */
   options: NewWorktreeOptions | null
   onCreatingChange: (creating: boolean) => void
@@ -607,7 +609,7 @@ function NewWorktreeForm({
       .createWorktree({
         projectRoot,
         name,
-        toolId: agent,
+        agentId: agent,
         base,
         nested: included.map((repository) => ({
           relativePath: repository.relativePath,
@@ -817,14 +819,15 @@ function NewWorktreeContent({
 }) {
   const projects = useAppStore((state) => state.projects)
   const tools = useAppStore((state) => state.tools)
+  const providers = useAppStore((state) => state.providers)
   const launchSettings = useAppStore((state) => state.launchSettings)
   const [chosen, setChosen] = useState(initialProject)
   // A picked project that leaves the list gives way to the first one.
   const project = projects.find((candidate) => candidate.id === chosen.id) ?? projects[0]
   // Kept when another project is picked, as the agent the user picked is.
   const [name, setName] = useState('')
-  const [agent, setAgent] = useState<CodingToolId>(
-    () => chatAgent(tools, launchSettings) ?? 'claude',
+  const [agent, setAgent] = useState<string>(
+    () => chatAgent(tools, providers, launchSettings)?.id ?? '',
   )
   const [loaded, setLoaded] = useState<
     { root: string; options: NewWorktreeOptionsResult } | { root: string; error: string } | null
@@ -893,7 +896,12 @@ function NewWorktreeContent({
           sourceName={source?.name ?? null}
           name={name}
           onNameChange={setName}
-          agent={agent}
+          agent={
+            // The agent picked while it can be used, else the one the picker shows.
+            usableChatAgents(tools, providers).find((usable) => usable.id === agent)?.id ??
+            chatAgent(tools, providers, launchSettings)?.id ??
+            ''
+          }
           onAgentChange={setAgent}
           options={options}
           onCreatingChange={onCreatingChange}

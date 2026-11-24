@@ -17,7 +17,16 @@ import type {
 import type { HookEventReport } from './hoot-cli'
 import type { Issue, IssueChanges, IssueResult, NewIssue } from './issues'
 import type { Label, LabelActor, LabelEvent, LabelGroup, Labels } from './labels'
-import type { AgentLaunchSettingsChange, LaunchSettings } from './launch-settings'
+import type { LaunchSettings } from './launch-settings'
+import type {
+  Agent,
+  AgentChange,
+  NewAgent,
+  NewProvider,
+  Provider,
+  ProviderChange,
+  ProvidersState,
+} from './providers'
 import type { ProjectFolderInfo } from './project-folders'
 import type { QuitReason, SessionInfo } from './session'
 import type { SidebarGroupId } from './sidebar-groups'
@@ -118,6 +127,12 @@ export interface StartSessionRequest {
   savedSessionId?: string | null
   toolId: ToolId
   /**
+   * The agent a session that is no chat's or saved session's starts with, by
+   * its id, such as one sent an issue; a chat's and a saved session's take
+   * theirs from it. Left out for a Terminal session.
+   */
+  agentId?: string | null
+  /**
    * The issue the session is started from, a Claude Code session in one of
    * the project's worktrees, which is sent the issue; `null` for every other
    * session.
@@ -140,6 +155,15 @@ export interface StartSessionRequest {
 }
 
 export type StartSessionResult = { ok: true; session: SessionInfo } | { ok: false; message: string }
+
+/** A provider made or changed, or why not. */
+export type ProviderResult = { ok: true; provider: Provider } | { ok: false; message: string }
+
+/** An agent made, or why not. */
+export type AgentResult = { ok: true; agent: Agent } | { ok: false; message: string }
+
+/** Whether a provider was deleted, or a global changed, or why not. */
+export type ProviderChangeResult = { ok: true } | { ok: false; message: string }
 
 /** A chat Hoot made, or why it could not. */
 export type CreateChatResult = { ok: true; chat: ChatInfo } | { ok: false; message: string }
@@ -279,8 +303,17 @@ export const IpcChannel = {
   setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
   setConfirmClose: 'launch-settings:set-confirm-close',
-  setAgentLaunchSettings: 'launch-settings:set-agent',
   launchSettingsChanged: 'launch-settings:changed',
+  getProviders: 'providers:get',
+  providersChanged: 'providers:changed',
+  addProvider: 'providers:add',
+  updateProvider: 'providers:update',
+  removeProvider: 'providers:remove',
+  setGlobalProvider: 'providers:set-global',
+  setGlobalModel: 'providers:set-global-model',
+  makeAgent: 'agents:make',
+  changeAgent: 'agents:change',
+  deleteAgent: 'agents:delete',
   listSessions: 'session:list',
   startSession: 'session:start',
   closeSession: 'session:close',
@@ -473,20 +506,32 @@ export interface HootApi {
   updateAllAgents(): void
   /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
-  /**
-   * The default agent, the YOLO mode switch, whether closing a running
-   * session asks first, and each agent's launch settings.
-   */
+  /** The default agent, the YOLO mode switch, and whether closing a running session asks first. */
   getLaunchSettings(): Promise<LaunchSettings>
-  /** Makes an agent the default agent. */
-  setDefaultAgent(id: CodingToolId): void
+  /** Makes an agent the default agent, by its id, or none. */
+  setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
   /** Turns on or off asking before a running session is closed. */
   setConfirmClose(on: boolean): void
-  /** Changes an agent's launch settings for the sessions that start from now on. */
-  setAgentLaunchSettings(id: CodingToolId, change: AgentLaunchSettingsChange): void
   onLaunchSettingsChanged(listener: (settings: LaunchSettings) => void): () => void
+  /** The user's providers, the agents, and each installed agent's global. */
+  getProviders(): Promise<ProvidersState>
+  onProvidersChanged(listener: (state: ProvidersState) => void): () => void
+  addProvider(provider: NewProvider): Promise<ProviderResult>
+  /** Changes a provider; one that is a global is written into its agent's configuration too. */
+  updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
+  /** Deletes a provider no agent runs on and that is no global. */
+  removeProvider(id: string): Promise<ProviderChangeResult>
+  /** Makes a provider an agent's global, writing it into the agent's own configuration. */
+  setGlobalProvider(harness: CodingToolId, providerId: string): Promise<ProviderChangeResult>
+  /** Writes another model into an agent's own configuration, keeping its provider. */
+  setGlobalModel(harness: CodingToolId, model: string | null): Promise<ProviderChangeResult>
+  /** Makes an agent of a harness and a provider. */
+  makeAgent(agent: NewAgent): Promise<AgentResult>
+  /** Changes an agent, for the sessions that start from now on. */
+  changeAgent(id: string, change: AgentChange): void
+  deleteAgent(id: string): void
   /** The sessions that have started, oldest first. */
   listSessions(): Promise<SessionInfo[]>
   startSession(request: StartSessionRequest): Promise<StartSessionResult>
@@ -505,8 +550,8 @@ export interface HootApi {
   onSessionCommand(listener: (command: SessionCommand) => void): () => void
   /** Every chat, in the order of the sidebar's Chats group. */
   listChats(): Promise<ChatInfo[]>
-  /** Makes a chat of an agent, in a new folder of its own, and says which. */
-  createChat(toolId: CodingToolId): Promise<CreateChatResult>
+  /** Makes a chat of an agent, by its id, in a new folder of its own, and says which. */
+  createChat(agentId: string): Promise<CreateChatResult>
   /** Gives a chat another name; an empty name gives it its default name again. */
   renameChat(id: string, name: string): void
   /** Notes the terminal title the chat's agent set, which names the chat. */
@@ -533,7 +578,7 @@ export interface HootApi {
   createSavedSession(
     projectRoot: string,
     worktreePath: string | null,
-    toolId: CodingToolId,
+    agentId: string,
   ): Promise<CreateSavedSessionResult>
   /** Gives a saved session another name; an empty name gives it its default name again. */
   renameSavedSession(id: string, name: string): void
@@ -659,11 +704,7 @@ export interface HootApi {
    * to merge when it first starts and judges the rest itself. Nothing is
    * checked first; only a project folder or worktree that is gone stops it.
    */
-  startMerge(
-    projectRoot: string,
-    worktreePath: string,
-    toolId: CodingToolId,
-  ): Promise<StartMergeResult>
+  startMerge(projectRoot: string, worktreePath: string, agentId: string): Promise<StartMergeResult>
   /**
    * Makes the saved session in the project's own folder that has an agent
    * delete a worktree and its branch, named after the worktree, which is
@@ -674,7 +715,7 @@ export interface HootApi {
   startDeletion(
     projectRoot: string,
     worktreePath: string,
-    toolId: CodingToolId,
+    agentId: string,
   ): Promise<StartDeletionResult>
   revealWorktree(projectRoot: string, worktreePath: string): void
   copyWorktreePath(projectRoot: string, worktreePath: string): void

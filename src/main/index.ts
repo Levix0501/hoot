@@ -6,8 +6,12 @@ import type { DatabaseSync } from 'node:sqlite'
 import { app, BrowserWindow, Menu, nativeTheme, net, shell as desktop } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { ISSUE_WORKFLOW } from '../shared/built-in-workflow'
+import { usableChatAgents } from '../shared/chats'
 import { waitedOnIds } from '../shared/dependencies'
-import { IpcChannel, type SessionCommand } from '../shared/ipc'
+import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
+import { defaultAgentLaunchSettings } from '../shared/launch-settings'
+import { issueAgent, type GlobalConfig, type Provider } from '../shared/providers'
+import { CODING_TOOL_IDS, type CodingToolId } from '../shared/tools'
 import { startBlockers } from '../shared/start-blockers'
 import {
   WINDOWS_LAYOUT_SWITCH,
@@ -16,7 +20,7 @@ import {
 } from '../shared/window-controls'
 import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
-import { readCodexLaunchOptions } from './agents/codex-options'
+import { codexConfigPath, readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
@@ -36,6 +40,14 @@ import { LabelStore } from './labels/label-store'
 import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-project'
 import { ProjectFolders } from './projects/project-folders'
 import { ProjectStore } from './projects/project-store'
+import {
+  claudeSignedIn,
+  claudeUserVariables,
+  readClaudeGlobal,
+  writeClaudeGlobal,
+} from './providers/claude-config'
+import { ProviderService, type GlobalReading } from './providers/provider-service'
+import { ProviderStore } from './providers/provider-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
 import { resolveLaunch } from './session/launch'
@@ -118,9 +130,16 @@ const tools = new ToolService({
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
 let terminalOptions: TerminalEnvOptions | null = null
+/**
+ * Where the settings of each Claude Code session go, a file each, which go
+ * with their sessions; those a Hoot that did not quit left behind go as Hoot
+ * starts.
+ */
+const sessionSettingsFolder = path.join(app.getPath('userData'), 'session-settings')
+fs.rmSync(sessionSettingsFolder, { recursive: true, force: true })
 const sessions = new SessionManager({
   host: ptyHost,
-  resolveLaunch: (toolId, cwd, issue, chat, sessionId) =>
+  resolveLaunch: (toolId, cwd, issue, chat, agent, sessionId) =>
     resolveLaunch(
       {
         shell,
@@ -131,10 +150,14 @@ const sessions = new SessionManager({
             fallbackLang: fallbackUtf8Locale(),
           }),
         getLoginEnvironment: () => tools.getLoginEnvironment(),
-        launchSettings: (tool) => ({
+        launchSettings: () => ({
           yoloMode: launchSettings.all().yoloMode,
-          agent: launchSettings.agent(tool),
+          agent: agent?.settings ?? defaultAgentLaunchSettings(),
         }),
+        provider: agent?.provider ?? null,
+        claudeUserVariables: async () =>
+          claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env),
+        settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,
       },
@@ -171,8 +194,68 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 /** Answers hoot in the sessions, once the database is open. */
 let hootServer: HootServer | null = null
 
+/** How long Hoot trusts what `claude auth status` said, before it asks again. */
+const SIGN_IN_FRESH_MS = 60_000
+
+/** What `claude auth status` last said, and when. */
+let claudeSignIn: { signedIn: boolean; at: number } | null = null
+
+/** A harness's configuration that names its own models, and a model. */
+function ownConfig(model: string | null): GlobalConfig {
+  return { url: '', apiKey: '', keyHeader: 'bearer', model }
+}
+
+/**
+ * Reads what a harness's own configuration names: for Claude Code, its
+ * settings and, when they name no provider, whether it is signed in to its
+ * subscription, which Hoot asks it again a minute later at the soonest; for
+ * Codex, whether it is signed in; OpenCode's free models need nothing.
+ */
+async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading> {
+  const { env } = await tools.getLoginEnvironment()
+  const home = os.homedir()
+  switch (harness) {
+    case 'claude': {
+      const config = await readClaudeGlobal(home, env)
+      if (config.url !== '' || config.apiKey !== '') return { config, signedIn: false }
+      const command = tools.getState().tools.find((entry) => entry.id === 'claude')?.path
+      if (claudeSignIn === null || Date.now() - claudeSignIn.at > SIGN_IN_FRESH_MS) {
+        const signedIn = command ? await claudeSignedIn(command, env, home) : false
+        claudeSignIn = { signedIn, at: Date.now() }
+      }
+      return { config, signedIn: claudeSignIn.signedIn }
+    }
+    case 'codex': {
+      const { model } = await readCodexConfig(env, home)
+      const auth = path.join(path.dirname(codexConfigPath(env, home)), 'auth.json')
+      return { config: ownConfig(model), signedIn: fs.existsSync(auth) }
+    }
+    case 'opencode':
+      return { config: ownConfig(null), signedIn: true }
+  }
+}
+
+/** Writes a provider and a model into a harness's own configuration, as its global. */
+async function writeHarnessGlobal(
+  harness: CodingToolId,
+  provider: Provider,
+  model: string | null,
+): Promise<void> {
+  const { env } = await tools.getLoginEnvironment()
+  if (harness === 'claude') {
+    await writeClaudeGlobal(os.homedir(), env, provider, model)
+    // Whatever it said is for the configuration before.
+    claudeSignIn = null
+    return
+  }
+  throw new Error(`Hoot does not change the configuration of ${harness} yet.`)
+}
+
 /** The chats, once the database is open. */
 let chatManager: ChatManager | null = null
+
+/** The providers and agents, once the database is open. */
+let providerService: ProviderService | null = null
 
 /**
  * Brings the window forward so the user can answer a question in it. In the
@@ -302,6 +385,8 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('focus', () => {
     worktrees?.refreshAll()
     projectFolders?.refreshAll()
+    // The harnesses' own configurations, which anything may have changed.
+    void providerService?.refreshGlobals()
   })
   // A session shown while the window is the active one counts as seen.
   window.on('focus', () => window.webContents.send(IpcChannel.windowFocusChanged, true))
@@ -404,6 +489,13 @@ function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
   const labels = new LabelStore(database)
+  const providers = new ProviderService({
+    store: new ProviderStore(database),
+    readGlobal: readHarnessGlobal,
+    writeGlobal: writeHarnessGlobal,
+    legacyLaunchSettings: (harness) => launchSettings.legacyAgent(harness),
+  })
+  providerService = providers
   const chats = new ChatManager({
     db: database,
     conversations: localChatConversations({
@@ -414,6 +506,39 @@ function startWithDatabase(database: DatabaseSync): void {
     trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
+  // As Hoot opens, and as harnesses get installed, it reads their globals and
+  // makes each that has one and no agent an agent. The chats made before
+  // providers take the provider their harness's configuration names, and
+  // that harness's first agent; the default agent of an earlier Hoot, a
+  // coding tool, is the agent made of it.
+  const followInstalled = (state: ToolsState) => {
+    if (state.detecting || state.tools.length === 0) return
+    const installed = CODING_TOOL_IDS.filter((id) =>
+      state.tools.some((tool) => tool.id === id && tool.available),
+    )
+    void providers.installedChanged(installed).then((pass) => {
+      const { agents: kept, globals } = providers.getState()
+      for (const harness of installed) {
+        const global = globals[harness]
+        const first = kept.find((agent) => agent.harness === harness)
+        if (global !== undefined)
+          chats.assignProvider(harness, global.providerId, first?.id ?? null)
+      }
+      if (!pass.opening) return
+      const tool = launchSettings.legacyDefaultTool()
+      const made = pass.made.find((agent) => agent.harness === tool)
+      if (made !== undefined && launchSettings.all().defaultAgent === null) {
+        launchSettings.setDefaultAgent(made.id)
+      }
+      launchSettings.dropLegacy()
+    })
+  }
+  tools.on('changed', followInstalled)
+  followInstalled(tools.getState())
+  // A deleted default agent leaves none: the first usable agent stands in.
+  providers.on('removed', (id) => {
+    if (launchSettings.all().defaultAgent === id) launchSettings.setDefaultAgent(null)
+  })
   // Worktrees live in the home directory, not in the user data directory, so
   // that an installed Hoot and one run from its repository share them; their
   // names come from the database.
@@ -470,6 +595,7 @@ function startWithDatabase(database: DatabaseSync): void {
     tools,
     agents,
     launchSettings,
+    providers,
     sidebar,
     filePanel,
     issueWindow,
@@ -561,6 +687,10 @@ function startWithDatabase(database: DatabaseSync): void {
           issue.id,
         ),
         workflows?.progress(issue.id) ?? { kind: 'not-started' },
+        issueAgent(
+          usableChatAgents(tools.getState(), providers.getState()),
+          launchSettings.all().defaultAgent,
+        ) !== null,
       ),
     startSession: (issueId, prompt) => sessionStarts.request(issueId, prompt),
     hookEvent: (sessionId, report) => sessions.reportHookEvent(sessionId, report),

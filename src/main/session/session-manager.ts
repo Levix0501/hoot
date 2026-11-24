@@ -8,7 +8,7 @@ import type { PtySpawnRequest } from '../../shared/pty-protocol'
 import type { SessionExit, SessionInfo } from '../../shared/session'
 import type { ToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
-import type { ChatLaunch, SentIssue } from './launch'
+import type { AgentLaunch, ChatLaunch, SentIssue } from './launch'
 
 export interface SessionLaunch {
   file: string
@@ -37,13 +37,15 @@ export interface SessionManagerOptions {
   host: PtyHost
   /**
    * Decides what a session runs in its working directory, given the issue it
-   * sends Claude Code, if any, and the session's id.
+   * sends Claude Code, if any, the conversation it continues, the agent it
+   * starts, and the session's id.
    */
   resolveLaunch(
     toolId: ToolId,
     cwd: string,
     issue: SentIssue | null,
     chat: ChatLaunch | null,
+    agent: AgentLaunch | null,
     sessionId: string,
   ): Promise<SessionLaunch>
   /** Sends a signal to a process group; replaceable for tests. */
@@ -168,6 +170,17 @@ export class SessionManager extends EventEmitter<{
     return this.records.get(id)?.info.projectRoot ?? null
   }
 
+  /**
+   * Records that a running session's agent went on with another provider, as
+   * OpenCode's `/models` can switch to.
+   */
+  setProvider(id: string, providerId: string): void {
+    const record = this.records.get(id)
+    if (!record || record.info.providerId === providerId) return
+    record.info = { ...record.info, providerId }
+    if (!record.starting) this.emit('updated', { ...record.info })
+  }
+
   /** The chat whose agent the session runs, if any. */
   chatIdOf(id: string): string | null {
     return this.records.get(id)?.info.chatId ?? null
@@ -235,6 +248,7 @@ export class SessionManager extends EventEmitter<{
     request: StartSessionRequest,
     issue: SentIssue | null = null,
     chat: ChatLaunch | null = null,
+    agent: AgentLaunch | null = null,
   ): Promise<SessionInfo> {
     if (this.records.has(request.id)) throw new SessionError('The session already exists.')
     const { promise: started, resolve: settle } = Promise.withResolvers<void>()
@@ -246,6 +260,7 @@ export class SessionManager extends EventEmitter<{
         chatId: request.chatId ?? null,
         savedSessionId: request.savedSessionId ?? null,
         toolId: request.toolId,
+        providerId: agent?.provider?.id ?? null,
         issueId: request.issueId,
         status: 'running',
         exit: null,
@@ -262,7 +277,14 @@ export class SessionManager extends EventEmitter<{
     // A session in a worktree runs in the worktree's root.
     const cwd = request.worktreePath ?? request.projectRoot
     try {
-      const launch = await this.options.resolveLaunch(request.toolId, cwd, issue, chat, request.id)
+      const launch = await this.options.resolveLaunch(
+        request.toolId,
+        cwd,
+        issue,
+        chat,
+        agent,
+        request.id,
+      )
       record.cleanup = launch.cleanup ?? null
       if (record.closing) throw new SessionError('The session was closed before it started.')
       try {

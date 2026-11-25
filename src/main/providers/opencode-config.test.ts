@@ -59,8 +59,9 @@ describe("OpenCode's own configuration", () => {
     expect(await openCodeConfigFile({}, home)).toBe(path.join(folder(), 'opencode.json'))
     write('opencode.jsonc', '{}')
     expect(await openCodeConfigFile({}, home)).toBe(path.join(folder(), 'opencode.jsonc'))
+    // On Windows, on the home folder's drive.
     expect(await openCodeConfigFile({ XDG_CONFIG_HOME: '/elsewhere' }, home)).toBe(
-      path.join('/elsewhere', 'opencode', 'opencode.json'),
+      path.resolve(home, '/elsewhere', 'opencode', 'opencode.json'),
     )
   })
 

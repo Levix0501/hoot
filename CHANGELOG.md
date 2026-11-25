@@ -1,5 +1,25 @@
 # hoot
 
+## 0.1.0-alpha.30
+
+### Minor Changes
+
+- [`fb6c88a`](https://github.com/Levix0501/hoot/commit/fb6c88af7d3eedde6a29560c52a42b97e465c8c8) - Codex agents run on your providers too, at their Responses addresses, each session on its own provider without changing config.toml, and Codex's global provider shows and changes on the Providers page.
+
+- [`d9264b5`](https://github.com/Levix0501/hoot/commit/d9264b5a13d55ee9264b120d95af636fa85a812e) - Agents now run on model providers: a new Providers page keeps your keys for DeepSeek, Kimi and others along with each tool's global provider, and the Agents page makes agents of Claude Code and a provider, each in the new session menus with the provider's mark on its icon.
+
+- [`d5c3327`](https://github.com/Levix0501/hoot/commit/d5c3327f32796eb8159381ab56424f67422e705f) - OpenCode agents run on your providers too, from OpenCode 2 on: Hoot writes them into OpenCode's configuration, starts each new chat on its agent's model and effort, and the session's icon follows a switch made with /models.
+
+### Patch Changes
+
+- [`08491a4`](https://github.com/Levix0501/hoot/commit/08491a48528f4c5736b539f9eb854e4633ab0cba) - Task boxes in issue descriptions and Markdown previews line up with their text, tables in Markdown previews get notra-editor's own cell padding, and in dark mode the description of a new blocking or blocked-by issue no longer sits on a darker box.
+
+- [`391655a`](https://github.com/Levix0501/hoot/commit/391655a0e89f95bca93679310634f9ada0db6bd5) - Moving the Issues window is smooth again: open, it no longer stays put until the pointer stops, and open or closed it keeps up with the pointer.
+
+- [`b738354`](https://github.com/Levix0501/hoot/commit/b738354d063075ab9a79d563835aeca3a2f2f582) - /model in a Claude Code session of Hoot's now changes that session alone, which goes on with the model picked when it is opened again, and no longer the model your other sessions and Claude Code outside Hoot start with.
+
+- [`dfbc8f3`](https://github.com/Levix0501/hoot/commit/dfbc8f3520706c2cfa10e048cd1ec3263a39462d) - The New issue dialog has a new look: the project at the top, a larger title over a roomier description with block handles, the status and the priority beside Create issue, and no Create more switch.
+
 ## 0.1.0-alpha.29
 
 ### Patch Changes

@@ -601,16 +601,24 @@ describe('resolveLaunch', () => {
     }
     // The user's settings name another provider, with a variable this one does not set.
     const userVariables = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS']
+    const folders: string[] = []
     const onKimi = await resolveLaunch(
       {
         ...context(loginEnv, { claude: { model: 'kimi-k3' } }),
         provider: kimi,
-        claudeUserVariables: async () => userVariables,
+        claudeUserVariables: async (folder) => {
+          folders.push(folder)
+          return userVariables
+        },
       },
       'claude',
       project,
     )
+    // Those of the settings for the session's own folder.
+    expect(folders).toEqual([project])
     expect(onKimi.args).toContain('kimi-k3')
+    // No model the settings save: the one the command picks, else the account's default.
+    expect(writtenSettings().model).toBe('')
     expect(writtenSettings().env).toEqual({
       ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic',
       ANTHROPIC_AUTH_TOKEN: 'sk-kimi',
@@ -650,9 +658,11 @@ describe('resolveLaunch', () => {
     const own = writtenSettings().env as Record<string, string>
     expect(Object.values(own).every((value) => value === '')).toBe(true)
     expect(own).toHaveProperty('ANTHROPIC_CUSTOM_HEADERS', '')
+    expect(writtenSettings().model).toBe('')
     // An agent on its own configuration, as a chat from before providers, gets none of it.
     await resolveLaunch(context(loginEnv), 'claude', project)
     expect(writtenSettings()).not.toHaveProperty('env')
+    expect(writtenSettings()).not.toHaveProperty('model')
   })
 
   it('gives a Codex that runs hooks in the background, and only such a Codex, the hook that reports its conversations', async () => {

@@ -45,10 +45,11 @@ export interface LaunchContext {
   provider: Provider | null
   /**
    * The variables of Claude Code's environment that say which provider it
-   * runs on, as the user's settings and the login shell's environment set
-   * them, which a session on another provider unsets (see `claudeSessionEnv`).
+   * runs on, as its settings for a session in `cwd` and the login shell's
+   * environment set them, which a session on another provider unsets (see
+   * `claudeSessionEnv`).
    */
-  claudeUserVariables(): Promise<string[]>
+  claudeUserVariables(cwd: string): Promise<string[]>
   /** The folder Hoot writes the settings of its Claude Code sessions in, a file each. */
   settingsFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
@@ -129,7 +130,10 @@ function withoutNul(text: string): string {
  * turns off these too. Hooks around `/model` too (see `MODEL_SWITCH_EVENTS`),
  * the one before it run in the foreground, which Claude Code waits for. With
  * an environment, that of the provider the session runs on (see
- * `claudeSessionEnv`), which takes precedence over the user's.
+ * `claudeSessionEnv`), which takes precedence over the user's and the
+ * project's settings, and the model `''`, the account's default, in place of
+ * any those settings save: one the session's command picks with `--model`
+ * takes precedence over it.
  */
 export function claudeCodeSettings(
   hoot: string,
@@ -145,7 +149,7 @@ export function claudeCodeSettings(
       PreModelSwitch: [{ hooks: [beforeSwitch] }],
       PostModelSwitch: [{ hooks: [hook] }],
     },
-    ...(env === null ? {} : { env }),
+    ...(env === null ? {} : { env, model: '' }),
   }
 }
 
@@ -158,12 +162,16 @@ export function claudeSettingsFilePath(folder: string, sessionId: string): strin
   return path.join(folder, `${sessionId}.json`)
 }
 
-/** Writes a Claude Code session's settings into its file, and returns where that is. */
-async function writeClaudeSettings(context: LaunchContext, model: string | null): Promise<string> {
+/** Writes the settings of a Claude Code session in `cwd` into its file, and returns where that is. */
+async function writeClaudeSettings(
+  context: LaunchContext,
+  cwd: string,
+  model: string | null,
+): Promise<string> {
   const env =
     context.provider === null
       ? null
-      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables())
+      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables(cwd))
   const settings = claudeCodeSettings(path.join(context.hoot.binDirectory, 'hoot'), env)
   const file = claudeSettingsFilePath(context.settingsFolder, context.hoot.sessionId)
   try {
@@ -426,7 +434,7 @@ export async function resolveLaunch(
   /** The file of a Claude Code session's settings, which its cleanup removes. */
   let settingsFile: string | null = null
   if (tool.id === 'claude') {
-    settingsFile = await writeClaudeSettings(context, agent.model)
+    settingsFile = await writeClaudeSettings(context, cwd, agent.model)
     hookArguments = ['--settings', settingsFile]
   } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
     hookArguments = ['-c', CODEX_HOOK_SETTING]

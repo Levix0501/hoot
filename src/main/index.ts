@@ -172,8 +172,8 @@ const sessions: SessionManager = new SessionManager({
           agent: agent?.settings ?? defaultAgentLaunchSettings(),
         }),
         provider: agent?.provider ?? null,
-        claudeUserVariables: async () =>
-          claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env),
+        claudeUserVariables: async (folder) =>
+          claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env, folder),
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,

@@ -262,13 +262,37 @@ export function claudeSessionEnv(
 }
 
 /**
- * The variables of Claude Code's environment that the user's settings and
- * the login shell's environment set: those a session on a provider unsets
- * when its provider gives none of its own.
+ * The files of settings Claude Code may read for a session in a folder,
+ * besides those Hoot gives it: the user's own, and a project's, shared and
+ * local, in the `.claude` of the folder or of any folder above it. Claude
+ * Code reads a project's shared settings in the folder it starts in, and its
+ * local ones at the root of the folder's repository too.
  */
-export async function claudeUserVariables(home: string, env: Env): Promise<string[]> {
-  const settings = await readSettings(claudeSettingsFile(home, env)).catch(() => null)
-  const names = new Set([...Object.keys(objectOf(settings?.env) ?? {}), ...Object.keys(env)])
+function claudeSettingsFiles(home: string, env: Env, cwd: string): string[] {
+  const files = [claudeSettingsFile(home, env)]
+  for (let folder = path.resolve(cwd); ; folder = path.dirname(folder)) {
+    files.push(
+      path.join(folder, '.claude', 'settings.json'),
+      path.join(folder, '.claude', 'settings.local.json'),
+    )
+    if (path.dirname(folder) === folder) return files
+  }
+}
+
+/**
+ * The variables of Claude Code's environment that its settings for a session
+ * in `cwd` (see `claudeSettingsFiles`) and the login shell's environment set:
+ * those a session on a provider unsets when its provider gives none of its
+ * own. Only their names are taken, never their values.
+ */
+export async function claudeUserVariables(home: string, env: Env, cwd: string): Promise<string[]> {
+  const files = await Promise.all(
+    claudeSettingsFiles(home, env, cwd).map((file) => readSettings(file).catch(() => null)),
+  )
+  const names = new Set([
+    ...files.flatMap((settings) => Object.keys(objectOf(settings?.env) ?? {})),
+    ...Object.keys(env),
+  ])
   return [...names].filter(isClaudeProviderVariable)
 }
 

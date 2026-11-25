@@ -33,6 +33,13 @@ function writeSettings(settings: unknown): void {
 
 const settings = () => JSON.parse(fs.readFileSync(file(), 'utf8')) as Record<string, unknown>
 
+/** Writes a file of a project's Claude Code settings, `name` in the `.claude` of `folder`; text as it is. */
+function writeProject(folder: string, name: string, content: unknown): void {
+  fs.mkdirSync(path.join(folder, '.claude'), { recursive: true })
+  const text = typeof content === 'string' ? content : JSON.stringify(content)
+  fs.writeFileSync(path.join(folder, '.claude', name), text)
+}
+
 const kimi: Provider = {
   id: 'p-kimi',
   name: 'Kimi',
@@ -188,9 +195,29 @@ describe("Claude Code's own configuration", () => {
 
   it('lists the provider variables the user’s settings and the login shell set', async () => {
     writeSettings({ env: { ANTHROPIC_BASE_URL: 'x', DISABLE_TELEMETRY: '1' } })
+    const project = path.join(home, 'project')
+    fs.mkdirSync(project)
     expect(
-      (await claudeUserVariables(home, { ANTHROPIC_API_KEY: 'y', PATH: '/bin' })).toSorted(),
+      (
+        await claudeUserVariables(home, { ANTHROPIC_API_KEY: 'y', PATH: '/bin' }, project)
+      ).toSorted(),
     ).toEqual(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'])
+  })
+
+  it('lists those of the project’s settings too, in its folder and the folders above it', async () => {
+    const repository = path.join(home, 'repository')
+    const folder = path.join(repository, 'packages', 'app')
+    writeProject(folder, 'settings.json', { env: { ANTHROPIC_DEFAULT_FABLE_MODEL: 'x' } })
+    writeProject(folder, 'settings.local.json', { env: { ANTHROPIC_CUSTOM_HEADERS: 'x' } })
+    // Claude Code reads a project's local settings at the root of its repository.
+    writeProject(repository, 'settings.local.json', { env: { ANTHROPIC_BETAS: 'x', FOO: '1' } })
+    // A file that cannot be read counts as none.
+    writeProject(repository, 'settings.json', '{ not json')
+    expect((await claudeUserVariables(home, {}, folder)).toSorted()).toEqual([
+      'ANTHROPIC_BETAS',
+      'ANTHROPIC_CUSTOM_HEADERS',
+      'ANTHROPIC_DEFAULT_FABLE_MODEL',
+    ])
   })
 
   it('gives a session on its subscription no provider, and unsets the user’s', () => {

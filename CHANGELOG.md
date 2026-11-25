@@ -1,5 +1,17 @@
 # hoot
 
+## 0.1.0-alpha.31
+
+### Patch Changes
+
+- [`9473745`](https://github.com/Levix0501/hoot/commit/9473745e1b52f7e7da5cc7d86c46090a9ac0ea2e) - Claude Code agents on Default now run their provider's default model rather than one saved in Claude Code's settings, and provider settings in a project's `.claude` settings no longer slip into them.
+
+- [`fc7fb58`](https://github.com/Levix0501/hoot/commit/fc7fb5844211f4834b7324ce564b68e7feebdd44) - Hoot no longer reads Claude Code's own settings for a global provider, makes an agent of them or writes them: Claude Code agents are made by hand, and `/model` saves its pick for Claude Code outside Hoot again, as Claude Code does, without changing Hoot's other sessions.
+
+- [`3b8e538`](https://github.com/Levix0501/hoot/commit/3b8e53871cfe036b57cbaf26f66bb04b809a34b8) - The Providers page now lists the providers Hoot knows to add, makers of models and gateways, each at the addresses its documentation gives, which the form shows rather than asks for, with its models to tick from models.dev, which Hoot reads once a day; Amazon Bedrock and Vertex AI run Claude Code through its own support for them, and Claude Code is told of a model's million tokens of context by itself.
+
+- [`e812813`](https://github.com/Levix0501/hoot/commit/e8128132ed5d35fefc1c89c9a4b4244ed0541319) - On the Agents page, an agent's provider now sits in its title row, next to its ⋯, instead of inside its command, which the provider is not part of.
+
 ## 0.1.0-alpha.30
 
 ### Minor Changes

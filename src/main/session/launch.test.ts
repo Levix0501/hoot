@@ -108,6 +108,7 @@ function context(
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     provider: null,
     claudeUserVariables: async () => [],
+    modelContext: () => null,
     settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
@@ -542,10 +543,12 @@ describe('resolveLaunch', () => {
       id: 'p-kimi',
       name: 'Kimi',
       presetId: 'kimi',
+      planId: null,
       apiKey: 'sk-kimi',
       keyHeader: 'bearer',
       urls: { responses: 'https://api.moonshot.cn/v1' },
       models: ['kimi-k3'],
+      cloud: null,
       own: null,
     }
     const codex = await resolveLaunch(
@@ -591,10 +594,12 @@ describe('resolveLaunch', () => {
       id: 'p-kimi',
       name: 'Kimi',
       presetId: 'kimi',
+      planId: null,
       apiKey: 'sk-kimi',
       keyHeader: 'bearer',
       urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
       models: ['kimi-k3.1-pro', 'kimi-k3'],
+      cloud: null,
       own: null,
     }
     // The user's settings name another provider, with a variable this one does not set.

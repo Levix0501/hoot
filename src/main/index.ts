@@ -12,8 +12,11 @@ import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
 import { defaultAgentLaunchSettings } from '../shared/launch-settings'
 import { MODEL_EVENT, MODEL_SWITCH_EVENT } from '../shared/hoot-cli'
 import {
+  bareModel,
   issueAgent,
+  planCatalog,
   providerOfOpenCodeId,
+  providerPlan,
   type GlobalHarness,
   type Provider,
 } from '../shared/providers'
@@ -57,6 +60,7 @@ import {
   takesProviders,
   writeOpenCodeConfig,
 } from './providers/opencode-config'
+import { ModelsDev } from './providers/models-dev'
 import { ProviderService, type GlobalReading } from './providers/provider-service'
 import { ProviderStore } from './providers/provider-store'
 import { PtyHostClient } from './pty/pty-host-client'
@@ -148,6 +152,14 @@ let terminalOptions: TerminalEnvOptions | null = null
  */
 const sessionSettingsFolder = path.join(app.getPath('userData'), 'session-settings')
 fs.rmSync(sessionSettingsFolder, { recursive: true, force: true })
+/**
+ * The models of the providers Hoot knows, as models.dev lists them, read
+ * through Electron's network stack, which takes the system's proxy settings.
+ */
+const modelsDev = new ModelsDev({
+  file: path.join(app.getPath('userData'), 'models-dev.json'),
+  fetch: (url, init) => net.fetch(url, init),
+})
 const sessions: SessionManager = new SessionManager({
   host: ptyHost,
   resolveLaunch: async (toolId, cwd, issue, givenChat, agent, sessionId) => {
@@ -172,6 +184,11 @@ const sessions: SessionManager = new SessionManager({
         provider: agent?.provider ?? null,
         claudeUserVariables: async (folder) =>
           claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env, folder),
+        modelContext: (provider, model) => {
+          const found = providerPlan(provider)
+          if (found === undefined) return null
+          return modelsDev.context(planCatalog(found.preset, found.plan), bareModel(model))
+        },
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,
@@ -588,9 +605,12 @@ function startWithDatabase(database: DatabaseSync): void {
     store: new ProviderStore(database),
     readGlobal: readHarnessGlobal,
     writeGlobal: writeHarnessGlobal,
+    catalogs: () => modelsDev.catalogs(),
     legacyLaunchSettings: (harness) => launchSettings.legacyAgent(harness),
   })
   providerService = providers
+  // Electron's network stack works once the app is ready.
+  void app.whenReady().then(() => modelsDev.start())
   const chats = new ChatManager({
     db: database,
     conversations: localChatConversations({
@@ -711,6 +731,7 @@ function startWithDatabase(database: DatabaseSync): void {
     agents,
     launchSettings,
     providers,
+    models: modelsDev,
     sidebar,
     filePanel,
     issueWindow,

@@ -114,7 +114,8 @@ Run `hoot --help` for every command and option.
   `~/Library/Application Support/Hoot` on macOS and `%APPDATA%\Hoot` on Windows. Worktrees go in
   `~/.hoot/worktrees`, and the folders chats run in, under `~/.hoot/chats`.
 - Hoot collects no telemetry. It goes online to look for new versions, of itself on GitHub and of
-  your agents on the npm registry, and to download the updates and agents you ask for.
+  your agents on the npm registry, to download the updates and agents you ask for, and once a day
+  to read from models.dev which models the providers it knows offer.
 - Hoot leaves your agents' configuration files alone: it passes its settings to each session on
   the command line, or to OpenCode in an environment variable. For an issue, it writes the issue to
   `.hoot/tmp` in the issue's worktree, which Git ignores.

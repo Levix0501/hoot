@@ -30,10 +30,12 @@ const kimi: Provider = {
   id: 'p1',
   name: 'Kimi',
   presetId: 'kimi',
+  planId: null,
   apiKey: 'sk-kimi',
   keyHeader: 'bearer',
   urls: { anthropic: 'https://api.moonshot.cn/anthropic', responses: 'https://api.moonshot.cn/v1' },
   models: ['kimi-k3[1m]'],
+  cloud: null,
   own: null,
 }
 

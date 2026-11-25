@@ -68,8 +68,10 @@ import {
   withAgentChange,
   type Agent,
   type AgentChange,
+  type ModelCatalogs,
   type NewAgent,
   type NewProvider,
+  type Provider,
   type ProviderChange,
   type ProvidersState,
 } from '../../shared/providers'
@@ -135,6 +137,23 @@ import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
 /** The pages of the settings: Agents where Hoot manages them, Appearance, Labels, and About. */
 export type SettingsSection = 'agents' | 'providers' | 'appearance' | 'labels' | 'about'
+
+/**
+ * A provider being added, in its dialog: from the Providers page's catalog,
+ * on a preset's form, or from an agent's provider picker, which offers the
+ * presets its harness can run and takes the provider added.
+ */
+export interface AddingProvider {
+  /** The harness whose presets alone are offered; `null` for every preset. */
+  harness: CodingToolId | null
+  /**
+   * The preset whose form the dialog opens on, `null` for a provider of the
+   * user's own; left out, the dialog opens on the presets to pick from.
+   */
+  presetId?: string | null
+  /** Takes the provider once it is added. */
+  onAdded?(provider: Provider): void
+}
 
 /**
  * How the issue list's Label filter matches the labels checked in it: issues
@@ -329,6 +348,8 @@ export interface AppState {
    * agent's global; `null` until they are known.
    */
   providers: ProvidersState | null
+  /** The models of the providers Hoot knows, as models.dev lists them; none until they are known. */
+  modelCatalogs: ModelCatalogs
   /** Every session, in the order they were started. */
   sessions: UiSession[]
   /** Every chat, in the order of the sidebar's Chats group. */
@@ -495,12 +516,8 @@ export interface AppState {
    * history.
    */
   settingsSection: SettingsSection | null
-  /**
-   * Whether another page asked the Providers page to add a provider, as an
-   * agent's provider picker does with Add provider…, which it does once it
-   * shows.
-   */
-  addingProvider: boolean
+  /** The provider being added, in its dialog; `null` while none is. */
+  addingProvider: AddingProvider | null
 
   /**
    * Reads the window's state and the appearance picked, and follows their
@@ -673,10 +690,10 @@ export interface AppState {
   showSettings(section?: SettingsSection): void
   /** Shows another page of the settings, without recording it in the history. */
   selectSettingsSection(section: SettingsSection): void
-  /** Shows the Providers page, adding a provider (see `addingProvider`). */
-  startAddingProvider(): void
-  /** The Providers page took the request to add a provider. */
-  tookAddingProvider(): void
+  /** Opens the dialog that adds a provider (see `addingProvider`). */
+  startAddingProvider(adding: AddingProvider): void
+  /** Closes the dialog that adds a provider. */
+  stopAddingProvider(): void
   /**
    * Leaves the settings as going back does. Without a page before them, shows
    * the empty page instead, and takes the settings out of the history.
@@ -2386,6 +2403,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     agents: null,
     launchSettings: null,
     providers: null,
+    modelCatalogs: {},
     sessions: [],
     chats: [],
     savedSessions: [],
@@ -2433,7 +2451,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
     settingsSection: null,
-    addingProvider: false,
+    addingProvider: null,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
@@ -2542,6 +2560,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       void api.getAgents().then((agents) => set((state) => ({ agents: state.agents ?? agents })))
       api.onLaunchSettingsChanged((launchSettings) => set({ launchSettings }))
       api.onProvidersChanged((providers) => set({ providers }))
+      api.onModelCatalogsChanged((modelCatalogs) => set({ modelCatalogs }))
+      void api.getModelCatalogs().then((modelCatalogs) => set({ modelCatalogs }))
       // Set as soon as it arrives: a change reported after it is newer.
       void api
         .getProviders()
@@ -3264,13 +3284,12 @@ export const useAppStore = create<AppState>()((set, get) => {
       showPage(settingsPage)
     },
 
-    startAddingProvider() {
-      set({ addingProvider: true })
-      get().showSettings('providers')
+    startAddingProvider(adding) {
+      set({ addingProvider: adding })
     },
 
-    tookAddingProvider() {
-      set({ addingProvider: false })
+    stopAddingProvider() {
+      set({ addingProvider: null })
     },
 
     selectSettingsSection(section) {

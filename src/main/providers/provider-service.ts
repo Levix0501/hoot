@@ -15,10 +15,12 @@ import {
   type GlobalConfig,
   type GlobalHarness,
   type HarnessGlobal,
+  type ModelCatalogs,
   type NewAgent,
   type NewProvider,
   type Provider,
   type ProviderChange,
+  type ProviderCloud,
   type ProvidersState,
   type WireFormat,
 } from '../../shared/providers'
@@ -40,6 +42,11 @@ export interface ProviderServiceOptions {
   readGlobal(harness: GlobalHarness): Promise<GlobalReading | null>
   /** Writes a provider and a model into a harness's own configuration, as its global. */
   writeGlobal(harness: GlobalHarness, provider: Provider, model: string | null): Promise<void>
+  /**
+   * The models of the providers Hoot knows, which a provider made of a
+   * harness's configuration is given the first picks of.
+   */
+  catalogs(): ModelCatalogs
   /**
    * The launch settings an earlier Hoot kept for a harness, before agents,
    * which the first agent made of its global takes; `null` for none.
@@ -77,6 +84,13 @@ function cleanUrls(urls: Partial<Record<WireFormat, string>>): Partial<Record<Wi
 
 function cleanModels(models: readonly string[]): string[] {
   return [...new Set(models.map((model) => model.trim()).filter((model) => model !== ''))]
+}
+
+function cleanCloud(cloud: ProviderCloud | null): ProviderCloud | null {
+  if (cloud === null) return null
+  return cloud.kind === 'bedrock'
+    ? { kind: 'bedrock', region: cloud.region.trim() }
+    : { kind: 'vertex', region: cloud.region.trim(), project: cloud.project.trim() }
 }
 
 /**
@@ -200,10 +214,12 @@ export class ProviderService extends EventEmitter<{
         ...current,
         ...(change.name === undefined ? {} : { name: change.name.trim() }),
         ...(change.presetId === undefined ? {} : { presetId: change.presetId }),
+        ...(change.planId === undefined ? {} : { planId: change.planId }),
         ...(change.apiKey === undefined ? {} : { apiKey: change.apiKey.trim() }),
         ...(change.keyHeader === undefined ? {} : { keyHeader: change.keyHeader }),
         ...(change.urls === undefined ? {} : { urls: cleanUrls(change.urls) }),
         ...(change.models === undefined ? {} : { models: cleanModels(change.models) }),
+        ...(change.cloud === undefined ? {} : { cloud: cleanCloud(change.cloud) }),
       }
       const problem = this.providerProblem(next)
       if (problem !== null) return { ok: false, message: problem }
@@ -342,7 +358,9 @@ export class ProviderService extends EventEmitter<{
     const current = this.globals[harness]?.providerId ?? null
     const provider =
       providerNamed(this.providers, harness, reading.config, current) ??
-      this.insertProvider(providerFromConfig(this.providers, harness, reading.config))
+      this.insertProvider(
+        providerFromConfig(this.providers, harness, reading.config, this.options.catalogs()),
+      )
     const global: HarnessGlobal = {
       providerId: provider.id,
       model: reading.config.model,
@@ -397,10 +415,12 @@ export class ProviderService extends EventEmitter<{
       id: this.newId(),
       name: input.name.trim(),
       presetId: input.presetId,
+      planId: input.planId,
       apiKey: input.apiKey.trim(),
       keyHeader: input.keyHeader,
       urls: cleanUrls(input.urls),
       models: cleanModels(input.models),
+      cloud: cleanCloud(input.cloud),
       own: null,
     }
     this.providers = [...this.providers, provider]
@@ -411,7 +431,9 @@ export class ProviderService extends EventEmitter<{
   /** Why a provider cannot be kept as it is; `null` when it can. */
   private providerProblem(provider: NewProvider): string | null {
     if (provider.name.trim() === '') return 'A provider needs a name.'
-    if (Object.keys(cleanUrls(provider.urls)).length === 0) return 'A provider needs an address.'
+    if (Object.keys(cleanUrls(provider.urls)).length === 0 && provider.cloud === null) {
+      return 'A provider needs an address.'
+    }
     return null
   }
 

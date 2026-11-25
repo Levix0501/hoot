@@ -214,7 +214,7 @@ function ProviderPicker({
       value={value}
       onValueChange={(id) => {
         if (typeof id !== 'string') return
-        if (id === ADD_PROVIDER) return startAddingProvider()
+        if (id === ADD_PROVIDER) return startAddingProvider({ harness, onAdded: onChange })
         const picked = providers.find((candidate) => candidate.id === id)
         if (picked !== undefined) onChange(picked)
       }}

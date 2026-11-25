@@ -21,6 +21,7 @@ import type { LaunchSettings } from './launch-settings'
 import type {
   Agent,
   AgentChange,
+  ModelCatalogs,
   NewAgent,
   NewProvider,
   Provider,
@@ -306,6 +307,8 @@ export const IpcChannel = {
   launchSettingsChanged: 'launch-settings:changed',
   getProviders: 'providers:get',
   providersChanged: 'providers:changed',
+  getModelCatalogs: 'providers:get-model-catalogs',
+  modelCatalogsChanged: 'providers:model-catalogs-changed',
   addProvider: 'providers:add',
   updateProvider: 'providers:update',
   removeProvider: 'providers:remove',
@@ -518,6 +521,9 @@ export interface HootApi {
   /** The user's providers, the agents, and each installed agent's global. */
   getProviders(): Promise<ProvidersState>
   onProvidersChanged(listener: (state: ProvidersState) => void): () => void
+  /** The models of the providers Hoot knows, as models.dev lists them. */
+  getModelCatalogs(): Promise<ModelCatalogs>
+  onModelCatalogsChanged(listener: (catalogs: ModelCatalogs) => void): () => void
   addProvider(provider: NewProvider): Promise<ProviderResult>
   /** Changes a provider; one that is a global is written into its agent's configuration too. */
   updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>

@@ -180,10 +180,12 @@ describe('SessionManager', () => {
         id: 'p-kimi',
         name: 'Kimi',
         presetId: 'kimi',
+        planId: null,
         apiKey: 'sk-kimi',
         keyHeader: 'bearer',
         urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
         models: ['kimi-k3.1-pro'],
+        cloud: null,
         own: null,
       },
     }

@@ -1,15 +1,6 @@
-import {
-  ArrowUpRightIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  EyeIcon,
-  EyeOffIcon,
-  PlusIcon,
-  Trash2Icon,
-  XIcon,
-} from 'lucide-react'
+import { ChevronRightIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { cn } from 'cn'
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import type { AgentState } from '../../../shared/agents'
 import {
@@ -22,278 +13,21 @@ import {
   ownProvider,
   presetById,
   providerMark,
-  PROVIDER_PRESETS,
-  type NewProvider,
   type Provider,
-  type ProviderPreset,
   type ProvidersState,
-  type WireFormat,
 } from '../../../shared/providers'
-import { toolStatus } from '../../../shared/tool-status'
-import { CODING_TOOL_IDS, getCodingTool, getTool, type CodingToolId } from '../../../shared/tools'
-import { api } from '../../lib/api'
+import { getCodingTool, type CodingToolId } from '../../../shared/tools'
+import { canAdd, draftOfProvider, providerInputOf, type FormDraft } from '../../lib/provider-draft'
 import { useAppStore } from '../../store/app-store'
 import { AgentIcon, ProviderMarkIcon } from '../provider-icon'
 import { ToolIcon } from '../tool-icon'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
-import { Input } from '../ui/input'
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-
-/** A provider as the add and edit dialogs keep it until it is saved. */
-type Draft = NewProvider
-
-/** The harnesses installed, as the last detection found them, in their order. */
-function useInstalled(): CodingToolId[] {
-  const tools = useAppStore((state) => state.tools)
-  return CODING_TOOL_IDS.filter((id) => toolStatus(tools, getTool(id)) === 'available')
-}
-
-/** The address of each format, named by the harness that takes it first. */
-const URL_ROWS: ReadonlyArray<{ format: WireFormat; harness: CodingToolId; placeholder: string }> =
-  [
-    { format: 'anthropic', harness: 'claude', placeholder: 'https://…/anthropic' },
-    { format: 'responses', harness: 'codex', placeholder: 'https://…/v1' },
-  ].filter(({ harness }) => FORMATS_OF[harness as CodingToolId].length > 0) as ReadonlyArray<{
-    format: WireFormat
-    harness: CodingToolId
-    placeholder: string
-  }>
-
-function draftFrom(preset: ProviderPreset | null): Draft {
-  return preset === null
-    ? { name: '', presetId: null, apiKey: '', keyHeader: 'bearer', urls: {}, models: [] }
-    : {
-        name: preset.name,
-        presetId: preset.id,
-        apiKey: '',
-        keyHeader: preset.keyHeader,
-        urls: { ...preset.urls },
-        models: [...preset.models],
-      }
-}
-
-/** Whether a draft can be saved: it has a name, an address and a key. */
-function draftValid(draft: Draft): boolean {
-  const hasUrl = Object.values(draft.urls).some((url) => (url ?? '').trim() !== '')
-  return draft.name.trim() !== '' && hasUrl && draft.apiKey.trim() !== ''
-}
-
-/** A field with its label above it. */
-function Field({
-  label,
-  htmlFor,
-  children,
-}: {
-  label: string
-  htmlFor?: string
-  children: ReactNode
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
-        {label}
-      </label>
-      {children}
-    </div>
-  )
-}
-
-/** The key, hidden until the eye shows it, with a link to where the provider gives keys out. */
-function KeyField({
-  value,
-  onChange,
-  keyUrl,
-  autoFocus,
-}: {
-  value: string
-  onChange: (value: string) => void
-  keyUrl: string | null
-  autoFocus?: boolean
-}) {
-  const [shown, setShown] = useState(false)
-  return (
-    <InputGroup>
-      <InputGroupInput
-        id="provider-key"
-        type={shown ? 'text' : 'password'}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoFocus={autoFocus}
-        spellCheck={false}
-        autoComplete="off"
-        placeholder="sk-…"
-        className="font-mono text-xs md:text-xs"
-        data-testid="provider-key"
-      />
-      <InputGroupAddon align="inline-end">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <InputGroupButton
-                size="icon-xs"
-                aria-label={shown ? 'Hide key' : 'Show key'}
-                onClick={() => setShown(!shown)}
-              />
-            }
-          >
-            {shown ? <EyeOffIcon /> : <EyeIcon />}
-          </TooltipTrigger>
-          <TooltipContent>{shown ? 'Hide key' : 'Show key'}</TooltipContent>
-        </Tooltip>
-        {keyUrl !== null && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <InputGroupButton
-                  size="icon-xs"
-                  aria-label="Get a key"
-                  onClick={() => api.openExternalLink(keyUrl)}
-                />
-              }
-            >
-              <ArrowUpRightIcon />
-            </TooltipTrigger>
-            <TooltipContent>Get a key</TooltipContent>
-          </Tooltip>
-        )}
-      </InputGroupAddon>
-    </InputGroup>
-  )
-}
-
-/** One address for each format an agent takes, named by that agent. */
-function UrlsField({
-  urls,
-  onChange,
-}: {
-  urls: Partial<Record<WireFormat, string>>
-  onChange: (urls: Partial<Record<WireFormat, string>>) => void
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {URL_ROWS.map(({ format, harness, placeholder }) => (
-        <InputGroup key={format}>
-          <InputGroupAddon className="w-28 justify-start text-xs text-muted-foreground">
-            <ToolIcon toolId={harness} className="size-4" />
-            {getCodingTool(harness).label}
-          </InputGroupAddon>
-          <InputGroupInput
-            value={urls[format] ?? ''}
-            onChange={(event) => onChange({ ...urls, [format]: event.target.value })}
-            spellCheck={false}
-            aria-label={`${getCodingTool(harness).label} URL`}
-            placeholder={placeholder}
-            className="font-mono text-xs md:text-xs"
-            data-testid={`provider-url-${format}`}
-          />
-        </InputGroup>
-      ))}
-    </div>
-  )
-}
-
-/** The models, as chips, with a field that adds one. */
-function ModelsField({
-  models,
-  onChange,
-}: {
-  models: string[]
-  onChange: (models: string[]) => void
-}) {
-  const [draft, setDraft] = useState('')
-  const commit = () => {
-    const model = draft.trim()
-    if (model === '') return
-    if (!models.includes(model)) onChange([...models, model])
-    setDraft('')
-  }
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-lg border border-input px-1.5 py-1 has-[input:focus]:border-ring has-[input:focus]:ring-3 has-[input:focus]:ring-ring/50 dark:bg-input/30">
-      {models.map((model) => (
-        <span
-          key={model}
-          className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted pr-0.5 pl-1.5 font-mono text-xs"
-        >
-          <span className="truncate">{model}</span>
-          <button
-            type="button"
-            aria-label={`Remove ${model}`}
-            className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-            onClick={() => onChange(models.filter((m) => m !== model))}
-          >
-            <XIcon className="size-3" />
-          </button>
-        </span>
-      ))}
-      <input
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            commit()
-          } else if (event.key === 'Backspace' && draft === '' && models.length > 0) {
-            onChange(models.slice(0, -1))
-          }
-        }}
-        onBlur={commit}
-        spellCheck={false}
-        placeholder="Add model…"
-        aria-label="Add model"
-        className="h-6 min-w-28 flex-1 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-muted-foreground"
-        data-testid="provider-models-input"
-      />
-    </div>
-  )
-}
-
-/** The fields of a provider: its name, for one Hoot does not know or one being edited, key, addresses and models. */
-function DraftFields({
-  draft,
-  onChange,
-  showName,
-  adding = false,
-}: {
-  draft: Draft
-  onChange: (draft: Draft) => void
-  showName: boolean
-  adding?: boolean
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      {showName && (
-        <Field label="Name" htmlFor="provider-name">
-          <Input
-            id="provider-name"
-            value={draft.name}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            autoFocus={adding && draft.presetId === null}
-            data-testid="provider-name"
-          />
-        </Field>
-      )}
-      <Field label="API key" htmlFor="provider-key">
-        <KeyField
-          value={draft.apiKey}
-          onChange={(apiKey) => onChange({ ...draft, apiKey })}
-          keyUrl={presetById(draft.presetId)?.keyUrl ?? null}
-          autoFocus={adding && draft.presetId !== null}
-        />
-      </Field>
-      <Field label="Base URLs">
-        <UrlsField urls={draft.urls} onChange={(urls) => onChange({ ...draft, urls })} />
-      </Field>
-      <Field label="Models">
-        <ModelsField models={draft.models} onChange={(models) => onChange({ ...draft, models })} />
-      </Field>
-    </div>
-  )
-}
+import { CATALOG_SEARCH, ProviderCatalog, useInstalled } from './provider-catalog'
+import { Field, ProviderFields } from './provider-fields'
 
 /** The installed harnesses whose global a provider is. */
 function useGlobalOf(providerId: string): CodingToolId[] {
@@ -502,109 +236,6 @@ function GlobalCard({ providers }: { providers: ProvidersState }) {
   )
 }
 
-/** A preset to pick, as a tile. */
-function PresetTile({ preset, onPick }: { preset: ProviderPreset | null; onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="flex h-11 min-w-0 items-center gap-2.5 rounded-lg border px-3 text-left text-sm outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50"
-      data-testid={`provider-preset-${preset?.id ?? 'custom'}`}
-    >
-      {preset === null ? (
-        <PlusIcon className="size-4 shrink-0 text-muted-foreground" />
-      ) : (
-        <ProviderMarkIcon mark={preset.mark} className="size-5 shrink-0" />
-      )}
-      <span className="truncate">{preset === null ? 'Custom' : preset.name}</span>
-    </button>
-  )
-}
-
-/** The presets an agent of Hoot's can run: those with an address in a format one takes. */
-const OFFERED_PRESETS = PROVIDER_PRESETS.filter((preset) =>
-  CODING_TOOL_IDS.some((harness) =>
-    FORMATS_OF[harness].some((format) => (preset.urls[format] ?? '') !== ''),
-  ),
-)
-
-function AddProviderDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const addProvider = useAppStore((state) => state.addProvider)
-  const [draft, setDraft] = useState<Draft | null>(null)
-  const [saving, setSaving] = useState(false)
-  const close = () => {
-    onClose()
-    window.setTimeout(() => setDraft(null), 150)
-  }
-  const save = async (adding: Draft) => {
-    setSaving(true)
-    const result = await addProvider({ ...adding, name: adding.name.trim() })
-    setSaving(false)
-    if (!result.ok) {
-      toast.error('Could not add the provider.', { description: result.message })
-      return
-    }
-    close()
-  }
-  return (
-    <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent className="sm:max-w-xl" data-testid="add-provider-dialog">
-        {draft === null ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>Add provider</DialogTitle>
-            </DialogHeader>
-            <div className="grid grid-cols-3 gap-2">
-              {OFFERED_PRESETS.map((preset) => (
-                <PresetTile
-                  key={preset.id}
-                  preset={preset}
-                  onPick={() => setDraft(draftFrom(preset))}
-                />
-              ))}
-              <PresetTile preset={null} onPick={() => setDraft(draftFrom(null))} />
-            </div>
-          </>
-        ) : (
-          <>
-            <DialogHeader className="flex-row items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="-my-1 -ml-1.5"
-                aria-label="Back"
-                onClick={() => setDraft(null)}
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <ProviderMarkIcon mark={providerMark({ ...draft, own: null })} className="size-5" />
-              <DialogTitle>{draft.presetId === null ? 'Custom provider' : draft.name}</DialogTitle>
-            </DialogHeader>
-            <DraftFields
-              draft={draft}
-              onChange={setDraft}
-              showName={draft.presetId === null}
-              adding
-            />
-            <DialogFooter>
-              <Button variant="outline" onClick={close}>
-                Cancel
-              </Button>
-              <Button
-                disabled={!draftValid(draft) || saving}
-                onClick={() => void save(draft)}
-                data-testid="add-provider-save"
-              >
-                Add provider
-              </Button>
-            </DialogFooter>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 /** The agents that run on a provider, each of which opens the Agents page. */
 function UsedBy({ provider }: { provider: Provider }) {
   const providers = useAppStore((state) => state.providers)
@@ -677,13 +308,23 @@ function DeleteProviderButton({
   )
 }
 
+/**
+ * The dialog that edits a provider of the user's: the add form's fields, its
+ * name too, a preset's addresses fixed by its plan.
+ */
 function EditProviderDialog({ provider, onClose }: { provider: Provider; onClose: () => void }) {
   const updateProvider = useAppStore((state) => state.updateProvider)
-  const [draft, setDraft] = useState<Draft>(provider)
+  const preset = presetById(provider.presetId) ?? null
+  const [draft, setDraft] = useState<FormDraft>(() => draftOfProvider(provider))
   const [saving, setSaving] = useState(false)
+  const valid = canAdd(draft, preset) && draft.name.trim() !== ''
   const save = async () => {
+    if (!valid || saving) return
     setSaving(true)
-    const result = await updateProvider(provider.id, { ...draft, name: draft.name.trim() })
+    const result = await updateProvider(provider.id, {
+      name: draft.name.trim(),
+      ...providerInputOf(draft, preset),
+    })
     setSaving(false)
     if (!result.ok) {
       toast.error('Could not save the provider.', { description: result.message })
@@ -699,7 +340,14 @@ function EditProviderDialog({ provider, onClose }: { provider: Provider; onClose
           <DialogTitle>{provider.name}</DialogTitle>
           <GlobalBadge providerId={provider.id} />
         </DialogHeader>
-        <DraftFields draft={draft} onChange={setDraft} showName />
+        <ProviderFields
+          preset={preset}
+          draft={draft}
+          onChange={setDraft}
+          onSubmit={() => void save()}
+          autoFocusKey={false}
+          editing
+        />
         <UsedBy provider={provider} />
         <DialogFooter className="sm:justify-between">
           <DeleteProviderButton provider={provider} onDeleted={onClose} />
@@ -708,7 +356,7 @@ function EditProviderDialog({ provider, onClose }: { provider: Provider; onClose
               Cancel
             </Button>
             <Button
-              disabled={!draftValid(draft) || saving}
+              disabled={!valid || saving}
               onClick={() => void save()}
               data-testid="edit-provider-save"
             >
@@ -772,15 +420,12 @@ function ProviderRow({ provider, onOpen }: { provider: Provider; onOpen: () => v
 /**
  * The settings' Providers page: each installed harness's global, then the
  * providers, the installed harnesses' own models first, each of the user's
- * opening a dialog that edits it, and Add provider, which adds one from a
- * preset or of the user's own.
+ * opening a dialog that edits it, then every preset to add one of, or one of
+ * the user's own, which Add provider goes to.
  */
 export function ProvidersPage() {
   const providers = useAppStore((state) => state.providers)
-  const addingProvider = useAppStore((state) => state.addingProvider)
-  const tookAddingProvider = useAppStore((state) => state.tookAddingProvider)
   const installed = useInstalled()
-  const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const listed = [
     ...installed.map((harness) => ownProvider(harness)),
@@ -798,7 +443,11 @@ export function ProvidersPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setAdding(true)}
+              onClick={() => {
+                const search = document.getElementById(CATALOG_SEARCH)
+                search?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                search?.focus({ preventScroll: true })
+              }}
               data-testid="add-provider"
             >
               <PlusIcon />
@@ -820,16 +469,9 @@ export function ProvidersPage() {
               ))}
             </div>
           )}
+          <ProviderCatalog />
         </div>
       </div>
-      {/* Also when another page asked to add one, as an agent's Add provider… does. */}
-      <AddProviderDialog
-        open={adding || addingProvider}
-        onClose={() => {
-          setAdding(false)
-          tookAddingProvider()
-        }}
-      />
       {edited && (
         <EditProviderDialog key={edited.id} provider={edited} onClose={() => setEditing(null)} />
       )}

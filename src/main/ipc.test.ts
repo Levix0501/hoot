@@ -336,6 +336,10 @@ const providersState: ProvidersState = {
   globals: {},
   ready: true,
 }
+const catalogs = { deepseek: [{ id: 'deepseek-flash', context: 1_000_000 }] }
+const models = Object.assign(emitter(), {
+  catalogs: vi.fn<() => typeof catalogs>(() => catalogs),
+})
 const providers = Object.assign(emitter(), {
   getState: vi.fn<() => ProvidersState>(() => providersState),
   agent: vi.fn<(id: string) => Agent | undefined>((id) => madeAgents.find((a) => a.id === id)),
@@ -372,6 +376,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   agents.removeAllListeners()
   launchSettings.removeAllListeners()
+  models.removeAllListeners()
   updates.removeAllListeners()
   workflows.removeAllListeners()
   labels.removeAllListeners()
@@ -396,6 +401,7 @@ beforeEach(() => {
     agents,
     launchSettings,
     providers,
+    models,
     appearance: emitter(),
     sessions: sessionManager,
     chats,
@@ -1262,20 +1268,44 @@ describe('the messages of the Agents page', () => {
 
   it('pass providers and agents on to the provider service, as far as they are valid', async () => {
     expect(await invoke(IpcChannel.getProviders)).toBe(providersState)
+    expect(await invoke(IpcChannel.getModelCatalogs)).toBe(catalogs)
+    models.emit('changed', catalogs)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.modelCatalogsChanged, catalogs)
     const kimi = {
       name: 'Kimi',
       presetId: 'kimi',
+      planId: null,
       apiKey: 'sk-kimi',
       keyHeader: 'bearer',
       urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
       models: ['kimi-k3.1-pro'],
+      cloud: null,
     }
     expect(await invoke(IpcChannel.addProvider, kimi)).toEqual({ ok: true })
     expect(await invoke(IpcChannel.addProvider, { ...kimi, keyHeader: 'cookie' })).toEqual({
       ok: false,
       message: 'Invalid provider.',
     })
-    expect(providers.addProvider.mock.calls).toEqual([[kimi]])
+    const vertex = {
+      ...kimi,
+      name: 'Vertex AI',
+      presetId: 'vertex',
+      planId: null,
+      urls: {},
+      cloud: { kind: 'vertex', region: 'global', project: 'my-project' },
+    }
+    expect(await invoke(IpcChannel.addProvider, vertex)).toEqual({ ok: true })
+    for (const cloud of [
+      { kind: 'vertex', region: 'global' },
+      { kind: 'bedrock', region: ' ' },
+      { kind: 'azure', region: 'eastus' },
+    ]) {
+      expect(await invoke(IpcChannel.addProvider, { ...vertex, cloud })).toEqual({
+        ok: false,
+        message: 'Invalid provider.',
+      })
+    }
+    expect(providers.addProvider.mock.calls).toEqual([[kimi], [vertex]])
     await invoke(IpcChannel.updateProvider, 'p-kimi', { apiKey: 'sk-new' })
     expect(providers.updateProvider).toHaveBeenCalledWith('p-kimi', { apiKey: 'sk-new' })
     await invoke(IpcChannel.removeProvider, 'p-kimi')

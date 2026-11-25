@@ -90,18 +90,33 @@ function mappedModel(provider: Provider, model: string | null): string | null {
   return model ?? provider.models[0] ?? null
 }
 
+/** How many tokens of context Claude Code takes `[1m]` to tell of. */
+const LONG_CONTEXT = 1_000_000
+
+/**
+ * A model as Claude Code takes it: marked `[1m]` where it takes a million
+ * tokens of context, which Claude Code otherwise counts as 200,000, unless
+ * it ends in such a mark already.
+ */
+export function claudeModel(model: string, context: number | null): string {
+  if (/\[[^\]]*\]$/.test(model)) return model
+  return context !== null && context >= LONG_CONTEXT ? `${model}[1m]` : model
+}
+
 /**
  * The environment of a Claude Code session on a provider, which Hoot gives it
  * in its `--settings`, where it takes precedence over the user's and the
  * project's settings and the login shell's environment: every provider
  * variable those set (see `isClaudeProviderVariable`) and every one a session
  * sets is set, empty to unset it where the provider gives none. A provider of
- * the user's gives its address, its key, in the header it takes, and its
- * model, or else its first, for Claude Code's tiers, and turns off the line
- * Claude Code adds to the system prompt for Anthropic's billing, which
- * changes with each version and keeps other providers from caching the
- * prompt. The harness's own sign-in gives none, so that the session runs on
- * the subscription.
+ * the user's gives where Claude Code reaches it: Amazon Bedrock's region and
+ * API key, Vertex AI's region and project, or else its address and its key,
+ * in the header it takes. It gives its model, or else its first, for Claude
+ * Code's tiers, marked where it takes a million tokens of context (see
+ * `claudeModel`), and turns off the line Claude Code adds to the system
+ * prompt for Anthropic's billing, which changes with each version and keeps
+ * other providers from caching the prompt. The harness's own sign-in gives
+ * none, so that the session runs on the subscription.
  */
 export function claudeSessionEnv(
   provider: Provider,
@@ -111,18 +126,36 @@ export function claudeSessionEnv(
    * (see `claudeUserVariables`).
    */
   userVariables: readonly string[],
+  /** How many tokens of context a model of the provider takes; `null` where that is not known. */
+  contextOf: (model: string) => number | null = () => null,
 ): Record<string, string> {
   const env: Record<string, string> = {}
   for (const name of [...userVariables, ...SESSION_VARIABLES]) {
     if (isClaudeProviderVariable(name)) env[name] = ''
   }
   if (provider.own !== null) return env
-  env.ANTHROPIC_BASE_URL = providerUrl(provider, 'claude')
-  env[provider.keyHeader === 'x-api-key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'] =
-    provider.apiKey
+  const cloud = provider.cloud
+  if (cloud?.kind === 'bedrock') {
+    env.CLAUDE_CODE_USE_BEDROCK = '1'
+    // A key works in the region it was made in.
+    env.AWS_REGION = cloud.region
+    env.AWS_BEARER_TOKEN_BEDROCK = provider.apiKey
+    // Claude Code's own models by the global prefix, which every region
+    // serves, rather than the region's, which the newest lack in some.
+    env.ANTHROPIC_BEDROCK_REGION_PREFIX = 'global'
+  } else if (cloud?.kind === 'vertex') {
+    env.CLAUDE_CODE_USE_VERTEX = '1'
+    env.CLOUD_ML_REGION = cloud.region
+    env.ANTHROPIC_VERTEX_PROJECT_ID = cloud.project
+  } else {
+    env.ANTHROPIC_BASE_URL = providerUrl(provider, 'claude')
+    env[provider.keyHeader === 'x-api-key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'] =
+      provider.apiKey
+  }
   const mapped = mappedModel(provider, model)
   if (mapped !== null) {
-    for (const tier of MAPPED_TIERS) env[`ANTHROPIC_DEFAULT_${tier}_MODEL`] = mapped
+    const marked = claudeModel(mapped, contextOf(mapped))
+    for (const tier of MAPPED_TIERS) env[`ANTHROPIC_DEFAULT_${tier}_MODEL`] = marked
   }
   env.CLAUDE_CODE_ATTRIBUTION_HEADER = '0'
   return env

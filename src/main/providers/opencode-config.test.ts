@@ -37,10 +37,12 @@ const kimi: Provider = {
   id: 'p1',
   name: 'Kimi',
   presetId: 'kimi',
+  planId: null,
   apiKey: 'sk-kimi',
   keyHeader: 'bearer',
   urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
   models: ['kimi-k3.1-pro', 'glm-5.3[1m]'],
+  cloud: null,
   own: null,
 }
 
@@ -49,6 +51,7 @@ const deepseek: Provider = {
   id: 'p2',
   name: 'DeepSeek',
   presetId: 'deepseek',
+  planId: null,
   apiKey: 'sk-deepseek',
   urls: { anthropic: 'https://api.deepseek.com/anthropic/' },
   models: ['deepseek-flash[1m]'],

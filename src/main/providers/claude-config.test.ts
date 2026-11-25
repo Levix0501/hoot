@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ownProvider } from '../../shared/providers'
+import { ownProvider, type Provider } from '../../shared/providers'
 import {
   claudeConfigDirectory,
+  claudeModel,
   claudeSessionEnv,
   claudeSettingsFile,
   claudeUserVariables,
@@ -31,6 +32,23 @@ function writeProject(folder: string, name: string, content: unknown): void {
   fs.mkdirSync(path.join(folder, '.claude'), { recursive: true })
   const text = typeof content === 'string' ? content : JSON.stringify(content)
   fs.writeFileSync(path.join(folder, '.claude', name), text)
+}
+
+/** A provider of the user's reached through a cloud, unless changed. */
+function cloud(change: Partial<Provider>): Provider {
+  return {
+    id: 'p-cloud',
+    name: 'Cloud',
+    presetId: null,
+    planId: null,
+    apiKey: '',
+    keyHeader: 'bearer',
+    urls: {},
+    models: [],
+    cloud: null,
+    own: null,
+    ...change,
+  }
 }
 
 describe("Claude Code's own configuration", () => {
@@ -86,5 +104,81 @@ describe("Claude Code's own configuration", () => {
     expect(env.ANTHROPIC_BASE_URL).toBe('')
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('')
     expect(Object.values(env).every((value) => value === '')).toBe(true)
+  })
+
+  it('runs a session on a provider at its address, with its key and model, marked for a long context', () => {
+    const deepseek: Provider = {
+      id: 'p-deepseek',
+      name: 'DeepSeek',
+      presetId: 'deepseek',
+      planId: null,
+      apiKey: 'sk-deepseek',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://api.deepseek.com/anthropic' },
+      models: ['deepseek-flash', 'deepseek-pro'],
+      cloud: null,
+      own: null,
+    }
+    const contexts: Record<string, number> = {
+      'deepseek-flash': 1_000_000,
+      'deepseek-pro': 128_000,
+    }
+    const env = claudeSessionEnv(deepseek, null, [], (model) => contexts[model] ?? null)
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+      ANTHROPIC_AUTH_TOKEN: 'sk-deepseek',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+      CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
+    })
+    const pro = claudeSessionEnv(deepseek, 'deepseek-pro', [], (model) => contexts[model] ?? null)
+    expect(pro.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('deepseek-pro')
+  })
+
+  it('runs a session on Amazon Bedrock and Vertex AI through Claude Code’s own support for them', () => {
+    const bedrock = claudeSessionEnv(
+      cloud({
+        presetId: 'bedrock',
+        planId: null,
+        apiKey: 'bedrock-key',
+        models: ['global.anthropic.claude-sonnet-5-5'],
+        cloud: { kind: 'bedrock', region: 'eu-west-1' },
+      }),
+      null,
+      ['ANTHROPIC_BASE_URL'],
+    )
+    expect(bedrock).toMatchObject({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_REGION: 'eu-west-1',
+      AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+      ANTHROPIC_BEDROCK_REGION_PREFIX: 'global',
+      ANTHROPIC_BASE_URL: '',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'global.anthropic.claude-sonnet-5-5',
+    })
+    const vertex = claudeSessionEnv(
+      cloud({
+        presetId: 'vertex',
+        planId: null,
+        cloud: { kind: 'vertex', region: 'global', project: 'my-project' },
+      }),
+      null,
+      [],
+    )
+    expect(vertex).toMatchObject({
+      CLAUDE_CODE_USE_VERTEX: '1',
+      CLOUD_ML_REGION: 'global',
+      ANTHROPIC_VERTEX_PROJECT_ID: 'my-project',
+      ANTHROPIC_BASE_URL: '',
+    })
+    expect(vertex.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('')
+  })
+
+  it('marks a model that takes a million tokens of context, unless it has a mark', () => {
+    expect(claudeModel('glm-5.3', 1_000_000)).toBe('glm-5.3[1m]')
+    expect(claudeModel('glm-5.3', 200_000)).toBe('glm-5.3')
+    expect(claudeModel('glm-5.3', null)).toBe('glm-5.3')
+    expect(claudeModel('deepseek-flash[1m]', 1_000_000)).toBe('deepseek-flash[1m]')
   })
 })

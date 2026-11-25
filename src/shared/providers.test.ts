@@ -8,11 +8,18 @@ import {
   hasGlobal,
   maskKey,
   namesProvider,
+  firstPicks,
   OWN_PROVIDER_IDS,
   ownProvider,
+  presetById,
+  presetHarnesses,
+  presetPlanOfUrl,
+  presetPlans,
+  PROVIDER_PRESETS,
   providerFromConfig,
   providerMark,
   providerNamed,
+  providerPlan,
   sessionAgent,
   usableAgents,
   type Agent,
@@ -24,10 +31,12 @@ const deepseek: Provider = {
   id: 'p-deepseek',
   name: 'DeepSeek',
   presetId: 'deepseek',
+  planId: null,
   apiKey: 'sk-deepseek',
   keyHeader: 'bearer',
   urls: { anthropic: 'https://api.deepseek.com/anthropic' },
   models: ['deepseek-flash[1m]', 'deepseek-pro'],
+  cloud: null,
   own: null,
 }
 
@@ -35,10 +44,12 @@ const kimi: Provider = {
   id: 'p-kimi',
   name: 'Kimi',
   presetId: 'kimi',
+  planId: null,
   apiKey: 'sk-kimi',
   keyHeader: 'bearer',
   urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
   models: ['kimi-k3.1-pro'],
+  cloud: null,
   own: null,
 }
 
@@ -113,32 +124,51 @@ describe('providers', () => {
   })
 
   it('makes a provider of a configuration from the preset of its address, numbered when taken', () => {
-    const made = providerFromConfig([deepseek], 'claude', {
-      url: 'https://api.deepseek.com/anthropic',
-      apiKey: 'sk-new',
-      keyHeader: 'bearer',
-      model: 'deepseek-pro',
-    })
+    const catalogs = {
+      deepseek: [
+        { id: 'deepseek-flash', context: 1_000_000 },
+        { id: 'deepseek-pro', context: 128_000 },
+      ],
+    }
+    const made = providerFromConfig(
+      [deepseek],
+      'claude',
+      {
+        url: 'https://api.deepseek.com/anthropic',
+        apiKey: 'sk-new',
+        keyHeader: 'bearer',
+        model: 'deepseek-pro',
+      },
+      catalogs,
+    )
     expect(made).toEqual({
       name: 'DeepSeek 2',
       presetId: 'deepseek',
+      planId: null,
       apiKey: 'sk-new',
       keyHeader: 'bearer',
       urls: {
         anthropic: 'https://api.deepseek.com/anthropic',
         responses: 'https://api.deepseek.com',
       },
-      models: ['deepseek-pro', 'deepseek-flash[1m]'],
+      models: ['deepseek-flash', 'deepseek-pro'],
+      cloud: null,
     })
-    const unknown = providerFromConfig([], 'claude', {
-      url: ' https://gateway.example.com/v1 ',
-      apiKey: 'sk-x',
-      keyHeader: 'x-api-key',
-      model: null,
-    })
+    const unknown = providerFromConfig(
+      [],
+      'claude',
+      {
+        url: ' https://gateway.example.com/v1 ',
+        apiKey: 'sk-x',
+        keyHeader: 'x-api-key',
+        model: null,
+      },
+      catalogs,
+    )
     expect(unknown).toMatchObject({
       name: 'gateway.example.com',
       presetId: null,
+      planId: null,
       urls: { anthropic: 'https://gateway.example.com/v1' },
       models: [],
       keyHeader: 'x-api-key',
@@ -225,5 +255,100 @@ describe('providers', () => {
     expect(maskKey('sk-1234567890abcd')).toBe('sk-••••abcd')
     expect(maskKey('short')).toBe('••••')
     expect(maskKey('')).toBe('')
+  })
+})
+
+const harnesses = (id: string) => presetHarnesses(presetById(id)!)
+
+/** DeepSeek's provider, changed. */
+const on = (change: Partial<Provider>): Provider => ({ ...deepseek, ...change })
+
+const models = (count: number) => Array.from({ length: count }, (_, i) => `m${i}`)
+
+describe('presets', () => {
+  it('lists makers of models and gateways, each by name, with ids and plans of their own', () => {
+    const ids = PROVIDER_PRESETS.map((preset) => preset.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const names = PROVIDER_PRESETS.map((preset) => preset.name)
+    expect(names).toEqual(
+      names.toSorted((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })),
+    )
+    for (const preset of PROVIDER_PRESETS) {
+      // Plans, or addresses of its own, never both.
+      expect(preset.plans === undefined || preset.urls === undefined).toBe(true)
+      const plans = presetPlans(preset)
+      expect(plans.length).toBeGreaterThan(0)
+      expect(new Set(plans.map((plan) => plan.id)).size).toBe(plans.length)
+      for (const url of plans.flatMap((plan) => Object.values(plan.urls))) {
+        expect(url).toMatch(/^https:\/\/[^\s]+$/)
+      }
+    }
+    // Only a cloud's plans, and the user's own resource, have no address.
+    const addressless = PROVIDER_PRESETS.filter(
+      (preset) => preset.cloud === undefined && preset.endpoint === undefined,
+    ).flatMap((preset) =>
+      presetPlans(preset)
+        .filter((plan) => Object.keys(plan.urls).length === 0)
+        .map((plan) => `${preset.id}/${plan.id}`),
+    )
+    expect(addressless).toEqual([])
+  })
+
+  it('tells which agents can run a preset', () => {
+    expect(harnesses('deepseek')).toEqual(['claude', 'codex', 'opencode'])
+    expect(harnesses('openrouter')).toEqual(['claude', 'codex', 'opencode'])
+    expect(harnesses('siliconflow')).toEqual(['claude', 'opencode'])
+    expect(harnesses('openai')).toEqual(['codex'])
+    expect(harnesses('azure')).toEqual(['codex'])
+    expect(harnesses('vertex')).toEqual(['claude'])
+  })
+
+  it('finds the plan a provider is on: the one it names, else by its addresses or region', () => {
+    const zhipu = {
+      anthropic: 'https://open.bigmodel.cn/api/anthropic',
+      responses: 'https://open.bigmodel.cn/api/v1',
+    }
+    // Zhipu's plans share their addresses: the plan named tells them apart.
+    expect(providerPlan(on({ presetId: 'zhipu', planId: 'api', urls: zhipu }))?.plan.id).toBe('api')
+    // One made before plans: the plan whose addresses its are, the first that has them.
+    expect(providerPlan(on({ presetId: 'zhipu', urls: zhipu }))?.plan.id).toBe('coding')
+    const kimiAt = (url: string) =>
+      on({ presetId: 'kimi', urls: { anthropic: `${url}/anthropic/`, responses: `${url}/v1` } })
+    expect(providerPlan(kimiAt('https://api.moonshot.ai'))?.plan.id).toBe('global')
+    expect(providerPlan(kimiAt('https://elsewhere.example.com'))).toBeUndefined()
+    // A plan its preset no longer has: by its addresses.
+    expect(providerPlan({ ...kimiAt('https://api.moonshot.cn'), planId: 'gone' })?.plan.id).toBe(
+      'cn',
+    )
+    const vertex = on({
+      presetId: 'vertex',
+      urls: {},
+      cloud: { kind: 'vertex', region: 'eu', project: 'p' },
+    })
+    expect(providerPlan(vertex)?.plan.id).toBe('eu')
+    expect(providerPlan(on({ presetId: null }))).toBeUndefined()
+  })
+
+  it('finds the preset and plan of an address in a harness’s formats', () => {
+    const found = presetPlanOfUrl('https://api.moonshot.ai/v1/', 'codex')
+    expect([found?.preset.id, found?.plan.id]).toEqual(['kimi', 'global'])
+    expect(presetPlanOfUrl('https://api.moonshot.ai/v1', 'claude')).toBeUndefined()
+    expect(presetPlanOfUrl(' ', 'claude')).toBeUndefined()
+  })
+
+  it('runs a cloud’s provider on Claude Code alone, without an address', () => {
+    const vertex: Provider = {
+      ...deepseek,
+      urls: {},
+      cloud: { kind: 'vertex', region: 'global', project: 'p' },
+    }
+    expect(canRun(vertex, 'claude')).toBe(true)
+    expect(canRun(vertex, 'codex')).toBe(false)
+    expect(canRun(vertex, 'opencode')).toBe(false)
+  })
+
+  it('picks a short list of models whole as a provider is made, a long one not at all', () => {
+    expect(firstPicks(models(12))).toEqual(models(12))
+    expect(firstPicks(models(13))).toEqual([])
   })
 })

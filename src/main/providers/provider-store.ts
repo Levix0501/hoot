@@ -1,15 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { Agent, KeyHeader, Provider, WireFormat } from '../../shared/providers'
+import type { Agent, KeyHeader, Provider, ProviderCloud, WireFormat } from '../../shared/providers'
 import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
 
 interface ProviderRow {
   id: string
   name: string
   preset_id: string | null
+  plan_id: string | null
   api_key: string
   key_header: KeyHeader
   urls: string
   models: string
+  cloud: string | null
 }
 
 interface AgentRow {
@@ -53,15 +55,35 @@ function urlsOf(text: string): Partial<Record<WireFormat, string>> {
   return urls
 }
 
+function filled(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+/** The cloud a row names; `null` for none, or one this Hoot cannot read. */
+function cloudOf(json: string | null): ProviderCloud | null {
+  if (json === null) return null
+  const value = parsed(json)
+  if (typeof value !== 'object' || value === null) return null
+  const record = value as Record<string, unknown>
+  const region = filled(record.region)
+  if (region === null) return null
+  if (record.kind === 'bedrock') return { kind: 'bedrock', region }
+  const project = filled(record.project)
+  if (record.kind === 'vertex' && project !== null) return { kind: 'vertex', region, project }
+  return null
+}
+
 function providerFromRow(row: ProviderRow): Provider {
   return {
     id: row.id,
     name: row.name,
     presetId: row.preset_id,
+    planId: row.plan_id,
     apiKey: row.api_key,
     keyHeader: row.key_header,
     urls: urlsOf(row.urls),
     models: stringsOf(row.models),
+    cloud: cloudOf(row.cloud),
     own: null,
   }
 }
@@ -91,16 +113,16 @@ export class ProviderStore {
   constructor(db: DatabaseSync) {
     this.statements = {
       providers: db.prepare(
-        `SELECT id, name, preset_id, api_key, key_header, urls, models
+        `SELECT id, name, preset_id, plan_id, api_key, key_header, urls, models, cloud
          FROM providers ORDER BY created_at, rowid`,
       ),
       insertProvider: db.prepare(
-        `INSERT INTO providers (id, name, preset_id, api_key, key_header, urls, models, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO providers (id, name, preset_id, plan_id, api_key, key_header, urls, models,
+         cloud, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
       updateProvider: db.prepare(
-        `UPDATE providers SET name = ?, preset_id = ?, api_key = ?, key_header = ?, urls = ?,
-         models = ? WHERE id = ?`,
+        `UPDATE providers SET name = ?, preset_id = ?, plan_id = ?, api_key = ?, key_header = ?,
+         urls = ?, models = ?, cloud = ? WHERE id = ?`,
       ),
       deleteProvider: db.prepare('DELETE FROM providers WHERE id = ?'),
       agents: db.prepare(
@@ -128,10 +150,12 @@ export class ProviderStore {
       provider.id,
       provider.name,
       provider.presetId,
+      provider.planId,
       provider.apiKey,
       provider.keyHeader,
       JSON.stringify(provider.urls),
       JSON.stringify(provider.models),
+      provider.cloud === null ? null : JSON.stringify(provider.cloud),
       createdAt,
     )
   }
@@ -140,10 +164,12 @@ export class ProviderStore {
     this.statements.updateProvider.run(
       provider.name,
       provider.presetId,
+      provider.planId,
       provider.apiKey,
       provider.keyHeader,
       JSON.stringify(provider.urls),
       JSON.stringify(provider.models),
+      provider.cloud === null ? null : JSON.stringify(provider.cloud),
       provider.id,
     )
   }

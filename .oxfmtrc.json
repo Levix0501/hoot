@@ -3,5 +3,5 @@
   "semi": false,
   "singleQuote": true,
   "printWidth": 100,
-  "ignorePatterns": ["pnpm-lock.yaml"]
+  "ignorePatterns": ["pnpm-lock.yaml", "src/main/providers/models-dev-snapshot.json"]
 }

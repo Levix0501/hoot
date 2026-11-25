@@ -50,6 +50,11 @@ export interface LaunchContext {
    * `claudeSessionEnv`).
    */
   claudeUserVariables(cwd: string): Promise<string[]>
+  /**
+   * How many tokens of context a model of a provider takes, as models.dev
+   * lists it; `null` where that is not known.
+   */
+  modelContext(provider: Provider, model: string): number | null
   /** The folder Hoot writes the settings of its Claude Code sessions in, a file each. */
   settingsFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
@@ -165,7 +170,9 @@ async function writeClaudeSettings(
   const env =
     context.provider === null
       ? null
-      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables(cwd))
+      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables(cwd), (id) =>
+          context.modelContext(context.provider!, id),
+        )
   const settings = claudeCodeSettings(path.join(context.hoot.binDirectory, 'hoot'), env)
   const file = claudeSettingsFilePath(context.settingsFolder, context.hoot.sessionId)
   try {

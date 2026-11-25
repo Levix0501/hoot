@@ -2,14 +2,30 @@ import { ServerIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 import { findProvider, providerMark, type ProviderMark } from '../../shared/providers'
 import type { CodingToolId, ToolId } from '../../shared/tools'
+import Ai302Icon from '../assets/provider-icons/ai302-color.svg?react'
+import AiHubMixIcon from '../assets/provider-icons/aihubmix-color.svg?react'
 import AnthropicIcon from '../assets/provider-icons/anthropic.svg?react'
+import AzureIcon from '../assets/provider-icons/azure-color.svg?react'
+import BailianIcon from '../assets/provider-icons/bailian-color.svg?react'
+import BedrockIcon from '../assets/provider-icons/bedrock-color.svg?react'
+import CommandCodeIcon from '../assets/provider-icons/commandcode.svg?react'
 import DeepSeekIcon from '../assets/provider-icons/deepseek-color.svg?react'
-import DoubaoIcon from '../assets/provider-icons/doubao-color.svg?react'
+import FireworksIcon from '../assets/provider-icons/fireworks-color.svg?react'
+import GroqIcon from '../assets/provider-icons/groq.svg?react'
+import HuaweiCloudIcon from '../assets/provider-icons/huaweicloud-color.svg?react'
 import KimiIcon from '../assets/provider-icons/kimi-color.svg?react'
 import MiniMaxIcon from '../assets/provider-icons/minimax-color.svg?react'
+import ModelScopeIcon from '../assets/provider-icons/modelscope-color.svg?react'
+import OllamaIcon from '../assets/provider-icons/ollama.svg?react'
 import OpenAIIcon from '../assets/provider-icons/openai.svg?react'
 import OpenRouterIcon from '../assets/provider-icons/openrouter.svg?react'
+import QwenIcon from '../assets/provider-icons/qwen-color.svg?react'
+import SiliconCloudIcon from '../assets/provider-icons/siliconcloud-color.svg?react'
 import StepFunIcon from '../assets/provider-icons/stepfun-color.svg?react'
+import TencentCloudIcon from '../assets/provider-icons/tencentcloud-color.svg?react'
+import VertexAIIcon from '../assets/provider-icons/vertexai-color.svg?react'
+import VolcengineIcon from '../assets/provider-icons/volcengine-color.svg?react'
+import XAIIcon from '../assets/provider-icons/xai.svg?react'
 import XiaomiMiMoIcon from '../assets/provider-icons/xiaomimimo.svg?react'
 import ZaiIcon from '../assets/provider-icons/zai.svg?react'
 import ZhipuIcon from '../assets/provider-icons/zhipu-color.svg?react'
@@ -21,17 +37,33 @@ type Svg = ComponentType<SVGProps<SVGSVGElement> & { title?: string }>
 
 /** The providers' marks, in their own colors where they have them, else in the text's. */
 const MARKS: Record<Exclude<ProviderMark, 'custom' | 'opencode'>, Svg> = {
+  ai302: Ai302Icon,
+  aihubmix: AiHubMixIcon,
   anthropic: AnthropicIcon,
-  openai: OpenAIIcon,
+  azure: AzureIcon,
+  bailian: BailianIcon,
+  bedrock: BedrockIcon,
+  commandcode: CommandCodeIcon,
   deepseek: DeepSeekIcon,
+  fireworks: FireworksIcon,
+  groq: GroqIcon,
+  huaweicloud: HuaweiCloudIcon,
   kimi: KimiIcon,
-  zhipu: ZhipuIcon,
-  zai: ZaiIcon,
   minimax: MiniMaxIcon,
-  doubao: DoubaoIcon,
-  xiaomimimo: XiaomiMiMoIcon,
-  stepfun: StepFunIcon,
+  modelscope: ModelScopeIcon,
+  ollama: OllamaIcon,
+  openai: OpenAIIcon,
   openrouter: OpenRouterIcon,
+  qwen: QwenIcon,
+  siliconcloud: SiliconCloudIcon,
+  stepfun: StepFunIcon,
+  tencentcloud: TencentCloudIcon,
+  vertexai: VertexAIIcon,
+  volcengine: VolcengineIcon,
+  xai: XAIIcon,
+  xiaomimimo: XiaomiMiMoIcon,
+  zai: ZaiIcon,
+  zhipu: ZhipuIcon,
 }
 
 /** A provider's mark: its maker's, OpenCode's for its free models, or a plain one Hoot does not know. */

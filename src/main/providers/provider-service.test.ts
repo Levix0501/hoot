@@ -62,6 +62,7 @@ function service(): ProviderService {
           : { url: '', apiKey: '', keyHeader: 'bearer', model }
       configs[harness] = { config, signedIn: configs[harness]?.signedIn ?? true }
     },
+    catalogs: () => ({}),
     legacyLaunchSettings: (harness) => legacy[harness] ?? null,
     now: () => 1_000 + ids,
     newId: () => `id-${++ids}`,
@@ -71,10 +72,12 @@ function service(): ProviderService {
 const deepseek = {
   name: 'DeepSeek',
   presetId: 'deepseek',
+  planId: null,
   apiKey: 'sk-deepseek',
   keyHeader: 'bearer' as const,
   urls: { anthropic: DEEPSEEK_URL },
   models: ['deepseek-flash[1m]', 'deepseek-pro'],
+  cloud: null,
 }
 
 describe('ProviderService', () => {
@@ -90,6 +93,7 @@ describe('ProviderService', () => {
           pending.read = () => resolve(configs[harness] ?? own())
         }),
       writeGlobal: async () => {},
+      catalogs: () => ({}),
     })
     const reading = slow.installedChanged(['opencode'])
     await Promise.resolve()
@@ -311,5 +315,38 @@ describe('ProviderService', () => {
     expect(providers.addProvider({ ...deepseek, urls: {} })).toMatchObject({ ok: false })
     const stored = new ProviderStore(db).providers()
     expect(stored.map((provider: Provider) => provider.name)).toEqual(['Mine'])
+  })
+
+  it('keeps the cloud Claude Code reaches a provider through, which needs no address', async () => {
+    const providers = service()
+    const added = providers.addProvider({
+      ...deepseek,
+      name: 'Vertex AI',
+      presetId: 'vertex',
+      planId: 'global',
+      apiKey: '',
+      urls: {},
+      cloud: { kind: 'vertex', region: ' global ', project: ' my-project ' },
+    })
+    expect(added).toMatchObject({
+      ok: true,
+      provider: {
+        planId: 'global',
+        cloud: { kind: 'vertex', region: 'global', project: 'my-project' },
+      },
+    })
+    const id = added.ok ? added.provider.id : ''
+    await providers.updateProvider(id, {
+      presetId: 'bedrock',
+      planId: 'eu-west-1',
+      cloud: { kind: 'bedrock', region: 'eu-west-1' },
+    })
+    const stored = new ProviderStore(db).providers()
+    expect(stored.find((provider) => provider.id === id)).toMatchObject({
+      presetId: 'bedrock',
+      planId: 'eu-west-1',
+      cloud: { kind: 'bedrock', region: 'eu-west-1' },
+    })
+    expect(stored.every((provider) => provider.id === id || provider.cloud === null)).toBe(true)
   })
 })

@@ -55,7 +55,7 @@ import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
 import type { ParentChange } from '../shared/sub-issues'
-import { canRun, type KeyHeader, type WireFormat } from '../shared/providers'
+import { canRun, type KeyHeader, type ProviderCloud, type WireFormat } from '../shared/providers'
 import { CODING_TOOL_IDS, TOOL_IDS, type CodingToolId } from '../shared/tools'
 import { plainFirstMessage } from '../shared/workflow-text'
 import type { WorkflowStep } from '../shared/workflows'
@@ -86,6 +86,7 @@ import type { AddProjectInspection } from './projects/add-project'
 import type { ProjectFolders } from './projects/project-folders'
 import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
+import type { ModelsDev } from './providers/models-dev'
 import type { ProviderService } from './providers/provider-service'
 import type { AgentLaunch, SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
@@ -114,6 +115,8 @@ export interface IpcDependencies {
   launchSettings: LaunchSettingsStore
   /** The user's providers, the agents made of them, and each installed agent's global. */
   providers: ProviderService
+  /** The models of the providers Hoot knows, as models.dev lists them. */
+  models: ModelsDev
   sidebar: SidebarStateStore
   /** Whether the file panel is shown, and how wide its parts are. */
   filePanel: FilePanelStore
@@ -258,21 +261,32 @@ const providerUrls = z.strictObject({
 }) satisfies z.ZodType<Partial<Record<WireFormat, string>>>
 const keyHeader = z.enum(['bearer', 'x-api-key']) satisfies z.ZodType<KeyHeader>
 const providerModels = z.array(z.string().max(1_000)).max(1_000)
+const cloudPlace = z.string().trim().min(1).max(100)
+const providerCloud = z
+  .discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('bedrock'), region: cloudPlace }),
+    z.strictObject({ kind: z.literal('vertex'), region: cloudPlace, project: cloudPlace }),
+  ])
+  .nullable() satisfies z.ZodType<ProviderCloud | null>
 const newProvider = z.strictObject({
   name: providerText,
   presetId: z.string().max(100).nullable(),
+  planId: z.string().max(100).nullable(),
   apiKey: providerText,
   keyHeader,
   urls: providerUrls,
   models: providerModels,
+  cloud: providerCloud,
 })
 const providerChange = z.strictObject({
   name: providerText.optional(),
   presetId: z.string().max(100).nullable().optional(),
+  planId: z.string().max(100).nullable().optional(),
   apiKey: providerText.optional(),
   keyHeader: keyHeader.optional(),
   urls: providerUrls.optional(),
   models: providerModels.optional(),
+  cloud: providerCloud.optional(),
 })
 const agentModel = z.string().max(1_000).nullable()
 const newAgent = z.strictObject({
@@ -559,6 +573,8 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle(IpcChannel.getProviders, () => deps.providers.getState())
   deps.providers.on('changed', (state) => send(IpcChannel.providersChanged, state))
+  handle(IpcChannel.getModelCatalogs, () => deps.models.catalogs())
+  deps.models.on('changed', (catalogs) => send(IpcChannel.modelCatalogsChanged, catalogs))
   handle(IpcChannel.addProvider, (_event, value) => {
     const parsed = newProvider.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid provider.' }

@@ -300,4 +300,14 @@ export const MIGRATIONS: readonly string[] = [
   -- sessions take while it is there; NULL for none.
   ALTER TABLE chats ADD COLUMN agent_id TEXT;
   `,
+  // 12: the plan of its preset a provider is on, and the cloud Claude Code reaches it through.
+  `
+  -- The plan or region of its preset; NULL for a preset without plans, and for
+  -- a provider made before plans, whose addresses tell its plan.
+  ALTER TABLE providers ADD COLUMN plan_id TEXT;
+  -- A JSON object: the cloud and where in it, such as
+  -- {"kind": "vertex", "region": "global", "project": "my-project"}; NULL for
+  -- a provider reached at its addresses alone.
+  ALTER TABLE providers ADD COLUMN cloud TEXT;
+  `,
 ]

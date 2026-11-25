@@ -120,7 +120,9 @@ so versions are alpha prereleases (`0.1.0-alpha.0`, `0.1.0-alpha.1` and on) unti
    "chore(release): version packages (alpha)", or updates it, with the next version in
    `package.json` and its section in `CHANGELOG.md`.
 2. Merge that pull request. The workflow tags the merge `v<version>`, builds the installers, signed
-   and notarized for macOS, and drafts a pre-release with them and the version's changelog.
+   and notarized for macOS, and drafts a pre-release with them and the version's changelog. The
+   installers ship a copy of models.dev read for the build; `node scripts/models-dev-snapshot.ts`
+   refreshes the one in the repository, which they ship when models.dev cannot be read.
 3. Check the draft on the Releases page and publish it. The workflow never publishes a release.
    Once one is published, earlier versions of Hoot offer it as an update.
 

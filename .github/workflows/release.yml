@@ -95,6 +95,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The copy of models.dev that Hoot ships with, read again for the
+      # installers; the copy in the repository stays when it cannot be read.
+      - name: Read models.dev again
+        run: >-
+          node scripts/models-dev-snapshot.ts ||
+          echo "::warning::Could not read models.dev: the installers ship the copy in the repository."
       # notarytool reads the App Store Connect API key from a file.
       - name: Write the App Store Connect API key to a file
         run: printf '%s' "$APP_STORE_CONNECT_API_KEY" > "$RUNNER_TEMP/app-store-connect-api-key.p8"

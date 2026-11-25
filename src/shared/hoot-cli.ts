@@ -228,16 +228,16 @@ export const HOOK_EVENTS = [
 export const MODEL_EVENT = 'ModelSelected'
 
 /**
- * The events of the hooks Hoot adds to every Claude Code session it starts
- * around `/model`, which saves the model picked in the user's settings:
- * before it does, and right after. Hoot puts back the model those settings
- * had, so that a model picked in one session changes no other, and the
- * session goes on with the one picked when it is opened again.
+ * The event of the hook Hoot adds to every Claude Code session it starts
+ * for `/model`, right after it switched the model: the session's chat goes
+ * on with the one picked when it is opened again. `/model` also saves the
+ * model in the user's settings, as Claude Code does, which Hoot leaves as
+ * they are: its other sessions each name their own model.
  */
-export const MODEL_SWITCH_EVENTS = ['PreModelSwitch', 'PostModelSwitch'] as const
+export const MODEL_SWITCH_EVENT = 'PostModelSwitch'
 
-/** Every event hoot reports: those of `HOOK_EVENTS`, `MODEL_EVENT` and `MODEL_SWITCH_EVENTS`. */
-export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT, ...MODEL_SWITCH_EVENTS] as const
+/** Every event hoot reports: those of `HOOK_EVENTS`, `MODEL_EVENT` and `MODEL_SWITCH_EVENT`. */
+export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT, MODEL_SWITCH_EVENT] as const
 
 export type HookEvent = (typeof REPORTED_EVENTS)[number]
 

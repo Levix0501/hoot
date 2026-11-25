@@ -47,21 +47,22 @@ describe('readClaudeLaunchOptions', () => {
     expect(options.defaultEffort).toBeNull()
   })
 
-  it('names the default model and effort level the settings set, the managed ones first', async () => {
+  it('names the default effort level the settings set, the managed ones first, and a default model only they set', async () => {
+    // Hoot's sessions start with the account's default model, not the one the user's settings save.
     write(userSettings, { model: 'sonnet', effortLevel: 'xhigh' })
     expect(await read()).toMatchObject({
-      defaultModel: { value: 'sonnet', source: 'settings.json' },
+      defaultModel: null,
       defaultEffort: { value: 'xhigh', source: 'settings.json' },
     })
-    write(managedSettings, { effortLevel: 'low' })
+    write(managedSettings, { model: 'opus', effortLevel: 'low' })
     expect(await read()).toMatchObject({
-      defaultModel: { value: 'sonnet', source: 'settings.json' },
+      defaultModel: { value: 'opus', source: 'managed settings' },
       defaultEffort: { value: 'low', source: 'managed settings' },
     })
   })
 
-  it("replaces an alias's model and name from the settings environment, with the capabilities it declares", async () => {
-    write(userSettings, {
+  it("replaces an alias's model and name from the managed settings' environment, with the capabilities it declares", async () => {
+    write(managedSettings, {
       env: {
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'gw-opus-x',
         ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'Gateway Opus',
@@ -71,7 +72,7 @@ describe('readClaudeLaunchOptions', () => {
     const opus = () => options.models.find((option) => option.value === 'opus')
     expect(opus()).toEqual({ value: 'opus', label: 'Gateway Opus', efforts: [] })
 
-    write(userSettings, {
+    write(managedSettings, {
       env: {
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'gw-opus-x',
         ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'Gateway Opus',
@@ -81,7 +82,7 @@ describe('readClaudeLaunchOptions', () => {
     options = await read()
     expect(opus()?.efforts).toEqual(['low', 'medium', 'high'])
 
-    write(userSettings, {
+    write(managedSettings, {
       env: {
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'gw-opus-x',
         ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES: 'effort,xhigh_effort,max_effort',
@@ -95,15 +96,18 @@ describe('readClaudeLaunchOptions', () => {
   })
 
   it('adds the custom model option and its name', async () => {
-    const options = await read({
-      ANTHROPIC_CUSTOM_MODEL_OPTION: 'my-model',
-      ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'My model',
+    write(managedSettings, {
+      env: {
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'my-model',
+        ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'My model',
+      },
     })
+    const options = await read()
     expect(options.models.at(-1)).toEqual({ value: 'my-model', label: 'My model', efforts: [] })
   })
 
   it("takes a known custom model's own levels, and the levels of a configured model that names it", async () => {
-    write(userSettings, {
+    write(managedSettings, {
       env: {
         ANTHROPIC_CUSTOM_MODEL_OPTION: 'claude-opus-5-5',
         ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES: 'effort',
@@ -116,7 +120,7 @@ describe('readClaudeLaunchOptions', () => {
       efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     })
 
-    write(userSettings, {
+    write(managedSettings, {
       model: 'gw-opus-x',
       env: {
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'gw-opus-x',
@@ -133,7 +137,7 @@ describe('readClaudeLaunchOptions', () => {
   })
 
   it("takes an unknown custom model's levels from the capabilities it declares", async () => {
-    write(userSettings, {
+    write(managedSettings, {
       env: {
         ANTHROPIC_CUSTOM_MODEL_OPTION: 'my-model',
         ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES: 'effort,xhigh_effort',
@@ -198,20 +202,48 @@ describe('readClaudeLaunchOptions', () => {
     expect(options.models.map((option) => option.value)).toEqual(['sonnet', 'managed-model'])
   })
 
-  it('takes the effort levels of Default from the configured model', async () => {
-    write(userSettings, { model: 'claude-opus-4-6' })
+  it('takes the effort levels of Default from the model the managed settings configure', async () => {
+    write(managedSettings, { model: 'claude-opus-4-6' })
     expect((await read()).defaultEfforts).toEqual(['low', 'medium', 'high', 'max'])
 
-    write(userSettings, { model: 'claude-opus-4-5' })
+    write(managedSettings, { model: 'claude-opus-4-5' })
     expect((await read()).defaultEfforts).toEqual([])
+
+    // The user's is not the default of Hoot's sessions.
+    fs.rmSync(managedSettings)
+    write(userSettings, { model: 'claude-opus-4-5' })
+    expect((await read()).defaultEfforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
   })
 
-  it("takes the managed settings' environment over the user's", async () => {
-    write(userSettings, { env: { ANTHROPIC_CUSTOM_MODEL_OPTION: 'user-model' } })
+  it("leaves out the provider variables of the user's settings and the login shell, which Hoot's sessions unset", async () => {
+    write(userSettings, {
+      env: {
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'user-model',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'user-opus',
+      },
+    })
     write(managedSettings, { env: { ANTHROPIC_CUSTOM_MODEL_OPTION: 'managed-model' } })
-    const options = await read()
-    expect(options.models.map((option) => option.value)).toContain('managed-model')
-    expect(options.models.map((option) => option.value)).not.toContain('user-model')
+    const options = await read({ ANTHROPIC_DEFAULT_SONNET_MODEL: 'shell-sonnet' })
+    expect(options.models.map((option) => [option.value, option.label])).toEqual([
+      ['fable', 'fable'],
+      ['opus', 'opus'],
+      ['sonnet', 'sonnet'],
+      ['haiku', 'haiku'],
+      ['managed-model', 'managed-model'],
+    ])
+  })
+
+  it('reads the user’s settings in CLAUDE_CONFIG_DIR when it is set', async () => {
+    const config = path.join(root, 'config')
+    fs.mkdirSync(config)
+    write(path.join(config, 'settings.json'), { modelPicker: { options: [{ model: 'x-model' }] } })
+    const options = await readClaudeLaunchOptions({
+      home,
+      env: { CLAUDE_CONFIG_DIR: config },
+      platform: 'linux',
+      managedSettingsPath: managedSettings,
+    })
+    expect(options.models.map((option) => option.value)).toContain('x-model')
   })
 
   it('ignores Claude Code’s cache of additional model options', async () => {

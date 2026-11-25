@@ -10,9 +10,14 @@ import { usableChatAgents } from '../shared/chats'
 import { waitedOnIds } from '../shared/dependencies'
 import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
 import { defaultAgentLaunchSettings } from '../shared/launch-settings'
-import { MODEL_EVENT } from '../shared/hoot-cli'
-import { issueAgent, providerOfOpenCodeId, type Provider } from '../shared/providers'
-import { CODING_TOOL_IDS, type CodingToolId } from '../shared/tools'
+import { MODEL_EVENT, MODEL_SWITCH_EVENT } from '../shared/hoot-cli'
+import {
+  issueAgent,
+  providerOfOpenCodeId,
+  type GlobalHarness,
+  type Provider,
+} from '../shared/providers'
+import { CODING_TOOL_IDS } from '../shared/tools'
 import { startBlockers } from '../shared/start-blockers'
 import {
   WINDOWS_LAYOUT_SWITCH,
@@ -42,14 +47,7 @@ import { LabelStore } from './labels/label-store'
 import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-project'
 import { ProjectFolders } from './projects/project-folders'
 import { ProjectStore } from './projects/project-store'
-import {
-  claudeSavedModel,
-  claudeSignedIn,
-  claudeUserVariables,
-  readClaudeGlobal,
-  restoreClaudeModel,
-  writeClaudeGlobal,
-} from './providers/claude-config'
+import { claudeUserVariables } from './providers/claude-config'
 import { readCodexGlobal, writeCodexGlobal } from './providers/codex-config'
 import {
   createOpenCodeSession,
@@ -299,44 +297,14 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 let hootServer: HootServer | null = null
 
 /**
- * The login shell's environment as Hoot last read it, for what must be read
- * at once, as the user's settings before `/model` saves a model in them.
+ * Reads what a harness's own configuration names: for Codex, its config.toml
+ * and sign-in; for OpenCode, its default model. Claude Code's settings are
+ * not read for a global (see `GLOBAL_HARNESSES`).
  */
-let loginEnv = baseEnv
-
-/**
- * The model the user's Claude Code settings saved as each session's `/model`
- * began, by session, which Hoot puts back once it has saved another.
- */
-const modelsBeforeSwitch = new Map<string, string | null>()
-
-/** How long Hoot trusts what `claude auth status` said, before it asks again. */
-const SIGN_IN_FRESH_MS = 60_000
-
-/** What `claude auth status` last said, and when. */
-let claudeSignIn: { signedIn: boolean; at: number } | null = null
-
-/**
- * Reads what a harness's own configuration names: for Claude Code, its
- * settings and, when they name no provider, whether it is signed in to its
- * subscription, which Hoot asks it again a minute later at the soonest; for
- * Codex, its config.toml and sign-in; for OpenCode, its default model.
- */
-async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading | null> {
+async function readHarnessGlobal(harness: GlobalHarness): Promise<GlobalReading | null> {
   const { env } = await tools.getLoginEnvironment()
-  loginEnv = env
   const home = os.homedir()
   switch (harness) {
-    case 'claude': {
-      const config = await readClaudeGlobal(home, env)
-      if (config.url !== '' || config.apiKey !== '') return { config, signedIn: false }
-      const command = tools.getState().tools.find((entry) => entry.id === 'claude')?.path
-      if (claudeSignIn === null || Date.now() - claudeSignIn.at > SIGN_IN_FRESH_MS) {
-        const signedIn = command ? await claudeSignedIn(command, env, home) : false
-        claudeSignIn = { signedIn, at: Date.now() }
-      }
-      return { config, signedIn: claudeSignIn.signedIn }
-    }
     case 'codex':
       return readCodexGlobal(env, home)
     case 'opencode':
@@ -360,17 +328,11 @@ async function syncOpenCodeProviders(): Promise<void> {
 
 /** Writes a provider and a model into a harness's own configuration, as its global. */
 async function writeHarnessGlobal(
-  harness: CodingToolId,
+  harness: GlobalHarness,
   provider: Provider,
   model: string | null,
 ): Promise<void> {
   const { env } = await tools.getLoginEnvironment()
-  if (harness === 'claude') {
-    await writeClaudeGlobal(os.homedir(), env, provider, model)
-    // Whatever it said is for the configuration before.
-    claudeSignIn = null
-    return
-  }
   if (harness === 'opencode') {
     if ((await openCodeOnProviders(env)) === null) {
       throw new Error('OpenCode takes it from version 2 on. Update OpenCode on the Agents page.')
@@ -518,7 +480,7 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('focus', () => {
     worktrees?.refreshAll()
     projectFolders?.refreshAll()
-    // The harnesses' own configurations, which anything may have changed.
+    // Codex's and OpenCode's own configurations, which anything may have changed.
     void providerService?.refreshGlobals()
   })
   // A session shown while the window is the active one counts as seen.
@@ -639,11 +601,13 @@ function startWithDatabase(database: DatabaseSync): void {
     trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
-  // As Hoot opens, and as harnesses get installed, it reads their globals and
-  // makes each that has one and no agent an agent. The chats made before
-  // providers take the provider their harness's configuration names, and
-  // that harness's first agent; the default agent of an earlier Hoot, a
-  // coding tool, is the agent made of it.
+  // As Hoot opens, and as harnesses get installed, it reads the globals of
+  // Codex and OpenCode and makes each that has one and no agent an agent. The
+  // chats made before providers take the provider their harness's
+  // configuration names, and that harness's first agent; the default agent of
+  // an earlier Hoot, a coding tool, is the agent made of it. Claude Code gets
+  // no agent this way, and its chats from before providers go on with its
+  // own settings, as they started.
   const followInstalled = (state: ToolsState) => {
     if (state.detecting || state.tools.length === 0) return
     const installed = CODING_TOOL_IDS.filter((id) =>
@@ -792,22 +756,11 @@ function startWithDatabase(database: DatabaseSync): void {
   sessions.on('hook-event', (id, report) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)
-    // `/model` in a Claude Code session saves the model picked in the user's
-    // settings, which Hoot reads before, while Claude Code waits, and puts
-    // back after: the session, and its chat when it is opened again, go on
-    // with the model picked, and no other session changes.
-    if (report.event === 'PreModelSwitch') {
-      modelsBeforeSwitch.set(id, claudeSavedModel(os.homedir(), loginEnv))
-      return
-    }
-    if (report.event === 'PostModelSwitch') {
-      if (modelsBeforeSwitch.has(id)) {
-        const before = modelsBeforeSwitch.get(id) ?? null
-        modelsBeforeSwitch.delete(id)
-        restoreClaudeModel(os.homedir(), loginEnv, before).catch((error: unknown) =>
-          console.error("Could not put back the model of Claude Code's settings:", error),
-        )
-      }
+    // A model picked with `/model` in a Claude Code session: its chat goes on
+    // with it when it is opened again. Claude Code also saves it in the
+    // user's settings, which Hoot leaves as they are: its other sessions
+    // each name their own model.
+    if (report.event === MODEL_SWITCH_EVENT) {
       const chat = chatId === null ? undefined : chats.get(chatId)
       if (chat !== undefined && chat.providerId !== null && typeof report.model === 'string') {
         chats.setProvider(chat.id, chat.providerId, report.model)
@@ -830,7 +783,6 @@ function startWithDatabase(database: DatabaseSync): void {
     if (chatId !== null) chats.typed(chatId, id, data)
   })
   sessions.on('updated', (session) => chats.sessionEnded(session))
-  sessions.on('closed', (session) => modelsBeforeSwitch.delete(session.id))
   // What happened while Hoot was not running: conversations it has not seen
   // yet, and chats whose conversation never got a message.
   void chats.reconcileAll()

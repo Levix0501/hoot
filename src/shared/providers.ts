@@ -393,6 +393,23 @@ export interface NewProvider {
 export type ProviderChange = Partial<NewProvider>
 
 /**
+ * The harnesses whose own configuration Hoot reads for their global, the
+ * provider they run on outside Hoot, and writes when that is changed here:
+ * Codex and OpenCode. Claude Code's own settings are left alone: Hoot
+ * neither reads a global from them nor writes them, and makes no agent of
+ * them, its Claude Code agents being made by hand.
+ */
+export const GLOBAL_HARNESSES = ['codex', 'opencode'] as const satisfies readonly CodingToolId[]
+
+/** A harness whose own configuration names its global (see `GLOBAL_HARNESSES`). */
+export type GlobalHarness = (typeof GLOBAL_HARNESSES)[number]
+
+/** Whether a harness's own configuration names its global (see `GLOBAL_HARNESSES`). */
+export function isGlobalHarness(harness: CodingToolId): harness is GlobalHarness {
+  return GLOBAL_HARNESSES.some((global) => global === harness)
+}
+
+/**
  * What an agent's own configuration names, as Hoot reads it: the provider
  * that agent runs on outside Hoot, and the model.
  */
@@ -411,7 +428,10 @@ export interface ProvidersState {
   providers: Provider[]
   /** In the order they were made. */
   agents: Agent[]
-  /** For each installed harness Hoot read the configuration of, what it names. */
+  /**
+   * For each installed harness of `GLOBAL_HARNESSES` Hoot read the
+   * configuration of, what it names; never Claude Code.
+   */
   globals: Partial<Record<CodingToolId, HarnessGlobal>>
   /**
    * Whether Hoot has read the installed harnesses' configurations since it

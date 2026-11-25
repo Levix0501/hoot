@@ -506,8 +506,6 @@ describe('resolveLaunch', () => {
         UserPromptSubmit: [{ hooks: [hook] }],
         Stop: [{ hooks: [hook] }],
         StopFailure: [{ hooks: [hook] }],
-        // In the foreground before `/model` saves a model, so that Hoot reads the settings first.
-        PreModelSwitch: [{ hooks: [{ type: 'command', command: hook.command }] }],
         PostModelSwitch: [{ hooks: [hook] }],
       },
     })

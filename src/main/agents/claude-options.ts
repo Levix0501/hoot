@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { AgentLaunchOptions, AgentModelOption, ConfiguredDefault } from '../../shared/agents'
 import type { Env } from '../env/env'
+import { claudeSettingsFile, isClaudeProviderVariable } from '../providers/claude-config'
 
 const FIVE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 const FOUR_LEVELS = ['low', 'medium', 'high', 'max']
@@ -40,11 +41,6 @@ async function readJson(file: string): Promise<JsonObject | null> {
   } catch {
     return null
   }
-}
-
-/** Where Claude Code keeps its user settings. */
-export function claudeSettingsPath(home: string): string {
-  return path.join(home, '.claude', 'settings.json')
 }
 
 /** Where Claude Code keeps its managed settings, which take precedence over the user's. */
@@ -187,13 +183,6 @@ function allowedBy(
   })
 }
 
-/**
- * The models Claude Code's `/model` picker offers under this configuration,
- * and the effort levels of Default: the four aliases, a custom model option,
- * the `modelPicker` rows, filtered by `availableModels` and the managed
- * settings' `deniedModels`. Only this configuration's settings are read, not
- * the cache Claude Code keeps of gateway models.
- */
 /** A setting as the managed settings, or else the user's, set it, and which of them does. */
 function configuredSetting(
   managed: JsonObject | null,
@@ -206,6 +195,17 @@ function configuredSetting(
   return fromUser === null ? null : { value: fromUser, source: 'settings.json' }
 }
 
+/**
+ * The models Claude Code's `/model` picker offers in a session of Hoot's on
+ * its own models, and the effort levels of Default: the four aliases, a
+ * custom model option, the `modelPicker` rows, filtered by `availableModels`
+ * and the managed settings' `deniedModels`. Such a session unsets every
+ * provider variable of the user's settings and of the login shell's
+ * environment, and starts with the account's default model, not the one the
+ * user's settings save (see `claudeCodeSettings`); the managed settings take
+ * precedence over Hoot's, and still count. Only this configuration's
+ * settings are read, not the cache Claude Code keeps of gateway models.
+ */
 export async function readClaudeLaunchOptions(options: {
   home: string
   env: Env
@@ -217,14 +217,18 @@ export async function readClaudeLaunchOptions(options: {
 }): Promise<AgentLaunchOptions> {
   const platform = options.platform ?? process.platform
   const [user, managed] = await Promise.all([
-    readJson(options.userSettingsPath ?? claudeSettingsPath(options.home)),
+    readJson(options.userSettingsPath ?? claudeSettingsFile(options.home, options.env)),
     readJson(options.managedSettingsPath ?? claudeManagedSettingsPath(platform)),
   ])
-  const env: Env = { ...options.env }
-  for (const settings of [user, managed]) {
-    for (const [name, value] of Object.entries(objectOf(settings?.env) ?? {})) {
-      if (typeof value === 'string') env[name] = value
-    }
+  const env: Env = {}
+  for (const [name, value] of [
+    ...Object.entries(options.env),
+    ...Object.entries(objectOf(user?.env) ?? {}),
+  ]) {
+    if (typeof value === 'string' && !isClaudeProviderVariable(name)) env[name] = value
+  }
+  for (const [name, value] of Object.entries(objectOf(managed?.env) ?? {})) {
+    if (typeof value === 'string') env[name] = value
   }
 
   const managedPicker = objectOf(managed?.modelPicker)
@@ -279,10 +283,7 @@ export async function readClaudeLaunchOptions(options: {
   )
 
   const configuredDefault =
-    stringOf(managed?.model) ??
-    stringOf(user?.model) ??
-    stringOf(env.ANTHROPIC_DEFAULT_MODEL) ??
-    'opus'
+    stringOf(managed?.model) ?? stringOf(env.ANTHROPIC_DEFAULT_MODEL) ?? 'opus'
   const defaultOptions = [
     ...aliasOptions,
     ...(customOption === null ? [] : [customOption]),
@@ -303,7 +304,7 @@ export async function readClaudeLaunchOptions(options: {
   return {
     models,
     defaultEfforts,
-    defaultModel: configuredSetting(managed, user, 'model'),
+    defaultModel: configuredSetting(managed, null, 'model'),
     defaultEffort: configuredSetting(managed, user, 'effortLevel'),
   }
 }

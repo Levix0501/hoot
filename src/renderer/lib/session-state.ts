@@ -138,7 +138,6 @@ export function afterHookEvent(session: StateSource, report: HookEventReport): S
     case 'StopFailure':
       return report.subagent ? {} : afterTurnFailed(session, report.turn)
     case 'ModelSelected':
-    case 'PreModelSwitch':
     case 'PostModelSwitch':
       return {}
   }

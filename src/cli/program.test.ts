@@ -1933,11 +1933,12 @@ describe('hoot hook', () => {
         ),
       ),
     ).toEqual({ ...none, event: 'PostModelSwitch', conversationId: 'c1', model: 'sonnet' })
+    // Hoot adds no hook before `/model`.
     expect(
       hookEventOf(
         Buffer.from(JSON.stringify({ hook_event_name: 'PreModelSwitch', session_id: 'c1' })),
       ),
-    ).toEqual({ ...none, event: 'PreModelSwitch', conversationId: 'c1' })
+    ).toBeNull()
     expect(
       hookEventOf(
         Buffer.from(

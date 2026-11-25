@@ -5,12 +5,15 @@ import {
   agentsToMake,
   canRun,
   findProvider,
+  GLOBAL_HARNESSES,
+  isGlobalHarness,
   providerFromConfig,
   providerNamed,
   withAgentChange,
   type Agent,
   type AgentChange,
   type GlobalConfig,
+  type GlobalHarness,
   type HarnessGlobal,
   type NewAgent,
   type NewProvider,
@@ -34,9 +37,9 @@ export interface ProviderServiceOptions {
    * Reads a harness's own configuration; `null` for one that names a provider
    * Hoot cannot run the harness on, which gives it no global.
    */
-  readGlobal(harness: CodingToolId): Promise<GlobalReading | null>
+  readGlobal(harness: GlobalHarness): Promise<GlobalReading | null>
   /** Writes a provider and a model into a harness's own configuration, as its global. */
-  writeGlobal(harness: CodingToolId, provider: Provider, model: string | null): Promise<void>
+  writeGlobal(harness: GlobalHarness, provider: Provider, model: string | null): Promise<void>
   /**
    * The launch settings an earlier Hoot kept for a harness, before agents,
    * which the first agent made of its global takes; `null` for none.
@@ -77,15 +80,17 @@ function cleanModels(models: readonly string[]): string[] {
 }
 
 /**
- * The user's providers, the agents made of them, and each installed harness's
- * global: the provider its own configuration names, which it runs on outside
- * Hoot. Hoot reads a harness's configuration when it opens, when the harness
- * gets installed, and when asked again, as when its window gets the focus: a
- * configuration that names none of the providers, by address and key, makes a
- * new one; an existing provider never changes by it. As it opens, and as a
- * harness gets installed, a harness that has a global and no agent gets one,
- * as the user would make it. Changing a global writes the harness's own
- * configuration, as does changing a provider that is one.
+ * The user's providers, the agents made of them, and the global of each
+ * installed harness of `GLOBAL_HARNESSES`: the provider its own configuration
+ * names, which it runs on outside Hoot. Hoot reads such a configuration when
+ * it opens, when the harness gets installed, and when asked again, as when
+ * its window gets the focus: a configuration that names none of the
+ * providers, by address and key, makes a new one; an existing provider never
+ * changes by it. As it opens, and as a harness gets installed, a harness that
+ * has a global and no agent gets one, as the user would make it. Changing a
+ * global writes the harness's own configuration, as does changing a provider
+ * that is one. Claude Code has no global: its own settings are never read
+ * for one or written, and its agents are made by hand alone.
  */
 export class ProviderService extends EventEmitter<{
   changed: [ProvidersState]
@@ -136,10 +141,10 @@ export class ProviderService extends EventEmitter<{
 
   /**
    * The harnesses a detection found installed. The first detection since Hoot
-   * started is its opening: every installed harness's global is read, and
-   * each that has one and no agent gets one. After it, a harness that got
-   * installed does the same; one that went loses its global, which is read
-   * again once it is back.
+   * started is its opening: the global of every installed harness that has
+   * one (see `GLOBAL_HARNESSES`) is read, and each that has one and no agent
+   * gets one. After it, a harness that got installed does the same; one that
+   * went loses its global, which is read again once it is back.
    */
   installedChanged(installed: readonly CodingToolId[]): Promise<InstallPass> {
     return this.enqueue(async () => {
@@ -149,21 +154,21 @@ export class ProviderService extends EventEmitter<{
       const added = CODING_TOOL_IDS.filter((harness) => now.has(harness) && !before.has(harness))
       for (const harness of before) if (!now.has(harness)) delete this.globals[harness]
       this.installed = now
-      for (const harness of added) await this.readGlobal(harness)
-      const made = this.makeAgents(added)
+      for (const harness of added) if (isGlobalHarness(harness)) await this.readGlobal(harness)
+      const made = this.makeAgents(added.filter(isGlobalHarness))
       this.opened = true
       if (opening || added.length > 0 || before.size !== now.size) this.emitChanged()
       return { opening, made }
     })
   }
 
-  /** Reads the global of every installed harness again; no agent is made. */
+  /** Reads the global of every installed harness that has one again; no agent is made. */
   refreshGlobals(): Promise<void> {
     return this.enqueue(async () => {
       if (this.installed === null) return
       const before = JSON.stringify(this.globals)
       const providers = this.providers.length
-      for (const harness of CODING_TOOL_IDS) {
+      for (const harness of GLOBAL_HARNESSES) {
         if (this.installed.has(harness)) await this.readGlobal(harness)
       }
       if (JSON.stringify(this.globals) !== before || this.providers.length !== providers) {
@@ -237,10 +242,12 @@ export class ProviderService extends EventEmitter<{
   /**
    * Makes a provider a harness's global, writing it into the harness's own
    * configuration with the global's model, where the provider has that model,
-   * else with the provider's first.
+   * else with the provider's first. Claude Code has none (see
+   * `GLOBAL_HARNESSES`).
    */
   setGlobal(harness: CodingToolId, providerId: string): Promise<ProviderResult> {
     return this.enqueue(async () => {
+      if (!isGlobalHarness(harness)) return { ok: false, message: 'The agent has no global.' }
       const provider = this.provider(providerId)
       if (provider === undefined || !canRun(provider, harness)) {
         return { ok: false, message: 'The provider cannot run this agent.' }
@@ -261,7 +268,9 @@ export class ProviderService extends EventEmitter<{
     return this.enqueue(async () => {
       const global = this.globals[harness]
       const provider = global === undefined ? undefined : this.provider(global.providerId)
-      if (provider === undefined) return { ok: false, message: 'The agent has no global.' }
+      if (provider === undefined || !isGlobalHarness(harness)) {
+        return { ok: false, message: 'The agent has no global.' }
+      }
       return this.writeGlobal(harness, provider, model?.trim() || null)
     })
   }
@@ -299,7 +308,7 @@ export class ProviderService extends EventEmitter<{
 
   /** Writes a global, then reads the harness's configuration again, as the window then shows it. */
   private async writeGlobal(
-    harness: CodingToolId,
+    harness: GlobalHarness,
     provider: Provider,
     model: string | null,
   ): Promise<ProviderResult> {
@@ -318,7 +327,7 @@ export class ProviderService extends EventEmitter<{
    * the one it had while it still names that, or a new one made of it. One
    * that cannot be read leaves the global as it was.
    */
-  private async readGlobal(harness: CodingToolId): Promise<void> {
+  private async readGlobal(harness: GlobalHarness): Promise<void> {
     let reading: GlobalReading | null
     try {
       reading = await this.options.readGlobal(harness)
@@ -407,8 +416,8 @@ export class ProviderService extends EventEmitter<{
   }
 
   /** The installed harnesses whose global a provider is. */
-  private harnessesWithGlobal(providerId: string): CodingToolId[] {
-    return CODING_TOOL_IDS.filter(
+  private harnessesWithGlobal(providerId: string): GlobalHarness[] {
+    return GLOBAL_HARNESSES.filter(
       (harness) =>
         this.installed?.has(harness) === true && this.globals[harness]?.providerId === providerId,
     )

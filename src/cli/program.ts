@@ -2,6 +2,7 @@ import { Command, CommanderError, InvalidArgumentError, Option } from 'commander
 import { MAX_BLOCKED_BY, MAX_BLOCKING } from '../shared/dependencies'
 import {
   MODEL_EVENT,
+  MODEL_SWITCH_EVENT,
   REPORTED_EVENTS,
   HOOT_ENV,
   MAX_PROMPT_LENGTH,
@@ -303,7 +304,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
   const picked =
     event === MODEL_EVENT
       ? { provider: inputText(provider), model: inputText(model) }
-      : event === 'PostModelSwitch'
+      : event === MODEL_SWITCH_EVENT
         ? { model: inputText(requested) ?? inputText(switched) }
         : {}
   return {

@@ -535,6 +535,55 @@ describe('resolveLaunch', () => {
     },
   )
 
+  it("runs Codex on its session's provider by its arguments, the key in its environment", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const kimi: Provider = {
+      id: 'p-kimi',
+      name: 'Kimi',
+      presetId: 'kimi',
+      apiKey: 'sk-kimi',
+      keyHeader: 'bearer',
+      urls: { responses: 'https://api.moonshot.cn/v1' },
+      models: ['kimi-k3'],
+      own: null,
+    }
+    const codex = await resolveLaunch(
+      { ...context(loginEnv), provider: kimi },
+      'codex',
+      project,
+      null,
+      { conversationId: 'thread-1', resume: true },
+    )
+    expect(codex.args).toEqual([
+      ...program(bin, 'codex').args,
+      'resume',
+      'thread-1',
+      '-c',
+      'model_provider="hoot"',
+      '-c',
+      'model_providers.hoot={name="Kimi",base_url="https://api.moonshot.cn/v1",env_key="HOOT_CODEX_API_KEY",wire_api="responses"}',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--model',
+      'kimi-k3',
+      '-c',
+      'model_reasoning_effort=high',
+    ])
+    expect(codex.env.HOOT_CODEX_API_KEY).toBe('sk-kimi')
+    // On its subscription, OpenAI's provider, whatever the user's configuration names.
+    const own = await resolveLaunch(
+      { ...context(loginEnv), provider: ownProvider('codex') },
+      'codex',
+      project,
+    )
+    expect(own.args).toEqual([
+      ...program(bin, 'codex').args,
+      '-c',
+      'model_provider="openai"',
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
+    expect(own.env).not.toHaveProperty('HOOT_CODEX_API_KEY')
+  })
+
   it("runs Claude Code on its session's provider, over the user's own, in its settings file", async () => {
     const loginEnv = { PATH: onPath(bin, '/usr/bin') }
     const kimi: Provider = {

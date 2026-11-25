@@ -9,11 +9,12 @@ export type WireFormat = 'anthropic' | 'responses'
 /**
  * The formats in which each agent can run a provider of the user's, the one
  * it takes first leading; an agent with none runs only on its own models.
- * OpenCode runs a provider at its Anthropic-compatible address.
+ * Codex runs a provider at its Responses address alone; OpenCode at its
+ * Anthropic-compatible one.
  */
 export const FORMATS_OF: Readonly<Record<CodingToolId, readonly WireFormat[]>> = {
   claude: ['anthropic'],
-  codex: [],
+  codex: ['responses'],
   opencode: ['anthropic'],
 }
 
@@ -56,15 +57,20 @@ export interface ProviderPreset {
 /**
  * The providers Hoot knows, in the order the Providers page offers them, with
  * the Anthropic-compatible addresses and the models that cc-switch's presets
- * point Claude Code at (November 2026). A model ending in `[1m]` tells Claude
- * Code that it takes a million tokens of context.
+ * point Claude Code at, and the Responses addresses its presets point Codex
+ * at where the provider's own documentation for Codex gives one (November
+ * 2026). A model ending in `[1m]` tells Claude Code that it takes a million
+ * tokens of context.
  */
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
     id: 'deepseek',
     name: 'DeepSeek',
     mark: 'deepseek',
-    urls: { anthropic: 'https://api.deepseek.com/anthropic' },
+    urls: {
+      anthropic: 'https://api.deepseek.com/anthropic',
+      responses: 'https://api.deepseek.com',
+    },
     models: ['deepseek-flash[1m]'],
     keyHeader: 'bearer',
     keyUrl: 'https://platform.deepseek.com/api_keys',
@@ -73,7 +79,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'kimi',
     name: 'Kimi',
     mark: 'kimi',
-    urls: { anthropic: 'https://api.moonshot.cn/anthropic' },
+    urls: {
+      anthropic: 'https://api.moonshot.cn/anthropic',
+      responses: 'https://api.moonshot.cn/v1',
+    },
     models: ['kimi-k3.1-pro'],
     keyHeader: 'bearer',
     keyUrl: 'https://platform.moonshot.cn/console/api-keys',
@@ -82,7 +91,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'kimi-coding',
     name: 'Kimi For Coding',
     mark: 'kimi',
-    urls: { anthropic: 'https://api.kimi.com/coding/' },
+    urls: {
+      anthropic: 'https://api.kimi.com/coding/',
+      responses: 'https://api.kimi.com/coding/v1',
+    },
     models: ['kimi-for-coding'],
     keyHeader: 'bearer',
     keyUrl: 'https://www.kimi.com/code',
@@ -91,7 +103,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'zhipu',
     name: 'Zhipu GLM',
     mark: 'zhipu',
-    urls: { anthropic: 'https://open.bigmodel.cn/api/anthropic' },
+    urls: {
+      anthropic: 'https://open.bigmodel.cn/api/anthropic',
+      responses: 'https://open.bigmodel.cn/api/v1',
+    },
     models: ['glm-5.3[1m]'],
     keyHeader: 'bearer',
     keyUrl: 'https://www.bigmodel.cn/claude-code',
@@ -100,7 +115,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'zai',
     name: 'Z.ai',
     mark: 'zai',
-    urls: { anthropic: 'https://api.z.ai/api/anthropic' },
+    urls: { anthropic: 'https://api.z.ai/api/anthropic', responses: 'https://api.z.ai/api/v1' },
     models: ['glm-5.3[1m]'],
     keyHeader: 'bearer',
     keyUrl: 'https://z.ai/subscribe',
@@ -109,7 +124,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'minimax',
     name: 'MiniMax',
     mark: 'minimax',
-    urls: { anthropic: 'https://api.minimax.cn/anthropic' },
+    urls: { anthropic: 'https://api.minimax.cn/anthropic', responses: 'https://api.minimax.cn/v1' },
     models: ['MiniMax-M3.1-Flash[1m]'],
     keyHeader: 'bearer',
     keyUrl: 'https://platform.minimax.cn/user-center/basic-information/interface-key',
@@ -118,7 +133,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'doubao',
     name: 'Doubao',
     mark: 'doubao',
-    urls: { anthropic: 'https://ark.cn-beijing.volces.com/api/compatible' },
+    urls: {
+      anthropic: 'https://ark.cn-beijing.volces.com/api/compatible',
+      responses: 'https://ark.cn-beijing.volces.com/api/v3',
+    },
     models: ['doubao-seed-2-1-pro-260915'],
     keyHeader: 'bearer',
     keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
@@ -127,7 +145,10 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: 'xiaomi',
     name: 'Xiaomi MiMo',
     mark: 'xiaomimimo',
-    urls: { anthropic: 'https://api.xiaomimimo.com/anthropic' },
+    urls: {
+      anthropic: 'https://api.xiaomimimo.com/anthropic',
+      responses: 'https://api.xiaomimimo.com/v1',
+    },
     models: ['mimo-v2.6-pro[1m]'],
     keyHeader: 'bearer',
     keyUrl: 'https://platform.xiaomimimo.com/#/console/api-keys',
@@ -149,6 +170,15 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     models: ['anthropic/claude-sonnet-5.5'],
     keyHeader: 'bearer',
     keyUrl: 'https://openrouter.ai/keys',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI API',
+    mark: 'openai',
+    urls: { responses: 'https://api.openai.com/v1' },
+    models: [],
+    keyHeader: 'bearer',
+    keyUrl: 'https://platform.openai.com/api-keys',
   },
   {
     id: 'anthropic',
@@ -230,11 +260,23 @@ export function providerOfOpenCodeId(openCodeId: string): string | null {
 }
 
 /**
- * A model as OpenCode takes it: without the mark at its end that tells Claude
- * Code its context, such as `[1m]`.
+ * A model as OpenCode and Codex take it: without the mark at its end that
+ * tells Claude Code its context, such as `[1m]`.
  */
-export function openCodeModel(model: string): string {
+export function bareModel(model: string): string {
   return model.replace(/\[[^\]]*\]$/, '')
+}
+
+/**
+ * The effort levels each agent offers on a provider of the user's: none for
+ * Claude Code, whose levels other providers' models do not tell; for Codex,
+ * those every provider Hoot knows takes; for OpenCode, the variants it gives
+ * a model at an Anthropic-compatible address.
+ */
+export const PROVIDER_EFFORTS: Readonly<Record<CodingToolId, readonly string[]>> = {
+  claude: [],
+  codex: ['low', 'high'],
+  opencode: ['low', 'medium', 'high'],
 }
 
 /** Whether an agent's own models need it signed in: OpenCode's free ones do not. */

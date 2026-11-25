@@ -124,7 +124,10 @@ describe('providers', () => {
       presetId: 'deepseek',
       apiKey: 'sk-new',
       keyHeader: 'bearer',
-      urls: { anthropic: 'https://api.deepseek.com/anthropic' },
+      urls: {
+        anthropic: 'https://api.deepseek.com/anthropic',
+        responses: 'https://api.deepseek.com',
+      },
       models: ['deepseek-pro', 'deepseek-flash[1m]'],
     })
     const unknown = providerFromConfig([], 'claude', {

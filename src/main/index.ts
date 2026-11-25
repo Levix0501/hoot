@@ -11,12 +11,7 @@ import { waitedOnIds } from '../shared/dependencies'
 import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
 import { defaultAgentLaunchSettings } from '../shared/launch-settings'
 import { MODEL_EVENT } from '../shared/hoot-cli'
-import {
-  issueAgent,
-  providerOfOpenCodeId,
-  type GlobalConfig,
-  type Provider,
-} from '../shared/providers'
+import { issueAgent, providerOfOpenCodeId, type Provider } from '../shared/providers'
 import { CODING_TOOL_IDS, type CodingToolId } from '../shared/tools'
 import { startBlockers } from '../shared/start-blockers'
 import {
@@ -26,7 +21,7 @@ import {
 } from '../shared/window-controls'
 import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
-import { codexConfigPath, readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
+import { readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
@@ -52,6 +47,7 @@ import {
   readClaudeGlobal,
   writeClaudeGlobal,
 } from './providers/claude-config'
+import { readCodexGlobal, writeCodexGlobal } from './providers/codex-config'
 import {
   createOpenCodeSession,
   openCodeModelRef,
@@ -259,16 +255,11 @@ const SIGN_IN_FRESH_MS = 60_000
 /** What `claude auth status` last said, and when. */
 let claudeSignIn: { signedIn: boolean; at: number } | null = null
 
-/** A harness's configuration that names its own models, and a model. */
-function ownConfig(model: string | null): GlobalConfig {
-  return { url: '', apiKey: '', keyHeader: 'bearer', model }
-}
-
 /**
  * Reads what a harness's own configuration names: for Claude Code, its
  * settings and, when they name no provider, whether it is signed in to its
  * subscription, which Hoot asks it again a minute later at the soonest; for
- * Codex, whether it is signed in; OpenCode's free models need nothing.
+ * Codex, its config.toml and sign-in; for OpenCode, its default model.
  */
 async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading | null> {
   const { env } = await tools.getLoginEnvironment()
@@ -284,11 +275,8 @@ async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading |
       }
       return { config, signedIn: claudeSignIn.signedIn }
     }
-    case 'codex': {
-      const { model } = await readCodexConfig(env, home)
-      const auth = path.join(path.dirname(codexConfigPath(env, home)), 'auth.json')
-      return { config: ownConfig(model), signedIn: fs.existsSync(auth) }
-    }
+    case 'codex':
+      return readCodexGlobal(env, home)
     case 'opencode':
       return readOpenCodeGlobal(env, home)
   }
@@ -327,7 +315,7 @@ async function writeHarnessGlobal(
     })
     return
   }
-  throw new Error(`Hoot does not change the configuration of ${harness} yet.`)
+  await writeCodexGlobal(env, os.homedir(), provider, model)
 }
 
 /** The chats, once the database is open. */

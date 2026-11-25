@@ -24,6 +24,7 @@ import {
   agentName,
   canRun,
   ownProvider,
+  PROVIDER_EFFORTS,
   providerMark,
   type Agent,
   type AgentChange,
@@ -112,19 +113,13 @@ function modelChoices(
   return provider.models.map((model) => ({ value: model, label: model, efforts: [] }))
 }
 
-/**
- * The effort levels OpenCode takes for a model of the user's at an
- * Anthropic-compatible address, as its variants.
- */
-const OPENCODE_VARIANTS = ['low', 'medium', 'high']
-
 /** The effort levels of a model, or of the default model, on a provider. */
 function effortsOf(
   model: string | null,
   provider: Provider | undefined,
   state: AgentState | undefined,
 ): string[] {
-  if (provider?.own === null) return state?.id === 'opencode' ? OPENCODE_VARIANTS : []
+  if (provider?.own === null) return state === undefined ? [] : [...PROVIDER_EFFORTS[state.id]]
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
   return options?.models.find((option) => option.value === model)?.efforts ?? []

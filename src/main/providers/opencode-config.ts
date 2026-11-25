@@ -5,7 +5,7 @@ import type { AgentLaunchOptions } from '../../shared/agents'
 import {
   canRun,
   OPENCODE_DEFAULT_FREE_MODEL,
-  openCodeModel,
+  bareModel,
   openCodeProviderId,
   providerUrl,
   trimUrl,
@@ -123,7 +123,7 @@ function openCodeEntry(provider: Provider): JsonObject {
       apiKey: provider.apiKey,
     },
     models: Object.fromEntries(
-      provider.models.map((model) => [openCodeModel(model), { name: openCodeModel(model) }]),
+      provider.models.map((model) => [bareModel(model), { name: bareModel(model) }]),
     ),
   }
 }
@@ -134,8 +134,8 @@ export function openCodeModelRef(provider: Provider, model: string | null): stri
     model === null
       ? provider.own === 'opencode'
         ? OPENCODE_DEFAULT_FREE_MODEL
-        : openCodeModel(provider.models[0] ?? '')
-      : openCodeModel(model)
+        : bareModel(provider.models[0] ?? '')
+      : bareModel(model)
   return `${openCodeProviderId(provider)}/${id}`
 }
 

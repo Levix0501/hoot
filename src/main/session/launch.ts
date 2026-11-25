@@ -20,6 +20,7 @@ import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
 import { findCommand } from '../tools/find-command'
 import { claudeSessionEnv } from '../providers/claude-config'
+import { codexProviderLaunch } from '../providers/codex-config'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
@@ -402,11 +403,21 @@ export async function resolveLaunch(
     env[HOOT_ENV.openCodePlugin] = '1'
   }
   const chatArguments = chatLaunchArguments(tool.id, chat)
+  // Codex runs on the session's provider by its own arguments and a variable
+  // that holds the key, which may give it a model and an effort level too.
+  let agent = launch.agent
+  let providerArguments: string[] = []
+  if (tool.id === 'codex' && context.provider !== null) {
+    const codex = codexProviderLaunch(context.provider, agent.model, agent.effort)
+    agent = { ...agent, model: codex.model, effort: codex.effort }
+    providerArguments = codex.args
+    for (const [name, value] of Object.entries(codex.env)) setEnvVariable(env, name, value)
+  }
   let hookArguments: string[] = []
   /** The file of a Claude Code session's settings, which its cleanup removes. */
   let settingsFile: string | null = null
   if (tool.id === 'claude') {
-    settingsFile = await writeClaudeSettings(context, launch.agent.model)
+    settingsFile = await writeClaudeSettings(context, agent.model)
     hookArguments = ['--settings', settingsFile]
   } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
     hookArguments = ['-c', CODEX_HOOK_SETTING]
@@ -417,10 +428,11 @@ export async function resolveLaunch(
   const args = [
     ...program.args,
     ...chatArguments.before,
+    ...providerArguments,
     ...agentLaunchArguments({
       tool: tool.id,
       yoloMode: launch.yoloMode,
-      settings: launch.agent,
+      settings: agent,
       hookArguments,
     }),
     ...chatArguments.after,

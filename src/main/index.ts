@@ -23,6 +23,7 @@ import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
 import { readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
+import { readVersion } from './agents/version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { ChatManager } from './chats/chat-manager'
@@ -30,7 +31,7 @@ import { localChatConversations } from './chats/conversations'
 import { FileWatcher } from './files/file-watcher'
 import { FolderAccess } from './files/folder-access'
 import { databaseFile, openDatabase, transaction } from './database/database'
-import { captureBaseEnv } from './env/env'
+import { captureBaseEnv, type Env } from './env/env'
 import { fallbackUtf8Locale, type TerminalEnvOptions } from './env/session-env'
 import { gitEnvironment } from './git/git'
 import { HootServer } from './hoot-cli/hoot-server'
@@ -55,6 +56,7 @@ import {
   openCodeModelRef,
   readOpenCodeGlobal,
   readOpenCodeLaunchOptions,
+  takesProviders,
   writeOpenCodeConfig,
 } from './providers/opencode-config'
 import { ProviderService, type GlobalReading } from './providers/provider-service'
@@ -185,11 +187,44 @@ const sessions: SessionManager = new SessionManager({
 })
 
 /**
+ * The versions the OpenCode commands Hoot has run report, by the command
+ * and the file it leads to, which an update replaces.
+ */
+const openCodeVersions = new Map<string, Promise<string | null>>()
+
+/** Whether the OpenCode at `command` takes Hoot's providers (see `takesProviders`). */
+async function openCodeTakesProviders(command: string, env: Env): Promise<boolean> {
+  const file = await fs.promises.stat(command).catch(() => null)
+  const key = `${command}\n${file?.mtimeMs ?? ''}\n${file?.size ?? ''}`
+  let version = openCodeVersions.get(key)
+  if (version === undefined) {
+    version = readVersion(command, env, os.homedir()).then((reading) => {
+      // One that did not say its version, too slow to start for one, is asked again.
+      if (reading.version === null) openCodeVersions.delete(key)
+      return reading.version
+    })
+    openCodeVersions.set(key, version)
+  }
+  return takesProviders(await version)
+}
+
+/** The installed OpenCode's command while it takes Hoot's providers, otherwise `null`. */
+async function openCodeOnProviders(env: Env): Promise<string | null> {
+  const command = tools
+    .getState()
+    .tools.find((tool) => tool.id === 'opencode' && tool.available)?.path
+  return command && (await openCodeTakesProviders(command, env)) ? command : null
+}
+
+/**
  * The conversation an OpenCode chat's session opens: one it goes on with, or
  * a new one, which Hoot makes first through OpenCode's background service on
  * the chat's provider and model, with its effort level as the variant, its
  * provider written into OpenCode's configuration before, and records as the
- * chat's. OpenCode then opens it with `-s`, as one it continues.
+ * chat's. OpenCode then opens it with `-s`, as one it continues. Where Hoot
+ * cannot make one, with OpenCode 1 or when making it fails, an agent on
+ * OpenCode's own models opens a new conversation of OpenCode's, as before
+ * Hoot had providers; one on a provider of the user's does not start.
  */
 async function openCodeConversation(
   cwd: string,
@@ -200,8 +235,13 @@ async function openCodeConversation(
   const provider = agent?.provider ?? null
   if (chat === null || chat.resume || provider === null || agent === null) return chat
   const login = await tools.getLoginEnvironment()
-  const command = tools.getState().tools.find((entry) => entry.id === 'opencode')?.path
-  if (!command) return chat
+  const command = await openCodeOnProviders(login.env)
+  if (command === null) {
+    if (provider.own !== null) return chat
+    throw new SessionError(
+      'This agent runs on OpenCode 2 and later. Update OpenCode on the Agents page.',
+    )
+  }
   let conversationId: string
   try {
     if (provider.own === null) await syncOpenCodeProviders()
@@ -213,6 +253,10 @@ async function openCodeConversation(
       agent.settings.effort,
     )
   } catch (error) {
+    if (provider.own !== null) {
+      console.error("Could not make OpenCode's conversation; it makes its own:", error)
+      return chat
+    }
     throw new SessionError(
       `Could not start OpenCode's conversation: ${error instanceof Error ? error.message : String(error)}`,
     )
@@ -233,8 +277,11 @@ const agents = new AgentService({
   launchOptions: async (tool, detection) => {
     const { env } = detection.login
     if (tool === 'opencode') {
+      // OpenCode 1 has no `opencode api` to list its models with.
       const command = detection.state.tools.find((entry) => entry.id === 'opencode')?.path
-      return command ? readOpenCodeLaunchOptions(command, env, os.homedir()) : null
+      return command && (await openCodeTakesProviders(command, env))
+        ? readOpenCodeLaunchOptions(command, env, os.homedir())
+        : null
     }
     if (tool === 'claude') {
       return readClaudeLaunchOptions({ home: os.homedir(), env })
@@ -299,14 +346,15 @@ async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading |
 
 /**
  * Writes the user's providers that OpenCode can run into its own
- * configuration, while OpenCode is installed, as each OpenCode session may
- * pick one with `/models`.
+ * configuration, while an OpenCode that takes them is installed, as each
+ * OpenCode session may pick one with `/models`.
  */
 async function syncOpenCodeProviders(): Promise<void> {
   if (providerService === null) return
   const installed = tools.getState().tools.some((tool) => tool.id === 'opencode' && tool.available)
   if (!installed) return
   const { env } = await tools.getLoginEnvironment()
+  if ((await openCodeOnProviders(env)) === null) return
   await writeOpenCodeConfig(env, os.homedir(), providerService.getState().providers)
 }
 
@@ -324,6 +372,9 @@ async function writeHarnessGlobal(
     return
   }
   if (harness === 'opencode') {
+    if ((await openCodeOnProviders(env)) === null) {
+      throw new Error('OpenCode takes it from version 2 on. Update OpenCode on the Agents page.')
+    }
     await writeOpenCodeConfig(env, os.homedir(), providerService?.getState().providers ?? [], {
       provider,
       model,

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser'
+import { major, valid } from 'semver'
 import type { AgentLaunchOptions } from '../../shared/agents'
 import {
   canRun,
@@ -25,6 +27,24 @@ export const ANTHROPIC_COMPATIBLE = '@opencode/ai/providers/anthropic-compatible
 
 /** How long OpenCode may take to answer through its API. */
 const API_TIMEOUT_MS = 30_000
+
+/** How many times Hoot asks OpenCode's service for its models while it lists none yet. */
+const MODEL_LIST_TRIES = 5
+
+/** How long Hoot waits before asking again. */
+const MODEL_LIST_INTERVAL_MS = 1500
+
+/**
+ * Whether an OpenCode takes Hoot's providers, as the version it reports
+ * says: OpenCode 2 does, with `providers` in its configuration and the
+ * conversations `opencode api` makes. OpenCode 1 has neither, so Hoot runs
+ * it as it did before it had providers and leaves its configuration alone;
+ * so too one whose version Hoot cannot read.
+ */
+export function takesProviders(version: string | null): boolean {
+  const parsed = version === null ? null : valid(version)
+  return parsed !== null && major(parsed) >= 2
+}
 
 function objectOf(value: unknown): JsonObject | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -251,16 +271,22 @@ export async function createOpenCodeSession(
 
 /**
  * The free models OpenCode comes with, which its own agents offer, each with
- * the effort levels it takes, its variants, as its own server lists them.
+ * the effort levels it takes, its variants, as its background service lists
+ * them. A service that has just started lists none until it has read them,
+ * a moment later, so an empty list is asked for again a few times.
  */
 export async function readOpenCodeLaunchOptions(
   command: string,
   env: Env,
   cwd: string,
+  interval = MODEL_LIST_INTERVAL_MS,
 ): Promise<AgentLaunchOptions> {
-  const data = await openCodeApi(command, env, cwd, ['--standalone', 'model.list']).catch(
-    () => null,
-  )
+  let data: unknown = null
+  for (let attempt = 0; attempt < MODEL_LIST_TRIES; attempt += 1) {
+    if (attempt > 0) await delay(interval)
+    data = await openCodeApi(command, env, cwd, ['model.list']).catch(() => null)
+    if (!Array.isArray(data) || data.length > 0) break
+  }
   const models = (Array.isArray(data) ? data : []).flatMap((entry) => {
     const model = objectOf(entry)
     if (model === null || model.providerID !== 'opencode') return []

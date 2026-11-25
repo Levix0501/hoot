@@ -4,12 +4,15 @@ import path from 'node:path'
 import { parse } from 'jsonc-parser'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProvider, type Provider } from '../../shared/providers'
+import { writeNodeCommand } from '../tools/test-support'
 import {
   ANTHROPIC_COMPATIBLE,
   openCodeBaseUrl,
   openCodeConfigFile,
   openCodeModelRef,
   readOpenCodeGlobal,
+  readOpenCodeLaunchOptions,
+  takesProviders,
   writeOpenCodeConfig,
 } from './opencode-config'
 
@@ -155,6 +158,49 @@ describe("OpenCode's own configuration", () => {
     const file = write('opencode.json', '{ not json')
     await expect(writeOpenCodeConfig({}, home, [kimi])).rejects.toThrow(/JSON object/)
     expect(fs.readFileSync(file, 'utf8')).toBe('{ not json')
+  })
+
+  it('takes providers from OpenCode 2 on', () => {
+    expect(takesProviders('2.0.32')).toBe(true)
+    expect(takesProviders('2.4.1')).toBe(true)
+    expect(takesProviders('3.0.0')).toBe(true)
+    expect(takesProviders('1.19.6')).toBe(false)
+    expect(takesProviders('opencode')).toBe(false)
+    expect(takesProviders(null)).toBe(false)
+  })
+
+  it("asks OpenCode's service for its free models again while it lists none yet", async () => {
+    const calls = path.join(home, 'calls')
+    const opencode = await writeNodeCommand(
+      path.join(home, 'bin', 'opencode'),
+      `const fs = require('node:fs')
+fs.appendFileSync(${JSON.stringify(calls)}, process.argv.slice(2).join(' ') + '\\n')
+const asked = fs.readFileSync(${JSON.stringify(calls)}, 'utf8').trim().split('\\n').length
+const data = asked < 3 ? [] : [
+  { providerID: 'opencode', modelID: 'big-pickle', name: 'Big Pickle', variants: [{ id: 'low' }, { id: 'high' }] },
+  { providerID: 'hoot-p1', modelID: 'kimi-k3.1-pro', name: 'kimi-k3.1-pro', variants: [] },
+]
+console.log(JSON.stringify({ location: { directory: process.cwd() }, data }))
+`,
+    )
+    const options = await readOpenCodeLaunchOptions(opencode, {}, home, 1)
+    expect(options.models).toEqual([
+      { value: 'big-pickle', label: 'Big Pickle', efforts: ['low', 'high'] },
+    ])
+    expect(fs.readFileSync(calls, 'utf8')).toBe('api model.list\n'.repeat(3))
+  })
+
+  it('asks an OpenCode without the API once', async () => {
+    const calls = path.join(home, 'calls')
+    const opencode = await writeNodeCommand(
+      path.join(home, 'bin', 'opencode'),
+      `require('node:fs').appendFileSync(${JSON.stringify(calls)}, 'asked\\n')
+console.error('Unknown command: api')
+process.exitCode = 1
+`,
+    )
+    expect((await readOpenCodeLaunchOptions(opencode, {}, home, 1)).models).toEqual([])
+    expect(fs.readFileSync(calls, 'utf8')).toBe('asked\n')
   })
 
   it("gives OpenCode a provider's address and models as it takes them", () => {

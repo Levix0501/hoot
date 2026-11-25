@@ -42,9 +42,11 @@ import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-pro
 import { ProjectFolders } from './projects/project-folders'
 import { ProjectStore } from './projects/project-store'
 import {
+  claudeSavedModel,
   claudeSignedIn,
   claudeUserVariables,
   readClaudeGlobal,
+  restoreClaudeModel,
   writeClaudeGlobal,
 } from './providers/claude-config'
 import { readCodexGlobal, writeCodexGlobal } from './providers/codex-config'
@@ -249,6 +251,18 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 /** Answers hoot in the sessions, once the database is open. */
 let hootServer: HootServer | null = null
 
+/**
+ * The login shell's environment as Hoot last read it, for what must be read
+ * at once, as the user's settings before `/model` saves a model in them.
+ */
+let loginEnv = baseEnv
+
+/**
+ * The model the user's Claude Code settings saved as each session's `/model`
+ * began, by session, which Hoot puts back once it has saved another.
+ */
+const modelsBeforeSwitch = new Map<string, string | null>()
+
 /** How long Hoot trusts what `claude auth status` said, before it asks again. */
 const SIGN_IN_FRESH_MS = 60_000
 
@@ -263,6 +277,7 @@ let claudeSignIn: { signedIn: boolean; at: number } | null = null
  */
 async function readHarnessGlobal(harness: CodingToolId): Promise<GlobalReading | null> {
   const { env } = await tools.getLoginEnvironment()
+  loginEnv = env
   const home = os.homedir()
   switch (harness) {
     case 'claude': {
@@ -726,6 +741,28 @@ function startWithDatabase(database: DatabaseSync): void {
   sessions.on('hook-event', (id, report) => {
     const chatId = sessions.chatIdOf(id) ?? sessions.savedSessionIdOf(id)
     if (chatId !== null) chats.noteHookEvent(chatId, report)
+    // `/model` in a Claude Code session saves the model picked in the user's
+    // settings, which Hoot reads before, while Claude Code waits, and puts
+    // back after: the session, and its chat when it is opened again, go on
+    // with the model picked, and no other session changes.
+    if (report.event === 'PreModelSwitch') {
+      modelsBeforeSwitch.set(id, claudeSavedModel(os.homedir(), loginEnv))
+      return
+    }
+    if (report.event === 'PostModelSwitch') {
+      if (modelsBeforeSwitch.has(id)) {
+        const before = modelsBeforeSwitch.get(id) ?? null
+        modelsBeforeSwitch.delete(id)
+        restoreClaudeModel(os.homedir(), loginEnv, before).catch((error: unknown) =>
+          console.error("Could not put back the model of Claude Code's settings:", error),
+        )
+      }
+      const chat = chatId === null ? undefined : chats.get(chatId)
+      if (chat !== undefined && chat.providerId !== null && typeof report.model === 'string') {
+        chats.setProvider(chat.id, chat.providerId, report.model)
+      }
+      return
+    }
     // A model picked in an OpenCode session, as with `/models`: the session
     // and its chat go on with its provider, when it is one of Hoot's.
     if (report.event === MODEL_EVENT && typeof report.provider === 'string') {
@@ -742,6 +779,7 @@ function startWithDatabase(database: DatabaseSync): void {
     if (chatId !== null) chats.typed(chatId, id, data)
   })
   sessions.on('updated', (session) => chats.sessionEnded(session))
+  sessions.on('closed', (session) => modelsBeforeSwitch.delete(session.id))
   // What happened while Hoot was not running: conversations it has not seen
   // yet, and chats whose conversation never got a message.
   void chats.reconcileAll()

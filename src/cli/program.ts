@@ -252,6 +252,11 @@ function utf8Text(bytes: Uint8Array, what: string, source: string): string {
   }
 }
 
+/** A text field of a hook's input, `null` when it is none or empty. */
+function inputText(field: unknown): string | null {
+  return typeof field === 'string' && field !== '' ? field : null
+}
+
 /**
  * The event of a Claude Code or Codex hook whose input is `input`, the JSON
  * the agent gives a hook on standard input, or the plugin Hoot gives OpenCode
@@ -278,6 +283,8 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     cwd: folder,
     provider_id: provider,
     model_id: model,
+    requested_model: requested,
+    to_model: switched,
   } = value as {
     hook_event_name?: unknown
     agent_id?: unknown
@@ -288,16 +295,17 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     cwd?: unknown
     provider_id?: unknown
     model_id?: unknown
+    requested_model?: unknown
+    to_model?: unknown
   }
   const event = REPORTED_EVENTS.find((candidate) => candidate === name)
   if (event === undefined) return null
   const picked =
     event === MODEL_EVENT
-      ? {
-          provider: typeof provider === 'string' && provider !== '' ? provider : null,
-          model: typeof model === 'string' && model !== '' ? model : null,
-        }
-      : {}
+      ? { provider: inputText(provider), model: inputText(model) }
+      : event === 'PostModelSwitch'
+        ? { model: inputText(requested) ?? inputText(switched) }
+        : {}
   return {
     ...picked,
     event,

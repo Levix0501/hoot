@@ -126,16 +126,25 @@ function withoutNul(text: string): string {
  * the background, so that it neither delays nor shows anything in Claude
  * Code; it prints nothing and always succeeds, so that it decides nothing.
  * The user's own hooks run as well, and a user who turned off all hooks
- * turns off these too. With an environment, that of the provider the session
- * runs on (see `claudeSessionEnv`), which takes precedence over the user's.
+ * turns off these too. Hooks around `/model` too (see `MODEL_SWITCH_EVENTS`),
+ * the one before it run in the foreground, which Claude Code waits for. With
+ * an environment, that of the provider the session runs on (see
+ * `claudeSessionEnv`), which takes precedence over the user's.
  */
 export function claudeCodeSettings(
   hoot: string,
   env: Record<string, string> | null = null,
 ): Record<string, unknown> {
   const hook = { type: 'command', command: quote([hoot, 'hook']), async: true }
+  // Before `/model` saves the model picked, while Claude Code waits for it,
+  // so that Hoot reads the user's settings as they were.
+  const beforeSwitch = { type: 'command', command: quote([hoot, 'hook']) }
   return {
-    hooks: Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [hook] }]])),
+    hooks: {
+      ...Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [hook] }]])),
+      PreModelSwitch: [{ hooks: [beforeSwitch] }],
+      PostModelSwitch: [{ hooks: [hook] }],
+    },
     ...(env === null ? {} : { env }),
   }
 }

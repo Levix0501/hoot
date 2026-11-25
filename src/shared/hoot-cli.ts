@@ -227,8 +227,17 @@ export const HOOK_EVENTS = [
  */
 export const MODEL_EVENT = 'ModelSelected'
 
-/** Every event hoot reports: those of `HOOK_EVENTS`, and `MODEL_EVENT`. */
-export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT] as const
+/**
+ * The events of the hooks Hoot adds to every Claude Code session it starts
+ * around `/model`, which saves the model picked in the user's settings:
+ * before it does, and right after. Hoot puts back the model those settings
+ * had, so that a model picked in one session changes no other, and the
+ * session goes on with the one picked when it is opened again.
+ */
+export const MODEL_SWITCH_EVENTS = ['PreModelSwitch', 'PostModelSwitch'] as const
+
+/** Every event hoot reports: those of `HOOK_EVENTS`, `MODEL_EVENT` and `MODEL_SWITCH_EVENTS`. */
+export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT, ...MODEL_SWITCH_EVENTS] as const
 
 export type HookEvent = (typeof REPORTED_EVENTS)[number]
 
@@ -271,7 +280,10 @@ export interface HookEventReport {
   folder?: string | null
   /** For `MODEL_EVENT`, the provider of the model picked, by the agent's own id of it. */
   provider?: string | null
-  /** For `MODEL_EVENT`, the model picked, by the agent's own id of it. */
+  /**
+   * For `MODEL_EVENT`, the model picked, by the agent's own id of it; for
+   * `PostModelSwitch`, the model asked for, as `/model` names it.
+   */
   model?: string | null
 }
 

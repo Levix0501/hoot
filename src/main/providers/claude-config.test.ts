@@ -6,11 +6,13 @@ import { ownProvider, type Provider } from '../../shared/providers'
 import {
   ANTHROPIC_API_URL,
   claudeConfigDirectory,
+  claudeSavedModel,
   claudeSessionEnv,
   claudeSettingsFile,
   claudeUserVariables,
   isClaudeProviderVariable,
   readClaudeGlobal,
+  restoreClaudeModel,
   writeClaudeGlobal,
 } from './claude-config'
 
@@ -158,6 +160,23 @@ describe("Claude Code's own configuration", () => {
     await expect(writeClaudeGlobal(home, {}, kimi, null)).rejects.toThrow(/JSON/)
     expect(fs.readFileSync(file(), 'utf8')).toBe('{ not json')
     expect(fs.readdirSync(path.dirname(file()))).toEqual(['settings.json'])
+  })
+
+  it('puts back the model it saved before /model saved another, the rest left alone', async () => {
+    expect(claudeSavedModel(home, {})).toBeNull()
+    writeSettings({ model: 'opus', theme: 'dark' })
+    expect(claudeSavedModel(home, {})).toBe('opus')
+    // `/model` in a session of Hoot's saves another, which Hoot takes back out.
+    writeSettings({ model: 'sonnet', theme: 'dark' })
+    await restoreClaudeModel(home, {}, 'opus')
+    expect(settings()).toEqual({ model: 'opus', theme: 'dark' })
+    writeSettings({ model: 'sonnet', theme: 'dark' })
+    await restoreClaudeModel(home, {}, null)
+    expect(settings()).toEqual({ theme: 'dark' })
+    // A file that holds no JSON object stays as it is.
+    fs.writeFileSync(file(), '{ not json')
+    await restoreClaudeModel(home, {}, 'opus')
+    expect(fs.readFileSync(file(), 'utf8')).toBe('{ not json')
   })
 
   it('knows the variables that say which provider it runs on', () => {

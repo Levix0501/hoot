@@ -1918,6 +1918,46 @@ describe('hoot hook', () => {
     expect(hookEventOf(Buffer.from(JSON.stringify({ hook_event_name: 7 })))).toBeNull()
   })
 
+  it('reads the model a session picked, with /model in Claude Code or /models in OpenCode', () => {
+    const none = { subagent: false, turn: null, source: null, reason: null, folder: null }
+    expect(
+      hookEventOf(
+        Buffer.from(
+          JSON.stringify({
+            hook_event_name: 'PostModelSwitch',
+            session_id: 'c1',
+            from_model: 'deepseek-flash',
+            to_model: 'claude-sonnet-5-5',
+            requested_model: 'sonnet',
+          }),
+        ),
+      ),
+    ).toEqual({ ...none, event: 'PostModelSwitch', conversationId: 'c1', model: 'sonnet' })
+    expect(
+      hookEventOf(
+        Buffer.from(JSON.stringify({ hook_event_name: 'PreModelSwitch', session_id: 'c1' })),
+      ),
+    ).toEqual({ ...none, event: 'PreModelSwitch', conversationId: 'c1' })
+    expect(
+      hookEventOf(
+        Buffer.from(
+          JSON.stringify({
+            hook_event_name: 'ModelSelected',
+            session_id: 'ses_1',
+            provider_id: 'hoot-p1',
+            model_id: 'kimi-k3.1-pro',
+          }),
+        ),
+      ),
+    ).toEqual({
+      ...none,
+      event: 'ModelSelected',
+      conversationId: 'ses_1',
+      provider: 'hoot-p1',
+      model: 'kimi-k3.1-pro',
+    })
+  })
+
   it('succeeds without a word when it cannot report, so that Claude Code goes on as it would', async () => {
     expect(await run(['hook'], { session: 'closed-session', stdin: hookInput('Stop') })).toEqual({
       code: 0,

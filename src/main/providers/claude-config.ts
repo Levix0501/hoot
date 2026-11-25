@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { ownProvider, providerUrl, type GlobalConfig, type Provider } from '../../shared/providers'
@@ -191,6 +192,39 @@ async function writeFileReplacing(file: string, text: string): Promise<void> {
     await fs.rm(temporary, { force: true }).catch(() => {})
     throw error
   }
+}
+
+/**
+ * The model the user's settings save, as `/model` saves one, read at once:
+ * `null` when they save none, or cannot be read.
+ */
+export function claudeSavedModel(home: string, env: Env): string | null {
+  try {
+    const settings = objectOf(JSON.parse(readFileSync(claudeSettingsFile(home, env), 'utf8')))
+    return textOf(settings?.model)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Puts back the model the user's settings saved before `/model` in a session
+ * of Hoot's saved another, or takes it out where they saved none, leaving
+ * the rest of the settings as they are. Settings that save that model
+ * already, or that are no JSON object, stay as they are.
+ */
+export async function restoreClaudeModel(
+  home: string,
+  env: Env,
+  model: string | null,
+): Promise<void> {
+  const file = claudeSettingsFile(home, env)
+  const settings = await readSettings(file).catch(() => null)
+  if (settings === null || textOf(settings.model) === model) return
+  const next: JsonObject = { ...settings }
+  if (model === null) delete next.model
+  else next.model = model
+  await writeFileReplacing(file, `${JSON.stringify(next, null, 2)}\n`)
 }
 
 /**

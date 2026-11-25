@@ -198,11 +198,13 @@ function ProviderPicker({
   value,
   onChange,
   testId,
+  className,
 }: {
   harness: CodingToolId
   value: string
   onChange: (provider: Provider) => void
   testId: string
+  className?: string
 }) {
   const providers = useProvidersFor(harness)
   const startAddingProvider = useAppStore((state) => state.startAddingProvider)
@@ -220,7 +222,7 @@ function ProviderPicker({
       <SelectTrigger
         size="sm"
         aria-label="Provider"
-        className={cn(PICKER_CHIP, 'font-sans', provider ? PICKED : NOT_PICKED)}
+        className={cn(PICKER_CHIP, 'font-sans', provider ? PICKED : NOT_PICKED, className)}
         data-testid={testId}
       >
         {provider ? (
@@ -415,9 +417,8 @@ function CopyCommandButton({ command, testId }: { command: string; testId: strin
 
 /**
  * The command an agent's new sessions run, as chips: the program, the
- * permission flag that YOLO mode adds, the provider, the model and effort,
- * which open their pickers, and the extra arguments, typed at the end and
- * removed with their ×.
+ * permission flag that YOLO mode adds, the model and effort, which open their
+ * pickers, and the extra arguments, typed at the end and removed with their ×.
  */
 function AgentCommand({ agent, state }: { agent: Agent; state: AgentState | undefined }) {
   const changeAgent = useAppStore((app) => app.changeAgent)
@@ -496,14 +497,6 @@ function AgentCommand({ agent, state }: { agent: Agent; state: AgentState | unde
             <TooltipContent>{permission.note}</TooltipContent>
           </Tooltip>
         )}
-        <ProviderPicker
-          harness={agent.harness}
-          value={agent.providerId}
-          onChange={(picked) =>
-            change({ providerId: picked.id, model: modelOn(agent.model, picked), effort: null })
-          }
-          testId={`agent-provider-${agent.id}`}
-        />
         {model && isPicked(model) && modelPicker}
         {effort && isPicked(effort) && effortPicker}
         {agent.extraArgs.map((argument, index) => (
@@ -672,8 +665,8 @@ function useIsDefault(agentId: string): boolean {
 
 /**
  * An agent's row, below its harness's: its icon and name, Default, its ⋯ and
- * switch, and its command below while it is on. One of a harness that is not
- * installed shows only its name and ⋯.
+ * switch, and while it is on, its provider before the ⋯ and its command below.
+ * One of a harness that is not installed shows only its name and ⋯.
  */
 export function AgentItem({
   agent,
@@ -730,6 +723,22 @@ export function AgentItem({
             <span className="text-xs text-muted-foreground">Off</span>
           )}
         </span>
+        {agent.enabled && (
+          <ProviderPicker
+            harness={agent.harness}
+            value={agent.providerId}
+            onChange={(picked) =>
+              changeAgent(agent.id, {
+                providerId: picked.id,
+                model: modelOn(agent.model, picked),
+                effort: null,
+              })
+            }
+            testId={`agent-provider-${agent.id}`}
+            // A long provider name gives way to the agent's own.
+            className="max-w-[40%]"
+          />
+        )}
         <AgentMenu agent={agent} isDefault={isDefault} onRename={() => setRenaming(true)} />
         <Tooltip>
           <TooltipTrigger render={<span className="inline-flex" />}>

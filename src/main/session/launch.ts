@@ -8,10 +8,12 @@ import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS, HOOT_ENV, MODEL_SWITCH_EVENT } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
 import {
+  agentModels,
+  catalogModelOf,
   claudeDefaultEffort,
   claudeEffortsOf,
   namesClaudeModel,
-  type CatalogModel,
+  type ModelCatalogs,
   type ModelMap,
   type Provider,
 } from '../../shared/providers'
@@ -27,7 +29,13 @@ import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
 import { findCommand } from '../tools/find-command'
 import { claudeSessionEnv, claudeSessionModel } from '../providers/claude-config'
-import { codexProviderLaunch } from '../providers/codex-config'
+import {
+  codexDefaultModel,
+  codexSessionCatalog,
+  type CodexCatalog,
+  type CodexCatalogSupport,
+} from '../providers/codex-catalog'
+import { codexProviderLaunch, tomlString } from '../providers/codex-config'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
@@ -64,9 +72,25 @@ export interface LaunchContext {
    * `claudeSessionEnv`).
    */
   claudeUserVariables(cwd: string): Promise<string[]>
-  /** What models.dev tells of a model of a provider; `null` where it lists none. */
-  catalogModel(provider: Provider, model: string): CatalogModel | null
-  /** The folder Hoot writes the settings of its Claude Code sessions in, a file each. */
+  /** The models of the providers Hoot knows, as models.dev lists them. */
+  catalogs(): ModelCatalogs
+  /**
+   * What Hoot read of the Codex a command runs for the catalogs of its
+   * sessions (see `readCodexCatalogSupport`); `null` for a Codex whose
+   * sessions get none.
+   */
+  codexCatalogSupport(command: string, env: Env): Promise<CodexCatalogSupport | null>
+  /**
+   * Whether the user's configuration of Codex, for the environment `env`,
+   * names a catalog of its own (`model_catalog_json`), as a tool that runs
+   * Codex on other providers does, which a session on Codex's own sign-in
+   * then takes in place of Codex's own.
+   */
+  codexNamesCatalog(env: Env): Promise<boolean>
+  /**
+   * The folder Hoot writes the settings of its Claude Code sessions and the
+   * catalogs of its Codex sessions in, a file each.
+   */
   settingsFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
   hoot: HootCliEnvOptions
@@ -214,7 +238,10 @@ function claudeSessionNote(context: LaunchContext, agent: AgentLaunchSettings): 
   const model = runs ?? ''
   const claudes = runs === null ? context.leavesRoles : namesClaudeModel(runs)
   if (agent.effort !== null || claudes) return { model, effortLevel: null }
-  const levels = runs === null ? [] : claudeEffortsOf(context.catalogModel(provider, runs))
+  const levels =
+    runs === null
+      ? []
+      : claudeEffortsOf(catalogModelOf(context.catalogs(), 'claude', provider, runs))
   return { model, effortLevel: claudeDefaultEffort(levels) }
 }
 
@@ -232,7 +259,7 @@ async function writeClaudeSettings(
           provider,
           { model: agent.model, modelMap: context.modelMap, leavesRoles: context.leavesRoles },
           await context.claudeUserVariables(cwd),
-          (id) => context.catalogModel(provider, id),
+          (id) => catalogModelOf(context.catalogs(), 'claude', provider, id),
         )
   const settings = claudeCodeSettings(
     path.join(context.hoot.binDirectory, 'hoot'),
@@ -256,6 +283,21 @@ async function writeClaudeSettings(
 /** The first version of Codex that runs a hook in the background, rather than skipping it. */
 export const CODEX_BACKGROUND_HOOKS_VERSION = '0.148.0'
 
+/**
+ * The first version of Codex that takes `--no-daemon`, which runs it without
+ * its shared background server, as it runs anyway with the settings Hoot
+ * gives it with `-c`: it then no longer warns, as each session starts, that
+ * those settings keep it from that server.
+ */
+export const CODEX_NO_DAEMON_VERSION = '0.156.0'
+
+/**
+ * The first version of Codex that makes of a model it does not know what
+ * Hoot's entries of such a model are made of (see `codexModelEntry`), which
+ * its sessions on a provider of the user's get a catalog of.
+ */
+export const CODEX_CATALOG_VERSION = '0.163.0'
+
 /** How long Hoot waits for Codex to say its version before a session starts. */
 const CODEX_VERSION_TIMEOUT_MS = 10_000
 
@@ -265,25 +307,24 @@ const CODEX_VERSION_TIMEOUT_MS = 10_000
  * own: a hook on each message the user submits, which runs hoot's `hook`
  * command, as the command `hoot` the session's PATH finds first, with the
  * hook's input, so that the session's hoot reports the conversation the
- * message went to. It runs in the background, so that it neither delays nor
- * shows anything in Codex; it prints nothing and always succeeds, so that it
- * decides nothing. Codex runs it once the user trusted it, which Codex asks
- * about the first time, naming it by its status message: a change to any of
- * it, that message included, makes Codex ask again. The user's own hooks
- * run as well, and a user who turned off Codex's hooks turns off this one
- * too.
+ * message went to, and the model it went to. It runs in the background, so
+ * that it neither delays nor shows anything in Codex; it prints nothing and
+ * always succeeds, so that it decides nothing. Codex runs it once the user
+ * trusted it, which Codex asks about the first time, naming it by its status
+ * message: a change to any of it, that message included, makes Codex ask
+ * again. The user's own hooks run as well, and a user who turned off Codex's
+ * hooks turns off this one too.
  */
 export const CODEX_HOOK_SETTING =
   'hooks.UserPromptSubmit=[{hooks=[{type="command",command="hoot hook",async=true,' +
   'statusMessage="Let Hoot know which conversation this is"}]}]'
 
 /**
- * Whether the Codex a session starts runs Hoot's hook: whether its command
- * says a version of `CODEX_BACKGROUND_HOOKS_VERSION` or later when run with
- * `--version`, read before each session, as the user may change Codex
- * while Hoot runs.
+ * The version of the Codex a session starts, as its command says it when run
+ * with `--version`, read before each session, as the user may change Codex
+ * while Hoot runs; `null` where it says none.
  */
-async function codexRunsHook(command: string, env: Env, cwd: string): Promise<boolean> {
+async function codexVersion(command: string, env: Env, cwd: string): Promise<string | null> {
   const { version } = await readVersion(
     command,
     env,
@@ -291,7 +332,41 @@ async function codexRunsHook(command: string, env: Env, cwd: string): Promise<bo
     process.platform,
     CODEX_VERSION_TIMEOUT_MS,
   )
-  return version !== null && gte(version, CODEX_BACKGROUND_HOOKS_VERSION)
+  return version
+}
+
+/** Whether a version of Codex is `least` or later; never for one that could not be read. */
+function codexAtLeast(version: string | null, least: string): boolean {
+  return version !== null && gte(version, least)
+}
+
+/**
+ * The file of a Codex session's catalog, named after the session in
+ * `folder`; its launch's cleanup removes it.
+ */
+export function codexCatalogFilePath(folder: string, sessionId: string): string {
+  return path.join(folder, `${sessionId}.codex-models.json`)
+}
+
+/**
+ * Writes the catalog of a Codex session into its file, and returns where
+ * that is. `null` where it cannot be written, as the session runs without
+ * one then.
+ */
+async function writeCodexCatalog(
+  context: LaunchContext,
+  catalog: CodexCatalog,
+): Promise<string | null> {
+  const file = codexCatalogFilePath(context.settingsFolder, context.hoot.sessionId)
+  try {
+    await fs.mkdir(context.settingsFolder, { recursive: true, mode: 0o700 })
+    await fs.writeFile(file, JSON.stringify(catalog), { mode: 0o600 })
+    return file
+  } catch (error) {
+    console.error("Could not write the Codex session's catalog:", error)
+    await fs.rm(file, { force: true }).catch(() => {})
+    return null
+  }
 }
 
 /**
@@ -424,12 +499,15 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
  * extra arguments; then the hooks Hoot adds, to Claude Code and to a Codex
  * that runs them, and, when Claude Code is sent an issue, the arguments that
  * send it, once the issue's files are written; the launch's cleanup removes
- * their folder. OpenCode gets Hoot's plugin instead, in its environment (see
- * `openCodeCliConfig`), with no argument for it: it still runs with its
- * background server. A chat's session also gets the arguments that continue
- * its conversation, and those that send the first message of one it starts
- * with one. Either environment also has what hoot needs to run in the
- * session.
+ * their folder. A Codex that takes it also runs without its shared
+ * background server (see `CODEX_NO_DAEMON_VERSION`), and on a provider of
+ * the user's, with a catalog of the provider's models (see
+ * `CODEX_CATALOG_VERSION`). OpenCode gets Hoot's plugin instead, in its
+ * environment (see `openCodeCliConfig`), with no argument for it: it still
+ * runs with its background server. A chat's session also gets the arguments
+ * that continue its conversation, and those that send the first message of
+ * one it starts with one. Either environment also has what hoot needs to run
+ * in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -486,24 +564,71 @@ export async function resolveLaunch(
     env[HOOT_ENV.openCodePlugin] = '1'
   }
   const chatArguments = chatLaunchArguments(tool.id, chat)
-  // Codex runs on the session's provider by its own arguments and a variable
-  // that holds the key, which may give it a model and an effort level too.
   let agent = launch.agent
+  /** Codex's arguments that go before all others, as `--no-daemon`. */
+  let codexArguments: string[] = []
+  /** The arguments that run Codex on the session's provider. */
   let providerArguments: string[] = []
-  if (tool.id === 'codex' && context.provider !== null) {
-    const codex = codexProviderLaunch(context.provider, agent.model, agent.effort)
-    agent = { ...agent, model: codex.model, effort: codex.effort }
-    providerArguments = codex.args
-    for (const [name, value] of Object.entries(codex.env)) setEnvVariable(env, name, value)
-  }
   let hookArguments: string[] = []
-  /** The file of a Claude Code session's settings, which its cleanup removes. */
+  /**
+   * The file of a Claude Code session's settings, or of a Codex session's
+   * catalog, which its cleanup removes.
+   */
   let settingsFile: string | null = null
   if (tool.id === 'claude') {
     settingsFile = await writeClaudeSettings(context, cwd, agent)
     hookArguments = ['--settings', settingsFile]
-  } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
-    hookArguments = ['-c', CODEX_HOOK_SETTING]
+  } else if (tool.id === 'codex') {
+    const version = await codexVersion(found, login.env, cwd)
+    // Codex runs on the session's provider by its own arguments and a
+    // variable that holds the key, with a model and an effort level too.
+    // On a provider of the user's, with a catalog of its models; on Codex's
+    // own sign-in, where the user's configuration names a catalog of its
+    // own, with Codex's own in its place, and while the agent names no
+    // model, with the one Codex starts with on it, not the configuration's.
+    const provider = context.provider
+    if (provider !== null) {
+      const catalogs = context.catalogs()
+      const codex = codexProviderLaunch(provider, agent.model, agent.effort, catalogs)
+      agent = { ...agent, model: codex.model, effort: codex.effort }
+      providerArguments = codex.args
+      for (const [name, value] of Object.entries(codex.env)) setEnvVariable(env, name, value)
+      const replaces = provider.own === null || (await context.codexNamesCatalog(login.env))
+      const support =
+        replaces && codexAtLeast(version, CODEX_CATALOG_VERSION)
+          ? await context.codexCatalogSupport(found, login.env)
+          : null
+      if (support !== null) {
+        if (provider.own === null) {
+          const catalog = codexSessionCatalog({
+            models: agentModels('codex', provider, catalogs),
+            model: codex.model,
+            catalogModel: (id) => catalogModelOf(catalogs, 'codex', provider, id),
+            own: support.own,
+          })
+          settingsFile = await writeCodexCatalog(context, catalog)
+        } else {
+          settingsFile = await writeCodexCatalog(context, { models: support.own })
+          agent = { ...agent, model: agent.model ?? codexDefaultModel(support.own) }
+        }
+        if (settingsFile !== null) {
+          providerArguments = [
+            ...providerArguments,
+            '-c',
+            `model_catalog_json=${tomlString(settingsFile)}`,
+          ]
+        }
+      }
+    }
+    if (
+      codexAtLeast(version, CODEX_NO_DAEMON_VERSION) &&
+      !agent.extraArgs.includes('--no-daemon')
+    ) {
+      codexArguments = ['--no-daemon']
+    }
+    if (codexAtLeast(version, CODEX_BACKGROUND_HOOKS_VERSION)) {
+      hookArguments = ['-c', CODEX_HOOK_SETTING]
+    }
   }
   const removeSettings = () => {
     if (settingsFile !== null) rmSync(settingsFile, { force: true })
@@ -511,6 +636,7 @@ export async function resolveLaunch(
   const args = [
     ...program.args,
     ...chatArguments.before,
+    ...codexArguments,
     ...providerArguments,
     ...agentLaunchArguments({
       tool: tool.id,

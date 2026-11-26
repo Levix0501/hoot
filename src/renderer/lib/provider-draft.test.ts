@@ -89,11 +89,11 @@ describe('a provider being added', () => {
     expect(canAdd(custom, null)).toBe(false)
     // Unnamed, it is named after its address (see `newProviderName`).
     expect(canAdd({ ...custom, urls: { anthropic: 'https://x.example.com' } }, null)).toBe(true)
-    // One of the user's own at an Anthropic-compatible address can do without models.
+    // One of the user's own at an Anthropic-compatible or a Responses address can do without models.
     const relay = { ...custom, models: [], urls: { anthropic: 'https://relay.example.com' } }
     expect(canAdd(relay, null)).toBe(true)
     expect(canAdd({ ...relay, urls: { responses: 'https://relay.example.com/v1' } }, null)).toBe(
-      false,
+      true,
     )
     expect(canAdd({ ...relay, apiKey: '' }, null)).toBe(false)
   })

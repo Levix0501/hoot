@@ -5,7 +5,13 @@ import { quote } from 'shell-quote'
 import { parse as parseToml } from 'smol-toml'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
-import { ownProvider, type CatalogModel, type Provider } from '../../shared/providers'
+import {
+  ownProvider,
+  type CatalogModel,
+  type ModelCatalogs,
+  type Provider,
+} from '../../shared/providers'
+import type { CodexCatalogSupport } from '../providers/codex-catalog'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
@@ -17,6 +23,7 @@ import {
   CODEX_HOOK_SETTING,
   claudeCodeSettings,
   claudeSettingsFilePath,
+  codexCatalogFilePath,
   firstMessageArguments,
   issueFileText,
   resolveLaunch,
@@ -110,7 +117,9 @@ function context(
     modelMap: {},
     leavesRoles: false,
     claudeUserVariables: async () => [],
-    catalogModel: () => null,
+    catalogs: () => ({}),
+    codexCatalogSupport: async () => null,
+    codexNamesCatalog: async () => false,
     settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
@@ -685,24 +694,31 @@ describe('resolveLaunch', () => {
       planId: null,
       apiKey: 'sk-bailian',
       keyHeader: 'bearer',
-      urls: { anthropic: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic' },
+      // At its plan's addresses, which tell its plan, and so the models.dev provider of its models.
+      urls: {
+        anthropic: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
+        responses: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      },
       models: ['deepseek-v4.1-flash-1017', 'qwen3.8-max'],
       cloud: null,
       own: null,
     }
-    const models: Record<string, CatalogModel> = {
-      'deepseek-v4.1-flash-1017': {
-        id: 'deepseek-v4.1-flash-1017',
-        context: 1_000_000,
-        output: 384_000,
-        efforts: ['low', 'high', 'max'],
-      },
-      'qwen3.8-max': {
-        id: 'qwen3.8-max',
-        context: 983_616,
-        output: 65_536,
-        efforts: ['low', 'medium', 'xhigh'],
-      },
+    // The models.dev provider of the plan the provider is on.
+    const models: ModelCatalogs = {
+      'alibaba-token-plan-cn': [
+        {
+          id: 'deepseek-v4.1-flash-1017',
+          context: 1_000_000,
+          output: 384_000,
+          efforts: ['low', 'high', 'max'],
+        },
+        {
+          id: 'qwen3.8-max',
+          context: 983_616,
+          output: 65_536,
+          efforts: ['low', 'medium', 'xhigh'],
+        },
+      ],
     }
     const onBailian = (agent: Partial<AgentLaunchSettings>, modelMap = {}) =>
       resolveLaunch(
@@ -710,10 +726,7 @@ describe('resolveLaunch', () => {
           ...context(loginEnv, { claude: agent }),
           provider: bailian,
           modelMap,
-          catalogModel: (provider, model) => {
-            expect(provider).toBe(bailian)
-            return models[model] ?? null
-          },
+          catalogs: () => models,
         },
         'claude',
         project,
@@ -774,10 +787,17 @@ describe('resolveLaunch', () => {
           provider: relay,
           modelMap,
           leavesRoles: true,
-          catalogModel: (_provider, model) =>
-            model.startsWith('claude-')
-              ? { id: model, context: 1_000_000, output: 128_000, efforts: ['low', 'high'] }
-              : null,
+          // Claude's models, which a Custom provider's Claude Code agents offer.
+          catalogs: () => ({
+            anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'].map(
+              (id): CatalogModel => ({
+                id,
+                context: 1_000_000,
+                output: 128_000,
+                efforts: ['low', 'high'],
+              }),
+            ),
+          }),
         },
         'claude',
         project,
@@ -819,11 +839,21 @@ describe('resolveLaunch', () => {
     const agents = { codex: { effort: 'high', extraArgs: ['--search'] } }
     const message = 'Merge the worktree feature-x.'
 
-    // Read again for each session, as Codex may change while Hoot runs.
-    for (const version of ['codex-cli 0.163.0', 'codex-cli 0.148.0', 'codex-cli 0.149.0-alpha.1']) {
+    // Read again for each session, as Codex may change while Hoot runs. One
+    // that takes it runs without its shared background server, which the
+    // hook's setting keeps it from anyway.
+    const versions = [
+      ['codex-cli 0.163.0', ['--no-daemon']],
+      ['codex-cli 0.156.0', ['--no-daemon']],
+      ['codex-cli 0.155.0', []],
+      ['codex-cli 0.148.0', []],
+      ['codex-cli 0.149.0-alpha.1', []],
+    ] as const
+    for (const [version, daemon] of versions) {
       await says(version)
       expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
         ...codex.args,
+        ...daemon,
         '--dangerously-bypass-approvals-and-sandbox',
         '-c',
         'model_reasoning_effort=high',
@@ -848,6 +878,27 @@ describe('resolveLaunch', () => {
       firstMessage: message,
     })
     expect(merging.args).toEqual([...codex.args, ...hookArguments, '--', message])
+    await says('codex-cli 0.172.0')
+    const resumedOnNewer = await resolveLaunch(context(loginEnv), 'codex', project, null, {
+      conversationId: 'thread-id',
+      resume: true,
+    })
+    expect(resumedOnNewer.args).toEqual([
+      ...codex.args,
+      'resume',
+      'thread-id',
+      '--no-daemon',
+      '--dangerously-bypass-approvals-and-sandbox',
+      ...hookArguments,
+    ])
+    // Not twice, where the agent's own arguments have it.
+    const ownDaemon = { codex: { extraArgs: ['--no-daemon'] } }
+    expect((await resolveLaunch(context(loginEnv, ownDaemon), 'codex', project)).args).toEqual([
+      ...codex.args,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--no-daemon',
+      ...hookArguments,
+    ])
 
     // An older Codex, or one whose version cannot be read, starts as it did.
     for (const version of ['codex-cli 0.147.0', 'codex-cli 0.148.0-alpha.2', 'codex-cli']) {
@@ -860,6 +911,150 @@ describe('resolveLaunch', () => {
         '--search',
       ])
     }
+  })
+
+  it("gives a Codex session on a provider of the user's a catalog of the provider's models", async () => {
+    const folder = path.join(root, 'codex-catalog')
+    const loginEnv = { PATH: onPath(folder, '/usr/bin') }
+    const codex = program(folder, 'codex')
+    const says = (text: string) =>
+      writeNodeCommand(
+        path.join(folder, 'codex'),
+        `if (process.argv.includes('--version')) console.log(${JSON.stringify(text)})\n`,
+      )
+    const deepseek: Provider = {
+      id: 'p-deepseek',
+      name: 'DeepSeek',
+      presetId: 'deepseek',
+      planId: null,
+      apiKey: 'sk-deepseek',
+      keyHeader: 'bearer',
+      urls: {
+        anthropic: 'https://api.deepseek.com/anthropic',
+        responses: 'https://api.deepseek.com',
+      },
+      models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+      cloud: null,
+      own: null,
+    }
+    const catalogs: ModelCatalogs = {
+      deepseek: [
+        { id: 'deepseek-v4-pro', context: 1_000_000, output: 384_000, efforts: ['high', 'max'] },
+      ],
+    }
+    const own: CodexCatalogSupport = {
+      own: [
+        { slug: 'gpt-6-luna', visibility: 'list', priority: 7 },
+        { slug: 'codex-auto-review', visibility: 'hide', priority: 0 },
+        { slug: 'gpt-6.2-sol', display_name: 'GPT-6.2-Sol', visibility: 'list', priority: 1 },
+      ],
+    }
+    const asked: string[] = []
+    const on = (
+      provider: Provider,
+      {
+        support = own,
+        namesCatalog = false,
+        model = null,
+      }: {
+        support?: CodexCatalogSupport | null
+        namesCatalog?: boolean
+        model?: string | null
+      } = {},
+    ) =>
+      resolveLaunch(
+        {
+          ...context(loginEnv, { codex: { model } }),
+          provider,
+          catalogs: () => catalogs,
+          codexCatalogSupport: async (command) => {
+            asked.push(command)
+            return support
+          },
+          codexNamesCatalog: async () => namesCatalog,
+        },
+        'codex',
+        project,
+      )
+    const file = codexCatalogFilePath(settingsFolder(), hoot.sessionId)
+
+    await says('codex-cli 0.163.0')
+    const launch = await on(deepseek)
+    expect(launch.args).toEqual([
+      ...codex.args,
+      '--no-daemon',
+      '-c',
+      'model_provider="hoot"',
+      '-c',
+      'model_providers.hoot={name="DeepSeek",base_url="https://api.deepseek.com",env_key="HOOT_CODEX_API_KEY",wire_api="responses"}',
+      '-c',
+      `model_catalog_json=${JSON.stringify(file)}`,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--model',
+      'deepseek-v4-pro',
+      '-c',
+      'model_reasoning_effort=high',
+      '-c',
+      CODEX_HOOK_SETTING,
+    ])
+    expect(asked).toEqual([path.join(folder, 'codex')])
+    const written = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      models: Array<Record<string, unknown>>
+    }
+    expect(written.models.map((entry) => entry.slug)).toEqual([
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+    ])
+    expect(written.models[0]).toMatchObject({
+      context_window: 1_000_000,
+      default_reasoning_level: 'high',
+    })
+    launch.cleanup?.()
+    expect(fs.existsSync(file)).toBe(false)
+
+    // None on its subscription, whose catalog is Codex's own, unless the
+    // user's configuration names one of its own, which Codex's own then
+    // replaces, with the model Codex starts with on it, not the configuration's.
+    const subscription = await on(ownProvider('codex'))
+    expect(subscription.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
+    expect(asked).toHaveLength(1)
+    const replaced = await on(ownProvider('codex'), { namesCatalog: true })
+    expect(replaced.args).toEqual([
+      ...codex.args,
+      '--no-daemon',
+      '-c',
+      'model_provider="openai"',
+      '-c',
+      `model_catalog_json=${JSON.stringify(file)}`,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--model',
+      'gpt-6.2-sol',
+      '-c',
+      CODEX_HOOK_SETTING,
+    ])
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ models: own.own })
+    replaced.cleanup?.()
+    expect(fs.existsSync(file)).toBe(false)
+    const picked = await on(ownProvider('codex'), { namesCatalog: true, model: 'gpt-6-luna' })
+    expect(picked.args.slice(picked.args.indexOf('--model'))).toEqual([
+      '--model',
+      'gpt-6-luna',
+      '-c',
+      CODEX_HOOK_SETTING,
+    ])
+    picked.cleanup?.()
+    expect(asked).toHaveLength(3)
+
+    // None where Hoot read nothing of this Codex it takes, nor on a Codex before 0.163.
+    const unread = await on(deepseek, { support: null })
+    expect(unread.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
+    expect(unread.cleanup).toBeUndefined()
+    await says('codex-cli 0.162.0')
+    const older = await on(deepseek)
+    expect(older.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
+    const olderSubscription = await on(ownProvider('codex'), { namesCatalog: true })
+    expect(olderSubscription.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
+    expect(asked).toHaveLength(4)
   })
 
   it('names the hook Codex asks the user to trust, which runs hoot in the background', () => {

@@ -282,7 +282,9 @@ export interface HookEventReport {
   provider?: string | null
   /**
    * For `MODEL_EVENT`, the model picked, by the agent's own id of it; for
-   * `PostModelSwitch`, the model asked for, as `/model` names it.
+   * `PostModelSwitch`, the model asked for, as `/model` names it; for a
+   * `UserPromptSubmit` of Codex's, the model the message goes to, which
+   * `/model` may have switched to.
    */
   model?: string | null
 }

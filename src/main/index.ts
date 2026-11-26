@@ -12,7 +12,7 @@ import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
 import { defaultAgentLaunchSettings } from '../shared/launch-settings'
 import { MODEL_EVENT, MODEL_SWITCH_EVENT } from '../shared/hoot-cli'
 import {
-  catalogModelOf,
+  bareModel,
   issueAgent,
   providerOfOpenCodeId,
   type GlobalHarness,
@@ -27,7 +27,7 @@ import {
 } from '../shared/window-controls'
 import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
-import { readCodexLaunchOptions } from './agents/codex-options'
+import { readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
 import { readVersion } from './agents/version'
 import { readAppInfo } from './app-info'
@@ -49,7 +49,7 @@ import { addProjectWithFirstCommit, inspectAddProject } from './projects/add-pro
 import { ProjectFolders } from './projects/project-folders'
 import { ProjectStore } from './projects/project-store'
 import { claudeUserVariables } from './providers/claude-config'
-import { readCodexGlobal, writeCodexGlobal } from './providers/codex-config'
+import { readCodexCatalogSupport, type CodexCatalogSupport } from './providers/codex-catalog'
 import {
   createOpenCodeSession,
   openCodeModelRef,
@@ -145,9 +145,9 @@ const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/in
 
 let terminalOptions: TerminalEnvOptions | null = null
 /**
- * Where the settings of each Claude Code session go, a file each, which go
- * with their sessions; those a Hoot that did not quit left behind go as Hoot
- * starts.
+ * Where the settings of each Claude Code session and the catalog of each
+ * Codex session go, a file each, which go with their sessions; those a Hoot
+ * that did not quit left behind go as Hoot starts.
  */
 const sessionSettingsFolder = path.join(app.getPath('userData'), 'session-settings')
 fs.rmSync(sessionSettingsFolder, { recursive: true, force: true })
@@ -185,7 +185,9 @@ const sessions: SessionManager = new SessionManager({
         leavesRoles: agent?.leavesRoles ?? false,
         claudeUserVariables: async (folder) =>
           claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env, folder),
-        catalogModel: (provider, model) => catalogModelOf(modelsDev.catalogs(), provider, model),
+        catalogs: () => modelsDev.catalogs(),
+        codexCatalogSupport,
+        codexNamesCatalog: async (env) => (await readCodexConfig(env, os.homedir())).hasCatalog,
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,
@@ -218,6 +220,31 @@ async function openCodeTakesProviders(command: string, env: Env): Promise<boolea
     openCodeVersions.set(key, version)
   }
   return takesProviders(await version)
+}
+
+/**
+ * What Hoot read of each Codex its sessions ran for their catalogs, by the
+ * command and the file it leads to, which an update replaces.
+ */
+const codexCatalogSupports = new Map<string, Promise<CodexCatalogSupport | null>>()
+
+/**
+ * What Hoot read of the Codex at `command` for the catalogs of its sessions
+ * (see `readCodexCatalogSupport`), once for each Codex: one it could not
+ * read is read again for the next session.
+ */
+async function codexCatalogSupport(command: string, env: Env): Promise<CodexCatalogSupport | null> {
+  const file = await fs.promises.stat(command).catch(() => null)
+  const key = `${command}\n${file?.mtimeMs ?? ''}\n${file?.size ?? ''}`
+  let support = codexCatalogSupports.get(key)
+  if (support === undefined) {
+    support = readCodexCatalogSupport(command, env).then((read) => {
+      if (read === null) codexCatalogSupports.delete(key)
+      return read
+    })
+    codexCatalogSupports.set(key, support)
+  }
+  return support
 }
 
 /** The installed OpenCode's command while it takes Hoot's providers, otherwise `null`. */
@@ -311,18 +338,15 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 let hootServer: HootServer | null = null
 
 /**
- * Reads what a harness's own configuration names: for Codex, its config.toml
- * and sign-in; for OpenCode, its default model. Claude Code's settings are
- * not read for a global (see `GLOBAL_HARNESSES`).
+ * Reads what a harness's own configuration names: for OpenCode, its default
+ * model. Claude Code's and Codex's are not read for a global (see
+ * `GLOBAL_HARNESSES`).
  */
 async function readHarnessGlobal(harness: GlobalHarness): Promise<GlobalReading | null> {
   const { env } = await tools.getLoginEnvironment()
-  const home = os.homedir()
   switch (harness) {
-    case 'codex':
-      return readCodexGlobal(env, home)
     case 'opencode':
-      return readOpenCodeGlobal(env, home)
+      return readOpenCodeGlobal(env, os.homedir())
   }
 }
 
@@ -347,17 +371,16 @@ async function writeHarnessGlobal(
   model: string | null,
 ): Promise<void> {
   const { env } = await tools.getLoginEnvironment()
-  if (harness === 'opencode') {
-    if ((await openCodeOnProviders(env)) === null) {
-      throw new Error('OpenCode takes it from version 2 on. Update OpenCode on the Agents page.')
-    }
-    await writeOpenCodeConfig(env, os.homedir(), providerService?.getState().providers ?? [], {
-      provider,
-      model,
-    })
-    return
+  switch (harness) {
+    case 'opencode':
+      if ((await openCodeOnProviders(env)) === null) {
+        throw new Error('OpenCode takes it from version 2 on. Update OpenCode on the Agents page.')
+      }
+      await writeOpenCodeConfig(env, os.homedir(), providerService?.getState().providers ?? [], {
+        provider,
+        model,
+      })
   }
-  await writeCodexGlobal(env, os.homedir(), provider, model)
 }
 
 /** The chats, once the database is open. */
@@ -491,7 +514,7 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('focus', () => {
     worktrees?.refreshAll()
     projectFolders?.refreshAll()
-    // Codex's and OpenCode's own configurations, which anything may have changed.
+    // OpenCode's own configuration, which anything may have changed.
     void providerService?.refreshGlobals()
   })
   // A session shown while the window is the active one counts as seen.
@@ -615,13 +638,13 @@ function startWithDatabase(database: DatabaseSync): void {
     trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
-  // As Hoot opens, and as harnesses get installed, it reads the globals of
-  // Codex and OpenCode and makes each that has one and no agent an agent. The
-  // chats made before providers take the provider their harness's
-  // configuration names, and that harness's first agent; the default agent of
-  // an earlier Hoot, a coding tool, is the agent made of it. Claude Code gets
-  // no agent this way, and its chats from before providers go on with its
-  // own settings, as they started.
+  // As Hoot opens, and as harnesses get installed, it reads the global of
+  // OpenCode and makes it an agent when it has one and no agent. Its chats
+  // made before providers take the provider its configuration names, and its
+  // first agent; the default agent of an earlier Hoot, a coding tool, is the
+  // agent made of it. Claude Code and Codex get no agent this way, and their
+  // chats from before providers go on with their own configurations, as they
+  // started.
   const followInstalled = (state: ToolsState) => {
     if (state.detecting || state.tools.length === 0) return
     const installed = CODING_TOOL_IDS.filter((id) =>
@@ -781,6 +804,26 @@ function startWithDatabase(database: DatabaseSync): void {
         chats.setProvider(chat.id, chat.providerId, report.model)
       }
       return
+    }
+    // The model a message in a Codex session went to, when another than the
+    // one its chat runs, as `/model` may have switched to: the chat goes on
+    // with it when it is opened again. As with Claude Code, Codex also saves
+    // a model picked with `/model` in the user's own configuration, which
+    // Hoot leaves as it is.
+    if (report.event === 'UserPromptSubmit' && !report.subagent) {
+      const chat = chatId === null ? undefined : chats.get(chatId)
+      if (
+        chat !== undefined &&
+        chat.toolId === 'codex' &&
+        chat.providerId !== null &&
+        typeof report.model === 'string'
+      ) {
+        const agent = chat.agentId === null ? undefined : providers.agent(chat.agentId)
+        const runs = chat.model ?? agent?.model ?? null
+        if (runs === null || bareModel(runs) !== report.model) {
+          chats.setProvider(chat.id, chat.providerId, report.model)
+        }
+      }
     }
     // A model picked in an OpenCode session, as with `/models`: the session
     // and its chat go on with its provider, when it is one of Hoot's.

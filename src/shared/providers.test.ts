@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   addedClaudeModels,
+  addedModels,
+  agentModels,
   agentName,
   agentsToMake,
   canRun,
@@ -9,8 +11,12 @@ import {
   claudeDefaultEffort,
   claudeEffortsOf,
   cleanModelMap,
+  codexDefaultEffort,
+  codexEffortsOf,
+  codexSessionEffort,
   findProvider,
   firstClaudeModel,
+  firstCodexModel,
   freeProviderName,
   hasGlobal,
   isCustomProvider,
@@ -26,6 +32,7 @@ import {
   presetPlanOfUrl,
   presetPlans,
   PROVIDER_PRESETS,
+  providerFirstModel,
   providerFromConfig,
   providerMark,
   providerNamed,
@@ -88,6 +95,11 @@ const HAIKU = { id: 'claude-haiku-4-5', context: 200_000, output: 64_000, effort
 
 /** Claude's models, newest first, as models.dev lists them. */
 const CLAUDE_MODELS = { anthropic: [OPUS, HAIKU] }
+
+const SOL = { id: 'gpt-6.2-sol', context: 1_050_000, output: 128_000, efforts: ['low', 'high'] }
+const SOL_HEALTHCARE = { ...SOL, id: 'gpt-6.2-sol-healthcare' }
+/** OpenAI's models, newest first, as models.dev lists them. */
+const OPENAI_MODELS = { openai: [SOL_HEALTHCARE, SOL, { ...SOL, id: 'gpt-6.2-astra' }] }
 
 function agent(id: string, change: Partial<Agent> = {}): Agent {
   return {
@@ -349,14 +361,22 @@ describe('Claude Code on a provider of the user’s', () => {
       ...deepseek,
       urls: { ...deepseek.urls, responses: presetById('deepseek')!.urls!.responses! },
     }
-    expect(catalogModelOf(catalogs, made, 'deepseek-flash[1m]')).toEqual(flash)
-    expect(catalogModelOf(catalogs, made, 'deepseek-next')).toBeNull()
-    expect(catalogModelOf(catalogs, { ...made, presetId: null }, 'deepseek-flash')).toBeNull()
-    // Of a Custom provider, of Claude's models alone.
-    expect(catalogModelOf(CLAUDE_MODELS, custom, 'claude-haiku-4-5')).toEqual(HAIKU)
-    expect(catalogModelOf(CLAUDE_MODELS, custom, 'relay-model')).toBeNull()
-    expect(catalogModelOf(CLAUDE_MODELS, deepseek, 'claude-haiku-4-5')).toBeNull()
-    expect(catalogModelOf(CLAUDE_MODELS, ownProvider('claude'), 'claude-haiku-4-5')).toBeNull()
+    expect(catalogModelOf(catalogs, 'claude', made, 'deepseek-flash[1m]')).toEqual(flash)
+    expect(catalogModelOf(catalogs, 'codex', made, 'deepseek-flash')).toEqual(flash)
+    expect(catalogModelOf(catalogs, 'claude', made, 'deepseek-next')).toBeNull()
+    expect(
+      catalogModelOf(catalogs, 'claude', { ...made, presetId: null }, 'deepseek-flash'),
+    ).toBeNull()
+    // Of a Custom provider, of the models of its harness's maker alone.
+    expect(catalogModelOf(CLAUDE_MODELS, 'claude', custom, 'claude-haiku-4-5')).toEqual(HAIKU)
+    expect(catalogModelOf(CLAUDE_MODELS, 'claude', custom, 'relay-model')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, 'codex', custom, 'claude-haiku-4-5')).toBeNull()
+    expect(catalogModelOf(OPENAI_MODELS, 'codex', custom, 'gpt-6.2-sol')).toEqual(SOL)
+    expect(catalogModelOf(OPENAI_MODELS, 'opencode', custom, 'gpt-6.2-sol')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, 'claude', deepseek, 'claude-haiku-4-5')).toBeNull()
+    expect(
+      catalogModelOf(CLAUDE_MODELS, 'claude', ownProvider('claude'), 'claude-haiku-4-5'),
+    ).toBeNull()
   })
 })
 
@@ -402,6 +422,59 @@ describe('Claude Code on a Custom provider', () => {
     // A preset's provider runs its own models for them, Claude's included.
     const anthropic = { ...custom, presetId: 'anthropic', models: ['claude-opus-5-5'] }
     expect(leavesRolesToClaude(anthropic, 'claude-opus-5-5', CLAUDE_MODELS)).toBe(false)
+  })
+})
+
+describe("Codex on a provider of the user's", () => {
+  it('offers OpenAI’s models after the provider’s, on a Custom provider alone', () => {
+    expect(addedModels('codex', custom, OPENAI_MODELS)).toEqual([
+      'gpt-6.2-sol-healthcare',
+      'gpt-6.2-sol',
+      'gpt-6.2-astra',
+    ])
+    const relay = { ...custom, models: ['glm-5', 'gpt-6.2-sol'] }
+    expect(agentModels('codex', relay, OPENAI_MODELS)).toEqual([
+      'glm-5',
+      'gpt-6.2-sol',
+      'gpt-6.2-sol-healthcare',
+      'gpt-6.2-astra',
+    ])
+    expect(agentModels('codex', deepseek, OPENAI_MODELS)).toEqual(deepseek.models)
+    // OpenCode is made by no maker of models.
+    expect(addedModels('opencode', custom, OPENAI_MODELS)).toEqual([])
+  })
+
+  it('starts on OpenAI’s newest GPT of a tier alone, else OpenAI’s newest', () => {
+    expect(firstCodexModel(OPENAI_MODELS)).toBe('gpt-6.2-sol')
+    expect(firstCodexModel({ openai: [SOL_HEALTHCARE] })).toBe('gpt-6.2-sol-healthcare')
+    expect(firstCodexModel({})).toBeNull()
+    expect(providerFirstModel('codex', custom, OPENAI_MODELS)).toBe('gpt-6.2-sol')
+    expect(providerFirstModel('claude', custom, CLAUDE_MODELS)).toBe('claude-opus-5-5')
+    expect(providerFirstModel('codex', { ...custom, models: ['glm-5'] }, OPENAI_MODELS)).toBe(
+      'glm-5',
+    )
+    expect(providerFirstModel('codex', deepseek, OPENAI_MODELS)).toBe(deepseek.models[0])
+    expect(providerFirstModel('opencode', custom, OPENAI_MODELS)).toBeNull()
+  })
+
+  it('offers the levels models.dev lists, and starts at `high`, else the highest below it', () => {
+    expect(codexEffortsOf({ efforts: ['none', 'low', 'max', 'turbo'] })).toEqual([
+      'none',
+      'low',
+      'max',
+      'turbo',
+    ])
+    expect(codexEffortsOf(null)).toEqual([])
+    expect(codexDefaultEffort([])).toBe('high')
+    expect(codexDefaultEffort(['low', 'high', 'max'])).toBe('high')
+    expect(codexDefaultEffort(['none', 'low', 'medium', 'xhigh'])).toBe('medium')
+    expect(codexDefaultEffort(['xhigh', 'max'])).toBe('xhigh')
+    expect(codexDefaultEffort(['max', 'turbo'])).toBe('max')
+    // The agent's level while the model takes it, or models.dev lists none for it.
+    expect(codexSessionEffort('max', ['low', 'high', 'max'])).toBe('max')
+    expect(codexSessionEffort('xhigh', ['low', 'high', 'max'])).toBe('high')
+    expect(codexSessionEffort('xhigh', [])).toBe('xhigh')
+    expect(codexSessionEffort(null, ['low', 'medium'])).toBe('medium')
   })
 })
 

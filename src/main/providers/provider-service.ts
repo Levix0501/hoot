@@ -104,8 +104,9 @@ function cleanCloud(cloud: ProviderCloud | null): ProviderCloud | null {
  * changes by it. As it opens, and as a harness gets installed, a harness that
  * has a global and no agent gets one, as the user would make it. Changing a
  * global writes the harness's own configuration, as does changing a provider
- * that is one. Claude Code has no global: its own settings are never read
- * for one or written, and its agents are made by hand alone.
+ * that is one. Claude Code and Codex have no global: their own
+ * configurations are never read for one or written, and their agents are
+ * made by hand alone.
  */
 export class ProviderService extends EventEmitter<{
   changed: [ProvidersState]
@@ -259,7 +260,7 @@ export class ProviderService extends EventEmitter<{
   /**
    * Makes a provider a harness's global, writing it into the harness's own
    * configuration with the global's model, where the provider has that model,
-   * else with the provider's first. Claude Code has none (see
+   * else with the provider's first. Claude Code and Codex have none (see
    * `GLOBAL_HARNESSES`).
    */
   setGlobal(harness: CodingToolId, providerId: string): Promise<ProviderResult> {

@@ -13,6 +13,7 @@ interface CodexModel {
   slug: string
   visibility: string
   levels: string[]
+  priority: number
 }
 
 interface CodexCatalog {
@@ -22,7 +23,6 @@ interface CodexCatalog {
 interface CodexConfig {
   model: string | null
   reasoningEffort: string | null
-  modelProvider: string | null
   hasCatalog: boolean
 }
 
@@ -55,11 +55,10 @@ export async function readCodexConfig(env: Env, home: string): Promise<CodexConf
     return {
       model: stringOf(parsed?.model),
       reasoningEffort: stringOf(parsed?.model_reasoning_effort),
-      modelProvider: stringOf(parsed?.model_provider),
       hasCatalog: stringOf(parsed?.model_catalog_json) !== null,
     }
   } catch {
-    return { model: null, reasoningEffort: null, modelProvider: null, hasCatalog: false }
+    return { model: null, reasoningEffort: null, hasCatalog: false }
   }
 }
 
@@ -68,7 +67,10 @@ function fromConfig(value: string | null): ConfiguredDefault | null {
   return value === null ? null : { value, source: 'config.toml' }
 }
 
-/** The catalog `codex debug models` prints, or `null` when it cannot be read. */
+/**
+ * The catalog `codex debug models` prints, its models by their priority, the
+ * order Codex's `/model` lists them in, or `null` when it cannot be read.
+ */
 function catalogOf(output: string): CodexCatalog | null {
   let parsed: unknown
   try {
@@ -90,16 +92,22 @@ function catalogOf(output: string): CodexCatalog | null {
           return effort === null ? [] : [effort]
         })
       : []
-    catalog.push({ slug, visibility, levels })
+    const priority = typeof model.priority === 'number' ? model.priority : Number.MAX_SAFE_INTEGER
+    catalog.push({ slug, visibility, levels, priority })
   }
-  return { models: catalog }
+  return { models: catalog.toSorted((a, b) => a.priority - b.priority) }
 }
 
 /**
- * The models Codex's catalog lists with visibility `list`, read from
- * `codex debug models` as the agent itself prints them, and the effort levels
- * of the configured model. Where Codex uses a provider other than OpenAI and
- * no catalog of its own, it offers only the configured model, without levels.
+ * The models a session of Hoot's on Codex's own sign-in offers with `/model`,
+ * those Codex lists with visibility `list`, and the effort levels of the one
+ * it starts with while its agent names none: as `codex debug models` prints
+ * them on OpenAI's provider, which such a session runs on whatever the
+ * user's configuration names (see `codexProviderLaunch`); where the
+ * configuration names a catalog of its own, as a tool that runs Codex on
+ * other providers does, Codex's own, which such a session takes in its
+ * place, starting with Codex's own first model rather than the
+ * configuration's (see `resolveLaunch`).
  */
 export async function readCodexLaunchOptions(options: {
   command: string
@@ -122,25 +130,20 @@ export async function readCodexLaunchOptions(options: {
     commandProgram(options.command, options.env, platform),
   ])
   const defaults = {
-    defaultModel: fromConfig(config.model),
+    defaultModel: config.hasCatalog ? null : fromConfig(config.model),
     defaultEffort: fromConfig(config.reasoningEffort),
-  }
-  const limited =
-    config.modelProvider !== null && config.modelProvider !== 'openai' && !config.hasCatalog
-  if (limited) {
-    return {
-      models:
-        config.model === null ? [] : [{ value: config.model, label: config.model, efforts: [] }],
-      defaultEfforts: [],
-      ...defaults,
-    }
   }
 
   const run = options.run ?? runCommand
   const result = await run(
     {
       file: program.file,
-      args: [...program.args, 'debug', 'models'],
+      args: [
+        ...program.args,
+        'debug',
+        'models',
+        ...(config.hasCatalog ? ['--bundled'] : ['-c', 'model_provider="openai"']),
+      ],
       env: options.env,
       cwd: options.home,
     },
@@ -149,13 +152,18 @@ export async function readCodexLaunchOptions(options: {
   const catalog = result === null || result.code !== 0 ? null : catalogOf(result.stdout)
   if (catalog === null) return { models: [], defaultEfforts: [], ...defaults }
 
-  const models: AgentModelOption[] = catalog.models
-    .filter((model) => model.visibility === 'list')
-    .map((model) => ({ value: model.slug, label: model.slug, efforts: [...model.levels] }))
-  const configured = catalog.models.find((model) => model.slug === config.model)
+  const listed = catalog.models.filter((model) => model.visibility === 'list')
+  const models: AgentModelOption[] = listed.map((model) => ({
+    value: model.slug,
+    label: model.slug,
+    efforts: [...model.levels],
+  }))
+  const configured = defaults.defaultModel?.value
+  const starts =
+    configured === undefined ? listed[0] : catalog.models.find((model) => model.slug === configured)
   return {
     models,
-    defaultEfforts: configured === undefined ? [] : [...configured.levels],
+    defaultEfforts: starts === undefined ? [] : [...starts.levels],
     ...defaults,
   }
 }

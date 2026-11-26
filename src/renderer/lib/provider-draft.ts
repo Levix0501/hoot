@@ -108,14 +108,17 @@ export function draftOfProvider(provider: Provider): FormDraft {
 
 /**
  * Whether a draft can be added: a key, what else its preset asks for, and a
- * model, which one of the user's own at an Anthropic-compatible address can
- * do without, its Claude Code agents offering Claude's models (see
- * `addedClaudeModels`). One left unnamed gets a name (see `newProviderName`).
+ * model, which one of the user's own at an Anthropic-compatible or a
+ * Responses address can do without, its Claude Code or Codex agents
+ * offering Claude's or OpenAI's models (see `addedModels`). One left unnamed
+ * gets a name (see `newProviderName`).
  */
 export function canAdd(draft: FormDraft, preset: ProviderPreset | null): boolean {
   if (preset === null) {
     const hasUrl = Object.values(draft.urls).some((url) => (url ?? '').trim() !== '')
-    const hasModel = draft.models.length > 0 || (draft.urls.anthropic ?? '').trim() !== ''
+    const offersModels =
+      (draft.urls.anthropic ?? '').trim() !== '' || (draft.urls.responses ?? '').trim() !== ''
+    const hasModel = draft.models.length > 0 || offersModels
     return hasUrl && hasModel && draft.apiKey.trim() !== ''
   }
   if (draft.models.length === 0) return false

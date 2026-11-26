@@ -1,16 +1,17 @@
 import type { AgentModelOption, AgentState } from '../../shared/agents'
 import {
-  addedClaudeModels,
+  addedModels,
   catalogModelOf,
   CLAUDE_ROLES,
   claudeDefaultEffort,
   claudeEffortsOf,
-  CODEX_PROVIDER_EFFORT,
-  firstClaudeModel,
+  codexDefaultEffort,
+  codexEffortsOf,
   leavesRolesToClaude,
   modelMapOn,
   namesClaudeModel,
-  PROVIDER_EFFORTS,
+  OPENCODE_PROVIDER_EFFORTS,
+  providerFirstModel,
   type Agent,
   type AgentChange,
   type ClaudeRole,
@@ -42,8 +43,9 @@ export function draftOf(agent: Agent): AgentDraft {
 /**
  * The models an agent on a provider can pick, in groups: on its harness's own
  * models, those its configuration offers, as the harness's detection read
- * them; on a provider of the user's, that provider's, and for Claude Code on
- * a Custom one, then Claude's (see `addedClaudeModels`).
+ * them; on a provider of the user's, that provider's, and on a Custom one,
+ * then those of its harness's maker, Claude's for Claude Code and OpenAI's
+ * for Codex (see `addedModels`).
  */
 export function modelGroups(
   harness: CodingToolId,
@@ -55,13 +57,12 @@ export function modelGroups(
   const groups: AgentModelOption[][] =
     provider.own !== null
       ? [state?.launchOptions?.models ?? []]
-      : [provider.models, harness === 'claude' ? addedClaudeModels(provider, catalogs) : []].map(
-          (models) =>
-            models.map((model) => ({
-              value: model,
-              label: model,
-              efforts: effortsOf(harness, model, provider, state, catalogs),
-            })),
+      : [provider.models, addedModels(harness, provider, catalogs)].map((models) =>
+          models.map((model) => ({
+            value: model,
+            label: model,
+            efforts: effortsOf(harness, model, provider, state, catalogs),
+          })),
         )
   return groups.filter((group) => group.length > 0)
 }
@@ -77,28 +78,11 @@ export function modelChoices(
 }
 
 /**
- * The model an agent on a provider of the user's runs while it names none:
- * the provider's first; for Claude Code on a Custom one without models of its
- * own, Claude's it starts with (see `firstClaudeModel`).
- */
-function providerFirst(
-  harness: CodingToolId,
-  provider: Provider,
-  catalogs: ModelCatalogs,
-): string | null {
-  const first = provider.models[0]
-  if (first !== undefined) return first
-  return harness === 'claude' && addedClaudeModels(provider, catalogs).length > 0
-    ? firstClaudeModel(catalogs)
-    : null
-}
-
-/**
  * The effort levels of a model, or of the one an agent made without a model
- * runs, on a provider: on a provider of the user's, for Claude Code, those
- * models.dev lists for the model (see `claudeEffortsOf`), for another agent,
- * those it offers for any; on the harness's own models, those its
- * configuration gives the model.
+ * runs, on a provider: on a provider of the user's, for Claude Code and
+ * Codex, those models.dev lists for the model (see `claudeEffortsOf` and
+ * `codexEffortsOf`), for OpenCode, those it offers for any; on the harness's
+ * own models, those its configuration gives the model.
  */
 export function effortsOf(
   harness: CodingToolId,
@@ -108,9 +92,11 @@ export function effortsOf(
   catalogs: ModelCatalogs,
 ): string[] {
   if (provider?.own === null) {
-    if (harness !== 'claude') return [...PROVIDER_EFFORTS[harness]]
-    const runs = model ?? providerFirst(harness, provider, catalogs)
-    return runs === null ? [] : claudeEffortsOf(catalogModelOf(catalogs, provider, runs))
+    if (harness === 'opencode') return [...OPENCODE_PROVIDER_EFFORTS]
+    const runs = model ?? providerFirstModel(harness, provider, catalogs)
+    if (runs === null) return []
+    const listed = catalogModelOf(catalogs, harness, provider, runs)
+    return harness === 'claude' ? claudeEffortsOf(listed) : codexEffortsOf(listed)
   }
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
@@ -119,13 +105,13 @@ export function effortsOf(
 
 /**
  * The effort level an agent's sessions start at while it picks none, where
- * Hoot knows it: for Claude Code on a provider of the user's, the one Hoot
- * starts them at (see `claudeDefaultEffort`), or for one of Claude's models,
- * which Claude Code knows itself, the one its configuration names where the
- * model takes it; for Codex there, the one Hoot gives it
- * (`CODEX_PROVIDER_EFFORT`); on the harness's own models, the one its
- * configuration names where the model takes it. `null` where the harness
- * picks one Hoot does not know, as OpenCode does.
+ * Hoot knows it: on a provider of the user's, the one Hoot starts them at,
+ * for Claude Code (see `claudeDefaultEffort`), unless the model is one of
+ * Claude's, which Claude Code knows itself, then the one its configuration
+ * names where the model takes it, and for Codex (see `codexDefaultEffort`);
+ * on the harness's own models, the one its configuration names where the
+ * model takes it. `null` where the harness picks one Hoot does not know, as
+ * OpenCode does.
  */
 export function defaultEffortOf(
   harness: CodingToolId,
@@ -141,12 +127,12 @@ export function defaultEffortOf(
   if (provider.own !== null) return configuredTaken
   switch (harness) {
     case 'claude': {
-      const runs = model ?? providerFirst(harness, provider, catalogs)
+      const runs = model ?? providerFirstModel(harness, provider, catalogs)
       if (runs === null) return null
       return namesClaudeModel(runs) ? configuredTaken : claudeDefaultEffort(efforts)
     }
     case 'codex':
-      return CODEX_PROVIDER_EFFORT
+      return codexDefaultEffort(efforts)
     case 'opencode':
       return null
   }
@@ -154,7 +140,7 @@ export function defaultEffortOf(
 
 /**
  * The model an agent runs on a provider while it names none: on a provider
- * of the user's, its first (see `providerFirst`); on the harness's own
+ * of the user's, its first (see `providerFirstModel`); on the harness's own
  * models, the one the harness's configuration names where it is offered,
  * else for Claude Code Opus, which it starts with, else the first offered.
  * `null` where nothing is offered.
@@ -166,7 +152,7 @@ export function impliedModel(
   catalogs: ModelCatalogs,
 ): string | null {
   if (provider === undefined) return null
-  if (provider.own === null) return providerFirst(harness, provider, catalogs)
+  if (provider.own === null) return providerFirstModel(harness, provider, catalogs)
   const options = state?.launchOptions
   if (!options) return null
   const offered = (value: string | undefined) =>
@@ -255,8 +241,8 @@ export function followMap(
 /**
  * The model an agent takes on another provider: its own where that one lists
  * it, else the one that one starts with. A provider of the user's lists its
- * own models, and Claude's only while it has none (see `addedClaudeModels`),
- * so that one with models of its own starts on its first.
+ * own models, and its harness's maker's only while it has none (see
+ * `addedModels`), so that one with models of its own starts on its first.
  */
 function modelOn(
   harness: CodingToolId,

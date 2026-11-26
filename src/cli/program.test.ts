@@ -76,6 +76,15 @@ const identifiers = (stdout: string) =>
 /** The issues of gamma, as saved. */
 const saved = () => hoot.issues.listInProject(hoot.gamma.id)
 
+/** The event of the input Codex gives its hook for a message of the user's, with `fields`. */
+function codexPrompt(fields: Record<string, unknown>) {
+  return hookEventOf(
+    Buffer.from(
+      JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 't1', ...fields }),
+    ),
+  )
+}
+
 describe('hoot issue view', () => {
   beforeEach(() => {
     addIssue('Alpha', 'todo', 2, STEPS)
@@ -1823,7 +1832,7 @@ describe('hoot hook', () => {
     ])
   })
 
-  it('reports the conversation of each message Codex tells its hook of', async () => {
+  it('reports the conversation of each message Codex tells its hook of, and its model', async () => {
     const stdin = JSON.stringify({
       session_id: '01a18187-0974-7a80-8bbb-1dbed37c649a',
       turn_id: '01a18187-0aa7-7351-866b-c0cd61e2a78e',
@@ -1846,6 +1855,7 @@ describe('hoot hook', () => {
         source: null,
         reason: null,
         folder: '/work/gamma',
+        model: 'gpt-5',
       },
     ])
   })
@@ -1957,6 +1967,24 @@ describe('hoot hook', () => {
       provider: 'hoot-p1',
       model: 'kimi-k3.1-pro',
     })
+  })
+
+  it('reads the model each message of Codex goes to, which Claude Code does not tell', () => {
+    const none = { turn: null, source: null, reason: null, folder: null }
+    expect(codexPrompt({ model: 'deepseek-v4-flash' })).toEqual({
+      ...none,
+      event: 'UserPromptSubmit',
+      subagent: false,
+      conversationId: 't1',
+      model: 'deepseek-v4-flash',
+    })
+    // A subagent's, which runs a model of its own, says so.
+    expect(codexPrompt({ model: 'deepseek-v4-flash', agent_id: 'a1' })).toMatchObject({
+      subagent: true,
+      model: 'deepseek-v4-flash',
+    })
+    expect(codexPrompt({})).not.toHaveProperty('model')
+    expect(codexPrompt({ model: '' })).not.toHaveProperty('model')
   })
 
   it('succeeds without a word when it cannot report, so that Claude Code goes on as it would', async () => {

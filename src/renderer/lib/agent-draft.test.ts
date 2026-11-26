@@ -52,6 +52,20 @@ const catalogs: ModelCatalogs = {
     { id: 'qwen3.8-max', context: 983_616, output: 65_536, efforts: ['low', 'medium'] },
     { id: 'deepseek-v4-flash-0731', context: 1_000_000, output: 384_000, efforts: ['high', 'max'] },
   ],
+  deepseek: [
+    {
+      id: 'deepseek-v4-pro',
+      context: 1_000_000,
+      output: 384_000,
+      efforts: ['low', 'high', 'max'],
+    },
+    { id: 'deepseek-v4-flash', context: 1_000_000, output: 384_000, efforts: ['low', 'medium'] },
+  ],
+  // OpenAI's, which Codex agents on a Custom provider offer.
+  openai: [
+    { id: 'gpt-6.2-sol-healthcare', context: 1_050_000, output: 128_000, efforts: ['low', 'high'] },
+    { id: 'gpt-6.2-sol', context: 1_050_000, output: 128_000, efforts: ['low', 'high'] },
+  ],
 }
 
 const subscription = ownProvider('claude')
@@ -135,6 +149,31 @@ describe('the model an agent runs while it names none', () => {
     ).toBe('gpt')
     // Before its detection read what it offers, it is not known.
     expect(impliedModel('claude', subscription, undefined, catalogs)).toBeNull()
+  })
+
+  it('offers Codex on a Custom provider OpenAI’s models after its own, starting on a GPT of a tier alone', () => {
+    const relay: Provider = {
+      ...deepseek,
+      presetId: null,
+      urls: { responses: 'https://relay.example.com/v1' },
+      models: [],
+    }
+    expect(modelGroups('codex', relay, undefined, catalogs)).toEqual([
+      [
+        {
+          value: 'gpt-6.2-sol-healthcare',
+          label: 'gpt-6.2-sol-healthcare',
+          efforts: ['low', 'high'],
+        },
+        { value: 'gpt-6.2-sol', label: 'gpt-6.2-sol', efforts: ['low', 'high'] },
+      ],
+    ])
+    expect(impliedModel('codex', relay, undefined, catalogs)).toBe('gpt-6.2-sol')
+    const own = { ...relay, models: ['glm-5'] }
+    expect(modelGroups('codex', own, undefined, catalogs).map((group) => group.length)).toEqual([
+      1, 2,
+    ])
+    expect(impliedModel('codex', own, undefined, catalogs)).toBe('glm-5')
   })
 
   it('is the one the panel shows for an agent made without one', () => {
@@ -224,6 +263,13 @@ describe('the effort level of an agent', () => {
     expect(effortsOf('codex', 'deepseek-v4-pro', deepseek, undefined, catalogs)).toEqual([
       'low',
       'high',
+      'max',
+    ])
+    expect(effortsOf('codex', 'unknown', deepseek, undefined, catalogs)).toEqual([])
+    expect(effortsOf('opencode', 'deepseek-v4-pro', deepseek, undefined, catalogs)).toEqual([
+      'low',
+      'medium',
+      'high',
     ])
   })
 
@@ -232,6 +278,8 @@ describe('the effort level of an agent', () => {
     // A model without `high` starts at the highest level below it.
     expect(startsAt({ model: 'qwen3.8-max' }, bailian)).toBe('medium')
     expect(startsAt({ harness: 'codex', model: 'deepseek-v4-pro' }, deepseek)).toBe('high')
+    expect(startsAt({ harness: 'codex', model: 'deepseek-v4-flash' }, deepseek)).toBe('medium')
+    expect(startsAt({ harness: 'codex', model: 'unknown' }, deepseek)).toBe('high')
     expect(startsAt({ harness: 'opencode', model: 'deepseek-v4-pro' }, deepseek)).toBeNull()
     // On its own models, and for one of Claude's, the level its configuration names, where the model takes it.
     const xhigh = stateWith({ defaultEffort: { value: 'xhigh', source: 'settings.json' } })

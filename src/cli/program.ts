@@ -264,7 +264,8 @@ function inputText(field: unknown): string | null {
  * gives in the same form, when it is one Hoot takes, whether a subagent met
  * it (the input names the agent), the turn it belongs to, and the
  * conversation it belongs to, with the folder the agent works in for it and
- * why a session started or ended; `null` for any other input.
+ * why a session started or ended; for a message Codex tells of, the model
+ * it goes to; `null` for any other input.
  */
 export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
@@ -286,6 +287,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     model_id: model,
     requested_model: requested,
     to_model: switched,
+    model: prompted,
   } = value as {
     hook_event_name?: unknown
     agent_id?: unknown
@@ -298,6 +300,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     model_id?: unknown
     requested_model?: unknown
     to_model?: unknown
+    model?: unknown
   }
   const event = REPORTED_EVENTS.find((candidate) => candidate === name)
   if (event === undefined) return null
@@ -306,7 +309,9 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
       ? { provider: inputText(provider), model: inputText(model) }
       : event === MODEL_SWITCH_EVENT
         ? { model: inputText(requested) ?? inputText(switched) }
-        : {}
+        : event === 'UserPromptSubmit' && inputText(prompted) !== null
+          ? { model: inputText(prompted) }
+          : {}
   return {
     ...picked,
     event,

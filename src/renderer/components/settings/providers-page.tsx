@@ -1,7 +1,7 @@
 import { ChevronRightIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { cn } from 'cn'
 import { useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '../../lib/toast'
 import type { AgentState } from '../../../shared/agents'
 import {
   agentName,

@@ -1,7 +1,7 @@
 import { CheckIcon, CircleAlertIcon, CopyIcon, PlusIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
-import { toast } from 'sonner'
+import { toast } from '../../lib/toast'
 import type { AgentState } from '../../../shared/agents'
 import { chatAgent } from '../../../shared/chats'
 import {

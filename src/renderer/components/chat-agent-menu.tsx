@@ -1,5 +1,5 @@
 import { Fragment, type ComponentType, type ReactNode } from 'react'
-import { toast } from 'sonner'
+import { toast } from '../lib/toast'
 import { agentsChecking, chatAgent, usableChatAgents } from '../../shared/chats'
 import { agentName } from '../../shared/providers'
 import { useAppStore } from '../store/app-store'

@@ -1,6 +1,5 @@
 import { ArchiveIcon } from 'lucide-react'
 import { createElement, type ReactNode } from 'react'
-import { toast } from 'sonner'
 import { create } from 'zustand'
 import { type AgentOperationSummary, type AgentsState } from '../../shared/agents'
 import type { AppInfo } from '../../shared/app-info'
@@ -96,6 +95,7 @@ import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib
 import { api } from '../lib/api'
 import { isOnList, type ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
+import { toast } from '../lib/toast'
 import {
   createSessionTerminal,
   setTerminalColorScheme,

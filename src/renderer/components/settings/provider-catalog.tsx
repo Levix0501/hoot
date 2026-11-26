@@ -1,7 +1,7 @@
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { useState, type ReactNode } from 'react'
-import { toast } from 'sonner'
+import { toast } from '../../lib/toast'
 import {
   presetById,
   presetHarnesses,

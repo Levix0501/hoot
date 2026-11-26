@@ -21,10 +21,10 @@ import {
 import { SettingsView } from './components/settings/settings-view'
 import { sidebarWidthStyle } from './components/sidebar-resize-handle'
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar'
-import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from './components/ui/tooltip'
 import { WindowNavigation } from './components/window-navigation'
 import { sessionShortcut } from './lib/session-shortcuts'
+import { Toasts } from './lib/toast'
 import { useAppStore } from './store/app-store'
 import { useFilesStore } from './store/files-store'
 import { isSettingsPage } from './store/page-history'
@@ -147,8 +147,7 @@ export function App() {
       <AddProjectDialog />
       <DiscardChangesDialog />
       <QuitDialog />
-      {/* Below the main area's top row, clear of its buttons and of the ended-session bar. */}
-      <Toaster position="top-right" offset={{ top: 60, right: 16 }} />
+      <Toasts />
     </TooltipProvider>
   )
 }

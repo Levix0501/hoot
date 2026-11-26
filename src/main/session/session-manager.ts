@@ -146,9 +146,14 @@ export class SessionManager extends EventEmitter<{
       .map((record) => ({ ...record.info }))
   }
 
-  /** How many sessions are starting or running. */
+  /**
+   * How many sessions are starting or running, other than those being
+   * closed: the window no longer shows them, and their processes end anyway.
+   */
   runningCount(): number {
-    return [...this.records.values()].filter(isRunning).length
+    return [...this.records.values()].filter(
+      (record) => isRunning(record) && record.closing === null,
+    ).length
   }
 
   /** The ids of a tool's sessions that are starting or running. */

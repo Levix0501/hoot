@@ -18,7 +18,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog'
-import { Spinner } from './ui/spinner'
 
 /** The open sessions of the worktree, which close before it is removed. */
 function OpenSessions({ names }: { names: readonly string[] }) {
@@ -45,25 +44,6 @@ function OpenSessions({ names }: { names: readonly string[] }) {
   )
 }
 
-function RemovalBody({ removal }: { removal: WorktreeRemoval }) {
-  // While asking, the sessions open now; once confirmed, those it listed.
-  const open = useAppStore(
-    useShallow((state) =>
-      openSessionsOf(state, removal.projectRoot, removal.path).map((session) =>
-        shownSessionName(state, session),
-      ),
-    ),
-  )
-  const names = removal.closingSessions ?? open
-  return (
-    <div className="grid gap-3 text-left">
-      <p>The folder of this worktree is missing.</p>
-      {names.length > 0 && <OpenSessions names={names} />}
-      <p>Its saved sessions are removed from Hoot too. No branch is deleted.</p>
-    </div>
-  )
-}
-
 /**
  * Asks before a missing worktree some of whose sessions are open is
  * removed: which sessions close first, which ends the processes of those
@@ -80,46 +60,53 @@ export function RemoveWorktreeDialog() {
         (row) => row.path === removal.path && row.missing,
       ),
   )
-  // Kept while the dialog fades out after the answer.
-  const [shown, setShown] = useState<WorktreeRemoval | null>(null)
-  if (removal !== null && removal !== shown) setShown(removal)
-  const current = removal ?? shown
-  const removing = current?.phase === 'removing'
+  const openNames = useAppStore(
+    useShallow((state) =>
+      removal === null
+        ? []
+        : openSessionsOf(state, removal.projectRoot, removal.path).map((session) =>
+            shownSessionName(state, session),
+          ),
+    ),
+  )
+  // As it asked last, kept while the dialog fades out after the answer,
+  // which takes the sessions out at once.
+  const [shown, setShown] = useState<{ removal: WorktreeRemoval; names: string[] } | null>(null)
+  if (removal !== null && (removal !== shown?.removal || openNames !== shown?.names)) {
+    setShown({ removal, names: openNames })
+  }
+  const names = shown?.names ?? []
 
   useEffect(() => {
-    if (removal?.phase === 'confirm' && !shownAsMissing) void answer(false)
+    if (removal !== null && !shownAsMissing) void answer(false)
   }, [removal, shownAsMissing, answer])
 
   return (
     <AlertDialog
       open={removal !== null}
       onOpenChange={(open) => {
-        if (!open && !removing) void answer(false)
+        if (!open) void answer(false)
       }}
     >
-      <AlertDialogContent
-        finalFocus={focusAfterOverlay}
-        data-testid="remove-worktree-dialog"
-        data-phase={current?.phase}
-      >
+      <AlertDialogContent finalFocus={focusAfterOverlay} data-testid="remove-worktree-dialog">
         <AlertDialogHeader>
           <AlertDialogTitle>Remove this worktree?</AlertDialogTitle>
           <AlertDialogDescription render={<div />} className="w-full">
-            {current && <RemovalBody removal={current} />}
+            <div className="grid gap-3 text-left">
+              <p>The folder of this worktree is missing.</p>
+              {names.length > 0 && <OpenSessions names={names} />}
+              <p>Its saved sessions are removed from Hoot too. No branch is deleted.</p>
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={removing} data-testid="worktree-remove-cancel">
-            Cancel
-          </AlertDialogCancel>
+          <AlertDialogCancel data-testid="worktree-remove-cancel">Cancel</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
-            disabled={removing}
             onClick={() => void answer(true)}
             data-testid="worktree-remove-confirm"
           >
-            {removing && <Spinner />}
-            {removing ? 'Removing…' : 'Remove'}
+            Remove
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

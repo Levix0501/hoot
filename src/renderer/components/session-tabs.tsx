@@ -227,7 +227,7 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
     >
       <ContextMenu>
         <ContextMenuTrigger
-          className={cn(TAB, session.closing && 'opacity-60')}
+          className={TAB}
           {...listeners}
           onMouseDown={(event) => {
             if (event.button === 1) event.preventDefault()
@@ -264,7 +264,6 @@ function SessionTab({ id, shown, separated }: { id: string; shown: string; separ
             // moment. Under the pointer, it takes the accent, out to its
             // edges, and keeps its color.
             className="pointer-events-none absolute inset-y-0 end-1 my-auto size-5 rounded-[10px] bg-clip-border text-foreground opacity-0 transition-none [corner-shape:superellipse(1.5)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 dark:hover:bg-accent"
-            disabled={session.closing}
             // Pressing it neither shows nor drags the tab, and leaves the
             // keyboard focus where it is.
             onPointerDown={(event) => event.stopPropagation()}

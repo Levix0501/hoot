@@ -45,7 +45,6 @@ export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId:
           <ContextMenuSeparator />
           <ContextMenuItem
             variant="destructive"
-            disabled={open.closing}
             onClick={() => close(savedId)}
             data-testid={`${testId}-close`}
           >
@@ -82,7 +81,6 @@ export function ChatMenu({ chatId, testId }: { chatId: string; testId: string })
           <ContextMenuSeparator />
           <ContextMenuItem
             variant="destructive"
-            disabled={open.closing}
             onClick={() => close(chatId)}
             data-testid={`${testId}-close`}
           >
@@ -118,7 +116,6 @@ export function SessionMenu({ session, testId }: { session: UiSession; testId: s
       <ContextMenuSeparator />
       <ContextMenuItem
         variant="destructive"
-        disabled={session.closing}
         onClick={() => requestCloseSession(session.id)}
         data-testid={`${testId}-close`}
       >

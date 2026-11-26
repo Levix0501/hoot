@@ -922,6 +922,9 @@ export function registerIpc(deps: IpcDependencies): void {
       ) {
         return { ok: false, message: 'Invalid session request.' }
       }
+      // A session of it the window closed may still be ending: a chat runs
+      // one agent at a time, and the next starts once the last has ended.
+      await deps.sessions.closeOf(chat.id)
       let prepared
       try {
         prepared = await deps.chats.prepareSession(chat.id)
@@ -979,6 +982,8 @@ export function registerIpc(deps: IpcDependencies): void {
           }
         }
       }
+      // Once a session of it the window closed has ended, as for a chat.
+      await deps.sessions.closeOf(saved.id)
       let prepared
       try {
         prepared = await deps.chats.prepareSession(saved.id)
@@ -1204,8 +1209,8 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = worktreeArguments.safeParse(args)
     if (!parsed.success) return { ok: false, message: 'Invalid request.' }
     const [root, worktreePath] = parsed.data
-    // Its open sessions close first: the window closes those it listed
-    // before asking, and any that opened since close here.
+    // Its open sessions close first; the window took them out as the user
+    // confirmed.
     const result = await deps.worktrees.removeMissing(root, worktreePath, () =>
       deps.sessions.closeIn(root, worktreePath),
     )

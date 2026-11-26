@@ -380,6 +380,19 @@ describe('SessionManager', () => {
     expect(manager.runningCount()).toBe(1)
   })
 
+  it('does not count a session being closed as running, while its process ends', async () => {
+    const { manager, host } = setup()
+    host.exitOn = null
+    await manager.start(request('s1'))
+    await manager.start(request('s2'))
+    const closed = manager.close('s1')
+    expect(manager.runningCount()).toBe(1)
+    expect(manager.list().map((session) => session.id)).toEqual(['s1', 's2'])
+    await closed
+    expect(manager.runningCount()).toBe(1)
+    expect(manager.list().map((session) => session.id)).toEqual(['s2'])
+  })
+
   it('uses SIGKILL when the process ignores SIGHUP', async () => {
     const { manager, host, signals } = setup()
     host.exitOn = null

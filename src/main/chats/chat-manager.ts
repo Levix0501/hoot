@@ -326,9 +326,12 @@ export class ChatManager extends EventEmitter<{
    * What starting the chat's agent takes: its folder, made when missing, the
    * conversation to continue, none when it never got a message, so that the
    * agent starts one and picks its id, and the first message of a saved
-   * session whose agent has not started yet.
+   * session whose agent has not started yet. Once Hoot has read what the
+   * agent did in its last run, which takes away a chat whose conversation
+   * never got a message: there is none then.
    */
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
+    await this.queues.get(id)
     const chat = this.chats.get(id)
     if (!chat || chat.deleted || chat.archived) return null
     this.titlesAtSwitch.delete(id)

@@ -27,6 +27,7 @@ import type {
   AddProjectConfirmation,
   AddProjectResult,
   AgentResult,
+  ArchiveChatResult,
   LabelChangeRequest,
   NewLabelRequest,
   Project,
@@ -237,8 +238,6 @@ export interface UiSession {
    * of the one it replaces, whose tab's place it keeps.
    */
   createdAt: number
-  /** Set once the session is being closed, until it is gone. */
-  closing: boolean
 }
 
 /** Whether a session's process started, or why it did not. */
@@ -304,19 +303,12 @@ export interface NewWorktreeRequest {
 }
 
 /**
- * The removal of a missing worktree some of whose sessions are open, from
- * asking whether to close them until it is removed or cancelled.
+ * The removal of a missing worktree some of whose sessions are open, while
+ * Hoot asks whether to close them.
  */
 export interface WorktreeRemoval {
   projectRoot: string
   path: string
-  /** Asking for confirmation, or closing the sessions and removing the worktree. */
-  phase: 'confirm' | 'removing'
-  /**
-   * While removing, the names of the open sessions the confirmation listed,
-   * which close first; `null` until then, while it lists those open now.
-   */
-  closingSessions: string[] | null
 }
 
 export interface AppState {
@@ -619,16 +611,16 @@ export interface AppState {
    */
   closeChat(chatId: string): void
   /**
-   * Archives a chat or saved session, as the button on its row does: its
-   * sessions close first, ending a running agent, then it leaves the sidebar
-   * for the Archive page, with a toast that can undo it. One that never got a
-   * message goes as its sessions close, as on closing it, without a toast.
-   * Says why when it cannot be archived.
+   * Archives a chat or saved session, as the button on its row does: at once
+   * it leaves the sidebar for the Archive page and its sessions the window,
+   * as closing them does, with a toast that can undo it; a running agent
+   * ends meanwhile. One that never got a message goes as its agent ends, as
+   * on closing it, without a toast. Says why when it cannot be archived.
    */
   archiveSession(id: string): Promise<void>
   /**
    * Brings an archived chat or saved session back to the sidebar, as the
-   * toast's Undo and the Archive page do.
+   * toast's Undo and the Archive page do; one being archived, once it is.
    */
   unarchiveSession(id: string): Promise<void>
   /**
@@ -842,9 +834,13 @@ export interface AppState {
   setWorktreeExpanded(projectRoot: string, path: string, expanded: boolean): void
   /** Expands or collapses a project's Local row in the sidebar, and saves its state. */
   setLocalExpanded(projectRoot: string, expanded: boolean): void
-  /** Closes a session, as its × does: ends its process if it runs, then removes it. */
+  /** Closes a session, as its × does (see `closeSession`). */
   requestCloseSession(id: string): void
-  /** Closes a session: ends its process if it runs, then removes it. */
+  /**
+   * Closes a session: it leaves the window at once, its page giving way to
+   * another, and its process, if it runs, ends meanwhile; settles once it
+   * has.
+   */
   closeSession(id: string): Promise<void>
   startRenaming(id: string): void
   /** Ends renaming; `null` keeps the name as it was. */
@@ -886,10 +882,14 @@ export interface AppState {
    * its registrations and what Hoot keeps of it, such as its saved
    * sessions. While some of its sessions are open, asks first whether to
    * close them. Nothing is removed when reading the project's worktrees
-   * again shows it no longer missing.
+   * again shows it no longer missing, nor while it is being removed.
    */
   removeMissingWorktree(projectRoot: string, path: string): Promise<void>
-  /** Closes the open sessions of the worktree being removed, then removes it; or cancels. */
+  /**
+   * Removes the worktree asked about, once confirmed: its open sessions
+   * close, leaving the window at once as closing them does, and it goes once
+   * their processes have ended. Says why when it cannot be removed.
+   */
   answerRemoveWorktree(confirmed: boolean): Promise<void>
 }
 
@@ -1087,7 +1087,6 @@ function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
     unread: false,
     customName: record?.customName ?? null,
     createdAt: Date.now(),
-    closing: false,
   }
 }
 
@@ -1684,14 +1683,18 @@ export const useAppStore = create<AppState>()((set, get) => {
   let issuesRead = false
 
   /**
-   * The chats and saved sessions leaving the sidebar, by id, from when their
-   * sessions have closed until they are archived: they no longer show, also
-   * when a list read meanwhile still has them.
+   * The chats and saved sessions being archived, by id, with the answer of
+   * the main process, from when they leave the sidebar until it answers:
+   * they no longer show, also when a list read meanwhile still has them.
    */
-  const leaving = new Set<string>()
+  const archiving = new Map<string, Promise<ArchiveChatResult>>()
 
-  /** The chats and saved sessions being archived, by id, until it is done or fails. */
-  const archiving = new Set<string>()
+  /** Says that a chat or saved session was archived, with a button that brings it back. */
+  const toastArchived = (record: ChatInfo) =>
+    toast.info(record.projectRoot === null ? 'Archived chat' : 'Archived session', {
+      icon: createElement(ArchiveIcon),
+      action: { label: 'Undo', onClick: () => void get().unarchiveSession(record.id) },
+    })
 
   /**
    * The archived chats and saved sessions being deleted for good, by id: they
@@ -1702,7 +1705,7 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /** Shows the chats as they are now, in the order the sidebar lists them. */
   const applyChats = (listed: ChatInfo[]) => {
-    const chats = listed.filter((chat) => !leaving.has(chat.id))
+    const chats = listed.filter((chat) => !archiving.has(chat.id))
     set((state) => ({
       chats,
       renamingChatId:
@@ -1714,7 +1717,7 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /** Shows the saved sessions as they are now, with the names of those running. */
   const applySavedSessions = (listed: SavedSessionInfo[]) => {
-    const savedSessions = listed.filter((saved) => !leaving.has(saved.id))
+    const savedSessions = listed.filter((saved) => !archiving.has(saved.id))
     set((state) => ({
       savedSessions,
       renamingSavedSessionId:
@@ -2070,11 +2073,17 @@ export const useAppStore = create<AppState>()((set, get) => {
     set({ collapsedWorktrees: collapsed })
   }
 
+  /** The missing worktrees being removed, by root, until the main process answers. */
+  const removingWorktrees = new Set<string>()
+
   /** Removes a worktree whose folder is missing, saying why when it cannot. */
   const removeWorktree = async (projectRoot: string, path: string) => {
+    if (removingWorktrees.has(path)) return
+    removingWorktrees.add(path)
     const result = await api
       .removeWorktree(projectRoot, path)
       .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      .finally(() => removingWorktrees.delete(path))
     if (!result.ok) {
       toast.error('Could not remove the worktree.', { description: result.message })
       return
@@ -2151,7 +2160,6 @@ export const useAppStore = create<AppState>()((set, get) => {
           unread: false,
           customName: saved?.customName ?? chat?.customName ?? null,
           createdAt,
-          closing: false,
         },
       ],
       ...(show
@@ -3055,54 +3063,48 @@ export const useAppStore = create<AppState>()((set, get) => {
         get().chats.find((chat) => chat.id === id) ??
         get().savedSessions.find((saved) => saved.id === id)
       if (record === undefined || archiving.has(id)) return
-      archiving.add(id)
-      try {
-        // Its sessions close first, ending a running agent, as closing them
-        // does: the page shown instead of one of them is the one closing it
-        // shows.
-        const open = get().sessions.filter(
-          (session) => session.chatId === id || session.savedSessionId === id,
-        )
-        await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
-        leaving.add(id)
-        set((state) => ({
-          chats: state.chats.filter((chat) => chat.id !== id),
-          savedSessions: state.savedSessions.filter((saved) => saved.id !== id),
-        }))
-        const result = await api
-          .archiveSession(id)
-          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-        leaving.delete(id)
-        if (!result.ok) {
-          toast.error('Could not archive the session.', { description: result.message })
-          // It stays as the main process has it.
-          void Promise.all([
-            api.listChats(),
-            api.listSavedSessions(),
-            api.listArchivedSessions(),
-          ]).then(
-            ([chats, savedSessions, archivedSessions]) => {
-              applyChats(chats)
-              applySavedSessions(savedSessions)
-              applyArchivedSessions(archivedSessions)
-            },
-            (error: unknown) => console.error('Could not list the chats:', error),
-          )
-          return
-        }
-        // One that never got a message went as its sessions closed, as on
-        // closing it: there is nothing to bring back.
-        if (!result.archived) return
-        toast.info(record.projectRoot === null ? 'Archived chat' : 'Archived session', {
-          icon: createElement(ArchiveIcon),
-          action: { label: 'Undo', onClick: () => void get().unarchiveSession(id) },
-        })
-      } finally {
-        archiving.delete(id)
+      // The main process ends a running agent before it archives it.
+      const answer = api
+        .archiveSession(id)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      archiving.set(id, answer)
+      // Meanwhile it is out of the sidebar, and its sessions out of the
+      // window, as closing them takes them out.
+      const open = get().sessions.filter(
+        (session) => session.chatId === id || session.savedSessionId === id,
+      )
+      if (open.length > 0) removeSessions(open.map((session) => session.id))
+      set((state) => ({
+        chats: state.chats.filter((chat) => chat.id !== id),
+        savedSessions: state.savedSessions.filter((saved) => saved.id !== id),
+      }))
+      // One that got a message is archived, which the toast says at once. One
+      // that got none may go as its agent ends, as on closing it, with
+      // nothing to bring back: the main process tells.
+      const shown = record.hasMessages ? toastArchived(record) : null
+      const result = await answer
+      archiving.delete(id)
+      if (result.ok && result.archived) {
+        if (shown === null) toastArchived(record)
+        return
       }
+      if (shown !== null) toast.dismiss(shown)
+      if (result.ok) return
+      toast.error('Could not archive the session.', { description: result.message })
+      // It stays as the main process has it.
+      void Promise.all([api.listChats(), api.listSavedSessions(), api.listArchivedSessions()]).then(
+        ([chats, savedSessions, archivedSessions]) => {
+          applyChats(chats)
+          applySavedSessions(savedSessions)
+          applyArchivedSessions(archivedSessions)
+        },
+        (error: unknown) => console.error('Could not list the chats:', error),
+      )
     },
 
     async unarchiveSession(id) {
+      // One being archived comes back once it is.
+      await archiving.get(id)
       const result = await api
         .unarchiveSession(id)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
@@ -3207,7 +3209,7 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     async launchSession(id, cols, rows) {
       const session = findSession(id)
-      if (!session || session.status !== 'starting' || session.closing) {
+      if (!session || session.status !== 'starting') {
         return { ok: false, message: 'The session was closed before it started.' }
       }
       // Once, whether its terminal view or hoot's request starts it.
@@ -3236,9 +3238,12 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (issue && status && status !== issue.status) get().updateIssue(issue.id, { status })
       }
       const started = findSession(id)
-      // Closed while it was starting.
-      if (!started || started.closing) {
-        return result.ok ? { ok: true } : { ok: false, message: result.message }
+      // Closed while it was starting. Its process may have started after the
+      // main process was told to close it: it ends now.
+      if (!started) {
+        if (!result.ok) return { ok: false, message: result.message }
+        void api.closeSession(id)
+        return { ok: true }
       }
       if (result.ok) {
         // Session events may already have moved the session on (it can exit right away).
@@ -3756,24 +3761,14 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     requestCloseSession(id) {
-      const session = findSession(id)
-      if (!session || session.closing) return
       void get().closeSession(id)
     },
 
     async closeSession(id) {
-      const session = findSession(id)
-      if (!session || session.closing) return
-      set((state) => ({
-        sessions: updateSession(state.sessions, id, { closing: true }),
-        renamingSessionId: state.renamingSessionId === id ? null : state.renamingSessionId,
-      }))
-      try {
-        // Returns once the session's process, if it was still running, has ended.
-        await api.closeSession(id)
-      } finally {
-        removeSessions([id])
-      }
+      if (!findSession(id)) return
+      // Its page gives way at once, without waiting for its process to end.
+      removeSessions([id])
+      await api.closeSession(id)
     },
 
     startRenaming(id) {
@@ -3832,10 +3827,10 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ newWorktree: null })
     },
     async removeMissingWorktree(projectRoot, path) {
-      if (get().worktreeRemoval !== null) return
+      if (get().worktreeRemoval !== null || removingWorktrees.has(path)) return
       // Its open sessions close first, once the user agrees.
       if (openSessionsOf(get(), projectRoot, path).length > 0) {
-        set({ worktreeRemoval: { projectRoot, path, phase: 'confirm', closingSessions: null } })
+        set({ worktreeRemoval: { projectRoot, path } })
         return
       }
       await removeWorktree(projectRoot, path)
@@ -3843,23 +3838,14 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     async answerRemoveWorktree(confirmed) {
       const removal = get().worktreeRemoval
-      if (removal === null || removal.phase !== 'confirm') return
-      if (!confirmed) {
-        set({ worktreeRemoval: null })
-        return
-      }
-      // Running ones end their processes first. The last to close may clean
-      // the worktree up already, which leaves nothing more to remove.
+      if (removal === null) return
+      set({ worktreeRemoval: null })
+      if (!confirmed) return
+      // Its open sessions leave the window at once, as closing them does: the
+      // main process ends their processes before it removes the worktree.
       const open = openSessionsOf(get(), removal.projectRoot, removal.path)
-      const removing: WorktreeRemoval = {
-        ...removal,
-        phase: 'removing',
-        closingSessions: open.map((session) => shownSessionName(get(), session)),
-      }
-      set({ worktreeRemoval: removing })
-      await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
+      if (open.length > 0) removeSessions(open.map((session) => session.id))
       await removeWorktree(removal.projectRoot, removal.path)
-      if (get().worktreeRemoval === removing) set({ worktreeRemoval: null })
     },
   }
 })

@@ -625,6 +625,33 @@ describe('the messages of chats', () => {
     expect(chats.opened).toHaveBeenCalledWith(chat.id)
   })
 
+  it('starts a chat or a saved session once a session of it the window closed has ended', async () => {
+    const { promise: closed, resolve: close } = Promise.withResolvers<void>()
+    sessionManager.closeOf.mockImplementationOnce(() => closed)
+    const started = invoke(IpcChannel.startSession, {
+      id: 's1',
+      projectRoot: chat.folder,
+      worktreePath: null,
+      chatId: chat.id,
+      toolId: 'claude',
+      issueId: null,
+      cols: 80,
+      rows: 24,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sessionManager.closeOf).toHaveBeenCalledWith(chat.id)
+    expect(chats.prepareSession).not.toHaveBeenCalled()
+    close()
+    expect(await started).toMatchObject({ ok: true })
+    expect(chats.prepareSession).toHaveBeenCalledWith(chat.id)
+
+    expect(await startLocal()).toMatchObject({ ok: true })
+    expect(sessionManager.closeOf).toHaveBeenLastCalledWith(local.id)
+    expect(sessionManager.closeOf.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      chats.prepareSession.mock.invocationCallOrder.at(-1)!,
+    )
+  })
+
   it('gives the saved sessions, makes one in a worktree, and passes on every change of them', async () => {
     expect(await invoke(IpcChannel.listSavedSessions)).toEqual([saved, local])
     expect(

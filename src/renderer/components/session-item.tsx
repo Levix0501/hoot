@@ -30,7 +30,6 @@ export function SessionItem({ session }: { session: UiSession }) {
     <ContextMenu>
       <ContextMenuTrigger
         render={<SidebarMenuItem />}
-        className={cn(session.closing && 'opacity-60')}
         data-testid="session-item"
         data-session-id={session.id}
         data-status={session.status}

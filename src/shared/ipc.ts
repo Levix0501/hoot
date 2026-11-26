@@ -550,6 +550,10 @@ export interface HootApi {
   deleteAgent(id: string): void
   /** The sessions that have started, oldest first. */
   listSessions(): Promise<SessionInfo[]>
+  /**
+   * Starts a session's process; a chat's or saved session's once any other
+   * session of it, as one the window closed, has ended.
+   */
   startSession(request: StartSessionRequest): Promise<StartSessionResult>
   /** Ends the session's process if it still runs, then forgets the session. */
   closeSession(id: string): Promise<void>
@@ -723,7 +727,8 @@ export interface HootApi {
   readWorktrees(projectRoot: string): Promise<WorktreeInfo[] | null>
   /**
    * Removes a worktree whose folder is missing, or that Git no longer lists:
-   * its registrations, and what Hoot keeps of it, such as its saved sessions.
+   * its open sessions close, then its registrations go, and what Hoot keeps
+   * of it, such as its saved sessions.
    */
   removeWorktree(projectRoot: string, worktreePath: string): Promise<RemoveWorktreeResult>
   /**

@@ -165,10 +165,14 @@ function show(level: ToastLevel, title: ReactNode, options: ToastOptions = {}): 
   })
 }
 
-/** Shows a toast at the top of the window, of one level or another (see `Toasts`). */
+/**
+ * Shows a toast at the top of the window, of one level or another (see
+ * `Toasts`), and gives its id; or takes one away, by its id.
+ */
 export const toast = {
   info: (title: ReactNode, options?: ToastOptions) => show('info', title, options),
   success: (title: ReactNode, options?: ToastOptions) => show('success', title, options),
   warning: (title: ReactNode, options?: ToastOptions) => show('warning', title, options),
   error: (title: ReactNode, options?: ToastOptions) => show('error', title, options),
+  dismiss: (id: string | number) => void sonner.dismiss(id),
 }

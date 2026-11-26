@@ -127,7 +127,6 @@ export function SessionPane({ session }: { session: UiSession }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={session.closing}
               onClick={() => {
                 if (resumable && session.chatId !== null) resumeChat(session.chatId)
                 else if (resumable && session.savedSessionId !== null) {

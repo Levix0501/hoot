@@ -12,7 +12,10 @@ export interface QuitGuardOptions {
   getWindow(): BrowserWindow | null
   /** Makes the window visible to the user so they can answer. */
   presentWindow(window: BrowserWindow): void
-  /** How many sessions are starting or running. */
+  /**
+   * How many sessions are starting or running, other than those being
+   * closed, whose processes end anyway.
+   */
   runningSessionCount(): number
   endSessions(): Promise<void>
   /** The agents being installed or updated, and those waiting to be. */

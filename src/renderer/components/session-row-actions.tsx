@@ -68,7 +68,6 @@ export function SessionCloseButton({
         'top-1.25 hover:bg-sidebar-foreground/10 peer-data-[size=default]/menu-button:top-1.25',
         className,
       )}
-      disabled={session.closing}
       // Pressing it leaves the keyboard focus where it is, as in a terminal.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => requestCloseSession(session.id)}

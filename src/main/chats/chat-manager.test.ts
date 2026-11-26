@@ -1007,6 +1007,17 @@ describe('ChatManager', () => {
     expect(manager.listArchived()).toEqual([])
   })
 
+  it('does not start a chat again that went as its agent ended, never having got a message', async () => {
+    const chat = await manager.create(agentOf('claude'))
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    // Opened again as soon as its agent ended, before Hoot read what it did.
+    manager.sessionEnded(ended(chat.id, 'claude'))
+
+    expect(await manager.prepareSession(chat.id)).toBeNull()
+    expect(manager.list()).toEqual([])
+  })
+
   it('archives a Claude Code chat with its conversation, and resumes it once unarchived', async () => {
     const chat = await manager.create(agentOf('claude'))
     manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))

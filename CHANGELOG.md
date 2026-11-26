@@ -1,5 +1,17 @@
 # hoot
 
+## 0.1.0-alpha.32
+
+### Patch Changes
+
+- [`b1e6d83`](https://github.com/Levix0501/hoot/commit/b1e6d832170519adace4e35c9c97fefaf829007b) - Agents on the Agents page now open in a side panel that edits their provider, model, effort level, model mapping and arguments, always on a named model, with the effort level each model starts at marked Default.
+
+- [`d564ab6`](https://github.com/Levix0501/hoot/commit/d564ab610ebbd031faa96d83fd697d5d7ad3e3ea) - Claude Code agents on a provider now offer the effort levels models.dev lists for their model, and with none picked start at `high` rather than at the level in Claude Code's own settings, which the model may not take.
+
+- [`d564ab6`](https://github.com/Levix0501/hoot/commit/d564ab610ebbd031faa96d83fd697d5d7ad3e3ea) - Claude Code agents on a provider now tell Claude Code their model's context and answer limits from models.dev, so Claude Code no longer warns that it does not recognize the model, no longer runs a smaller model as if it took a million tokens, and no longer cuts answers off at 32,000 tokens.
+
+- [`d564ab6`](https://github.com/Levix0501/hoot/commit/d564ab610ebbd031faa96d83fd697d5d7ad3e3ea) - A Claude Code agent on a provider can now map Opus, Sonnet, Haiku, Fable and subagents to models of its provider, each running the agent's own model until mapped to another.
+
 ## 0.1.0-alpha.31
 
 ### Patch Changes

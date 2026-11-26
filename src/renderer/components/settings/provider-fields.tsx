@@ -11,7 +11,6 @@ import {
 import { api } from '../../lib/api'
 import { addressesOf, draftCatalog, withPlan, type FormDraft } from '../../lib/provider-draft'
 import { useAppStore } from '../../store/app-store'
-import { ProviderMarkIcon } from '../provider-icon'
 import { Checkbox } from '../ui/checkbox'
 import { Input } from '../ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
@@ -300,21 +299,24 @@ const READ_ONLY =
 
 /**
  * A provider's addresses, each on one line after its format: one of the
- * user's own's, one for each format, typed in; a preset's, which its plan
- * fixes, read-only (without `onChange`), those it has.
+ * user's own's, one for each format, typed in, the first taking the focus
+ * with `autoFocus`; a preset's, which its plan fixes, read-only (without
+ * `onChange`), those it has.
  */
 function UrlsField({
   urls,
   onChange,
+  autoFocus = false,
 }: {
   urls: Partial<Record<WireFormat, string>>
   onChange?: (urls: Partial<Record<WireFormat, string>>) => void
+  autoFocus?: boolean
 }) {
   const formats =
     onChange === undefined ? FORMATS.filter((format) => (urls[format] ?? '') !== '') : FORMATS
   return (
     <div className="flex flex-col gap-1.5">
-      {formats.map((format) => (
+      {formats.map((format, index) => (
         <InputGroup key={format} className={cn(onChange === undefined && READ_ONLY)}>
           <InputGroupAddon className="w-20 justify-start text-xs text-muted-foreground">
             {FORMAT_NAMES[format]}
@@ -323,6 +325,7 @@ function UrlsField({
             value={urls[format] ?? ''}
             readOnly={onChange === undefined}
             tabIndex={onChange === undefined ? -1 : undefined}
+            autoFocus={autoFocus && onChange !== undefined && index === 0}
             onChange={(event) => onChange?.({ ...urls, [format]: event.target.value })}
             spellCheck={false}
             aria-label={`${FORMAT_NAMES[format]} URL`}
@@ -404,26 +407,26 @@ function PlanField({
 }
 
 /**
- * The fields of a provider being added or edited. A preset's: its plan or
- * region, the addresses that fixes, read-only, what reaches it (a key;
- * Azure's endpoint, the path Hoot adds shown in it; Vertex AI's project) and
- * its models; one of the user's own: its name, addresses, key and models.
- * Edited, a provider's name is the panel's title instead.
+ * The fields of a provider being added or edited, whose name is its panel's
+ * title. A preset's: its plan or region, the addresses that fixes,
+ * read-only, what reaches it (a key; Azure's endpoint, the path Hoot adds
+ * shown in it; Vertex AI's project) and its models; one of the user's own:
+ * its addresses, key and models. With `autoFocus`, the one to fill first
+ * takes the focus: the first address of one of the user's own, a preset's
+ * endpoint, project or key.
  */
 export function ProviderFields({
   preset,
   draft,
   onChange,
   onSubmit,
-  autoFocusKey = true,
-  editing = false,
+  autoFocus = false,
 }: {
   preset: ProviderPreset | null
   draft: FormDraft
   onChange: (draft: FormDraft) => void
   onSubmit: () => void
-  autoFocusKey?: boolean
-  editing?: boolean
+  autoFocus?: boolean
 }) {
   const catalogs = useAppStore((state) => state.modelCatalogs)
   const plan = preset === null ? null : presetPlan(preset, draft.planId)
@@ -431,20 +434,13 @@ export function ProviderFields({
   const catalog = draftCatalog(draft)
   return (
     <div className="flex flex-col gap-4">
-      {preset === null && !editing && (
-        <Field label="Name" htmlFor="provider-name">
-          <Input
-            id="provider-name"
-            value={draft.name}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            autoFocus={autoFocusKey && preset === null}
-            data-testid="provider-name"
-          />
-        </Field>
-      )}
       {preset === null && (
         <Field label="Addresses">
-          <UrlsField urls={draft.urls} onChange={(urls) => onChange({ ...draft, urls })} />
+          <UrlsField
+            urls={draft.urls}
+            onChange={(urls) => onChange({ ...draft, urls })}
+            autoFocus={autoFocus}
+          />
         </Field>
       )}
       {preset !== null && <PlanField preset={preset} draft={draft} onChange={onChange} />}
@@ -459,7 +455,7 @@ export function ProviderFields({
               placeholder={preset.endpoint}
               spellCheck={false}
               className="font-mono text-xs md:text-xs"
-              autoFocus={autoFocusKey}
+              autoFocus={autoFocus}
               data-testid="provider-endpoint"
             />
             <InputGroupAddon align="inline-end" className="font-mono text-xs font-normal">
@@ -477,7 +473,7 @@ export function ProviderFields({
             placeholder="my-project"
             spellCheck={false}
             className="font-mono text-xs md:text-xs"
-            autoFocus={autoFocusKey}
+            autoFocus={autoFocus}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) onSubmit()
             }}
@@ -490,7 +486,7 @@ export function ProviderFields({
             value={draft.apiKey}
             onChange={(apiKey) => onChange({ ...draft, apiKey })}
             keyUrl={keyUrl}
-            autoFocus={autoFocusKey && preset !== null && preset.endpoint === undefined}
+            autoFocus={autoFocus && preset !== null && preset.endpoint === undefined}
             onEnter={onSubmit}
           />
         </Field>
@@ -505,14 +501,5 @@ export function ProviderFields({
         />
       </Field>
     </div>
-  )
-}
-
-/** The mark a provider's form is headed by: its preset's, or a plus for one of the user's own. */
-export function FormTitleMark({ preset }: { preset: ProviderPreset | null }) {
-  return preset === null ? (
-    <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
-  ) : (
-    <ProviderMarkIcon mark={preset.mark} className="size-5 shrink-0" />
   )
 }

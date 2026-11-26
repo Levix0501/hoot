@@ -68,7 +68,6 @@ import {
   type ModelCatalogs,
   type NewAgent,
   type NewProvider,
-  type Provider,
   type ProviderChange,
   type ProvidersState,
 } from '../../shared/providers'
@@ -135,23 +134,6 @@ import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
 /** The pages of the settings, in the order the settings list them. */
 export type SettingsSection = 'agents' | 'providers' | 'appearance' | 'labels' | 'archive' | 'about'
-
-/**
- * A provider being added, in its dialog: from the Providers page's catalog,
- * on a preset's form, or from an agent's provider picker, which offers the
- * presets its harness can run and takes the provider added.
- */
-export interface AddingProvider {
-  /** The harness whose presets alone are offered; `null` for every preset. */
-  harness: CodingToolId | null
-  /**
-   * The preset whose form the dialog opens on, `null` for a provider of the
-   * user's own; left out, the dialog opens on the presets to pick from.
-   */
-  presetId?: string | null
-  /** Takes the provider once it is added. */
-  onAdded?(provider: Provider): void
-}
 
 /**
  * How the issue list's Label filter matches the labels checked in it: issues
@@ -505,8 +487,6 @@ export interface AppState {
    * history.
    */
   settingsSection: SettingsSection | null
-  /** The provider being added, in its dialog; `null` while none is. */
-  addingProvider: AddingProvider | null
 
   /**
    * Reads the window's state and the appearance picked, and follows their
@@ -684,10 +664,6 @@ export interface AppState {
   showSettings(section?: SettingsSection): void
   /** Shows another page of the settings, without recording it in the history. */
   selectSettingsSection(section: SettingsSection): void
-  /** Opens the dialog that adds a provider (see `addingProvider`). */
-  startAddingProvider(adding: AddingProvider): void
-  /** Closes the dialog that adds a provider. */
-  stopAddingProvider(): void
   /**
    * Leaves the settings as going back does. Without a page before them, shows
    * the empty page instead, and takes the settings out of the history.
@@ -2465,7 +2441,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     windowFocused: false,
     appearance: DEFAULT_APPEARANCE,
     settingsSection: null,
-    addingProvider: null,
 
     async initializeWindow() {
       api.onToggleSidebarRequested(() => get().setSidebarOpen(!get().sidebarOpen))
@@ -3346,14 +3321,6 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (isSettingsPage(get().currentPage)) return
       blurBeforeSettings()
       showPage(settingsPage)
-    },
-
-    startAddingProvider(adding) {
-      set({ addingProvider: adding })
-    },
-
-    stopAddingProvider() {
-      set({ addingProvider: null })
     },
 
     selectSettingsSection(section) {

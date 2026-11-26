@@ -1,4 +1,4 @@
-import { Trash2Icon } from 'lucide-react'
+import { ChevronLeftIcon, Trash2Icon } from 'lucide-react'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '../../lib/toast'
@@ -12,11 +12,17 @@ import {
   presetById,
   providerMark,
   type Provider,
+  type ProviderMark,
+  type ProviderPreset,
 } from '../../../shared/providers'
 import { getCodingTool, type CodingToolId } from '../../../shared/tools'
 import {
+  canAdd,
   canSave,
+  draftOf,
   draftOfProvider,
+  newProviderName,
+  newProviderOf,
   providerChange,
   savableDraft,
   type FormDraft,
@@ -28,9 +34,12 @@ import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { useInstalled } from './provider-catalog'
+import { PresetPicker, useInstalled } from './provider-catalog'
 import { Field, ProviderFields } from './provider-fields'
 import { SIDE_PANEL, TitleName } from './side-panel'
+
+/** A provider panel's classes: wider than an agent's, for the addresses on one line each. */
+const PROVIDER_PANEL = cn(SIDE_PANEL, 'data-[side=right]:sm:max-w-[30rem]')
 
 /** The installed harnesses whose global a provider is. */
 function useGlobalOf(providerId: string): CodingToolId[] {
@@ -152,14 +161,35 @@ function DeleteProviderButton({
   )
 }
 
-/** The panel's header: the provider's mark, its name, and what else it says of it. */
-function Header({ provider, children }: { provider: Provider; children: ReactNode }) {
+/**
+ * The panel's header: Back, where there is somewhere to go back to, the
+ * provider's mark, then its name and what else is said of it.
+ */
+function Header({
+  mark,
+  onBack,
+  children,
+}: {
+  mark: ProviderMark
+  onBack?: () => void
+  children: ReactNode
+}) {
   return (
     <div className="flex items-center gap-3 border-b px-5 pt-5 pb-4">
-      <ProviderMarkIcon mark={providerMark(provider)} className="size-5 shrink-0" />
+      {onBack !== undefined && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="-mr-1 -ml-2"
+          aria-label="Back"
+          onClick={onBack}
+          data-testid="add-provider-back"
+        >
+          <ChevronLeftIcon />
+        </Button>
+      )}
+      <ProviderMarkIcon mark={mark} className="size-5 shrink-0" />
       {children}
-      <SignedOut provider={provider} />
-      <GlobalBadge providerId={provider.id} />
     </div>
   )
 }
@@ -204,7 +234,7 @@ function EditProvider({ provider, onClose }: { provider: Provider; onClose: () =
       }}
       data-testid={`provider-panel-${provider.id}`}
     >
-      <Header provider={provider}>
+      <Header mark={providerMark(provider)}>
         <SheetTitle render={<div className="flex min-w-0 flex-1" />}>
           <TitleName
             value={draft.name}
@@ -218,6 +248,8 @@ function EditProvider({ provider, onClose }: { provider: Provider; onClose: () =
             testId="provider-panel-name"
           />
         </SheetTitle>
+        <SignedOut provider={provider} />
+        <GlobalBadge providerId={provider.id} />
       </Header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
         <ProviderFields
@@ -225,13 +257,78 @@ function EditProvider({ provider, onClose }: { provider: Provider; onClose: () =
           draft={draft}
           onChange={change}
           onSubmit={() => commit(draft)}
-          autoFocusKey={false}
-          editing
         />
         <UsedBy provider={provider} />
       </div>
       <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
         <DeleteProviderButton provider={provider} onDeleted={onClose} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A provider being added, in the panel: the fields of its preset, or of one
+ * of the user's own, the one to fill first focused, under the name it gets
+ * left blank, and Add provider.
+ */
+function NewProvider({
+  preset,
+  onBack,
+  onAdded,
+  onCancel,
+}: {
+  preset: ProviderPreset | null
+  /** Goes back to the presets it was picked among, where it was picked in the panel. */
+  onBack?: () => void
+  onAdded: (provider: Provider) => void
+  onCancel: () => void
+}) {
+  const catalogs = useAppStore((state) => state.modelCatalogs)
+  const providers = useAppStore((state) => state.providers?.providers)
+  const addProvider = useAppStore((state) => state.addProvider)
+  const [draft, setDraft] = useState<FormDraft>(() => draftOf(preset, catalogs))
+  const [saving, setSaving] = useState(false)
+  const ready = canAdd(draft, preset) && !saving
+  const add = async () => {
+    if (!ready) return
+    setSaving(true)
+    const result = await addProvider(newProviderOf(draft, preset, providers ?? []))
+    setSaving(false)
+    if (result.ok) onAdded(result.provider)
+    else toast.error('Could not add the provider.', { description: result.message })
+  }
+  return (
+    <div
+      className="flex h-full flex-col"
+      data-testid={`new-provider-panel-${preset?.id ?? 'custom'}`}
+    >
+      <Header mark={providerMark({ presetId: preset?.id ?? null, own: null })} onBack={onBack}>
+        <SheetTitle render={<div className="flex min-w-0 flex-1" />}>
+          <TitleName
+            value={draft.name}
+            own={newProviderName(draft, preset, providers ?? [])}
+            onChange={(name) => setDraft({ ...draft, name })}
+            testId="new-provider-name"
+          />
+        </SheetTitle>
+      </Header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <ProviderFields
+          preset={preset}
+          draft={draft}
+          onChange={setDraft}
+          onSubmit={() => void add()}
+          autoFocus
+        />
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button disabled={!ready} onClick={() => void add()} data-testid="add-provider-save">
+          Add provider
+        </Button>
       </div>
     </div>
   )
@@ -298,10 +395,12 @@ function OwnProvider({ provider, harness }: { provider: Provider; harness: Codin
   )
   return (
     <div className="flex h-full flex-col" data-testid={`provider-panel-${provider.id}`}>
-      <Header provider={provider}>
+      <Header mark={providerMark(provider)}>
         <SheetTitle className="min-w-0 flex-1 truncate text-base leading-8 font-semibold">
           {provider.name}
         </SheetTitle>
+        <SignedOut provider={provider} />
+        <GlobalBadge providerId={provider.id} />
       </Header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
         {models !== undefined && models.length > 0 && (
@@ -314,16 +413,23 @@ function OwnProvider({ provider, harness }: { provider: Provider; harness: Codin
 }
 
 /**
- * The panel at the window's right that shows a provider, by its id: one of
- * the user's, each change saved as it is made, with Delete; a harness's own
- * models, to be seen. It closes with Esc or a click beside it.
+ * What the Providers page's panel shows: a provider, by its id, or one being
+ * added of a preset (`null` for one of the user's own).
+ */
+export type ProviderTarget = { id: string } | { presetId: string | null } | null
+
+/**
+ * The panel at the window's right on the Providers page: a provider of the
+ * user's, each change saved as it is made, with Delete; a harness's own
+ * models, to be seen; one being added, which once added it shows as the
+ * user's. It closes with Esc or a click beside it.
  */
 export function ProviderPanel({
   target,
   onTargetChange,
 }: {
-  target: string | null
-  onTargetChange: (target: string | null) => void
+  target: ProviderTarget
+  onTargetChange: (target: ProviderTarget) => void
 }) {
   // What it showed last, which it keeps showing as it closes.
   const [last, setLast] = useState(target)
@@ -331,24 +437,85 @@ export function ProviderPanel({
   const shown = target ?? last
   const installed = useInstalled()
   const providers = useAppStore((state) => state.providers?.providers)
-  const own = installed.find((harness) => ownProvider(harness).id === shown)
-  const provider = providers?.find((candidate) => candidate.id === shown)
   const close = () => onTargetChange(null)
+  let content: ReactNode = null
+  if (shown !== null && 'presetId' in shown) {
+    content = (
+      <NewProvider
+        key={shown.presetId ?? ''}
+        preset={presetById(shown.presetId) ?? null}
+        onAdded={(provider) => onTargetChange({ id: provider.id })}
+        onCancel={close}
+      />
+    )
+  } else if (shown !== null) {
+    const own = installed.find((harness) => ownProvider(harness).id === shown.id)
+    const provider = providers?.find((candidate) => candidate.id === shown.id)
+    if (own !== undefined) content = <OwnProvider provider={ownProvider(own)} harness={own} />
+    else if (provider !== undefined) {
+      content = <EditProvider key={provider.id} provider={provider} onClose={close} />
+    }
+  }
   return (
     <Sheet open={target !== null} onOpenChange={(open) => !open && close()}>
       <SheetContent
         side="right"
         showCloseButton={false}
         initialFocus={false}
-        // Wider than an agent's, for the addresses on one line each.
-        className={cn(SIDE_PANEL, 'data-[side=right]:sm:max-w-[30rem]')}
+        className={PROVIDER_PANEL}
         data-testid="provider-panel"
       >
-        {own !== undefined ? (
-          <OwnProvider provider={ownProvider(own)} harness={own} />
-        ) : provider !== undefined ? (
-          <EditProvider key={provider.id} provider={provider} onClose={close} />
-        ) : null}
+        {content}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+/**
+ * The panel over an agent's that adds a provider for it: the presets its
+ * harness can run, then the form of the one picked, the provider added
+ * going to the agent as the panel closes.
+ */
+export function AddProviderPanel({
+  harness,
+  open,
+  onOpenChange,
+  onAdded,
+}: {
+  harness: CodingToolId
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAdded: (provider: Provider) => void
+}) {
+  // undefined: picking; null: one of the user's own; a preset: its form.
+  const [picked, setPicked] = useState<ProviderPreset | null | undefined>(undefined)
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      // Back on the presets for the next time, once it has closed.
+      onOpenChangeComplete={(opened) => !opened && setPicked(undefined)}
+    >
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className={PROVIDER_PANEL}
+        data-testid="add-provider-panel"
+      >
+        {picked === undefined ? (
+          <PresetPicker harness={harness} onPick={setPicked} />
+        ) : (
+          <NewProvider
+            key={picked?.id ?? ''}
+            preset={picked}
+            onBack={() => setPicked(undefined)}
+            onAdded={(provider) => {
+              onAdded(provider)
+              onOpenChange(false)
+            }}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
       </SheetContent>
     </Sheet>
   )

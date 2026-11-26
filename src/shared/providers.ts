@@ -1505,7 +1505,8 @@ export function freeProviderName(providers: readonly Provider[], base: string): 
   for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`
 }
 
-function hostOf(url: string): string | null {
+/** The host of an address; `null` for one that is not a URL. */
+export function hostOf(url: string): string | null {
   try {
     return new URL(url.trim()).host || null
   } catch {

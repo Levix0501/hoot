@@ -8,6 +8,7 @@ import {
   customMatches,
   draftOf,
   draftOfProvider,
+  newProviderName,
   newProviderOf,
   presetMatches,
   providerChange,
@@ -56,7 +57,7 @@ describe('a provider being added', () => {
     expect(draftOf(preset('deepseek'), catalogs)).toMatchObject({
       presetId: 'deepseek',
       planId: 'deepseek',
-      name: 'DeepSeek',
+      name: '',
       models: ['deepseek-0', 'deepseek-1'],
       keyHeader: 'bearer',
     })
@@ -84,8 +85,9 @@ describe('a provider being added', () => {
     const vertex = draftOf(preset('vertex'), catalogs)
     expect(canAdd({ ...vertex, models: ['claude-0'] }, preset('vertex'))).toBe(false)
     expect(canAdd({ ...vertex, models: ['claude-0'], project: 'p' }, preset('vertex'))).toBe(true)
-    const custom = { ...draftOf(null, catalogs), name: 'Mine', apiKey: 'k', models: ['m'] }
+    const custom = { ...draftOf(null, catalogs), apiKey: 'k', models: ['m'] }
     expect(canAdd(custom, null)).toBe(false)
+    // Unnamed, it is named after its address (see `newProviderName`).
     expect(canAdd({ ...custom, urls: { anthropic: 'https://x.example.com' } }, null)).toBe(true)
     // One of the user's own at an Anthropic-compatible address can do without models.
     const relay = { ...custom, models: [], urls: { anthropic: 'https://relay.example.com' } }
@@ -138,12 +140,18 @@ describe('a provider being added', () => {
     expect(providerInputOf(custom, null)).toMatchObject({ urls: custom.urls, cloud: null })
   })
 
-  it('names a preset’s provider after it, numbered when the name is taken', () => {
+  it('takes the name typed, else its preset’s or its address’s host, numbered when that is taken', () => {
     const draft = draftOf(preset('deepseek'), catalogs)
-    expect(newProviderOf(draft, preset('deepseek'), [provider({ name: 'DeepSeek' })]).name).toBe(
-      'DeepSeek 2',
-    )
-    expect(newProviderOf({ ...draft, name: ' Mine ' }, null, []).name).toBe('Mine')
+    const taken = [provider({ name: 'DeepSeek' }), provider({ name: 'relay.example.com' })]
+    expect(newProviderOf(draft, preset('deepseek'), taken).name).toBe('DeepSeek 2')
+    expect(newProviderOf({ ...draft, name: ' Mine ' }, preset('deepseek'), taken).name).toBe('Mine')
+    const custom = draftOf(null, catalogs)
+    expect(newProviderOf({ ...custom, name: ' Mine ' }, null, []).name).toBe('Mine')
+    const relay = { ...custom, urls: { anthropic: ' ', responses: 'https://relay.example.com/v1' } }
+    expect(newProviderName(relay, null, [])).toBe('relay.example.com')
+    expect(newProviderName(relay, null, taken)).toBe('relay.example.com 2')
+    expect(newProviderName({ urls: { anthropic: 'relay' } }, null, [])).toBe('Custom')
+    expect(newProviderName(custom, null, [provider({ name: 'Custom' })])).toBe('Custom 2')
   })
 
   it('shows the addresses its plan fixes: Vertex AI’s in its region, none of Azure’s', () => {

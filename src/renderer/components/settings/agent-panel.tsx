@@ -55,6 +55,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { AddProviderPanel } from './provider-panel'
 import { SIDE_PANEL, TitleName } from './side-panel'
 
 /** The choice of a provider picker that adds a provider. */
@@ -128,7 +129,11 @@ export function useAgentSummary(agent: Agent, state: AgentState | undefined, nam
   return parts.join(' · ')
 }
 
-/** The providers of a provider picker, each with its mark, and Add provider… last. */
+/**
+ * The providers of a provider picker, each with its mark, and Add provider…
+ * last, which opens the panel that adds one over this one, the provider
+ * added becoming the one picked.
+ */
 function ProviderSelect({
   harness,
   value,
@@ -139,52 +144,60 @@ function ProviderSelect({
   onChange: (provider: Provider) => void
 }) {
   const providers = useProvidersFor(harness)
-  const startAddingProvider = useAppStore((state) => state.startAddingProvider)
+  const [adding, setAdding] = useState(false)
   const provider = providers.find((candidate) => candidate.id === value)
   return (
-    <Select
-      value={value}
-      onValueChange={(id) => {
-        if (typeof id !== 'string') return
-        if (id === ADD_PROVIDER) return startAddingProvider({ harness, onAdded: onChange })
-        const picked = providers.find((candidate) => candidate.id === id)
-        if (picked !== undefined) onChange(picked)
-      }}
-    >
-      <SelectTrigger
-        size="sm"
-        aria-label="Provider"
-        className={GHOST}
-        data-testid="agent-panel-provider"
+    <>
+      <Select
+        value={value}
+        onValueChange={(id) => {
+          if (typeof id !== 'string') return
+          if (id === ADD_PROVIDER) return setAdding(true)
+          const picked = providers.find((candidate) => candidate.id === id)
+          if (picked !== undefined) onChange(picked)
+        }}
       >
-        {provider && <ProviderMarkIcon mark={providerMark(provider)} className="size-4" />}
-        <span className="truncate">{provider?.name ?? ''}</span>
-        <span className="flex-1" />
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-52">
-        <SelectGroup>
-          {providers.map((candidate) => (
-            <SelectItem
-              key={candidate.id}
-              value={candidate.id}
-              data-testid={`agent-provider-option-${candidate.id}`}
-            >
-              <span className="flex items-center gap-2">
-                <ProviderMarkIcon mark={providerMark(candidate)} className="size-4" />
-                {candidate.name}
-              </span>
-            </SelectItem>
-          ))}
-        </SelectGroup>
-        <SelectSeparator />
-        <SelectItem value={ADD_PROVIDER} data-testid="agent-provider-add">
-          <span className="flex items-center gap-2 text-muted-foreground">
-            <PlusIcon className="size-4" />
-            Add provider…
-          </span>
-        </SelectItem>
-      </SelectContent>
-    </Select>
+        <SelectTrigger
+          size="sm"
+          aria-label="Provider"
+          className={GHOST}
+          data-testid="agent-panel-provider"
+        >
+          {provider && <ProviderMarkIcon mark={providerMark(provider)} className="size-4" />}
+          <span className="truncate">{provider?.name ?? ''}</span>
+          <span className="flex-1" />
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-52">
+          <SelectGroup>
+            {providers.map((candidate) => (
+              <SelectItem
+                key={candidate.id}
+                value={candidate.id}
+                data-testid={`agent-provider-option-${candidate.id}`}
+              >
+                <span className="flex items-center gap-2">
+                  <ProviderMarkIcon mark={providerMark(candidate)} className="size-4" />
+                  {candidate.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+          <SelectSeparator />
+          <SelectItem value={ADD_PROVIDER} data-testid="agent-provider-add">
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <PlusIcon className="size-4" />
+              Add provider…
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <AddProviderPanel
+        harness={harness}
+        open={adding}
+        onOpenChange={setAdding}
+        onAdded={onChange}
+      />
+    </>
   )
 }
 

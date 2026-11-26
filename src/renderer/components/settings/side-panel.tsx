@@ -9,7 +9,8 @@ export const SIDE_PANEL = 'gap-0 p-0 outline-none [app-region:no-drag]'
 /**
  * The name atop a panel, which reads as a title and edits in place, the one
  * it gets left blank as its placeholder: an agent's own name, a provider's
- * saved one. Esc puts back the name it had, where it was changed.
+ * saved one, or the one a new provider gets. Esc puts back the name it had,
+ * where it was changed.
  */
 export function TitleName({
   value,

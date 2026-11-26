@@ -21,7 +21,7 @@ import { Button } from '../ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { CATALOG_SEARCH, ProviderCatalog, useInstalled } from './provider-catalog'
-import { GlobalBadge, ProviderPanel, SignedOut } from './provider-panel'
+import { GlobalBadge, ProviderPanel, SignedOut, type ProviderTarget } from './provider-panel'
 
 /** The installed harnesses that can run a provider, as small marks. */
 function HarnessMarks({ provider }: { provider: Provider }) {
@@ -242,14 +242,14 @@ function ProviderRow({
 
 /**
  * The settings' Providers page: each installed harness's global, then the
- * providers, the installed harnesses' own models first, each opening in the
- * panel, then every preset to add one of, or one of the user's own, which
- * Add provider goes to.
+ * providers, the installed harnesses' own models first, then every preset to
+ * add one of, or one of the user's own, which Add provider goes to; each
+ * provider, and each one being added, in the panel.
  */
 export function ProvidersPage() {
   const providers = useAppStore((state) => state.providers)
   const installed = useInstalled()
-  const [target, setTarget] = useState<string | null>(null)
+  const [target, setTarget] = useState<ProviderTarget>(null)
   const listed = [
     ...installed.map((harness) => ownProvider(harness)),
     ...(providers?.providers ?? []),
@@ -286,13 +286,13 @@ export function ProvidersPage() {
                 <ProviderRow
                   key={provider.id}
                   provider={provider}
-                  selected={target === provider.id}
-                  onOpen={() => setTarget(provider.id)}
+                  selected={target !== null && 'id' in target && target.id === provider.id}
+                  onOpen={() => setTarget({ id: provider.id })}
                 />
               ))}
             </div>
           )}
-          <ProviderCatalog />
+          <ProviderCatalog onPick={(presetId) => setTarget({ presetId })} />
         </div>
       </div>
       <ProviderPanel target={target} onTargetChange={setTarget} />

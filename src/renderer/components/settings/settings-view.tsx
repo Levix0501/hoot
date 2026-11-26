@@ -24,7 +24,6 @@ import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
 import { ArchivePage } from './archive-page'
 import { LabelsPage } from './labels-page'
-import { AddProviderHost } from './provider-catalog'
 import { ProvidersPage } from './providers-page'
 
 /**
@@ -171,7 +170,6 @@ export function SettingsView() {
       ) : (
         <AppearancePage />
       )}
-      <AddProviderHost />
     </>
   )
 }

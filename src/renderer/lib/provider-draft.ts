@@ -3,6 +3,7 @@ import {
   catalogModelIds,
   firstPicks,
   freeProviderName,
+  hostOf,
   planCatalog,
   planIdOf,
   presetById,
@@ -20,11 +21,12 @@ import {
   type WireFormat,
 } from '../../shared/providers'
 
-/** A provider as the add dialog and the edit panel keep it until it is saved. */
+/** A provider as its panel keeps it until it is added or saved. */
 export interface FormDraft {
   presetId: string | null
   /** The preset's plan or region; `null` for a provider of the user's own. */
   planId: string | null
+  /** The name typed: blank for a new provider's own (see `newProviderName`). */
   name: string
   apiKey: string
   /** Azure's: the user's resource. */
@@ -44,13 +46,16 @@ export function draftCatalog(draft: Pick<FormDraft, 'presetId' | 'planId'>): str
   return preset === undefined ? null : planCatalog(preset, presetPlan(preset, draft.planId))
 }
 
-/** A new provider's draft: a preset's first plan, with the models picked of it at first (see `firstPicks`). */
+/**
+ * A new provider's draft: a preset's first plan, with the models picked of
+ * it at first (see `firstPicks`), and no name typed.
+ */
 export function draftOf(preset: ProviderPreset | null, catalogs: ModelCatalogs): FormDraft {
   const plan = preset === null ? null : presetPlan(preset, null)
   return {
     presetId: preset?.id ?? null,
     planId: plan?.id ?? null,
-    name: preset?.name ?? '',
+    name: '',
     apiKey: '',
     endpoint: '',
     project: '',
@@ -102,16 +107,16 @@ export function draftOfProvider(provider: Provider): FormDraft {
 }
 
 /**
- * Whether a draft can be saved: a key, what else its preset asks for, and a
+ * Whether a draft can be added: a key, what else its preset asks for, and a
  * model, which one of the user's own at an Anthropic-compatible address can
  * do without, its Claude Code agents offering Claude's models (see
- * `addedClaudeModels`).
+ * `addedClaudeModels`). One left unnamed gets a name (see `newProviderName`).
  */
 export function canAdd(draft: FormDraft, preset: ProviderPreset | null): boolean {
   if (preset === null) {
     const hasUrl = Object.values(draft.urls).some((url) => (url ?? '').trim() !== '')
     const hasModel = draft.models.length > 0 || (draft.urls.anthropic ?? '').trim() !== ''
-    return draft.name.trim() !== '' && hasUrl && hasModel && draft.apiKey.trim() !== ''
+    return hasUrl && hasModel && draft.apiKey.trim() !== ''
   }
   if (draft.models.length === 0) return false
   if (preset.cloud === 'vertex') return draft.project.trim() !== ''
@@ -231,14 +236,29 @@ export function providerInputOf(
   }
 }
 
-/** The provider a draft adds: a preset's named after it, with a number when that name is taken. */
+/**
+ * The name a new provider gets where none is typed: its preset's; for one
+ * of the user's own, its first address's host, else Custom; with a number
+ * when that name is taken.
+ */
+export function newProviderName(
+  draft: Pick<FormDraft, 'urls'>,
+  preset: ProviderPreset | null,
+  providers: readonly Provider[],
+): string {
+  const address = [draft.urls.anthropic, draft.urls.responses].find((url) => !blank(url))
+  const host = address === undefined ? null : hostOf(address)
+  return freeProviderName(providers, preset?.name ?? host ?? 'Custom')
+}
+
+/** The provider a draft adds, named as typed, else as `newProviderName` names it. */
 export function newProviderOf(
   draft: FormDraft,
   preset: ProviderPreset | null,
   providers: readonly Provider[],
 ): NewProvider {
   return {
-    name: preset === null ? draft.name.trim() : freeProviderName(providers, preset.name),
+    name: draft.name.trim() || newProviderName(draft, preset, providers),
     presetId: preset?.id ?? null,
     ...providerInputOf(draft, preset),
   }

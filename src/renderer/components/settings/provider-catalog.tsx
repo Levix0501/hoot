@@ -1,29 +1,14 @@
-import { ChevronLeftIcon, PlusIcon, SearchIcon } from 'lucide-react'
+import { PlusIcon, SearchIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { useState, type ReactNode } from 'react'
-import { toast } from '../../lib/toast'
-import {
-  presetById,
-  presetHarnesses,
-  PROVIDER_PRESETS,
-  type ProviderPreset,
-} from '../../../shared/providers'
+import { presetHarnesses, PROVIDER_PRESETS, type ProviderPreset } from '../../../shared/providers'
 import { toolStatus } from '../../../shared/tool-status'
 import { CODING_TOOL_IDS, getTool, type CodingToolId } from '../../../shared/tools'
-import {
-  canAdd,
-  customMatches,
-  draftOf,
-  newProviderOf,
-  presetMatches,
-  type FormDraft,
-} from '../../lib/provider-draft'
-import { useAppStore, type AddingProvider } from '../../store/app-store'
+import { customMatches, presetMatches } from '../../lib/provider-draft'
+import { useAppStore } from '../../store/app-store'
 import { ProviderMarkIcon } from '../provider-icon'
-import { Button } from '../ui/button'
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../ui/dialog'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '../ui/input-group'
-import { FormTitleMark, ProviderFields } from './provider-fields'
+import { SheetTitle } from '../ui/sheet'
 
 /** The harnesses installed, as the last detection found them, in their order. */
 export function useInstalled(): CodingToolId[] {
@@ -105,13 +90,11 @@ export const CATALOG_SEARCH = 'provider-catalog-search'
 /**
  * Every preset, on the Providers page below the user's providers, as cards
  * of makers of models and of gateways, then one of the user's own; one
- * picked opens its form.
+ * picked opens its form (`null` for one of the user's own).
  */
-export function ProviderCatalog() {
+export function ProviderCatalog({ onPick }: { onPick: (presetId: string | null) => void }) {
   const [query, setQuery] = useState('')
   const sections = sectionsOf(query, null)
-  const startAddingProvider = useAppStore((state) => state.startAddingProvider)
-  const open = (presetId: string | null) => startAddingProvider({ harness: null, presetId })
   return (
     <div className="flex flex-col gap-3" data-testid="provider-catalog">
       <div className="flex items-center justify-between gap-4 pt-2">
@@ -127,8 +110,8 @@ export function ProviderCatalog() {
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
               const first = sections[0]?.presets[0]
-              if (first !== undefined) open(first.id)
-              else if (customMatches(query)) open(null)
+              if (first !== undefined) onPick(first.id)
+              else if (customMatches(query)) onPick(null)
             }}
             placeholder="Search"
             aria-label="Search providers"
@@ -142,14 +125,19 @@ export function ProviderCatalog() {
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {section.presets.map((preset) => (
-              <PresetTile key={preset.id} preset={preset} bordered onPick={() => open(preset.id)} />
+              <PresetTile
+                key={preset.id}
+                preset={preset}
+                bordered
+                onPick={() => onPick(preset.id)}
+              />
             ))}
           </div>
         </div>
       ))}
       {customMatches(query) && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <PresetTile preset={null} bordered onPick={() => open(null)} />
+          <PresetTile preset={null} bordered onPick={() => onPick(null)} />
         </div>
       )}
     </div>
@@ -157,134 +145,60 @@ export function ProviderCatalog() {
 }
 
 /**
- * The dialog that adds a provider. From the catalog it opens on that
- * preset's form; from an agent's picker, on a search above the presets that
- * agent can run, which one picked turns into its form, the provider added
- * going to the agent.
+ * The presets a harness can run, in the panel that adds a provider for one
+ * of its agents: a search atop them, then their tiles, one of the user's own
+ * last; one picked, or the first found with Enter, opens its form.
  */
-function AddProviderDialog({ adding, onClose }: { adding: AddingProvider; onClose: () => void }) {
-  const catalogs = useAppStore((state) => state.modelCatalogs)
-  const providers = useAppStore((state) => state.providers?.providers ?? [])
-  const addProvider = useAppStore((state) => state.addProvider)
-  const opened = adding.presetId === undefined ? undefined : (presetById(adding.presetId) ?? null)
-  // undefined: picking; null: one of the user's own; a preset: its form.
-  const [picked, setPicked] = useState<ProviderPreset | null | undefined>(opened)
-  const [draft, setDraft] = useState<FormDraft>(() => draftOf(opened ?? null, catalogs))
+export function PresetPicker({
+  harness,
+  onPick,
+}: {
+  harness: CodingToolId
+  onPick: (preset: ProviderPreset | null) => void
+}) {
   const [query, setQuery] = useState('')
-  const [saving, setSaving] = useState(false)
-  const sections = sectionsOf(query, adding.harness)
-  const pick = (preset: ProviderPreset | null) => {
-    setPicked(preset)
-    setDraft(draftOf(preset, catalogs))
-  }
-  const add = async () => {
-    if (picked === undefined || !canAdd(draft, picked) || saving) return
-    setSaving(true)
-    const result = await addProvider(newProviderOf(draft, picked, providers))
-    setSaving(false)
-    if (!result.ok) {
-      toast.error('Could not add the provider.', { description: result.message })
-      return
-    }
-    adding.onAdded?.(result.provider)
-    onClose()
-  }
+  const sections = sectionsOf(query, harness)
   const first = sections[0]?.presets[0]
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
-      {picked === undefined ? (
-        <DialogContent
-          className="gap-0 overflow-hidden p-0 sm:max-w-2xl"
-          showCloseButton={false}
-          data-testid="add-provider-picker"
-        >
-          <DialogTitle className="sr-only">Add provider</DialogTitle>
-          <div className="flex h-12 items-center gap-2.5 border-b px-4">
-            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-                if (first !== undefined) pick(first)
-                else if (customMatches(query)) pick(null)
-              }}
-              placeholder="Search providers…"
-              aria-label="Search providers"
-              className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              data-testid="add-provider-search"
-            />
+    <div className="flex h-full flex-col" data-testid="add-provider-picker">
+      <SheetTitle className="sr-only">Add provider</SheetTitle>
+      <div className="flex items-center gap-2.5 border-b px-5 pt-5 pb-4">
+        <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+            if (first !== undefined) onPick(first)
+            else if (customMatches(query)) onPick(null)
+          }}
+          placeholder="Search providers…"
+          aria-label="Search providers"
+          className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          data-testid="add-provider-search"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        {sections.map((section) => (
+          <div key={section.id} className="pb-1">
+            <SectionTitle>{section.title}</SectionTitle>
+            <div className="grid grid-cols-2 gap-0.5">
+              {section.presets.map((preset) => (
+                <PresetTile key={preset.id} preset={preset} onPick={() => onPick(preset)} />
+              ))}
+            </div>
           </div>
-          <div className="max-h-[min(64vh,560px)] overflow-y-auto p-2">
-            {sections.map((section) => (
-              <div key={section.id} className="pb-1">
-                <SectionTitle>{section.title}</SectionTitle>
-                <div className="grid grid-cols-3 gap-0.5">
-                  {section.presets.map((preset) => (
-                    <PresetTile key={preset.id} preset={preset} onPick={() => pick(preset)} />
-                  ))}
-                </div>
-              </div>
-            ))}
-            {customMatches(query) && (
-              <div className="mt-1 grid grid-cols-3 gap-0.5 border-t pt-1.5">
-                <PresetTile preset={null} onPick={() => pick(null)} />
-              </div>
-            )}
-            {sections.length === 0 && !customMatches(query) && (
-              <div className="py-10 text-center text-sm text-muted-foreground">No providers</div>
-            )}
+        ))}
+        {customMatches(query) && (
+          <div className="mt-1 grid grid-cols-2 gap-0.5 border-t pt-1.5">
+            <PresetTile preset={null} onPick={() => onPick(null)} />
           </div>
-        </DialogContent>
-      ) : (
-        <DialogContent className="gap-0 p-0 sm:max-w-lg" data-testid="add-provider-dialog">
-          <div className="flex h-12 items-center gap-2 px-3">
-            {opened === undefined && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Back"
-                onClick={() => setPicked(undefined)}
-              >
-                <ChevronLeftIcon />
-              </Button>
-            )}
-            <span className={opened === undefined ? '' : 'pl-1'}>
-              <FormTitleMark preset={picked} />
-            </span>
-            <DialogTitle>{picked === null ? 'Custom provider' : picked.name}</DialogTitle>
-          </div>
-          <div className="px-4 pt-1 pb-4">
-            <ProviderFields
-              preset={picked}
-              draft={draft}
-              onChange={setDraft}
-              onSubmit={() => void add()}
-            />
-          </div>
-          <DialogFooter className="mx-0 mb-0">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!canAdd(draft, picked) || saving}
-              onClick={() => void add()}
-              data-testid="add-provider-save"
-            >
-              Add provider
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      )}
-    </Dialog>
+        )}
+        {sections.length === 0 && !customMatches(query) && (
+          <div className="py-10 text-center text-sm text-muted-foreground">No providers</div>
+        )}
+      </div>
+    </div>
   )
-}
-
-/** The dialog of the provider being added, wherever adding it began (see `AddingProvider`). */
-export function AddProviderHost() {
-  const adding = useAppStore((state) => state.addingProvider)
-  const stopAddingProvider = useAppStore((state) => state.stopAddingProvider)
-  if (adding === null) return null
-  return <AddProviderDialog adding={adding} onClose={stopAddingProvider} />
 }

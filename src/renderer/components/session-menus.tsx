@@ -1,4 +1,4 @@
-import { PencilIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { PencilIcon, XIcon } from 'lucide-react'
 import { focusAfterOverlay, useAppStore, type UiSession } from '../store/app-store'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 
@@ -19,9 +19,9 @@ const SESSION_MENU_CLASS = 'w-auto min-w-36 [app-region:no-drag]'
 
 /**
  * The context menu of a saved session, the same on its row in the sidebar
- * and on its tab: Rename…, Close while it is open, as its close button
- * closes it, and Delete, whether or not it is open. `testId` is the prefix of
- * the items' test ids.
+ * and on its tab: Rename…, and Close while it is open, as its close button
+ * closes it. The row's archive button takes the session out of the sidebar.
+ * `testId` is the prefix of the items' test ids.
  */
 export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId: string }) {
   const open = useAppStore((state) =>
@@ -29,86 +29,68 @@ export function SavedSessionMenu({ savedId, testId }: { savedId: string; testId:
   )
   const startRenaming = useAppStore((state) => state.startRenamingSavedSession)
   const close = useAppStore((state) => state.closeSavedSession)
-  const requestDelete = useAppStore((state) => state.requestDeleteSession)
   return (
     <ContextMenuContent
       className={SESSION_MENU_CLASS}
-      finalFocus={focusAfterSessionMenu(() => {
-        const state = useAppStore.getState()
-        return state.renamingSavedSessionId === savedId || state.sessionDeletion === savedId
-      })}
+      finalFocus={focusAfterSessionMenu(
+        () => useAppStore.getState().renamingSavedSessionId === savedId,
+      )}
     >
       <ContextMenuItem onClick={() => startRenaming(savedId)} data-testid={`${testId}-rename`}>
         <PencilIcon />
         Rename…
       </ContextMenuItem>
-      <ContextMenuSeparator />
       {open && (
-        <ContextMenuItem
-          variant="destructive"
-          disabled={open.closing}
-          onClick={() => close(savedId)}
-          data-testid={`${testId}-close`}
-        >
-          <XIcon />
-          Close
-        </ContextMenuItem>
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            variant="destructive"
+            disabled={open.closing}
+            onClick={() => close(savedId)}
+            data-testid={`${testId}-close`}
+          >
+            <XIcon />
+            Close
+          </ContextMenuItem>
+        </>
       )}
-      <ContextMenuItem
-        variant="destructive"
-        onClick={() => requestDelete(savedId)}
-        data-testid={`${testId}-delete`}
-      >
-        <Trash2Icon />
-        Delete
-      </ContextMenuItem>
     </ContextMenuContent>
   )
 }
 
 /**
  * The context menu of a chat, the same on its row in the sidebar and on its
- * tab: Rename…, Close while it is open, as its close button closes it, and
- * Delete, whether or not it is open. `testId` is the prefix of the items'
- * test ids.
+ * tab: Rename…, and Close while it is open, as its close button closes it.
+ * The row's archive button takes the chat out of the sidebar. `testId` is the
+ * prefix of the items' test ids.
  */
 export function ChatMenu({ chatId, testId }: { chatId: string; testId: string }) {
   const open = useAppStore((state) => state.sessions.find((session) => session.chatId === chatId))
   const startRenaming = useAppStore((state) => state.startRenamingChat)
   const close = useAppStore((state) => state.closeChat)
-  const requestDelete = useAppStore((state) => state.requestDeleteSession)
   return (
     <ContextMenuContent
       className={SESSION_MENU_CLASS}
-      finalFocus={focusAfterSessionMenu(() => {
-        const state = useAppStore.getState()
-        return state.renamingChatId === chatId || state.sessionDeletion === chatId
-      })}
+      finalFocus={focusAfterSessionMenu(() => useAppStore.getState().renamingChatId === chatId)}
     >
       <ContextMenuItem onClick={() => startRenaming(chatId)} data-testid={`${testId}-rename`}>
         <PencilIcon />
         Rename…
       </ContextMenuItem>
-      <ContextMenuSeparator />
       {open && (
-        <ContextMenuItem
-          variant="destructive"
-          disabled={open.closing}
-          onClick={() => close(chatId)}
-          data-testid={`${testId}-close`}
-        >
-          <XIcon />
-          Close
-        </ContextMenuItem>
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            variant="destructive"
+            disabled={open.closing}
+            onClick={() => close(chatId)}
+            data-testid={`${testId}-close`}
+          >
+            <XIcon />
+            Close
+          </ContextMenuItem>
+        </>
       )}
-      <ContextMenuItem
-        variant="destructive"
-        onClick={() => requestDelete(chatId)}
-        data-testid={`${testId}-delete`}
-      >
-        <Trash2Icon />
-        Delete
-      </ContextMenuItem>
     </ContextMenuContent>
   )
 }

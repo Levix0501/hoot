@@ -12,8 +12,7 @@ export interface AgentLaunchSettings {
 
 /**
  * What the Agents page keeps besides the agents themselves: the default
- * agent, the YOLO mode switch, and whether closing a running session asks
- * first.
+ * agent and the YOLO mode switch.
  */
 export interface LaunchSettings {
   /**
@@ -24,11 +23,6 @@ export interface LaunchSettings {
   defaultAgent: string | null
   /** Whether each agent gets the arguments that make it act without asking. */
   yoloMode: boolean
-  /**
-   * Whether closing a running session asks for confirmation first, as it
-   * does until the user tells it not to.
-   */
-  confirmClose: boolean
 }
 
 /** The settings an agent starts with until the user changes one. */
@@ -36,9 +30,9 @@ export function defaultAgentLaunchSettings(): AgentLaunchSettings {
   return { enabled: true, model: null, effort: null, extraArgs: [] }
 }
 
-/** The settings Hoot starts with: no default agent, YOLO mode on, closing a running session asking first. */
+/** The settings Hoot starts with: no default agent, YOLO mode on. */
 export function defaultLaunchSettings(): LaunchSettings {
-  return { defaultAgent: null, yoloMode: true, confirmClose: true }
+  return { defaultAgent: null, yoloMode: true }
 }
 
 /** The settings with another default agent, or `null` while the settings are not known. */
@@ -52,15 +46,4 @@ export function withDefaultAgent(
 /** The settings with YOLO mode on or off, or `null` while the settings are not known. */
 export function withYoloMode(settings: LaunchSettings | null, on: boolean): LaunchSettings | null {
   return settings === null ? null : { ...settings, yoloMode: on }
-}
-
-/**
- * The settings with closing a running session asking first or not, or `null`
- * while the settings are not known.
- */
-export function withConfirmClose(
-  settings: LaunchSettings | null,
-  on: boolean,
-): LaunchSettings | null {
-  return settings === null ? null : { ...settings, confirmClose: on }
 }

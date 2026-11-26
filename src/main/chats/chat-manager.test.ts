@@ -966,6 +966,84 @@ describe('ChatManager', () => {
     expect(manager.get(chat.id)).toBeUndefined()
   })
 
+  it('archives a chat out of the lists, keeping its folder, and brings it back', async () => {
+    const chat = await manager.create(agentOf('codex'))
+    fs.writeFileSync(path.join(chat.folder, 'notes.txt'), 'keep')
+
+    expect(await manager.archive(chat.id)).toBe(true)
+    // Archived again, it stays as it is.
+    expect(await manager.archive(chat.id)).toBe(true)
+
+    expect(manager.list()).toEqual([])
+    expect(manager.get(chat.id)?.id).toBe(chat.id)
+    expect(manager.listArchived()).toEqual([
+      expect.objectContaining({ id: chat.id, archivedAt: clock }),
+    ])
+    // An archived chat starts nothing.
+    expect(await manager.prepareSession(chat.id)).toBeNull()
+    // Its folder, with what is in it, stays as it is, unlike a deleted chat's.
+    expect(fs.readFileSync(path.join(chat.folder, 'notes.txt'), 'utf8')).toBe('keep')
+    expect(trashed).toEqual([])
+    // It is archived after a restart too.
+    const again = await restarted()
+    expect(again.list()).toEqual([])
+    expect(again.listArchived().map((entry) => entry.id)).toEqual([chat.id])
+
+    await again.unarchive(chat.id)
+    expect(again.list().map((entry) => entry.id)).toEqual([chat.id])
+    expect(again.listArchived()).toEqual([])
+    expect(await again.prepareSession(chat.id)).not.toBeNull()
+  })
+
+  it('does not archive a chat that went as its agent ended, never having got a message', async () => {
+    const chat = await manager.create(agentOf('claude'))
+    await manager.prepareSession(chat.id)
+    manager.opened(chat.id)
+    // Its sessions close before it is archived; it goes as its agent ends.
+    manager.sessionEnded(ended(chat.id, 'claude'))
+
+    expect(await manager.archive(chat.id)).toBe(false)
+    expect(manager.list()).toEqual([])
+    expect(manager.listArchived()).toEqual([])
+  })
+
+  it('archives a Claude Code chat with its conversation, and resumes it once unarchived', async () => {
+    const chat = await manager.create(agentOf('claude'))
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'conversation-1'))
+    await manager.flush()
+
+    await manager.archive(chat.id)
+    expect(manager.list()).toEqual([])
+    expect(manager.listArchived()).toEqual([
+      expect.objectContaining({ id: chat.id, conversationId: 'conversation-1', hasMessages: true }),
+    ])
+
+    await manager.unarchive(chat.id)
+    expect(await manager.prepareSession(chat.id)).toMatchObject({
+      launch: { conversationId: 'conversation-1', resume: true },
+    })
+  })
+
+  it('archives a saved session below its worktree, last archived first, and brings it back', async () => {
+    const folder = worktreeFolder('fix-login-bug')
+    const first = manager.createSavedSession('/work/project', folder, agentOf('codex'))
+    const second = manager.createSavedSession('/work/project', folder, agentOf('opencode'))
+
+    await manager.archive(first.id)
+    await manager.archive(second.id)
+
+    expect(manager.listSavedSessions()).toEqual([])
+    expect(manager.listArchived()).toEqual([
+      expect.objectContaining({ id: second.id, worktreePath: folder }),
+      expect.objectContaining({ id: first.id, worktreePath: folder }),
+    ])
+    expect(fs.readdirSync(folder)).toEqual(['README.md'])
+
+    await manager.unarchive(first.id)
+    expect(manager.listSavedSessions().map((entry) => entry.id)).toEqual([first.id])
+    expect(manager.listArchived().map((entry) => entry.id)).toEqual([second.id])
+  })
+
   for (const toolId of ['codex', 'opencode'] as const) {
     it(`keeps the conversation of a deleted ${toolId} saved session from the other sessions of its worktree`, async () => {
       const folder = worktreeFolder('fix-login-bug')

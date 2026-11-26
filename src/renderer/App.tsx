@@ -1,8 +1,7 @@
 import { cn } from 'cn'
 import { useEffect } from 'react'
 import { AddProjectDialog } from './components/add-project-dialog'
-import { CloseSessionDialog } from './components/close-session-dialog'
-import { DeleteSessionDialog } from './components/delete-session-dialog'
+import { DeleteArchivedSessionDialog } from './components/delete-archived-session-dialog'
 import { DiscardChangesDialog } from './components/files/file-panel'
 import { DeleteIssueDialog } from './components/issues/delete-issue-dialog'
 import { DependentIssueDialogView } from './components/issues/dependent-issue-dialog'
@@ -138,8 +137,7 @@ export function App() {
       <RenameSessionDialog />
       <RenameChatDialog />
       <RenameSavedSessionDialog />
-      <CloseSessionDialog />
-      <DeleteSessionDialog />
+      <DeleteArchivedSessionDialog />
       <NewWorktreeDialog />
       <RemoveWorktreeDialog />
       <NewIssueDialog />

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { ChatInfo, SavedSessionInfo } from '../../shared/chats'
+import type { ArchivedSessionInfo, ChatInfo, SavedSessionInfo } from '../../shared/chats'
 import type { CodingToolId } from '../../shared/tools'
 
 interface ChatRow {
@@ -15,6 +15,7 @@ interface ChatRow {
   created_at: number
   opened_at: number
   deleted_at: number | null
+  archived_at: number | null
   conversation_reported: number
   unreported_run_started_at: number | null
   provider_id: string | null
@@ -23,7 +24,7 @@ interface ChatRow {
 }
 
 const COLUMNS = `id, tool_id, folder, project_root, worktree_path, conversation_id, title,
-                 custom_name, has_messages, created_at, opened_at, deleted_at,
+                 custom_name, has_messages, created_at, opened_at, deleted_at, archived_at,
                  conversation_reported, unreported_run_started_at, provider_id, model, agent_id`
 
 /**
@@ -37,9 +38,12 @@ export interface UnreportedRun {
 
 /**
  * A chat or saved session as the database keeps it: also one the user
- * deleted, which keeps its row so that its conversation stays its own.
+ * archived, which the settings' Archive page lists, and one the user deleted,
+ * which keeps its row so that its conversation stays its own.
  */
 export interface StoredChat extends ChatInfo {
+  /** Whether the user archived it, which leaves it out of the sidebar until it is unarchived. */
+  archived: boolean
   /** Whether the user deleted it, which leaves it out of the sidebar for good. */
   deleted: boolean
   /**
@@ -77,6 +81,7 @@ function chatFromRow(row: ChatRow): ChatInfo {
 function storedFromRow(row: ChatRow): StoredChat {
   return {
     ...chatFromRow(row),
+    archived: row.archived_at !== null,
     deleted: row.deleted_at !== null,
     conversationReported: row.conversation_reported === 1,
     unreportedRun:
@@ -88,6 +93,11 @@ function savedSessionFromRow(row: ChatRow): SavedSessionInfo {
   const chat = chatFromRow(row)
   if (chat.projectRoot === null) throw new Error(`The saved session ${chat.id} has no project.`)
   return { ...chat, projectRoot: chat.projectRoot }
+}
+
+function archivedSessionFromRow(row: ChatRow): ArchivedSessionInfo {
+  if (row.archived_at === null) throw new Error(`The session ${row.id} is not archived.`)
+  return { ...chatFromRow(row), archivedAt: row.archived_at }
 }
 
 /** What can change about a chat; what is left out stays as it is. */
@@ -109,8 +119,9 @@ export interface ChatChanges {
  * project's own folder. The chats come in the order of the sidebar's Chats
  * group, by when they were last opened, newest first; the saved sessions come
  * by when they were made, oldest first, as they show below their worktree or
- * their project's Local row. Those the user deleted are in
- * neither list, but are kept with their conversations.
+ * their project's Local row. Those the user archived are in neither list,
+ * but in the archive, until they are unarchived; those the user deleted are
+ * in neither, and are kept with their conversations.
  */
 export class ChatStore {
   private readonly statements
@@ -119,13 +130,21 @@ export class ChatStore {
     this.statements = {
       chats: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE project_root IS NULL AND deleted_at IS NULL
+         FROM chats
+         WHERE project_root IS NULL AND deleted_at IS NULL AND archived_at IS NULL
          ORDER BY opened_at DESC, created_at DESC, id`,
       ),
       savedSessions: db.prepare(
         `SELECT ${COLUMNS}
-         FROM chats WHERE project_root IS NOT NULL AND deleted_at IS NULL
+         FROM chats
+         WHERE project_root IS NOT NULL AND deleted_at IS NULL AND archived_at IS NULL
          ORDER BY created_at, id`,
+      ),
+      archived: db.prepare(
+        `SELECT ${COLUMNS}
+         FROM chats
+         WHERE deleted_at IS NULL AND archived_at IS NOT NULL
+         ORDER BY archived_at DESC, created_at DESC, id`,
       ),
       chat: db.prepare(`SELECT ${COLUMNS} FROM chats WHERE id = ?`),
       inFolder: db.prepare(
@@ -154,6 +173,8 @@ export class ChatStore {
         `UPDATE chats SET provider_id = ?, agent_id = coalesce(agent_id, ?)
          WHERE provider_id IS NULL AND tool_id = ?`,
       ),
+      markArchived: db.prepare('UPDATE chats SET archived_at = ? WHERE id = ?'),
+      unarchive: db.prepare('UPDATE chats SET archived_at = NULL WHERE id = ?'),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
       delete: db.prepare('DELETE FROM chats WHERE id = ?'),
       deleteInFolder: db.prepare('DELETE FROM chats WHERE folder = ?'),
@@ -171,7 +192,12 @@ export class ChatStore {
     return (this.statements.savedSessions.all() as unknown as ChatRow[]).map(savedSessionFromRow)
   }
 
-  /** The chat or saved session with this id, if any, also one the user deleted. */
+  /** Every archived chat and saved session, last archived first. */
+  listArchived(): ArchivedSessionInfo[] {
+    return (this.statements.archived.all() as unknown as ChatRow[]).map(archivedSessionFromRow)
+  }
+
+  /** The chat or saved session with this id, if any, also one the user archived or deleted. */
   get(id: string): StoredChat | undefined {
     const row = this.statements.chat.get(id) as ChatRow | undefined
     return row ? storedFromRow(row) : undefined
@@ -239,6 +265,19 @@ export class ChatStore {
    */
   assignProvider(toolId: CodingToolId, providerId: string, agentId: string | null): number {
     return Number(this.statements.assignProvider.run(providerId, agentId, toolId).changes)
+  }
+
+  /**
+   * Archives a chat or saved session, recording when: it leaves the lists
+   * until it is unarchived.
+   */
+  markArchived(id: string, at: number): void {
+    this.statements.markArchived.run(at, id)
+  }
+
+  /** Brings an archived chat or saved session back to the lists. */
+  unarchive(id: string): void {
+    this.statements.unarchive.run(id)
   }
 
   /** Leaves a chat or saved session out of the lists from now on, keeping its row. */

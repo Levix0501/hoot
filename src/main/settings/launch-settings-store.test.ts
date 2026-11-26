@@ -27,7 +27,7 @@ function writeSettings(content: unknown): void {
 const saved = () => JSON.parse(fs.readFileSync(file, 'utf8')) as unknown
 
 describe('LaunchSettingsStore', () => {
-  it('starts with no default agent, YOLO mode on and closing asking first, without writing anything', () => {
+  it('starts with no default agent and YOLO mode on, without writing anything', () => {
     const store = new LaunchSettingsStore(directory)
     expect(store.all()).toEqual(defaultLaunchSettings())
     expect(store.all().defaultAgent).toBeNull()
@@ -39,7 +39,7 @@ describe('LaunchSettingsStore', () => {
     const store = new LaunchSettingsStore(directory)
     store.setDefaultAgent('agent-1')
     store.setYoloMode(false)
-    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: false, confirmClose: true })
+    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: false })
     expect(saved()).toMatchObject({
       launchSettings: { defaultAgentId: 'agent-1', yoloMode: false },
     })
@@ -62,7 +62,7 @@ describe('LaunchSettingsStore', () => {
     })
     const store = new LaunchSettingsStore(directory)
     // A tool id was the default agent then; agents have ids of their own now.
-    expect(store.all()).toEqual({ defaultAgent: null, yoloMode: false, confirmClose: true })
+    expect(store.all()).toEqual({ defaultAgent: null, yoloMode: false })
     expect(store.legacyDefaultTool()).toBe('codex')
     expect(store.legacyAgent('claude')).toEqual(defaultAgentLaunchSettings())
     expect(store.legacyAgent('codex')).toEqual({
@@ -73,7 +73,7 @@ describe('LaunchSettingsStore', () => {
     })
     expect(store.legacyAgent('opencode')).toBeNull()
     // Kept while other settings change.
-    store.setConfirmClose(false)
+    store.setYoloMode(true)
     expect(new LaunchSettingsStore(directory).legacyAgent('codex')?.model).toBe('x')
 
     store.dropLegacy()
@@ -81,7 +81,7 @@ describe('LaunchSettingsStore', () => {
     expect(store.legacyDefaultTool()).toBeNull()
     const reopened = new LaunchSettingsStore(directory)
     expect(reopened.legacyAgent('codex')).toBeNull()
-    expect(reopened.all()).toEqual({ defaultAgent: null, yoloMode: false, confirmClose: false })
+    expect(reopened.all()).toEqual({ defaultAgent: null, yoloMode: true })
   })
 
   it('ignores the permission levels earlier versions saved, and keeps them in the file', () => {
@@ -102,23 +102,14 @@ describe('LaunchSettingsStore', () => {
     expect(settings.yoloMode).toBe(true)
   })
 
-  it('asks before closing a running session until told not to, also after other settings changed', () => {
-    writeSettings({ launchSettings: { defaultAgentId: 'agent-1', yoloMode: false } })
+  it('ignores the switch for asking before closing that earlier versions saved', () => {
+    writeSettings({ launchSettings: { defaultAgentId: 'agent-1', confirmClose: false } })
     const store = new LaunchSettingsStore(directory)
-    expect(store.all().confirmClose).toBe(true)
-    const changes: LaunchSettings[] = []
-    store.on('changed', (settings) => changes.push(settings))
-
-    store.setConfirmClose(false)
-    store.setConfirmClose(false)
-    expect(changes.map((settings) => settings.confirmClose)).toEqual([false])
-    expect(saved()).toMatchObject({ launchSettings: { confirmClose: false, yoloMode: false } })
-    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(false)
-
-    store.setConfirmClose(true)
-    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(true)
-    writeSettings({ launchSettings: { confirmClose: 'no' } })
-    expect(new LaunchSettingsStore(directory).all().confirmClose).toBe(true)
+    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: true })
+    store.setYoloMode(false)
+    expect(saved()).toMatchObject({
+      launchSettings: { defaultAgentId: 'agent-1', yoloMode: false },
+    })
   })
 
   it('reports each change once, and writes nothing when a change changes nothing', () => {

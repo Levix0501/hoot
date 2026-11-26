@@ -230,8 +230,8 @@ export class SessionManager extends EventEmitter<{
 
   /**
    * Closes the sessions of a chat or saved session, by its id, whether they
-   * are starting, running or ended, as before it is deleted: settles once
-   * their processes have ended.
+   * are starting, running or ended, as before it is archived or deleted:
+   * settles once their processes have ended.
    */
   async closeOf(chatId: string): Promise<void> {
     const ids = [...this.records.values()]

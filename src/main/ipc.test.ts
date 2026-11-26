@@ -116,7 +116,6 @@ const launchSettings = Object.assign(new EventEmitter(), {
   all: vi.fn<() => unknown>(() => launchSettingsState),
   setDefaultAgent: vi.fn<(id: string) => void>(),
   setYoloMode: vi.fn<(on: boolean) => void>(),
-  setConfirmClose: vi.fn<(on: boolean) => void>(),
   change: vi.fn<(id: string, change: unknown) => void>(),
 })
 
@@ -224,6 +223,9 @@ const chats = Object.assign(emitter(), {
   rename: vi.fn<(id: string, name: string) => boolean>(() => true),
   setTitle: vi.fn<(id: string, title: string) => void>(),
   delete: vi.fn<(id: string) => Promise<void>>(async () => {}),
+  archive: vi.fn<(id: string) => Promise<boolean>>(async () => true),
+  unarchive: vi.fn<(id: string) => Promise<void>>(async () => {}),
+  listArchived: vi.fn<() => unknown[]>(() => []),
 })
 const project = { id: 1, root: '/work/project', name: 'project' }
 const projects = {
@@ -687,6 +689,55 @@ describe('the messages of chats', () => {
     })
     sessionManager.closeOf.mockImplementation(async () => {})
     chats.delete.mockImplementation(async () => {})
+  })
+
+  it('archive a chat or a saved session once its sessions have closed, and bring it back', async () => {
+    const order: string[] = []
+    sessionManager.closeOf.mockImplementation(async (id) => {
+      order.push(`close ${id}`)
+    })
+    chats.archive.mockImplementation(async (id) => {
+      order.push(`archive ${id}`)
+      return true
+    })
+    expect(await invoke(IpcChannel.archiveSession, chat.id)).toEqual({ ok: true, archived: true })
+    expect(await invoke(IpcChannel.archiveSession, saved.id)).toEqual({
+      ok: true,
+      archived: true,
+    })
+    expect(order).toEqual([
+      `close ${chat.id}`,
+      `archive ${chat.id}`,
+      `close ${saved.id}`,
+      `archive ${saved.id}`,
+    ])
+
+    expect(await invoke(IpcChannel.unarchiveSession, chat.id)).toEqual({ ok: true })
+    expect(chats.unarchive.mock.calls).toEqual([[chat.id]])
+    expect(await invoke(IpcChannel.archiveSession, 7)).toEqual({
+      ok: false,
+      message: 'Invalid request.',
+    })
+
+    // A chat that went as its sessions closed, never having got a message, is not archived.
+    chats.archive.mockResolvedValueOnce(false)
+    expect(await invoke(IpcChannel.archiveSession, chat.id)).toEqual({ ok: true, archived: false })
+
+    chats.archive.mockRejectedValueOnce(new Error('database is locked'))
+    expect(await invoke(IpcChannel.archiveSession, chat.id)).toEqual({
+      ok: false,
+      message: 'database is locked',
+    })
+    sessionManager.closeOf.mockImplementation(async () => {})
+    chats.archive.mockImplementation(async () => true)
+  })
+
+  it('gives the archived sessions, and passes on every change of them', async () => {
+    expect(await invoke(IpcChannel.listArchivedSessions)).toEqual([])
+    const changed = [{ ...chat, archivedAt: 4_000 }]
+    chats.emit('archived-changed', changed)
+    expect(webContents.send).toHaveBeenCalledWith(IpcChannel.archivedSessionsChanged, changed)
+    expect(chats.listArchived).toHaveBeenCalled()
   })
 
   it('creates a named worktree and the session it opens', async () => {
@@ -1259,9 +1310,6 @@ describe('the messages of the Agents page', () => {
     send(IpcChannel.setYoloMode, false)
     send(IpcChannel.setYoloMode, 'yes')
     expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])
-    send(IpcChannel.setConfirmClose, false)
-    send(IpcChannel.setConfirmClose, 'no')
-    expect(launchSettings.setConfirmClose.mock.calls).toEqual([[false]])
 
     launchSettings.emit('changed', launchSettingsState)
     expect(webContents.send).toHaveBeenCalledWith(

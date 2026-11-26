@@ -316,4 +316,12 @@ export const MIGRATIONS: readonly string[] = [
   -- {"haiku": "deepseek-v4.1-flash"}; a role left out takes its default.
   ALTER TABLE agents ADD COLUMN model_map TEXT NOT NULL DEFAULT '{}';
   `,
+  // 14: chats and saved sessions the user archived.
+  `
+  -- A chat or saved session the user archived stays in Hoot, out of the
+  -- sidebar, on the settings' Archive page, until it is unarchived or deleted
+  -- for good: when it was archived, in milliseconds since the Unix epoch.
+  -- NULL while it is not archived.
+  ALTER TABLE chats ADD COLUMN archived_at INTEGER;
+  `,
 ]

@@ -1,3 +1,4 @@
+import { ArchiveIcon } from 'lucide-react'
 import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
@@ -10,6 +11,7 @@ import {
   chatAgent,
   chatName,
   usableChatAgents,
+  type ArchivedSessionInfo,
   type ChatInfo,
   type SavedSessionInfo,
 } from '../../shared/chats'
@@ -57,12 +59,7 @@ import {
   type Labels,
   type NamedLabel,
 } from '../../shared/labels'
-import {
-  withConfirmClose,
-  withDefaultAgent,
-  withYoloMode,
-  type LaunchSettings,
-} from '../../shared/launch-settings'
+import { withDefaultAgent, withYoloMode, type LaunchSettings } from '../../shared/launch-settings'
 import {
   issueAgent,
   withAgentChange,
@@ -135,8 +132,8 @@ import {
 } from './session-order'
 import { worktreeRows, type WorktreeRow } from './worktree-rows'
 
-/** The pages of the settings: Agents where Hoot manages them, Appearance, Labels, and About. */
-export type SettingsSection = 'agents' | 'providers' | 'appearance' | 'labels' | 'about'
+/** The pages of the settings, in the order the settings list them. */
+export type SettingsSection = 'agents' | 'providers' | 'appearance' | 'labels' | 'archive' | 'about'
 
 /**
  * A provider being added, in its dialog: from the Providers page's catalog,
@@ -449,9 +446,9 @@ export interface AppState {
   renamingChatId: string | null
   /** The saved session the rename dialog is open for. */
   renamingSavedSessionId: string | null
-  /** A running session the user asked to close, while Hoot asks for confirmation. */
-  closeConfirmation: string | null
-  /** A chat or saved session the user asked to delete, by its id, while Hoot asks for confirmation. */
+  /** The chats and saved sessions the user archived, last archived first. */
+  archivedSessions: ArchivedSessionInfo[]
+  /** An archived chat or saved session the user asked to delete for good, by its id, while Hoot asks for confirmation. */
   sessionDeletion: string | null
   /**
    * While Hoot asks whether to quit, or to restart into an update: how many
@@ -547,11 +544,6 @@ export interface AppState {
   setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
-  /**
-   * Turns on or off asking before a running session is closed, by any of the
-   * ways to close a single session.
-   */
-  setConfirmClose(on: boolean): void
   addProvider(provider: NewProvider): Promise<ProviderResult>
   /** Changes a provider; one that is a global is written into its agent's configuration too. */
   updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
@@ -610,9 +602,8 @@ export interface AppState {
   /** Opens a saved session the New Worktree dialog made, showing its page. */
   openCreatedSession(session: SavedSessionInfo): void
   /**
-   * Closes a saved session's open session, as its × does: asks for
-   * confirmation first while its agent runs, unless the Agents page says
-   * not to ask. The saved session stays, to continue later.
+   * Closes a saved session's open session, as its × does. The saved session
+   * stays, to continue later.
    */
   closeSavedSession(id: string): void
   startRenamingSavedSession(id: string): void
@@ -623,21 +614,32 @@ export interface AppState {
   /** Continues a chat whose agent ended unexpectedly, as its Resume button does. */
   resumeChat(chatId: string): void
   /**
-   * Closes a chat's open session, as its × does: asks for confirmation first
-   * while its agent runs, unless the Agents page says not to ask. The chat
-   * stays, to continue later.
+   * Closes a chat's open session, as its × does. The chat stays, to continue
+   * later.
    */
   closeChat(chatId: string): void
   /**
-   * Asks for confirmation before deleting a chat or saved session, by its id,
-   * every time, whether or not its agent runs.
+   * Archives a chat or saved session, as the button on its row does: its
+   * sessions close first, ending a running agent, then it leaves the sidebar
+   * for the Archive page, with a toast that can undo it. One that never got a
+   * message goes as its sessions close, as on closing it, without a toast.
+   * Says why when it cannot be archived.
    */
-  requestDeleteSession(id: string): void
+  archiveSession(id: string): Promise<void>
   /**
-   * Deletes the chat or saved session asked about, once confirmed: its
-   * sessions close first, as closing them does but without asking again,
-   * then it leaves the sidebar and its worktree's tabs for good. Says why
-   * when it cannot be deleted.
+   * Brings an archived chat or saved session back to the sidebar, as the
+   * toast's Undo and the Archive page do.
+   */
+  unarchiveSession(id: string): Promise<void>
+  /**
+   * Asks for confirmation before an archived chat or saved session is deleted
+   * for good, by its id.
+   */
+  requestDeleteArchivedSession(id: string): void
+  /**
+   * Deletes the archived chat or saved session asked about, once confirmed:
+   * it leaves the Archive page for good, and a chat's own folder goes to the
+   * Trash. Says why when it cannot be deleted.
    */
   answerDeleteSession(confirmed: boolean): Promise<void>
   startRenamingChat(chatId: string): void
@@ -840,17 +842,9 @@ export interface AppState {
   setWorktreeExpanded(projectRoot: string, path: string, expanded: boolean): void
   /** Expands or collapses a project's Local row in the sidebar, and saves its state. */
   setLocalExpanded(projectRoot: string, expanded: boolean): void
-  /**
-   * Closes a session, asking for confirmation first while it runs, unless
-   * the Agents page says not to ask.
-   */
+  /** Closes a session, as its × does: ends its process if it runs, then removes it. */
   requestCloseSession(id: string): void
-  /**
-   * Closes the session asked about, once confirmed; with `dontAskAgain`, a
-   * confirmation also turns asking off from now on.
-   */
-  answerCloseConfirmation(confirmed: boolean, dontAskAgain?: boolean): void
-  /** Closes a session without asking: ends its process if it runs, then removes it. */
+  /** Closes a session: ends its process if it runs, then removes it. */
   closeSession(id: string): Promise<void>
   startRenaming(id: string): void
   /** Ends renaming; `null` keeps the name as it was. */
@@ -1032,19 +1026,6 @@ function pathText(path: string): ReactNode {
 /** The message of something thrown, such as a failed call to the main process. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** A chat or saved session asked to be deleted, unless it is in neither list. */
-function deletionAmong(
-  id: string | null,
-  chats: readonly ChatInfo[],
-  savedSessions: readonly SavedSessionInfo[],
-): string | null {
-  return id !== null &&
-    !chats.some((chat) => chat.id === id) &&
-    !savedSessions.some((saved) => saved.id === id)
-    ? null
-    : id
 }
 
 /** What an agent is asked to do with a worktree in a session of the project's own folder. */
@@ -1644,7 +1625,6 @@ export const useAppStore = create<AppState>()((set, get) => {
         currentPage,
         history,
         renamingSessionId: keep(state.renamingSessionId),
-        closeConfirmation: keep(state.closeConfirmation),
         // What was entered for a removed project's issues goes with them.
         issues: state.issues.filter((issue) => !goneIssues.has(issue.id)),
         checkedProjects: withoutProjects(state.checkedProjects, projectIds),
@@ -1704,28 +1684,37 @@ export const useAppStore = create<AppState>()((set, get) => {
   let issuesRead = false
 
   /**
-   * The chats and saved sessions being deleted, by id, from when their
-   * sessions have closed: they no longer show, also when a list read meanwhile
-   * still has them.
+   * The chats and saved sessions leaving the sidebar, by id, from when their
+   * sessions have closed until they are archived: they no longer show, also
+   * when a list read meanwhile still has them.
    */
-  const beingDeleted = new Set<string>()
+  const leaving = new Set<string>()
+
+  /** The chats and saved sessions being archived, by id, until it is done or fails. */
+  const archiving = new Set<string>()
+
+  /**
+   * The archived chats and saved sessions being deleted for good, by id: they
+   * no longer show on the Archive page, also when a list read meanwhile still
+   * has them.
+   */
+  const deletingArchived = new Set<string>()
 
   /** Shows the chats as they are now, in the order the sidebar lists them. */
   const applyChats = (listed: ChatInfo[]) => {
-    const chats = listed.filter((chat) => !beingDeleted.has(chat.id))
+    const chats = listed.filter((chat) => !leaving.has(chat.id))
     set((state) => ({
       chats,
       renamingChatId:
         state.renamingChatId !== null && !chats.some((chat) => chat.id === state.renamingChatId)
           ? null
           : state.renamingChatId,
-      sessionDeletion: deletionAmong(state.sessionDeletion, chats, state.savedSessions),
     }))
   }
 
   /** Shows the saved sessions as they are now, with the names of those running. */
   const applySavedSessions = (listed: SavedSessionInfo[]) => {
-    const savedSessions = listed.filter((saved) => !beingDeleted.has(saved.id))
+    const savedSessions = listed.filter((saved) => !leaving.has(saved.id))
     set((state) => ({
       savedSessions,
       renamingSavedSessionId:
@@ -1733,12 +1722,29 @@ export const useAppStore = create<AppState>()((set, get) => {
         !savedSessions.some((saved) => saved.id === state.renamingSavedSessionId)
           ? null
           : state.renamingSavedSessionId,
-      sessionDeletion: deletionAmong(state.sessionDeletion, state.chats, savedSessions),
       sessions: state.sessions.map((session) => {
         if (session.savedSessionId === null) return session
         const saved = savedSessions.find((candidate) => candidate.id === session.savedSessionId)
         return saved === undefined ? session : { ...session, customName: saved.customName }
       }),
+    }))
+  }
+
+  /**
+   * Shows the archived chats and saved sessions as they are now, last
+   * archived first, but those being deleted. Unlike the lists of the sidebar,
+   * one that is being archived is shown as soon as it is: the change that
+   * lists it comes after it is archived.
+   */
+  const applyArchivedSessions = (listed: ArchivedSessionInfo[]) => {
+    const archivedSessions = listed.filter((entry) => !deletingArchived.has(entry.id))
+    set((state) => ({
+      archivedSessions,
+      sessionDeletion:
+        state.sessionDeletion !== null &&
+        !archivedSessions.some((entry) => entry.id === state.sessionDeletion)
+          ? null
+          : state.sessionDeletion,
     }))
   }
 
@@ -2162,11 +2168,11 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 
   const closeCurrent = () => {
-    const { closeConfirmation, quitConfirmation } = get()
+    const { quitConfirmation } = get()
     const id = currentSessionId(get())
-    // While Hoot waits for an answer, ⌘W does not ask anything else; and
-    // without a session shown, it closes nothing.
-    if (id === null || closeConfirmation !== null || quitConfirmation !== null) return
+    // While Hoot asks whether to quit, ⌘W closes nothing; and without a
+    // session shown, it closes nothing.
+    if (id === null || quitConfirmation !== null) return
     get().requestCloseSession(id)
   }
 
@@ -2431,7 +2437,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     renamingSessionId: null,
     renamingChatId: null,
     renamingSavedSessionId: null,
-    closeConfirmation: null,
+    archivedSessions: [],
     sessionDeletion: null,
     quitConfirmation: null,
     update: { kind: 'none' },
@@ -2593,6 +2599,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         savedSessionsRead = true
         applySavedSessions(sessions)
       })
+      let archivedSessionsRead = false
+      api.onArchivedSessionsChanged((sessions) => {
+        archivedSessionsRead = true
+        applyArchivedSessions(sessions)
+      })
       api.onShowSettingsRequested(() => get().showSettings())
       api.onShowAboutRequested(() => get().showSettings('about'))
       api.onConfirmQuit((runningSessions, reason, agentOperations) =>
@@ -2641,17 +2652,20 @@ export const useAppStore = create<AppState>()((set, get) => {
         (error: unknown) => console.error('Could not list the worktrees:', error),
       )
 
-      const [projects, sessions, launchSettings, chats, savedSessions] = await Promise.all([
-        api.listProjects(),
-        api.listSessions(),
-        api.getLaunchSettings(),
-        api.listChats(),
-        api.listSavedSessions(),
-      ])
+      const [projects, sessions, launchSettings, chats, savedSessions, archivedSessions] =
+        await Promise.all([
+          api.listProjects(),
+          api.listSessions(),
+          api.getLaunchSettings(),
+          api.listChats(),
+          api.listSavedSessions(),
+          api.listArchivedSessions(),
+        ])
       // A setting changed while this was read is reported by the change event, which is newer.
       set((state) => ({ launchSettings: state.launchSettings ?? launchSettings }))
       if (!chatsRead) applyChats(chats)
       if (!savedSessionsRead) applySavedSessions(savedSessions)
+      if (!archivedSessionsRead) applyArchivedSessions(archivedSessions)
       applyProjects(projects)
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
@@ -2749,12 +2763,6 @@ export const useAppStore = create<AppState>()((set, get) => {
       const launchSettings = withYoloMode(get().launchSettings, on)
       if (launchSettings !== null) set({ launchSettings })
       api.setYoloMode(on)
-    },
-
-    setConfirmClose(on) {
-      const launchSettings = withConfirmClose(get().launchSettings, on)
-      if (launchSettings !== null) set({ launchSettings })
-      api.setConfirmClose(on)
     },
 
     addProvider(provider) {
@@ -3042,10 +3050,71 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (open) get().requestCloseSession(open.id)
     },
 
-    requestDeleteSession(id) {
-      const { chats, savedSessions, sessionDeletion } = get()
+    async archiveSession(id) {
+      const record =
+        get().chats.find((chat) => chat.id === id) ??
+        get().savedSessions.find((saved) => saved.id === id)
+      if (record === undefined || archiving.has(id)) return
+      archiving.add(id)
+      try {
+        // Its sessions close first, ending a running agent, as closing them
+        // does: the page shown instead of one of them is the one closing it
+        // shows.
+        const open = get().sessions.filter(
+          (session) => session.chatId === id || session.savedSessionId === id,
+        )
+        await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
+        leaving.add(id)
+        set((state) => ({
+          chats: state.chats.filter((chat) => chat.id !== id),
+          savedSessions: state.savedSessions.filter((saved) => saved.id !== id),
+        }))
+        const result = await api
+          .archiveSession(id)
+          .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+        leaving.delete(id)
+        if (!result.ok) {
+          toast.error('Could not archive the session.', { description: result.message })
+          // It stays as the main process has it.
+          void Promise.all([
+            api.listChats(),
+            api.listSavedSessions(),
+            api.listArchivedSessions(),
+          ]).then(
+            ([chats, savedSessions, archivedSessions]) => {
+              applyChats(chats)
+              applySavedSessions(savedSessions)
+              applyArchivedSessions(archivedSessions)
+            },
+            (error: unknown) => console.error('Could not list the chats:', error),
+          )
+          return
+        }
+        // One that never got a message went as its sessions closed, as on
+        // closing it: there is nothing to bring back.
+        if (!result.archived) return
+        toast.info(record.projectRoot === null ? 'Archived chat' : 'Archived session', {
+          icon: createElement(ArchiveIcon),
+          action: { label: 'Undo', onClick: () => void get().unarchiveSession(id) },
+        })
+      } finally {
+        archiving.delete(id)
+      }
+    },
+
+    async unarchiveSession(id) {
+      const result = await api
+        .unarchiveSession(id)
+        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      if (!result.ok) {
+        toast.error('Could not unarchive the session.', { description: result.message })
+      }
+    },
+
+    requestDeleteArchivedSession(id) {
+      const { archivedSessions, sessionDeletion } = get()
       if (sessionDeletion !== null) return
-      if (deletionAmong(id, chats, savedSessions) === null) return
+      if (!archivedSessions.some((entry) => entry.id === id)) return
       set({ sessionDeletion: id })
     },
 
@@ -3054,34 +3123,24 @@ export const useAppStore = create<AppState>()((set, get) => {
       if (id === null) return
       set({ sessionDeletion: null })
       if (!confirmed) return
-      const saved = get().savedSessions.some((entry) => entry.id === id)
-      if (!saved && !get().chats.some((chat) => chat.id === id)) return
-      // Its sessions close first, ending a running agent, as closing them
-      // does: the page shown instead of one of them is the one closing it
-      // shows.
-      const open = get().sessions.filter(
-        (session) => session.chatId === id || session.savedSessionId === id,
-      )
-      await Promise.allSettled(open.map((session) => get().closeSession(session.id)))
-      beingDeleted.add(id)
+      const record = get().archivedSessions.find((entry) => entry.id === id)
+      if (record === undefined) return
+      deletingArchived.add(id)
       set((state) => ({
-        chats: state.chats.filter((chat) => chat.id !== id),
-        savedSessions: state.savedSessions.filter((entry) => entry.id !== id),
+        archivedSessions: state.archivedSessions.filter((entry) => entry.id !== id),
       }))
-      const result = await (saved ? api.deleteSavedSession(id) : api.deleteChat(id)).catch(
-        (error: unknown) => ({ ok: false as const, message: errorMessage(error) }),
-      )
-      beingDeleted.delete(id)
+      const result = await (
+        record.projectRoot === null ? api.deleteChat(id) : api.deleteSavedSession(id)
+      ).catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
+      deletingArchived.delete(id)
       if (result.ok) return
       toast.error('Could not delete the session.', { description: result.message })
       // It stays as the main process has it.
-      void Promise.all([api.listChats(), api.listSavedSessions()]).then(
-        ([chats, savedSessions]) => {
-          applyChats(chats)
-          applySavedSessions(savedSessions)
-        },
-        (error: unknown) => console.error('Could not list the chats:', error),
-      )
+      void api
+        .listArchivedSessions()
+        .then(applyArchivedSessions, (error: unknown) =>
+          console.error('Could not list the archived sessions:', error),
+        )
     },
 
     startRenamingChat(chatId) {
@@ -3699,20 +3758,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     requestCloseSession(id) {
       const session = findSession(id)
       if (!session || session.closing) return
-      // Until the settings are read, it asks.
-      if (!isSessionRunning(session) || get().launchSettings?.confirmClose === false) {
-        void get().closeSession(id)
-        return
-      }
-      if (get().closeConfirmation === null) set({ closeConfirmation: id })
-    },
-
-    answerCloseConfirmation(confirmed, dontAskAgain = false) {
-      const id = get().closeConfirmation
-      if (id === null) return
-      set({ closeConfirmation: null })
-      if (!confirmed) return
-      if (dontAskAgain) get().setConfirmClose(false)
       void get().closeSession(id)
     },
 

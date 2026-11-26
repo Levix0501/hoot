@@ -65,7 +65,6 @@ function readSettings(value: unknown): LaunchSettings {
   return {
     defaultAgent: textOf(stored.defaultAgentId, fallback.defaultAgent),
     yoloMode: booleanOf(stored.yoloMode, fallback.yoloMode),
-    confirmClose: booleanOf(stored.confirmClose, fallback.confirmClose),
   }
 }
 
@@ -87,13 +86,13 @@ function readLegacy(value: unknown): LegacySettings | null {
 }
 
 /**
- * The default agent, the YOLO mode switch and whether closing a running
- * session asks first, kept in `settings.json` in the user data directory.
- * Sessions read YOLO mode when they start, so a change to it applies to the
- * next session and never to a running one; whether closing asks applies at
- * once. It also keeps what an earlier Hoot kept for each coding tool, before
- * agents were made of providers, until the agents made of them take it.
- * Permission levels saved by earlier versions are ignored.
+ * The default agent and the YOLO mode switch, kept in `settings.json` in the
+ * user data directory. Sessions read YOLO mode when they start, so a change
+ * to it applies to the next session and never to a running one. It also keeps
+ * what an earlier Hoot kept for each coding tool, before agents were made of
+ * providers, until the agents made of them take it. Permission levels and the
+ * switch for asking before a running session is closed, which earlier
+ * versions kept, are ignored.
  */
 export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings] }> {
   private readonly config: Conf<StoredSettings>
@@ -130,13 +129,6 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
     this.save()
   }
 
-  /** Turns on or off asking before a running session is closed. */
-  setConfirmClose(on: boolean): void {
-    if (this.settings.confirmClose === on) return
-    this.settings = { ...this.settings, confirmClose: on }
-    this.save()
-  }
-
   /**
    * The launch settings an earlier Hoot kept for a coding tool, which the
    * first agent made of it takes; `null` when there are none.
@@ -165,7 +157,6 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
           : { agents: this.legacy.agents, defaultAgent: this.legacy.defaultTool }),
         defaultAgentId: this.settings.defaultAgent,
         yoloMode: this.settings.yoloMode,
-        confirmClose: this.settings.confirmClose,
       })
     } catch (error) {
       // The change still applies until Hoot quits.

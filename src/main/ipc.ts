@@ -17,6 +17,7 @@ import {
   IpcChannel,
   type AddProjectConfirmation,
   type AddProjectResult,
+  type ArchiveChatResult,
   type CreateChatResult,
   type CreateLabelGroupResult,
   type CreateLabelResult,
@@ -33,6 +34,7 @@ import {
   type StartSessionResult,
   type StartupState,
   type SubIssueChangeResult,
+  type UnarchiveChatResult,
   type WindowState,
 } from '../shared/ipc'
 import {
@@ -580,10 +582,6 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.boolean().safeParse(value)
     if (parsed.success) deps.launchSettings.setYoloMode(parsed.data)
   })
-  on(IpcChannel.setConfirmClose, (value) => {
-    const parsed = z.boolean().safeParse(value)
-    if (parsed.success) deps.launchSettings.setConfirmClose(parsed.data)
-  })
   deps.launchSettings.on('changed', (settings) => send(IpcChannel.launchSettingsChanged, settings))
 
   handle(IpcChannel.getProviders, () => deps.providers.getState())
@@ -873,6 +871,40 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.deleteSavedSession, (_event, value) => deleteChat(value, true))
 
   deps.chats.on('saved-changed', (sessions) => send(IpcChannel.savedSessionsChanged, sessions))
+
+  /**
+   * Archives a chat or saved session: its sessions close first, as when it is
+   * deleted; one that is archived already needs nothing more, and one that
+   * went as they closed, or before, is not archived.
+   */
+  handle(IpcChannel.archiveSession, async (_event, value): Promise<ArchiveChatResult> => {
+    const parsed = sessionId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    try {
+      await deps.sessions.closeOf(parsed.data)
+      return { ok: true, archived: await deps.chats.archive(parsed.data) }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
+  })
+
+  /** Brings an archived chat or saved session back to the sidebar. */
+  handle(IpcChannel.unarchiveSession, async (_event, value): Promise<UnarchiveChatResult> => {
+    const parsed = sessionId.safeParse(value)
+    if (!parsed.success) return { ok: false, message: 'Invalid request.' }
+    try {
+      await deps.chats.unarchive(parsed.data)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) }
+    }
+  })
+
+  handle(IpcChannel.listArchivedSessions, () => deps.chats.listArchived())
+
+  deps.chats.on('archived-changed', (sessions) =>
+    send(IpcChannel.archivedSessionsChanged, sessions),
+  )
 
   handle(IpcChannel.startSession, async (_event, value): Promise<StartSessionResult> => {
     const parsed = startSessionRequest.safeParse(value)

@@ -65,6 +65,15 @@ export interface SavedSessionInfo extends ChatInfo {
   worktreePath: string | null
 }
 
+/**
+ * A chat or saved session the user archived: out of the sidebar until it is
+ * unarchived or deleted for good from the settings' Archive page.
+ */
+export interface ArchivedSessionInfo extends ChatInfo {
+  /** Milliseconds since the Unix epoch, when the user archived it. */
+  archivedAt: number
+}
+
 /** Whether a chat is a saved session, of a project's worktree or of its own folder. */
 export function isSavedSession(chat: ChatInfo): chat is SavedSessionInfo {
   return chat.projectRoot !== null

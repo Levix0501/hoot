@@ -1,4 +1,12 @@
-import { ArrowLeftIcon, BotIcon, InfoIcon, KeyRoundIcon, SunMoonIcon, TagIcon } from 'lucide-react'
+import {
+  ArchiveIcon,
+  ArrowLeftIcon,
+  BotIcon,
+  InfoIcon,
+  KeyRoundIcon,
+  SunMoonIcon,
+  TagIcon,
+} from 'lucide-react'
 import { useEffect, type ComponentType } from 'react'
 import { api } from '../../lib/api'
 import { useAppStore, type SettingsSection } from '../../store/app-store'
@@ -14,6 +22,7 @@ import {
 import { AboutPage } from './about-page'
 import { AgentsPage } from './agents-page'
 import { AppearancePage } from './appearance-page'
+import { ArchivePage } from './archive-page'
 import { LabelsPage } from './labels-page'
 import { AddProviderHost } from './provider-catalog'
 import { ProvidersPage } from './providers-page'
@@ -31,6 +40,7 @@ const SECTIONS: ReadonlyArray<{
   { id: 'providers', label: 'Providers', icon: KeyRoundIcon },
   { id: 'appearance', label: 'Appearance', icon: SunMoonIcon },
   { id: 'labels', label: 'Labels', icon: TagIcon },
+  { id: 'archive', label: 'Archive', icon: ArchiveIcon },
   { id: 'about', label: 'About', icon: InfoIcon },
 ]
 
@@ -154,6 +164,8 @@ export function SettingsView() {
         <AboutPage />
       ) : section === 'labels' ? (
         <LabelsPage />
+      ) : section === 'archive' ? (
+        <ArchivePage />
       ) : section === 'agents' && api.manageAgents ? (
         <AgentsPage />
       ) : (

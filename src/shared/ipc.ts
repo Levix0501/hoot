@@ -1,7 +1,7 @@
 import type { AgentOperationSummary, AgentsState } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
-import type { ChatInfo, SavedSessionInfo } from './chats'
+import type { ArchivedSessionInfo, ChatInfo, SavedSessionInfo } from './chats'
 import type { Dependencies, Dependency } from './dependencies'
 import type { DroppedPathQuoting } from './dropped-path-quoting'
 import type { FilePanelLayout } from './file-panel'
@@ -177,6 +177,15 @@ export type CreateSavedSessionResult =
 /** Whether a chat or saved session was deleted, or why not. */
 export type DeleteChatResult = { ok: true } | { ok: false; message: string }
 
+/**
+ * Whether a chat or saved session was archived, or why not: one whose
+ * conversation never got a message goes as its sessions close, and is not.
+ */
+export type ArchiveChatResult = { ok: true; archived: boolean } | { ok: false; message: string }
+
+/** Whether an archived chat or saved session was brought back, or why not. */
+export type UnarchiveChatResult = { ok: true } | { ok: false; message: string }
+
 /** Whether the parents of issues were changed, or why not. */
 export type SubIssueChangeResult = { ok: true } | { ok: false; message: string }
 
@@ -303,7 +312,6 @@ export const IpcChannel = {
   getLaunchSettings: 'launch-settings:get',
   setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
-  setConfirmClose: 'launch-settings:set-confirm-close',
   launchSettingsChanged: 'launch-settings:changed',
   getProviders: 'providers:get',
   providersChanged: 'providers:changed',
@@ -338,6 +346,10 @@ export const IpcChannel = {
   setSavedSessionTitle: 'saved-sessions:set-title',
   deleteSavedSession: 'saved-sessions:delete',
   savedSessionsChanged: 'saved-sessions:changed',
+  archiveSession: 'archive:archive',
+  unarchiveSession: 'archive:unarchive',
+  listArchivedSessions: 'archive:list',
+  archivedSessionsChanged: 'archive:changed',
   getWindowState: 'window:get-state',
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
@@ -509,14 +521,12 @@ export interface HootApi {
   updateAllAgents(): void
   /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
-  /** The default agent, the YOLO mode switch, and whether closing a running session asks first. */
+  /** The default agent and the YOLO mode switch. */
   getLaunchSettings(): Promise<LaunchSettings>
   /** Makes an agent the default agent, by its id, or none. */
   setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
-  /** Turns on or off asking before a running session is closed. */
-  setConfirmClose(on: boolean): void
   onLaunchSettingsChanged(listener: (settings: LaunchSettings) => void): () => void
   /** The user's providers, the agents, and each installed agent's global. */
   getProviders(): Promise<ProvidersState>
@@ -597,6 +607,18 @@ export interface HootApi {
    * went on in another conversation.
    */
   onSavedSessionsChanged(listener: (sessions: SavedSessionInfo[]) => void): () => void
+  /**
+   * Archives a chat or saved session, closing its sessions first: it leaves
+   * the sidebar but stays in Hoot, on the settings' Archive page. Settles
+   * once it is archived, or gone for having never got a message.
+   */
+  archiveSession(id: string): Promise<ArchiveChatResult>
+  /** Brings an archived chat or saved session back, to the sidebar. */
+  unarchiveSession(id: string): Promise<UnarchiveChatResult>
+  /** Every archived chat and saved session, last archived first. */
+  listArchivedSessions(): Promise<ArchivedSessionInfo[]>
+  /** The archived chats and saved sessions changed: one was archived, unarchived or deleted. */
+  onArchivedSessionsChanged(listener: (sessions: ArchivedSessionInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
   setSidebarOpen(open: boolean): void

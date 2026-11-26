@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { chatName } from '../../shared/chats'
-import { focusAfterOverlay, isSessionRunning, useAppStore } from '../store/app-store'
+import { focusAfterOverlay, useAppStore } from '../store/app-store'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,33 +13,20 @@ import {
 } from './ui/alert-dialog'
 
 /**
- * Asks before a chat or saved session is deleted, every time: it says that
- * the session goes from Hoot, and, while its agent runs, that Hoot ends the
- * agent first.
+ * Asks before an archived chat or saved session is deleted for good, as the
+ * Archive page's Delete does: the session leaves Hoot for good, and a chat's
+ * own folder goes to the Trash.
  */
-export function DeleteSessionDialog() {
+export function DeleteArchivedSessionDialog() {
   const record = useAppStore((state) =>
     state.sessionDeletion === null
       ? undefined
-      : (state.chats.find((chat) => chat.id === state.sessionDeletion) ??
-        state.savedSessions.find((saved) => saved.id === state.sessionDeletion)),
-  )
-  const running = useAppStore(
-    (state) =>
-      state.sessionDeletion !== null &&
-      state.sessions.some(
-        (session) =>
-          (session.chatId === state.sessionDeletion ||
-            session.savedSessionId === state.sessionDeletion) &&
-          isSessionRunning(session),
-      ),
+      : state.archivedSessions.find((entry) => entry.id === state.sessionDeletion),
   )
   const answerDeleteSession = useAppStore((state) => state.answerDeleteSession)
   // Kept while the dialog fades out after the answer.
   const [name, setName] = useState('')
-  const [wasRunning, setWasRunning] = useState(false)
   if (record && chatName(record) !== name) setName(chatName(record))
-  if (record && running !== wasRunning) setWasRunning(running)
 
   return (
     <AlertDialog
@@ -58,12 +45,7 @@ export function DeleteSessionDialog() {
             >
               {name}
             </span>{' '}
-            will be removed from Hoot.
-            {wasRunning && (
-              <span className="mt-2 block" data-testid="delete-session-running">
-                It is still running: Hoot ends its agent first.
-              </span>
-            )}
+            will be removed from Hoot for good.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

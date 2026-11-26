@@ -4,7 +4,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { inProjectFolder, type ChatInfo, type SavedSessionInfo } from '../../shared/chats'
+import {
+  inProjectFolder,
+  type ArchivedSessionInfo,
+  type ChatInfo,
+  type SavedSessionInfo,
+} from '../../shared/chats'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import { defaultSessionName, type SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
@@ -137,13 +142,17 @@ interface EndedRun {
  * agent there: a saved session in it never takes up one that started before
  * the session was made.
  *
- * A chat the user deletes leaves the lists for good, but keeps its row, with
- * the conversation it was in, for as long as another chat in its folder could
- * take that conversation up: the agent's records still hold it.
+ * A chat the user archives leaves the lists, and stays in Hoot with its
+ * conversation and its folder, to be unarchived or deleted for good from the
+ * settings' Archive page. A chat the user deletes leaves the lists for good,
+ * but keeps its row, with the conversation it was in, for as long as another
+ * chat in its folder could take that conversation up: the agent's records
+ * still hold it.
  */
 export class ChatManager extends EventEmitter<{
   changed: [chats: ChatInfo[]]
   'saved-changed': [sessions: SavedSessionInfo[]]
+  'archived-changed': [sessions: ArchivedSessionInfo[]]
 }> {
   private readonly chats: ChatStore
   private readonly home: string
@@ -199,11 +208,17 @@ export class ChatManager extends EventEmitter<{
     return this.chats.listSavedSessions()
   }
 
+  /** Every archived chat and saved session, last archived first. */
+  listArchived(): ArchivedSessionInfo[] {
+    return this.chats.listArchived()
+  }
+
   /** The chat or saved session with this id, if any and the user has not deleted it. */
   get(id: string): ChatInfo | undefined {
     const chat = this.chats.get(id)
     if (!chat || chat.deleted) return undefined
     const {
+      archived: _archived,
       deleted: _deleted,
       conversationReported: _reported,
       unreportedRun: _unreportedRun,
@@ -315,7 +330,7 @@ export class ChatManager extends EventEmitter<{
    */
   async prepareSession(id: string): Promise<PreparedChatSession | null> {
     const chat = this.chats.get(id)
-    if (!chat || chat.deleted) return null
+    if (!chat || chat.deleted || chat.archived) return null
     this.titlesAtSwitch.delete(id)
     this.messageReportedAt.delete(id)
     this.reported.delete(id)
@@ -386,7 +401,8 @@ export class ChatManager extends EventEmitter<{
    */
   opened(id: string): void {
     this.firstMessages.delete(id)
-    if (this.chats.get(id)?.deleted !== false) return
+    const chat = this.chats.get(id)
+    if (!chat || chat.deleted || chat.archived) return
     this.chats.update(id, { lastOpenedAt: this.now() })
     this.running.add(id)
     this.emitChanged()
@@ -582,6 +598,37 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
+   * Archives a chat or saved session, once its agent has ended: it leaves the
+   * lists, and stays in Hoot, with its conversation and its folder, on the
+   * settings' Archive page, until it is unarchived or deleted for good.
+   * Settles with whether it is archived: one whose conversation never got a
+   * message went as its agent ended, and is not.
+   */
+  async archive(id: string): Promise<boolean> {
+    this.firstMessages.delete(id)
+    let archived = false
+    await this.enqueue(id, async () => {
+      const chat = this.chats.get(id)
+      if (!chat || chat.deleted) return
+      archived = true
+      if (chat.archived) return
+      this.chats.markArchived(id, this.now())
+      this.emitChanged()
+    })
+    return archived
+  }
+
+  /** Brings an archived chat or saved session back to the lists. */
+  unarchive(id: string): Promise<void> {
+    return this.enqueue(id, async () => {
+      const chat = this.chats.get(id)
+      if (!chat || chat.deleted || !chat.archived) return
+      this.chats.unarchive(id)
+      this.emitChanged()
+    })
+  }
+
+  /**
    * Deletes a chat or saved session the user no longer wants, once its agent
    * has ended: it leaves the lists for good, and the agent's own records of
    * its conversations stay as they are. As those records still hold its
@@ -717,9 +764,9 @@ export class ChatManager extends EventEmitter<{
       if (gone) await this.removeChat(chat)
       return
     }
-    // A deleted chat keeps the conversation it was in: one after it may be
-    // that of another chat in its folder.
-    if (next && !chat.deleted && this.isActiveChat(chat)) {
+    // A deleted or archived chat keeps the conversation it was in: one after
+    // it may be that of another chat in its folder.
+    if (next && !chat.deleted && !chat.archived && this.isActiveChat(chat)) {
       this.chats.update(chatId, {
         conversationId: next.id,
         conversationReported: false,
@@ -755,10 +802,11 @@ export class ChatManager extends EventEmitter<{
   /**
    * Whether this chat is the one opened last among those in its folder: the
    * one a conversation an agent started belongs to, when the chat that
-   * started it does not say so itself.
+   * started it does not say so itself. The archived ones are not opened any
+   * more, and do not count.
    */
   private isActiveChat(chat: ChatInfo): boolean {
-    const siblings = this.chats.inFolder(chat.folder)
+    const siblings = this.chats.inFolder(chat.folder).filter((other) => !other.archived)
     const active = siblings.reduce((best, candidate) => {
       if (candidate.lastOpenedAt !== best.lastOpenedAt) {
         return candidate.lastOpenedAt > best.lastOpenedAt ? candidate : best
@@ -835,6 +883,7 @@ export class ChatManager extends EventEmitter<{
   private emitChanged(): void {
     this.emit('changed', this.chats.list())
     this.emit('saved-changed', this.chats.listSavedSessions())
+    this.emit('archived-changed', this.chats.listArchived())
   }
 
   /** Runs `task` once the work already queued for `key` has finished. */

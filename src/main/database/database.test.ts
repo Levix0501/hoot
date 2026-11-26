@@ -338,6 +338,9 @@ const REPORT_COLUMNS = {
   ...PROVIDER_COLUMNS,
 }
 
+/** The column the upgrade to the archive adds to a chat, as it is for one not archived. */
+const ARCHIVE_COLUMNS = { archived_at: null }
+
 describe('the upgrade to labels', () => {
   it('drops the records of the workflows and keeps everything else, no issue with a label', () => {
     let db = openDatabase(file, MIGRATIONS.slice(0, 4))
@@ -397,7 +400,12 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats ORDER BY id').all()).toEqual(
-      before.map((row) => ({ ...row, deleted_at: null, ...REPORT_COLUMNS })),
+      before.map((row) => ({
+        ...row,
+        deleted_at: null,
+        ...REPORT_COLUMNS,
+        ...ARCHIVE_COLUMNS,
+      })),
     )
     db.close()
   })
@@ -415,7 +423,7 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({ ...row, ...REPORT_COLUMNS })),
+      before.map((row) => ({ ...row, ...REPORT_COLUMNS, ...ARCHIVE_COLUMNS })),
     )
     expect(() => db.exec("UPDATE chats SET conversation_reported = 2 WHERE id = 'chat'")).toThrow(
       /CHECK constraint/,
@@ -436,7 +444,12 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({ ...row, unreported_run_started_at: null, ...PROVIDER_COLUMNS })),
+      before.map((row) => ({
+        ...row,
+        unreported_run_started_at: null,
+        ...PROVIDER_COLUMNS,
+        ...ARCHIVE_COLUMNS,
+      })),
     )
     db.close()
   })
@@ -455,7 +468,7 @@ describe('the upgrade to labels', () => {
     db = openDatabase(file)
     expect(userVersion(db)).toBe(MIGRATIONS.length)
     expect(db.prepare('SELECT * FROM chats').all()).toEqual(
-      before.map((row) => ({ ...row, ...PROVIDER_COLUMNS })),
+      before.map((row) => ({ ...row, ...PROVIDER_COLUMNS, ...ARCHIVE_COLUMNS })),
     )
     db.exec(`
       INSERT INTO providers (id, name, preset_id, api_key, key_header, urls, models, created_at)

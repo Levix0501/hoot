@@ -4,12 +4,15 @@ import {
   addressesOf,
   azureResource,
   canAdd,
+  canSave,
   customMatches,
   draftOf,
   draftOfProvider,
   newProviderOf,
   presetMatches,
+  providerChange,
   providerInputOf,
+  savableDraft,
   withPlan,
 } from './provider-draft'
 
@@ -195,6 +198,106 @@ describe('a provider being edited', () => {
     const moved = provider({ presetId: 'kimi', urls: { anthropic: 'https://old.example.com' } })
     expect(draftOfProvider(moved).planId).toBe('cn')
     expect(draftOfProvider(provider({})).planId).toBeNull()
+  })
+
+  it('changes only what differs, as the provider keeps it', () => {
+    const custom = provider({ urls: { anthropic: 'https://relay.example.com' } })
+    const draft = draftOfProvider(custom)
+    expect(providerChange(custom, draft, null)).toEqual({})
+    expect(
+      providerChange(
+        custom,
+        { ...draft, name: ' Relay ', urls: { anthropic: ' https://relay.example.com ' } },
+        null,
+      ),
+    ).toEqual({ name: 'Relay' })
+    expect(
+      providerChange(
+        custom,
+        {
+          ...draft,
+          apiKey: 'sk-2',
+          urls: { ...draft.urls, responses: 'https://relay.example.com/v1' },
+        },
+        null,
+      ),
+    ).toEqual({
+      apiKey: 'sk-2',
+      urls: { anthropic: 'https://relay.example.com', responses: 'https://relay.example.com/v1' },
+    })
+    expect(providerChange(custom, { ...draft, models: ['m', 'n'] }, null)).toEqual({
+      models: ['m', 'n'],
+    })
+    // Another plan: its id, and the models picked of it.
+    const zhipu = provider({
+      presetId: 'zhipu',
+      planId: 'coding',
+      urls: { ...preset('zhipu').plans![0]!.urls },
+    })
+    const api = withPlan(draftOfProvider(zhipu), preset('zhipu'), 'api', catalogs)
+    expect(providerChange(zhipu, api, preset('zhipu'))).toEqual({ planId: 'api', models: [] })
+    const vertex = provider({
+      presetId: 'vertex',
+      apiKey: '',
+      cloud: { kind: 'vertex', region: 'eu', project: 'my-project' },
+      urls: {},
+    })
+    const moved = { ...draftOfProvider(vertex), project: ' other ' }
+    expect(providerChange(vertex, moved, preset('vertex'))).toMatchObject({
+      cloud: { kind: 'vertex', region: 'eu', project: 'other' },
+    })
+  })
+
+  it('puts back what would keep it from being saved, and only that', () => {
+    const custom = provider({ urls: { anthropic: 'https://relay.example.com' }, models: [] })
+    const draft = draftOfProvider(custom)
+    expect(savableDraft(draft, custom, null)).toBe(draft)
+    expect(savableDraft({ ...draft, name: ' ', apiKey: '', models: ['m'] }, custom, null)).toEqual({
+      ...draft,
+      models: ['m'],
+    })
+    // Without an address, its addresses come back.
+    expect(savableDraft({ ...draft, urls: { anthropic: ' ' } }, custom, null).urls).toEqual(
+      custom.urls,
+    )
+    // Without models, it needs its Anthropic address, which comes back ...
+    const responses = { anthropic: '', responses: 'https://relay.example.com/v1' }
+    expect(savableDraft({ ...draft, urls: responses }, custom, null).urls).toEqual(custom.urls)
+    // ... or, without one, the models that went.
+    const named = provider({ urls: { responses: 'https://relay.example.com/v1' }, models: ['m'] })
+    expect(savableDraft({ ...draftOfProvider(named), models: [] }, named, null).models).toEqual([
+      'm',
+    ])
+    const deepseek = provider({ presetId: 'deepseek', urls: { ...preset('deepseek').urls } })
+    const none = { ...draftOfProvider(deepseek), models: [] }
+    expect(savableDraft(none, deepseek, preset('deepseek')).models).toEqual(['m'])
+    const azure = provider({
+      presetId: 'azure',
+      urls: { responses: 'https://r.openai.azure.com/openai/v1' },
+    })
+    const blankEndpoint = { ...draftOfProvider(azure), endpoint: '/openai/v1' }
+    expect(savableDraft(blankEndpoint, azure, preset('azure')).endpoint).toBe(
+      'https://r.openai.azure.com',
+    )
+    // Vertex AI takes no key, but a project.
+    const vertex = provider({
+      presetId: 'vertex',
+      apiKey: '',
+      cloud: { kind: 'vertex', region: 'eu', project: 'my-project' },
+    })
+    const unnamed = { ...draftOfProvider(vertex), project: '' }
+    expect(savableDraft(unnamed, vertex, preset('vertex'))).toMatchObject({
+      apiKey: '',
+      project: 'my-project',
+    })
+  })
+
+  it('is saved with a name, as it can be added', () => {
+    const deepseek = provider({ presetId: 'deepseek', urls: { ...preset('deepseek').urls } })
+    const draft = draftOfProvider(deepseek)
+    expect(canSave(draft, preset('deepseek'))).toBe(true)
+    expect(canSave({ ...draft, name: ' ' }, preset('deepseek'))).toBe(false)
+    expect(canSave({ ...draft, apiKey: '' }, preset('deepseek'))).toBe(false)
   })
 
   it('takes an Azure endpoint with or without the path Hoot adds', () => {

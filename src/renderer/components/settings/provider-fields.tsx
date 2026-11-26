@@ -1,6 +1,6 @@
 import { ArrowUpRightIcon, EyeIcon, EyeOffIcon, PlusIcon, SearchIcon } from 'lucide-react'
 import { cn } from 'cn'
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AZURE_PATH,
   catalogModelIds,
@@ -8,12 +8,10 @@ import {
   type ProviderPreset,
   type WireFormat,
 } from '../../../shared/providers'
-import { getCodingTool, type CodingToolId } from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { addressesOf, draftCatalog, withPlan, type FormDraft } from '../../lib/provider-draft'
 import { useAppStore } from '../../store/app-store'
 import { ProviderMarkIcon } from '../provider-icon'
-import { ToolIcon } from '../tool-icon'
 import { Checkbox } from '../ui/checkbox'
 import { Input } from '../ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
@@ -284,53 +282,58 @@ function ModelPicker({
   )
 }
 
-/** A provider of the user's own's addresses, one for each format, with the harnesses that take it. */
-const URL_ROWS: ReadonlyArray<{
-  format: WireFormat
-  harnesses: CodingToolId[]
-  placeholder: string
-}> = [
-  { format: 'anthropic', harnesses: ['claude', 'opencode'], placeholder: 'https://…/anthropic' },
-  { format: 'responses', harnesses: ['codex'], placeholder: 'https://…/v1' },
-]
+/** The formats a provider has an address for, in the order its form lists them. */
+const FORMATS: readonly WireFormat[] = ['anthropic', 'responses']
 
 const FORMAT_NAMES: Record<WireFormat, string> = {
   anthropic: 'Anthropic',
   responses: 'Responses',
 }
 
+/**
+ * A field that is not the user's to change, as a disabled one looks, its
+ * text still there to be selected and copied: no ring as it is clicked into,
+ * nor a stop of Tab's (see `UrlsField`).
+ */
+const READ_ONLY =
+  'bg-input/50 text-muted-foreground dark:bg-input/80 has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-0'
+
+/**
+ * A provider's addresses, each on one line after its format: one of the
+ * user's own's, one for each format, typed in; a preset's, which its plan
+ * fixes, read-only (without `onChange`), those it has.
+ */
 function UrlsField({
   urls,
   onChange,
 }: {
   urls: Partial<Record<WireFormat, string>>
-  onChange: (urls: Partial<Record<WireFormat, string>>) => void
+  onChange?: (urls: Partial<Record<WireFormat, string>>) => void
 }) {
+  const formats =
+    onChange === undefined ? FORMATS.filter((format) => (urls[format] ?? '') !== '') : FORMATS
   return (
     <div className="flex flex-col gap-1.5">
-      {URL_ROWS.map(({ format, harnesses, placeholder }) => (
-        <InputGroup key={format}>
-          <InputGroupAddon className="w-28 justify-start gap-1.5 text-xs text-muted-foreground">
+      {formats.map((format) => (
+        <InputGroup key={format} className={cn(onChange === undefined && READ_ONLY)}>
+          <InputGroupAddon className="w-20 justify-start text-xs text-muted-foreground">
             {FORMAT_NAMES[format]}
-            <span className="ml-auto flex items-center gap-0.5">
-              {harnesses.map((harness) => (
-                <Tooltip key={harness}>
-                  <TooltipTrigger render={<span className="flex" />}>
-                    <ToolIcon toolId={harness} className="size-3.5" />
-                  </TooltipTrigger>
-                  <TooltipContent>{getCodingTool(harness).label}</TooltipContent>
-                </Tooltip>
-              ))}
-            </span>
           </InputGroupAddon>
           <InputGroupInput
             value={urls[format] ?? ''}
-            onChange={(event) => onChange({ ...urls, [format]: event.target.value })}
+            readOnly={onChange === undefined}
+            tabIndex={onChange === undefined ? -1 : undefined}
+            onChange={(event) => onChange?.({ ...urls, [format]: event.target.value })}
             spellCheck={false}
             aria-label={`${FORMAT_NAMES[format]} URL`}
-            placeholder={placeholder}
-            className="font-mono text-xs md:text-xs"
-            data-testid={`provider-url-${format}`}
+            // One longer than its line ends in an ellipsis, until it is scrolled.
+            className={cn(
+              'font-mono text-xs md:text-xs',
+              onChange === undefined && 'text-ellipsis',
+            )}
+            data-testid={
+              onChange === undefined ? `provider-address-${format}` : `provider-url-${format}`
+            }
           />
         </InputGroup>
       ))}
@@ -338,37 +341,13 @@ function UrlsField({
   )
 }
 
-/** An address, broken after a dot or a slash where it wraps. */
-function UrlText({ url }: { url: string }) {
-  return url.split(/(?<=[./])(?!\/)/).map((part, i) => (
-    <Fragment key={i}>
-      {i > 0 && <wbr />}
-      {part}
-    </Fragment>
-  ))
-}
-
-/** A preset's addresses, which its plan fixes: shown, to be seen and copied, not edited. */
+/** A preset's addresses, which its plan fixes: read-only, to be seen and copied. */
 function AddressList({ urls }: { urls: Partial<Record<WireFormat, string>> }) {
-  const formats = URL_ROWS.map((row) => row.format).filter((format) => (urls[format] ?? '') !== '')
-  if (formats.length === 0) return null
+  if (FORMATS.every((format) => (urls[format] ?? '') === '')) return null
   return (
     <Field label="Addresses">
-      <div
-        className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 rounded-lg bg-muted px-3 py-2 text-xs"
-        data-testid="provider-addresses"
-      >
-        {formats.map((format) => (
-          <Fragment key={format}>
-            <span className="text-muted-foreground">{FORMAT_NAMES[format]}</span>
-            <span
-              className="font-mono [overflow-wrap:anywhere] select-text"
-              data-testid={`provider-address-${format}`}
-            >
-              <UrlText url={urls[format] ?? ''} />
-            </span>
-          </Fragment>
-        ))}
+      <div data-testid="provider-addresses">
+        <UrlsField urls={urls} />
       </div>
     </Field>
   )
@@ -426,10 +405,10 @@ function PlanField({
 
 /**
  * The fields of a provider being added or edited. A preset's: its plan or
- * region, the addresses that fixes, shown, what reaches it (a key; Azure's
- * endpoint, the path Hoot adds shown in it; Vertex AI's project) and its
- * models; one of the user's own: its name, addresses, key and models.
- * Editing names a preset's provider too.
+ * region, the addresses that fixes, read-only, what reaches it (a key;
+ * Azure's endpoint, the path Hoot adds shown in it; Vertex AI's project) and
+ * its models; one of the user's own: its name, addresses, key and models.
+ * Edited, a provider's name is the panel's title instead.
  */
 export function ProviderFields({
   preset,
@@ -452,7 +431,7 @@ export function ProviderFields({
   const catalog = draftCatalog(draft)
   return (
     <div className="flex flex-col gap-4">
-      {(preset === null || editing) && (
+      {preset === null && !editing && (
         <Field label="Name" htmlFor="provider-name">
           <Input
             id="provider-name"

@@ -14,12 +14,13 @@ import {
   type ModelCatalogs,
   type NewProvider,
   type Provider,
+  type ProviderChange,
   type ProviderCloud,
   type ProviderPreset,
   type WireFormat,
 } from '../../shared/providers'
 
-/** A provider as the add and edit dialogs keep it until it is saved. */
+/** A provider as the add dialog and the edit panel keep it until it is saved. */
 export interface FormDraft {
   presetId: string | null
   /** The preset's plan or region; `null` for a provider of the user's own. */
@@ -83,7 +84,7 @@ export function azureResource(endpoint: string): string {
   return trimUrl(endpoint).replace(/\/openai(\/v1)?$/, '')
 }
 
-/** A provider of the user's, as the edit dialog starts with it: on the plan its addresses or region are. */
+/** A provider of the user's, as the edit panel starts with it: on the plan its addresses or region are. */
 export function draftOfProvider(provider: Provider): FormDraft {
   const preset = presetById(provider.presetId) ?? null
   const plan = providerPlan(provider)?.plan ?? (preset === null ? null : presetPlan(preset, null))
@@ -116,6 +117,87 @@ export function canAdd(draft: FormDraft, preset: ProviderPreset | null): boolean
   if (preset.cloud === 'vertex') return draft.project.trim() !== ''
   if (preset.endpoint !== undefined && azureResource(draft.endpoint) === '') return false
   return draft.apiKey.trim() !== ''
+}
+
+/** Whether an edited provider's draft can be saved: as one added can (see `canAdd`), and named. */
+export function canSave(draft: FormDraft, preset: ProviderPreset | null): boolean {
+  return canAdd(draft, preset) && draft.name.trim() !== ''
+}
+
+const blank = (text: string | undefined) => (text ?? '').trim() === ''
+
+/** Whether two sets of addresses are the same, as a provider keeps them: trimmed, blank ones none. */
+function sameAddresses(
+  a: Partial<Record<WireFormat, string>>,
+  b: Partial<Record<WireFormat, string>>,
+): boolean {
+  const formats = new Set([...Object.keys(a), ...Object.keys(b)] as WireFormat[])
+  return [...formats].every((format) => (a[format] ?? '').trim() === (b[format] ?? '').trim())
+}
+
+/**
+ * An edited provider's draft with what keeps it from being saved (see
+ * `canSave`) put back as the provider has it: a blank name, key, endpoint or
+ * project; for one of the user's own, addresses that leave it none, and the
+ * Anthropic address or the models, whichever went, where it is left with
+ * neither; for a preset's, its models, where none is left. The draft itself
+ * where nothing is put back.
+ */
+export function savableDraft(
+  draft: FormDraft,
+  provider: Provider,
+  preset: ProviderPreset | null,
+): FormDraft {
+  const saved = draftOfProvider(provider)
+  const next = { ...draft }
+  if (blank(next.name)) next.name = saved.name
+  if (blank(next.apiKey) && preset?.cloud !== 'vertex') next.apiKey = saved.apiKey
+  if (preset?.endpoint !== undefined && azureResource(next.endpoint) === '') {
+    next.endpoint = saved.endpoint
+  }
+  if (preset?.cloud === 'vertex' && blank(next.project)) next.project = saved.project
+  if (preset === null) {
+    if (Object.values(next.urls).every((url) => blank(url))) next.urls = saved.urls
+    if (next.models.length === 0 && blank(next.urls.anthropic)) {
+      if (sameAddresses(next.urls, saved.urls)) next.models = saved.models
+      else next.urls = saved.urls
+    }
+  } else if (next.models.length === 0) {
+    next.models = saved.models
+  }
+  const changed = (Object.keys(next) as Array<keyof FormDraft>).some(
+    (field) => next[field] !== draft[field],
+  )
+  return changed ? next : draft
+}
+
+/** A provider's cloud, as compared: its kind, region and project, trimmed. */
+function cloudKey(cloud: ProviderCloud | null): string {
+  if (cloud === null) return ''
+  const project = cloud.kind === 'vertex' ? cloud.project.trim() : ''
+  return [cloud.kind, cloud.region.trim(), project].join('\n')
+}
+
+/**
+ * What an edited provider's draft changes of it: each field it saves (see
+ * `providerInputOf`) that differs from the provider's, as the provider keeps
+ * it, trimmed, blank addresses none. Empty where the draft changes nothing.
+ */
+export function providerChange(
+  provider: Provider,
+  draft: FormDraft,
+  preset: ProviderPreset | null,
+): ProviderChange {
+  const input = { name: draft.name.trim(), ...providerInputOf(draft, preset) }
+  const change: ProviderChange = {}
+  if (input.name !== provider.name) change.name = input.name
+  if (input.planId !== provider.planId) change.planId = input.planId
+  if (input.apiKey !== provider.apiKey) change.apiKey = input.apiKey
+  if (input.keyHeader !== provider.keyHeader) change.keyHeader = input.keyHeader
+  if (!sameAddresses(input.urls, provider.urls)) change.urls = input.urls
+  if (input.models.join('\n') !== provider.models.join('\n')) change.models = input.models
+  if (cloudKey(input.cloud) !== cloudKey(provider.cloud)) change.cloud = input.cloud
+  return change
 }
 
 /** The cloud a preset's plan is reached through by Claude Code; `null` for none. */

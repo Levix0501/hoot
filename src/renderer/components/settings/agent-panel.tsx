@@ -662,17 +662,18 @@ function PanelFields({
 }
 
 /**
- * The name atop the panel, which reads as a title and edits in place, the
- * one the agent gets without one of its own as its placeholder. Esc puts
- * back the name it had, where it was changed.
+ * The name atop a panel, which reads as a title and edits in place, the one
+ * it gets left blank as its placeholder: an agent's own name, a provider's
+ * saved one. Esc puts back the name it had, where it was changed.
  */
-function TitleName({
+export function TitleName({
   value,
   own,
   onChange,
   onCommit,
   onRevert,
   autoFocus = false,
+  testId = 'agent-panel-name',
 }: {
   value: string
   own: string
@@ -681,6 +682,7 @@ function TitleName({
   /** Puts back the name it had; `null` where nothing was changed. */
   onRevert?: (() => void) | null
   autoFocus?: boolean
+  testId?: string
 }) {
   return (
     <input
@@ -701,7 +703,7 @@ function TitleName({
       spellCheck={false}
       aria-label="Name"
       className="-ml-1.5 h-8 min-w-0 flex-1 rounded-md bg-transparent px-1.5 text-base font-semibold outline-none placeholder:text-foreground hover:bg-muted/60 focus:bg-transparent focus:ring-3 focus:ring-ring/50"
-      data-testid="agent-panel-name"
+      data-testid={testId}
     />
   )
 }

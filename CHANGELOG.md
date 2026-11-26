@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.34
+
+### Patch Changes
+
+- [`3bcaa29`](https://github.com/Levix0501/hoot/commit/3bcaa2926d46d739d259c0f1cf7c5a85e39f931f) - On Windows, the window's minimize, maximize and close buttons are now drawn by Hoot, and a side panel that opens over them, such as a provider's or an agent's, covers them instead of lying under them.
+
 ## 0.1.0-alpha.33
 
 ### Minor Changes

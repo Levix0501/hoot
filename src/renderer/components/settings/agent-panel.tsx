@@ -694,8 +694,6 @@ function EditPanel({
 }) {
   const changeAgent = useAppStore((app) => app.changeAgent)
   const deleteAgent = useAppStore((app) => app.deleteAgent)
-  const setDefaultAgent = useAppStore((app) => app.setDefaultAgent)
-  const isDefault = useIsDefault(agent.id)
   const catalogs = useAppStore((app) => app.modelCatalogs)
   const provider = useAgentProvider(agent)
   const saved = draftOf(agent)
@@ -747,17 +745,7 @@ function EditPanel({
           }}
         />
       </div>
-      <div className="flex items-center justify-between gap-2 border-t px-5 py-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={isDefault || !agent.enabled}
-          onClick={() => setDefaultAgent(agent.id)}
-          data-testid="agent-panel-make-default"
-        >
-          <CheckIcon />
-          {isDefault ? 'Default agent' : 'Make default'}
-        </Button>
+      <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
         <Button
           variant="ghost"
           size="sm"

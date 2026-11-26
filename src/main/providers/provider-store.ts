@@ -1,5 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { Agent, KeyHeader, Provider, ProviderCloud, WireFormat } from '../../shared/providers'
+import {
+  cleanModelMap,
+  type Agent,
+  type KeyHeader,
+  type ModelMap,
+  type Provider,
+  type ProviderCloud,
+  type WireFormat,
+} from '../../shared/providers'
 import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
 
 interface ProviderRow {
@@ -23,6 +31,7 @@ interface AgentRow {
   model: string | null
   effort: string | null
   extra_args: string
+  model_map: string
   created_at: number
 }
 
@@ -57,6 +66,19 @@ function urlsOf(text: string): Partial<Record<WireFormat, string>> {
 
 function filled(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+/** The model map a row holds: its roles mapped to a model, those this Hoot does not know left out. */
+function modelMapOf(text: string): ModelMap {
+  const value = parsed(text)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  return cleanModelMap(
+    Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    ),
+  )
 }
 
 /** The cloud a row names; `null` for none, or one this Hoot cannot read. */
@@ -99,6 +121,7 @@ function agentFromRow(row: AgentRow): Agent | null {
     model: row.model,
     effort: row.effort,
     extraArgs: stringsOf(row.extra_args),
+    modelMap: modelMapOf(row.model_map),
     createdAt: row.created_at,
   }
 }
@@ -126,16 +149,16 @@ export class ProviderStore {
       ),
       deleteProvider: db.prepare('DELETE FROM providers WHERE id = ?'),
       agents: db.prepare(
-        `SELECT id, harness, provider_id, name, enabled, model, effort, extra_args, created_at
-         FROM agents ORDER BY created_at, rowid`,
+        `SELECT id, harness, provider_id, name, enabled, model, effort, extra_args, model_map,
+         created_at FROM agents ORDER BY created_at, rowid`,
       ),
       insertAgent: db.prepare(
         `INSERT INTO agents (id, harness, provider_id, name, enabled, model, effort, extra_args,
-         created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         model_map, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
       updateAgent: db.prepare(
         `UPDATE agents SET provider_id = ?, name = ?, enabled = ?, model = ?, effort = ?,
-         extra_args = ? WHERE id = ?`,
+         extra_args = ?, model_map = ? WHERE id = ?`,
       ),
       deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
     }
@@ -195,6 +218,7 @@ export class ProviderStore {
       agent.model,
       agent.effort,
       JSON.stringify(agent.extraArgs),
+      JSON.stringify(agent.modelMap),
       agent.createdAt,
     )
   }
@@ -207,6 +231,7 @@ export class ProviderStore {
       agent.model,
       agent.effort,
       JSON.stringify(agent.extraArgs),
+      JSON.stringify(agent.modelMap),
       agent.id,
     )
   }

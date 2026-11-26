@@ -7,7 +7,14 @@ import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS, HOOT_ENV, MODEL_SWITCH_EVENT } from '../../shared/hoot-cli'
 import type { Issue } from '../../shared/issues'
-import type { Provider } from '../../shared/providers'
+import {
+  claudeDefaultEffort,
+  claudeEffortsOf,
+  namesClaudeModel,
+  type CatalogModel,
+  type ModelMap,
+  type Provider,
+} from '../../shared/providers'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
 import { readVersion } from '../agents/version'
 import { setEnvVariable, type Env } from '../env/env'
@@ -19,7 +26,7 @@ import {
 import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
 import { findCommand } from '../tools/find-command'
-import { claudeSessionEnv } from '../providers/claude-config'
+import { claudeSessionEnv, claudeSessionModel } from '../providers/claude-config'
 import { codexProviderLaunch } from '../providers/codex-config'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
@@ -43,6 +50,8 @@ export interface LaunchContext {
    * configuration, as for a chat made before providers.
    */
   provider: Provider | null
+  /** The models of its provider the session's agent maps Claude Code's roles to. */
+  modelMap: ModelMap
   /**
    * The variables of Claude Code's environment that say which provider it
    * runs on, as its settings for a session in `cwd` and the login shell's
@@ -50,11 +59,8 @@ export interface LaunchContext {
    * `claudeSessionEnv`).
    */
   claudeUserVariables(cwd: string): Promise<string[]>
-  /**
-   * How many tokens of context a model of a provider takes, as models.dev
-   * lists it; `null` where that is not known.
-   */
-  modelContext(provider: Provider, model: string): number | null
+  /** What models.dev tells of a model of a provider; `null` where it lists none. */
+  catalogModel(provider: Provider, model: string): CatalogModel | null
   /** The folder Hoot writes the settings of its Claude Code sessions in, a file each. */
   settingsFolder: string
   /** What the session's process needs to run hoot, Hoot's command line program. */
@@ -71,6 +77,8 @@ export interface LaunchContext {
 export interface AgentLaunch {
   settings: AgentLaunchSettings
   provider: Provider | null
+  /** For Claude Code, the models of the provider its agent maps Claude Code's roles to. */
+  modelMap?: ModelMap
 }
 
 /**
@@ -125,6 +133,17 @@ function withoutNul(text: string): string {
 }
 
 /**
+ * What the settings of a Claude Code session on a provider name besides its
+ * environment: the model it starts with, and the effort level it starts at
+ * while its command picks none.
+ */
+export interface ClaudeSessionNote {
+  /** `''` for the account's default. */
+  model: string
+  effortLevel: string | null
+}
+
+/**
  * The settings Hoot adds to every Claude Code session it starts, with
  * `--settings`, on top of the user's own: a hook for each of `HOOK_EVENTS`,
  * which runs hoot's `hook` command, here the command `hoot`, with the hook's
@@ -135,20 +154,27 @@ function withoutNul(text: string): string {
  * turns off these too. One for `/model` too (see `MODEL_SWITCH_EVENT`). With
  * an environment, that of the provider the session runs on (see
  * `claudeSessionEnv`), which takes precedence over the user's and the
- * project's settings, and the model `''`, the account's default, in place of
- * any those settings save: one the session's command picks with `--model`
- * takes precedence over it.
+ * project's settings, and the model and effort level it starts with (see
+ * `ClaudeSessionNote`), in place of any those settings save: a model or an
+ * effort level the session's command picks takes precedence over these.
  */
 export function claudeCodeSettings(
   hoot: string,
   env: Record<string, string> | null = null,
+  note: ClaudeSessionNote = { model: '', effortLevel: null },
 ): Record<string, unknown> {
   const hook = { type: 'command', command: quote([hoot, 'hook']), async: true }
   return {
     hooks: Object.fromEntries(
       [...HOOK_EVENTS, MODEL_SWITCH_EVENT].map((event) => [event, [{ hooks: [hook] }]]),
     ),
-    ...(env === null ? {} : { env, model: '' }),
+    ...(env === null
+      ? {}
+      : {
+          env,
+          model: note.model,
+          ...(note.effortLevel === null ? {} : { effortLevel: note.effortLevel }),
+        }),
   }
 }
 
@@ -161,19 +187,48 @@ export function claudeSettingsFilePath(folder: string, sessionId: string): strin
   return path.join(folder, `${sessionId}.json`)
 }
 
+/**
+ * The model and effort level the settings of a Claude Code session on a
+ * provider name (see `ClaudeSessionNote`): on a provider of the user's, the
+ * model it runs, named, as Claude Code otherwise takes its default for one
+ * of Claude's and so for a million tokens of context, and while its agent
+ * picks no effort level, the one it starts at (see `claudeDefaultEffort`),
+ * unless the model is one of Claude's, whose levels Claude Code knows; on
+ * its subscription, the account's default.
+ */
+function claudeSessionNote(context: LaunchContext, agent: AgentLaunchSettings): ClaudeSessionNote {
+  const provider = context.provider
+  if (provider === null || provider.own !== null) return { model: '', effortLevel: null }
+  const runs = claudeSessionModel(provider, agent.model, context.modelMap)
+  const model = runs ?? ''
+  if (agent.effort !== null || (runs !== null && namesClaudeModel(runs))) {
+    return { model, effortLevel: null }
+  }
+  const levels = runs === null ? [] : claudeEffortsOf(context.catalogModel(provider, runs))
+  return { model, effortLevel: claudeDefaultEffort(levels) }
+}
+
 /** Writes the settings of a Claude Code session in `cwd` into its file, and returns where that is. */
 async function writeClaudeSettings(
   context: LaunchContext,
   cwd: string,
-  model: string | null,
+  agent: AgentLaunchSettings,
 ): Promise<string> {
+  const provider = context.provider
   const env =
-    context.provider === null
+    provider === null
       ? null
-      : claudeSessionEnv(context.provider, model, await context.claudeUserVariables(cwd), (id) =>
-          context.modelContext(context.provider!, id),
+      : claudeSessionEnv(
+          provider,
+          { model: agent.model, modelMap: context.modelMap },
+          await context.claudeUserVariables(cwd),
+          (id) => context.catalogModel(provider, id),
         )
-  const settings = claudeCodeSettings(path.join(context.hoot.binDirectory, 'hoot'), env)
+  const settings = claudeCodeSettings(
+    path.join(context.hoot.binDirectory, 'hoot'),
+    env,
+    claudeSessionNote(context, agent),
+  )
   const file = claudeSettingsFilePath(context.settingsFolder, context.hoot.sessionId)
   try {
     await fs.mkdir(context.settingsFolder, { recursive: true, mode: 0o700 })
@@ -435,7 +490,7 @@ export async function resolveLaunch(
   /** The file of a Claude Code session's settings, which its cleanup removes. */
   let settingsFile: string | null = null
   if (tool.id === 'claude') {
-    settingsFile = await writeClaudeSettings(context, cwd, agent.model)
+    settingsFile = await writeClaudeSettings(context, cwd, agent)
     hookArguments = ['--settings', settingsFile]
   } else if (tool.id === 'codex' && (await codexRunsHook(found, login.env, cwd))) {
     hookArguments = ['-c', CODEX_HOOK_SETTING]

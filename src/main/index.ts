@@ -12,11 +12,9 @@ import { IpcChannel, type SessionCommand, type ToolsState } from '../shared/ipc'
 import { defaultAgentLaunchSettings } from '../shared/launch-settings'
 import { MODEL_EVENT, MODEL_SWITCH_EVENT } from '../shared/hoot-cli'
 import {
-  bareModel,
+  catalogModelOf,
   issueAgent,
-  planCatalog,
   providerOfOpenCodeId,
-  providerPlan,
   type GlobalHarness,
   type Provider,
 } from '../shared/providers'
@@ -182,13 +180,10 @@ const sessions: SessionManager = new SessionManager({
           agent: agent?.settings ?? defaultAgentLaunchSettings(),
         }),
         provider: agent?.provider ?? null,
+        modelMap: agent?.modelMap ?? {},
         claudeUserVariables: async (folder) =>
           claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env, folder),
-        modelContext: (provider, model) => {
-          const found = providerPlan(provider)
-          if (found === undefined) return null
-          return modelsDev.context(planCatalog(found.preset, found.plan), bareModel(model))
-        },
+        catalogModel: (provider, model) => catalogModelOf(modelsDev.catalogs(), provider, model),
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,

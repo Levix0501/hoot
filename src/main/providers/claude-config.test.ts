@@ -2,11 +2,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ownProvider, type Provider } from '../../shared/providers'
+import { ownProvider, type CatalogModel, type Provider } from '../../shared/providers'
 import {
   claudeConfigDirectory,
   claudeModel,
   claudeSessionEnv,
+  claudeSessionModel,
   claudeSettingsFile,
   claudeUserVariables,
   isClaudeProviderVariable,
@@ -33,6 +34,27 @@ function writeProject(folder: string, name: string, content: unknown): void {
   const text = typeof content === 'string' ? content : JSON.stringify(content)
   fs.writeFileSync(path.join(folder, '.claude', name), text)
 }
+
+/** DeepSeek's provider, with a model of a million tokens of context first and a smaller one after. */
+const deepseek: Provider = {
+  id: 'p-deepseek',
+  name: 'DeepSeek',
+  presetId: 'deepseek',
+  planId: null,
+  apiKey: 'sk-deepseek',
+  keyHeader: 'bearer',
+  urls: { anthropic: 'https://api.deepseek.com/anthropic' },
+  models: ['deepseek-flash', 'deepseek-pro'],
+  cloud: null,
+  own: null,
+}
+
+/** What models.dev tells of DeepSeek's models. */
+const deepseekModels: Record<string, CatalogModel> = {
+  'deepseek-flash': { id: 'deepseek-flash', context: 1_000_000, output: 384_000, efforts: [] },
+  'deepseek-pro': { id: 'deepseek-pro', context: 128_000, output: 8_000, efforts: [] },
+}
+const catalogModel = (model: string) => deepseekModels[model] ?? null
 
 /** A provider of the user's reached through a cloud, unless changed. */
 function cloud(change: Partial<Provider>): Provider {
@@ -99,7 +121,9 @@ describe("Claude Code's own configuration", () => {
   })
 
   it('gives a session on its subscription no provider, and unsets the user’s', () => {
-    const env = claudeSessionEnv(ownProvider('claude'), null, ['ANTHROPIC_CUSTOM_HEADERS'])
+    const env = claudeSessionEnv(ownProvider('claude'), { model: null }, [
+      'ANTHROPIC_CUSTOM_HEADERS',
+    ])
     expect(env.ANTHROPIC_CUSTOM_HEADERS).toBe('')
     expect(env.ANTHROPIC_BASE_URL).toBe('')
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('')
@@ -107,33 +131,98 @@ describe("Claude Code's own configuration", () => {
   })
 
   it('runs a session on a provider at its address, with its key and model, marked for a long context', () => {
-    const deepseek: Provider = {
-      id: 'p-deepseek',
-      name: 'DeepSeek',
-      presetId: 'deepseek',
-      planId: null,
-      apiKey: 'sk-deepseek',
-      keyHeader: 'bearer',
-      urls: { anthropic: 'https://api.deepseek.com/anthropic' },
-      models: ['deepseek-flash', 'deepseek-pro'],
-      cloud: null,
-      own: null,
-    }
-    const contexts: Record<string, number> = {
-      'deepseek-flash': 1_000_000,
-      'deepseek-pro': 128_000,
-    }
-    const env = claudeSessionEnv(deepseek, null, [], (model) => contexts[model] ?? null)
+    const env = claudeSessionEnv(deepseek, { model: null }, [], catalogModel)
     expect(env).toMatchObject({
       ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
       ANTHROPIC_AUTH_TOKEN: 'sk-deepseek',
       ANTHROPIC_API_KEY: '',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+      // Fable and subagents are left to Claude Code while none is mapped to them.
+      ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
       CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
     })
-    const pro = claudeSessionEnv(deepseek, 'deepseek-pro', [], (model) => contexts[model] ?? null)
+    const pro = claudeSessionEnv(deepseek, { model: 'deepseek-pro' }, [], catalogModel)
     expect(pro.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('deepseek-pro')
+  })
+
+  it('tells Claude Code the context and the answer its model takes, which it does not know of another’s', () => {
+    // Its provider's first, on Default.
+    expect(claudeSessionEnv(deepseek, { model: null }, [], catalogModel)).toMatchObject({
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '384000',
+    })
+    expect(claudeSessionEnv(deepseek, { model: 'deepseek-pro' }, [], catalogModel)).toMatchObject({
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '128000',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '8000',
+    })
+    // Unset where models.dev does not list them, over those the user's settings give.
+    const unknown = claudeSessionEnv(deepseek, { model: 'deepseek-next' }, [], catalogModel)
+    expect(unknown.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('')
+    expect(unknown.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe('')
+    // Claude Code knows the limits of Claude's own models, whoever serves them.
+    const claude = claudeSessionEnv(
+      { ...deepseek, models: ['anthropic/claude-sonnet-5-5'] },
+      { model: null },
+      [],
+      () => ({
+        id: 'anthropic/claude-sonnet-5-5',
+        context: 1_000_000,
+        output: 64_000,
+        efforts: [],
+      }),
+    )
+    expect(claude.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('')
+    expect(claude.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe('')
+  })
+
+  it('runs Claude Code’s roles on the models its agent maps to them, the session’s model on the rest', () => {
+    const env = claudeSessionEnv(
+      deepseek,
+      { model: 'deepseek-pro', modelMap: { opus: 'deepseek-flash', fable: 'deepseek-pro' } },
+      [],
+      catalogModel,
+    )
+    expect(env).toMatchObject({
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-pro',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-pro',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'deepseek-pro',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '128000',
+    })
+    const subagents = claudeSessionEnv(
+      deepseek,
+      { model: null, modelMap: { subagent: 'deepseek-flash' } },
+      [],
+      catalogModel,
+    )
+    expect(subagents.CLAUDE_CODE_SUBAGENT_MODEL).toBe('deepseek-flash[1m]')
+    // A session that picked an alias of Claude Code's with /model runs the model it stands for.
+    const resumed = claudeSessionEnv(
+      deepseek,
+      { model: 'opus', modelMap: { opus: 'deepseek-pro' } },
+      [],
+      catalogModel,
+    )
+    expect(resumed).toMatchObject({
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-pro',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-pro',
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '128000',
+    })
+  })
+
+  it('knows the model an alias of Claude Code’s stands for on a provider', () => {
+    const map = { haiku: 'deepseek-pro' }
+    expect(claudeSessionModel(deepseek, null, map)).toBe('deepseek-flash')
+    expect(claudeSessionModel(deepseek, 'deepseek-pro', map)).toBe('deepseek-pro')
+    expect(claudeSessionModel(deepseek, 'haiku', map)).toBe('deepseek-pro')
+    expect(claudeSessionModel(deepseek, 'sonnet[1m]', map)).toBe('deepseek-flash')
+    expect(claudeSessionModel(deepseek, 'Opus', {})).toBe('deepseek-flash')
+    // Fable's own, while none is mapped to it.
+    expect(claudeSessionModel(deepseek, 'fable', map)).toBeNull()
+    expect(claudeSessionModel({ models: [] }, null, {})).toBeNull()
   })
 
   it('runs a session on Amazon Bedrock and Vertex AI through Claude Code’s own support for them', () => {
@@ -145,7 +234,7 @@ describe("Claude Code's own configuration", () => {
         models: ['global.anthropic.claude-sonnet-5-5'],
         cloud: { kind: 'bedrock', region: 'eu-west-1' },
       }),
-      null,
+      { model: null },
       ['ANTHROPIC_BASE_URL'],
     )
     expect(bedrock).toMatchObject({
@@ -163,7 +252,7 @@ describe("Claude Code's own configuration", () => {
         planId: null,
         cloud: { kind: 'vertex', region: 'global', project: 'my-project' },
       }),
-      null,
+      { model: null },
       [],
     )
     expect(vertex).toMatchObject({

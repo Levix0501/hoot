@@ -3,10 +3,15 @@ import {
   agentName,
   agentsToMake,
   canRun,
+  catalogModelOf,
+  claudeDefaultEffort,
+  claudeEffortsOf,
+  cleanModelMap,
   findProvider,
   freeProviderName,
   hasGlobal,
   maskKey,
+  modelMapOn,
   namesProvider,
   firstPicks,
   OWN_PROVIDER_IDS,
@@ -22,6 +27,7 @@ import {
   providerPlan,
   sessionAgent,
   usableAgents,
+  withAgentChange,
   type Agent,
   type GlobalConfig,
   type Provider,
@@ -63,6 +69,7 @@ function agent(id: string, change: Partial<Agent> = {}): Agent {
     model: null,
     effort: null,
     extraArgs: [],
+    modelMap: {},
     createdAt: 1,
     ...change,
   }
@@ -126,8 +133,8 @@ describe('providers', () => {
   it('makes a provider of a configuration from the preset of its address, numbered when taken', () => {
     const catalogs = {
       deepseek: [
-        { id: 'deepseek-flash', context: 1_000_000 },
-        { id: 'deepseek-pro', context: 128_000 },
+        { id: 'deepseek-flash', context: 1_000_000, output: null, efforts: [] },
+        { id: 'deepseek-pro', context: 128_000, output: null, efforts: [] },
       ],
     }
     const made = providerFromConfig(
@@ -264,6 +271,52 @@ const harnesses = (id: string) => presetHarnesses(presetById(id)!)
 const on = (change: Partial<Provider>): Provider => ({ ...deepseek, ...change })
 
 const models = (count: number) => Array.from({ length: count }, (_, i) => `m${i}`)
+
+describe('Claude Code on a provider of the user’s', () => {
+  it('offers the effort levels models.dev lists for a model that Claude Code takes', () => {
+    expect(claudeEffortsOf({ efforts: ['max', 'none', 'low', 'high', 'minimal'] })).toEqual([
+      'low',
+      'high',
+      'max',
+    ])
+    expect(claudeEffortsOf({ efforts: [] })).toEqual([])
+    expect(claudeEffortsOf(null)).toEqual([])
+  })
+
+  it('starts at high while the agent picks no level, else the highest below it the model takes', () => {
+    expect(claudeDefaultEffort([])).toBe('high')
+    expect(claudeDefaultEffort(['low', 'high', 'max'])).toBe('high')
+    expect(claudeDefaultEffort(['low', 'medium', 'xhigh'])).toBe('medium')
+    expect(claudeDefaultEffort(['xhigh', 'max'])).toBe('xhigh')
+    // Claude Code's settings cannot keep max.
+    expect(claudeDefaultEffort(['max'])).toBeNull()
+  })
+
+  it('maps roles to models of the provider, which another provider keeps while it offers them', () => {
+    expect(cleanModelMap({ opus: ' kimi-k3 ', haiku: '  ', fable: undefined })).toEqual({
+      opus: 'kimi-k3',
+    })
+    const map = { opus: 'kimi-k3', haiku: 'kimi-k3.1-pro' }
+    expect(modelMapOn(map, { models: ['kimi-k3'], own: null })).toEqual({ opus: 'kimi-k3' })
+    expect(modelMapOn(map, ownProvider('claude'))).toEqual({})
+    const changed = withAgentChange(agent('a'), { modelMap: { subagent: ' kimi-k3 ' } })
+    expect(changed.modelMap).toEqual({ subagent: 'kimi-k3' })
+    expect(withAgentChange(changed, { name: 'Mine' }).modelMap).toEqual({ subagent: 'kimi-k3' })
+  })
+
+  it('finds what models.dev tells of a model of a provider, by the catalog of its plan', () => {
+    const flash = { id: 'deepseek-flash', context: 1_000_000, output: 384_000, efforts: ['high'] }
+    const catalogs = { deepseek: [flash] }
+    // At the addresses of DeepSeek's preset.
+    const made = {
+      ...deepseek,
+      urls: { ...deepseek.urls, responses: presetById('deepseek')!.urls!.responses! },
+    }
+    expect(catalogModelOf(catalogs, made, 'deepseek-flash[1m]')).toEqual(flash)
+    expect(catalogModelOf(catalogs, made, 'deepseek-next')).toBeNull()
+    expect(catalogModelOf(catalogs, { ...made, presetId: null }, 'deepseek-flash')).toBeNull()
+  })
+})
 
 describe('presets', () => {
   it('lists makers of models and gateways, each by name, with ids and plans of their own', () => {

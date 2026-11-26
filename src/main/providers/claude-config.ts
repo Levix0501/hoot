@@ -1,16 +1,27 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { providerUrl, type Provider } from '../../shared/providers'
+import {
+  bareModel,
+  FOLLOWING_ROLES,
+  namesClaudeModel,
+  providerUrl,
+  type CatalogModel,
+  type ClaudeRole,
+  type ModelMap,
+  type Provider,
+} from '../../shared/providers'
 import { envVariable, type Env } from '../env/env'
 
 type JsonObject = Record<string, unknown>
 
-/**
- * The model tiers Claude Code maps its aliases through, which a session on a
- * provider of the user's points at that provider's model. Fable's is left
- * empty, as magpie found models other than Fable to do badly in its tier.
- */
-const MAPPED_TIERS = ['OPUS', 'SONNET', 'HAIKU'] as const
+/** The variable that gives Claude Code the model of each of its roles. */
+const ROLE_VARIABLES: Readonly<Record<ClaudeRole, string>> = {
+  opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  fable: 'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  subagent: 'CLAUDE_CODE_SUBAGENT_MODEL',
+}
 
 /**
  * The variables of Claude Code's environment that say which provider it runs
@@ -45,9 +56,7 @@ const SESSION_VARIABLES = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_MODEL',
   'ANTHROPIC_SMALL_FAST_MODEL',
-  'ANTHROPIC_DEFAULT_FABLE_MODEL',
-  ...MAPPED_TIERS.map((tier) => `ANTHROPIC_DEFAULT_${tier}_MODEL`),
-  'CLAUDE_CODE_SUBAGENT_MODEL',
+  ...Object.values(ROLE_VARIABLES),
 ]
 
 function objectOf(value: unknown): JsonObject | null {
@@ -85,9 +94,36 @@ async function readSettings(file: string): Promise<JsonObject | null> {
   return settings
 }
 
-/** The model a session on a provider maps Claude Code's tiers to: its own, else the provider's first. */
-function mappedModel(provider: Provider, model: string | null): string | null {
-  return model ?? provider.models[0] ?? null
+/**
+ * The model a session on a provider of the user's runs: the one it starts
+ * with, or the one an alias of Claude Code's stands for there, as a model a
+ * session picked with `/model` may be, through its agent's model map; else
+ * the provider's first. `null` for Fable's while none is mapped to it, which
+ * is Claude Code's own, and for a provider with no models.
+ */
+export function claudeSessionModel(
+  provider: Pick<Provider, 'models'>,
+  model: string | null,
+  modelMap: ModelMap,
+): string | null {
+  const first = provider.models[0] ?? null
+  if (model === null) return first
+  switch (bareModel(model).trim().toLowerCase()) {
+    case 'default':
+      return first
+    case 'opus':
+    case 'best':
+    case 'opusplan':
+      return modelMap.opus ?? first
+    case 'sonnet':
+      return modelMap.sonnet ?? first
+    case 'haiku':
+      return modelMap.haiku ?? first
+    case 'fable':
+      return modelMap.fable ?? null
+    default:
+      return model
+  }
 }
 
 /** How many tokens of context Claude Code takes `[1m]` to tell of. */
@@ -111,23 +147,37 @@ export function claudeModel(model: string, context: number | null): string {
  * sets is set, empty to unset it where the provider gives none. A provider of
  * the user's gives where Claude Code reaches it: Amazon Bedrock's region and
  * API key, Vertex AI's region and project, or else its address and its key,
- * in the header it takes. It gives its model, or else its first, for Claude
- * Code's tiers, marked where it takes a million tokens of context (see
- * `claudeModel`), and turns off the line Claude Code adds to the system
- * prompt for Anthropic's billing, which changes with each version and keeps
- * other providers from caching the prompt. The harness's own sign-in gives
- * none, so that the session runs on the subscription.
+ * in the header it takes. It gives Claude Code's roles their models (see
+ * `ModelMap`): Opus, Sonnet and Haiku the session's model unless the agent
+ * maps one of its own to them, Fable and subagents only one mapped to them,
+ * each marked where it takes a million tokens of context (see
+ * `claudeModel`). It tells Claude Code how many tokens of context the
+ * session's model takes and of answer it gives, as models.dev lists them,
+ * which Claude Code does not know of another maker's model: it otherwise
+ * assumes a million tokens of context, and warns of it as it starts, and
+ * asks for 32,000 tokens of answer at most. Each is unset where models.dev
+ * does not list it, or the model is one of Claude's, which Claude Code knows,
+ * so that one the user's settings give for another provider does not apply.
+ * It turns off the line Claude Code adds to the system prompt for
+ * Anthropic's billing, which changes with each version and keeps other
+ * providers from caching the prompt. The harness's own sign-in gives none,
+ * so that the session runs on the subscription.
  */
 export function claudeSessionEnv(
   provider: Provider,
-  model: string | null,
+  session: {
+    /** The model the session starts with; `null` for its provider's first. */
+    model: string | null
+    /** The models its agent maps Claude Code's roles to. */
+    modelMap?: ModelMap
+  },
   /**
    * The variables its other settings and the login shell's environment set
    * (see `claudeUserVariables`).
    */
   userVariables: readonly string[],
-  /** How many tokens of context a model of the provider takes; `null` where that is not known. */
-  contextOf: (model: string) => number | null = () => null,
+  /** What models.dev tells of a model of the provider; `null` where it lists none. */
+  catalogModel: (model: string) => CatalogModel | null = () => null,
 ): Record<string, string> {
   const env: Record<string, string> = {}
   for (const name of [...userVariables, ...SESSION_VARIABLES]) {
@@ -152,11 +202,21 @@ export function claudeSessionEnv(
     env[provider.keyHeader === 'x-api-key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'] =
       provider.apiKey
   }
-  const mapped = mappedModel(provider, model)
-  if (mapped !== null) {
-    const marked = claudeModel(mapped, contextOf(mapped))
-    for (const tier of MAPPED_TIERS) env[`ANTHROPIC_DEFAULT_${tier}_MODEL`] = marked
+  const modelMap = session.modelMap ?? {}
+  const runs = claudeSessionModel(provider, session.model, modelMap)
+  const main = runs ?? provider.models[0] ?? null
+  const marked = (model: string) => claudeModel(model, catalogModel(model)?.context ?? null)
+  for (const role of FOLLOWING_ROLES) {
+    const model = modelMap[role] ?? main
+    if (model !== null) env[ROLE_VARIABLES[role]] = marked(model)
   }
+  for (const role of ['fable', 'subagent'] as const) {
+    const model = modelMap[role]
+    if (model !== undefined) env[ROLE_VARIABLES[role]] = marked(model)
+  }
+  const limits = runs === null || namesClaudeModel(runs) ? null : catalogModel(runs)
+  env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = limits?.context ? String(limits.context) : ''
+  env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = limits?.output ? String(limits.output) : ''
   env.CLAUDE_CODE_ATTRIBUTION_HEADER = '0'
   return env
 }

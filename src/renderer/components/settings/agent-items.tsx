@@ -2,6 +2,7 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CopyIcon,
+  LayersIcon,
   LockIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -10,7 +11,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { AgentState } from '../../../shared/agents'
 import { chatAgent, usableChatAgents } from '../../../shared/chats'
 import {
@@ -23,11 +24,22 @@ import {
 import {
   agentName,
   canRun,
+  catalogModelOf,
+  CLAUDE_ROLE_NAMES,
+  CLAUDE_ROLES,
+  claudeDefaultEffort,
+  claudeEffortsOf,
+  FOLLOWING_ROLES,
+  modelMapOn,
+  namesClaudeModel,
   ownProvider,
   PROVIDER_EFFORTS,
   providerMark,
   type Agent,
   type AgentChange,
+  type ClaudeRole,
+  type ModelCatalogs,
+  type ModelMap,
   type Provider,
 } from '../../../shared/providers'
 import { getCodingTool, type CodingToolId } from '../../../shared/tools'
@@ -38,6 +50,7 @@ import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -105,24 +118,62 @@ interface ModelChoice {
  * provider of the user's, that provider's.
  */
 function modelChoices(
+  harness: CodingToolId,
   provider: Provider | undefined,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
 ): ModelChoice[] {
   if (provider === undefined) return []
   if (provider.own !== null) return state?.launchOptions?.models ?? []
-  return provider.models.map((model) => ({ value: model, label: model, efforts: [] }))
+  return provider.models.map((model) => ({
+    value: model,
+    label: model,
+    efforts: effortsOf(harness, model, provider, state, catalogs),
+  }))
 }
 
-/** The effort levels of a model, or of the default model, on a provider. */
+/**
+ * The effort levels of a model, or of the default model, on a provider: on a
+ * provider of the user's, for Claude Code, those models.dev lists for the
+ * model (see `claudeEffortsOf`), for another agent, those it offers for any.
+ */
 function effortsOf(
+  harness: CodingToolId,
   model: string | null,
   provider: Provider | undefined,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
 ): string[] {
-  if (provider?.own === null) return state === undefined ? [] : [...PROVIDER_EFFORTS[state.id]]
+  if (provider?.own === null) {
+    if (harness !== 'claude') return [...PROVIDER_EFFORTS[harness]]
+    const runs = model ?? provider.models[0]
+    return runs === undefined ? [] : claudeEffortsOf(catalogModelOf(catalogs, provider, runs))
+  }
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
   return options?.models.find((option) => option.value === model)?.efforts ?? []
+}
+
+/**
+ * The effort level Default picks: on a provider of the user's, for Claude
+ * Code, the one Hoot starts its sessions at (see `claudeDefaultEffort`), but
+ * for one of Claude's models, Claude Code's own; otherwise what the harness's
+ * configuration names, if anything.
+ */
+function defaultEffortOf(
+  harness: CodingToolId,
+  model: string | null,
+  provider: Provider | undefined,
+  state: AgentState | undefined,
+  catalogs: ModelCatalogs,
+): { value: string; source: string } | null {
+  if (provider?.own === null) {
+    const runs = model ?? provider.models[0]
+    if (harness !== 'claude' || runs === undefined || namesClaudeModel(runs)) return null
+    const level = claudeDefaultEffort(effortsOf(harness, model, provider, state, catalogs))
+    return level === null ? null : { value: level, source: provider.name }
+  }
+  return state?.launchOptions?.defaultEffort ?? null
 }
 
 /**
@@ -255,9 +306,13 @@ function DefaultChoice({
   return (
     <SelectItem value={DEFAULT_CHOICE}>
       <span>{configured === null ? 'Default' : `Default · ${configured.value}`}</span>
-      <span className="text-muted-foreground">
-        {configured === null ? `${getCodingTool(harness).label}'s own setting` : configured.source}
-      </span>
+      {configured?.source !== '' && (
+        <span className="text-muted-foreground">
+          {configured === null
+            ? `${getCodingTool(harness).label}'s own setting`
+            : configured.source}
+        </span>
+      )}
     </SelectItem>
   )
 }
@@ -276,14 +331,15 @@ function ModelPicker({
   segment: CommandSegment
   onChange: (change: AgentChange) => void
 }) {
-  const models = modelChoices(provider, state)
+  const catalogs = useAppStore((app) => app.modelCatalogs)
+  const models = modelChoices(agent.harness, provider, state, catalogs)
   const current = agent.model
   const known = provider?.own === null || state?.launchOptions != null
   const missing = current !== null && known && !models.some((m) => m.value === current)
   const pick = (value: string) => {
     const model = value === DEFAULT_CHOICE ? null : value
     // An effort level the new model does not take goes back to Default.
-    const efforts = effortsOf(model, provider, state)
+    const efforts = effortsOf(agent.harness, model, provider, state, catalogs)
     const effort = agent.effort !== null && efforts.includes(agent.effort) ? agent.effort : null
     onChange({ model, effort })
   }
@@ -357,7 +413,8 @@ function EffortPicker({
   segment: CommandSegment
   onChange: (change: AgentChange) => void
 }) {
-  const efforts = effortsOf(agent.model, provider, state)
+  const catalogs = useAppStore((app) => app.modelCatalogs)
+  const efforts = effortsOf(agent.harness, agent.model, provider, state, catalogs)
   return (
     <Select
       value={agent.effort ?? DEFAULT_CHOICE}
@@ -376,7 +433,7 @@ function EffortPicker({
       <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-48">
         <DefaultChoice
           harness={agent.harness}
-          configured={provider?.own === null ? null : (state?.launchOptions?.defaultEffort ?? null)}
+          configured={defaultEffortOf(agent.harness, agent.model, provider, state, catalogs)}
         />
         {efforts.map((effort) => (
           <SelectItem key={effort} value={effort}>
@@ -385,6 +442,129 @@ function EffortPicker({
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+/** A picker of the model of its provider one of Claude Code's roles runs on, beside its name. */
+function RoleModelPicker({
+  role,
+  provider,
+  follows,
+  value,
+  onChange,
+  testId,
+}: {
+  role: ClaudeRole
+  provider: Provider
+  /** The model the role takes while none is mapped to it; `null` for Claude Code's own. */
+  follows: string | null
+  value: string | null
+  onChange: (model: string | null) => void
+  testId: string
+}) {
+  const missing = value !== null && !provider.models.includes(value)
+  return (
+    <Fragment>
+      <span className="text-xs text-muted-foreground">{CLAUDE_ROLE_NAMES[role]}</span>
+      <Select
+        value={value ?? DEFAULT_CHOICE}
+        onValueChange={(picked) => {
+          if (typeof picked === 'string') onChange(picked === DEFAULT_CHOICE ? null : picked)
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          aria-label={`${CLAUDE_ROLE_NAMES[role]} model`}
+          className={cn(
+            PICKER_CHIP,
+            'max-w-full justify-self-start',
+            value === null ? NOT_PICKED : missing ? PICKED_MISSING : PICKED,
+          )}
+          data-testid={testId}
+        >
+          {missing && <CircleAlertIcon className="size-3" />}
+          {value !== null || follows !== null ? (
+            <span className="truncate">{value ?? follows}</span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <PlusIcon className="size-3" />
+              model
+            </span>
+          )}
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-64">
+          <SelectGroup>
+            <DefaultChoice
+              harness="claude"
+              configured={follows === null ? null : { value: follows, source: '' }}
+            />
+          </SelectGroup>
+          {missing && (
+            <SelectGroup>
+              <SelectLabel>Not offered any more</SelectLabel>
+              <SelectItem value={value}>
+                <span className="font-mono text-xs">{value}</span>
+              </SelectItem>
+            </SelectGroup>
+          )}
+          {provider.models.length > 0 && (
+            <SelectGroup>
+              <SelectLabel>{provider.name}</SelectLabel>
+              {provider.models.map((model) => (
+                <SelectItem key={model} value={model} data-testid={`${testId}-option-${model}`}>
+                  <span className="font-mono text-xs">{model}</span>
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
+        </SelectContent>
+      </Select>
+    </Fragment>
+  )
+}
+
+/**
+ * The models of a provider of the user's a Claude Code agent runs Claude
+ * Code's roles on, a picker each: Opus, Sonnet and Haiku show the agent's
+ * model while none is mapped to them, which they then take.
+ */
+function ModelMapFields({
+  provider,
+  model,
+  modelMap,
+  onChange,
+  testId,
+}: {
+  provider: Provider
+  /** The model the agent's sessions start with; `null` for its provider's first. */
+  model: string | null
+  modelMap: ModelMap
+  onChange: (modelMap: ModelMap) => void
+  testId: string
+}) {
+  const runs = model ?? provider.models[0] ?? null
+  return (
+    <div
+      className="grid w-fit max-w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1"
+      data-testid={testId}
+    >
+      {CLAUDE_ROLES.map((role) => (
+        <RoleModelPicker
+          key={role}
+          role={role}
+          provider={provider}
+          follows={FOLLOWING_ROLES.includes(role) ? runs : null}
+          value={modelMap[role] ?? null}
+          onChange={(picked) => {
+            const next = { ...modelMap }
+            if (picked === null) delete next[role]
+            else next[role] = picked
+            onChange(next)
+          }}
+          testId={`${testId}-${role}`}
+        />
+      ))}
+    </div>
   )
 }
 
@@ -433,13 +613,15 @@ function AgentCommand({ agent, state }: { agent: Agent; state: AgentState | unde
     effort: agent.effort,
     extraArgs: agent.extraArgs,
   }
+  const catalogs = useAppStore((app) => app.modelCatalogs)
   const segments = commandSegments({
     tool: agent.harness,
     program: tool.command,
     yoloMode,
     settings,
-    modelEfforts: agent.model === null ? [] : effortsOf(agent.model, provider, state),
-    defaultEfforts: effortsOf(null, provider, state),
+    modelEfforts:
+      agent.model === null ? [] : effortsOf(agent.harness, agent.model, provider, state, catalogs),
+    defaultEfforts: effortsOf(agent.harness, null, provider, state, catalogs),
   })
   const command = displayCommand(segments)
   const change = (update: AgentChange) => changeAgent(agent.id, update)
@@ -603,15 +785,23 @@ function AgentNameField({ agent, own, onDone }: { agent: Agent; own: string; onD
   )
 }
 
-/** The ⋯ of an agent's row: rename it, make it the default agent, delete it. */
+/**
+ * The ⋯ of an agent's row: rename it, show its model map, for Claude Code on
+ * a provider of the user's, make it the default agent, delete it.
+ */
 function AgentMenu({
   agent,
   isDefault,
   onRename,
+  modelMapShown,
+  onModelMapShownChange,
 }: {
   agent: Agent
   isDefault: boolean
   onRename: () => void
+  /** Whether its model map shows, for an agent that has one; `undefined` for one that has none. */
+  modelMapShown?: boolean
+  onModelMapShownChange?: (shown: boolean) => void
 }) {
   const deleteAgent = useAppStore((state) => state.deleteAgent)
   const setDefaultAgent = useAppStore((state) => state.setDefaultAgent)
@@ -635,6 +825,18 @@ function AgentMenu({
           <PencilIcon />
           Rename
         </DropdownMenuItem>
+        {modelMapShown !== undefined && (
+          <DropdownMenuCheckboxItem
+            checked={modelMapShown}
+            onCheckedChange={(checked) => onModelMapShownChange?.(checked)}
+            // The menu closes, to leave the map it shows or hides in sight.
+            closeOnClick
+            data-testid={`agent-model-map-toggle-${agent.id}`}
+          >
+            <LayersIcon />
+            Model mapping
+          </DropdownMenuCheckboxItem>
+        )}
         <DropdownMenuItem
           disabled={isDefault || !agent.enabled}
           onClick={() => setDefaultAgent(agent.id)}
@@ -681,6 +883,12 @@ export function AgentItem({
   const changeAgent = useAppStore((app) => app.changeAgent)
   const isDefault = useIsDefault(agent.id)
   const [renaming, setRenaming] = useState(false)
+  const provider = useProvidersFor(agent.harness).find(
+    (candidate) => candidate.id === agent.providerId,
+  )
+  // Claude Code on a provider of the user's maps its roles; the map shows while it is not the default.
+  const roleProvider = agent.harness === 'claude' && provider?.own === null ? provider : undefined
+  const [modelMapShown, setModelMapShown] = useState(() => Object.keys(agent.modelMap).length > 0)
   if (dormant) {
     return (
       <div
@@ -732,6 +940,7 @@ export function AgentItem({
                 providerId: picked.id,
                 model: modelOn(agent.model, picked),
                 effort: null,
+                modelMap: modelMapOn(agent.modelMap, picked),
               })
             }
             testId={`agent-provider-${agent.id}`}
@@ -739,7 +948,13 @@ export function AgentItem({
             className="max-w-[40%]"
           />
         )}
-        <AgentMenu agent={agent} isDefault={isDefault} onRename={() => setRenaming(true)} />
+        <AgentMenu
+          agent={agent}
+          isDefault={isDefault}
+          onRename={() => setRenaming(true)}
+          modelMapShown={roleProvider !== undefined && agent.enabled ? modelMapShown : undefined}
+          onModelMapShownChange={setModelMapShown}
+        />
         <Tooltip>
           <TooltipTrigger render={<span className="inline-flex" />}>
             <Switch
@@ -757,6 +972,17 @@ export function AgentItem({
       {agent.enabled && (
         <div className="min-w-0 sm:pl-7">
           <AgentCommand agent={agent} state={state} />
+        </div>
+      )}
+      {agent.enabled && roleProvider !== undefined && modelMapShown && (
+        <div className="min-w-0 sm:pl-7">
+          <ModelMapFields
+            provider={roleProvider}
+            model={agent.model}
+            modelMap={agent.modelMap}
+            onChange={(modelMap) => changeAgent(agent.id, { modelMap })}
+            testId={`agent-model-map-${agent.id}`}
+          />
         </div>
       )}
     </div>
@@ -784,9 +1010,11 @@ function NewAgentRow({
   const [providerId, setProviderId] = useState(() => firstProvider(providers)?.id ?? '')
   const provider = providers.find((candidate) => candidate.id === providerId)
   const [model, setModel] = useState<string | null>(() => modelOn(null, provider))
+  const [modelMap, setModelMap] = useState<ModelMap>({})
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
-  const models = modelChoices(provider, state)
+  const catalogs = useAppStore((app) => app.modelCatalogs)
+  const models = modelChoices(harness, provider, state, catalogs)
   // The name it gets without one of its own, as its field shows it.
   const draft: Agent = {
     id: '\u0000new',
@@ -797,6 +1025,7 @@ function NewAgentRow({
     model,
     effort: null,
     extraArgs: [],
+    modelMap,
     createdAt: 0,
   }
   const own =
@@ -815,6 +1044,7 @@ function NewAgentRow({
       providerId,
       model,
       name: typed === '' || typed === own ? null : typed,
+      modelMap,
     })
     setCreating(false)
     if (result.ok) onDone()
@@ -862,6 +1092,7 @@ function NewAgentRow({
           onChange={(picked) => {
             setProviderId(picked.id)
             setModel(modelOn(model, picked))
+            setModelMap(modelMapOn(modelMap, picked))
           }}
           testId={`new-agent-provider-${harness}`}
         />
@@ -897,6 +1128,17 @@ function NewAgentRow({
           </SelectContent>
         </Select>
       </div>
+      {harness === 'claude' && provider?.own === null && (
+        <div className="sm:pl-7">
+          <ModelMapFields
+            provider={provider}
+            model={model}
+            modelMap={modelMap}
+            onChange={setModelMap}
+            testId={`new-agent-model-map-${harness}`}
+          />
+        </div>
+      )}
     </div>
   )
 }

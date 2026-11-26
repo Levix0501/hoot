@@ -310,4 +310,10 @@ export const MIGRATIONS: readonly string[] = [
   -- a provider reached at its addresses alone.
   ALTER TABLE providers ADD COLUMN cloud TEXT;
   `,
+  // 13: the models of its provider a Claude Code agent runs Claude Code's roles on.
+  `
+  -- A JSON object: the model mapped to each of Claude Code's roles, such as
+  -- {"haiku": "deepseek-v4.1-flash"}; a role left out takes its default.
+  ALTER TABLE agents ADD COLUMN model_map TEXT NOT NULL DEFAULT '{}';
+  `,
 ]

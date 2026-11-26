@@ -40,14 +40,27 @@ export const CATALOG_IDS: readonly string[] = [
 
 const optional = <T extends z.ZodType>(schema: T) => schema.optional().catch(undefined)
 
-/** What Hoot keeps of a models.dev model: what tells whether an agent can run it, and its context. */
+/**
+ * The ways of reasoning models.dev lists for a model, of which Hoot keeps
+ * those that are effort levels, with the levels.
+ */
+const reasoningOptions = z
+  .array(z.object({ type: optional(z.string()), values: optional(z.array(z.string())) }))
+  .transform((options) => options.filter((option) => option.type === 'effort'))
+
+/**
+ * What Hoot keeps of a models.dev model: what tells whether an agent can run
+ * it, how many tokens of context it takes and of answer it gives, and its
+ * effort levels.
+ */
 const keptModel = z.object({
   id: z.string().min(1),
   status: optional(z.string()),
   tool_call: optional(z.boolean()),
   modalities: optional(z.object({ output: optional(z.array(z.string())) })),
   release_date: optional(z.string()),
-  limit: optional(z.object({ context: optional(z.number()) })),
+  limit: optional(z.object({ context: optional(z.number()), output: optional(z.number()) })),
+  reasoning_options: optional(reasoningOptions),
   /** The package and address the model is served with, when not its provider's. */
   provider: optional(z.object({ npm: optional(z.string()), api: optional(z.string()) })),
 })
@@ -60,8 +73,17 @@ interface KeptCatalog {
   models: Record<string, KeptModel>
 }
 
+/**
+ * The form of what Hoot keeps of models.dev, which a copy saved by a Hoot
+ * that kept fewer of its fields does not have: Hoot reads models.dev again
+ * rather than take such a copy. `scripts/models-dev-snapshot.ts` writes it too.
+ */
+export const MODELS_DEV_FORMAT = 2
+
 /** What Hoot keeps of models.dev, as it ships with Hoot and as Hoot saves it after reading it. */
 export interface ModelsDevCopy {
+  /** Its form (see `MODELS_DEV_FORMAT`). */
+  format: number
   /** When it was read, in milliseconds since the Unix epoch. */
   fetchedAt: number
   /** The ETag models.dev answered with, which tells whether it has changed since; `null` for none. */
@@ -151,7 +173,12 @@ export function catalogsOf(copy: Pick<ModelsDevCopy, 'catalogs'>): ModelCatalogs
         (a, b) =>
           (b.release_date ?? '').localeCompare(a.release_date ?? '') || b.id.localeCompare(a.id),
       )
-      .map((model) => ({ id: model.id, context: model.limit?.context ?? null }))
+      .map((model) => ({
+        id: model.id,
+        context: model.limit?.context ?? null,
+        output: model.limit?.output ?? null,
+        efforts: [...new Set(model.reasoning_options?.flatMap((option) => option.values ?? []))],
+      }))
   }
   return catalogs
 }
@@ -160,6 +187,7 @@ export function catalogsOf(copy: Pick<ModelsDevCopy, 'catalogs'>): ModelCatalogs
 export const SNAPSHOT: ModelsDevCopy = snapshot as ModelsDevCopy
 
 const savedCopy = z.object({
+  format: z.literal(MODELS_DEV_FORMAT),
   fetchedAt: z.number(),
   etag: z.string().nullable(),
   catalogs: z.record(z.string(), z.unknown()),
@@ -167,7 +195,7 @@ const savedCopy = z.object({
 
 /**
  * The copy Hoot saved in a file; `null` for none, one it cannot read, and one
- * an earlier Hoot saved that lacks a provider this one knows.
+ * an earlier Hoot saved, of another form or without a provider this one knows.
  */
 async function readCopy(file: string): Promise<ModelsDevCopy | null> {
   try {
@@ -227,11 +255,6 @@ export class ModelsDev extends EventEmitter<{ changed: [catalogs: ModelCatalogs]
     return this.current
   }
 
-  /** How many tokens of context a model of a models.dev provider takes; `null` where it is not known. */
-  context(catalog: string, model: string): number | null {
-    return this.current[catalog]?.find((entry) => entry.id === model)?.context ?? null
-  }
-
   /**
    * Takes the copy saved before when it is newer than the one Hoot ships
    * with, then reads models.dev when the copy is a day old, and looks again
@@ -287,7 +310,12 @@ export class ModelsDev extends EventEmitter<{ changed: [catalogs: ModelCatalogs]
       if (read === null || Object.keys(read).length === 0) return
       // A provider models.dev no longer lists keeps the models it listed.
       const catalogs = { ...this.copy.catalogs, ...read }
-      await this.keep({ fetchedAt: this.now(), etag: response.headers.get('etag'), catalogs })
+      await this.keep({
+        format: MODELS_DEV_FORMAT,
+        fetchedAt: this.now(),
+        etag: response.headers.get('etag'),
+        catalogs,
+      })
     } catch {
       // Without a network, or with a file of another form: the copy Hoot has stays.
     } finally {

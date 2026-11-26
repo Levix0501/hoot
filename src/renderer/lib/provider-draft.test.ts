@@ -16,7 +16,12 @@ import {
 const preset = (id: string) => presetById(id)!
 
 const ids = (count: number, prefix: string) =>
-  Array.from({ length: count }, (_, i) => ({ id: `${prefix}-${i}`, context: null }))
+  Array.from({ length: count }, (_, i) => ({
+    id: `${prefix}-${i}`,
+    context: null,
+    output: null,
+    efforts: [],
+  }))
 
 const catalogs = {
   deepseek: ids(2, 'deepseek'),

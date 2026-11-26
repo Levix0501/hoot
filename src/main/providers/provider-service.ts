@@ -4,6 +4,7 @@ import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import {
   agentsToMake,
   canRun,
+  cleanModelMap,
   findProvider,
   GLOBAL_HARNESSES,
   isGlobalHarness,
@@ -402,6 +403,7 @@ export class ProviderService extends EventEmitter<{
       model: input.model?.trim() || null,
       effort: null,
       extraArgs: [],
+      modelMap: cleanModelMap(input.modelMap ?? {}),
       createdAt: this.now(),
       ...settings,
     }

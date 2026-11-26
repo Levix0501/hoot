@@ -326,6 +326,7 @@ function ownAgent(harness: Agent['harness']): Agent {
     model: null,
     effort: 'high',
     extraArgs: ['--verbose'],
+    modelMap: {},
     createdAt: 1,
   }
 }
@@ -336,7 +337,9 @@ const providersState: ProvidersState = {
   globals: {},
   ready: true,
 }
-const catalogs = { deepseek: [{ id: 'deepseek-flash', context: 1_000_000 }] }
+const catalogs = {
+  deepseek: [{ id: 'deepseek-flash', context: 1_000_000, output: null, efforts: [] }],
+}
 const models = Object.assign(emitter(), {
   catalogs: vi.fn<() => typeof catalogs>(() => catalogs),
 })
@@ -368,6 +371,7 @@ const claudeChatAgent = {
 const claudeLaunch = {
   settings: { enabled: true, model: null, effort: 'high', extraArgs: ['--verbose'] },
   provider: ownProvider('claude'),
+  modelMap: {},
 }
 
 beforeEach(() => {
@@ -1317,13 +1321,21 @@ describe('the messages of the Agents page', () => {
     expect(providers.setGlobalModel).toHaveBeenCalledWith('claude', null)
 
     const agent = { harness: 'claude', providerId: 'p-kimi', model: 'kimi-k3.1-pro' }
+    const mapped = { ...agent, modelMap: { haiku: 'kimi-k3', subagent: 'kimi-k3' } }
     await invoke(IpcChannel.makeAgent, agent)
+    await invoke(IpcChannel.makeAgent, mapped)
     await invoke(IpcChannel.makeAgent, { ...agent, harness: 'shell' })
-    expect(providers.addAgent.mock.calls).toEqual([[agent]])
+    // A role Claude Code does not have, or a blank model, is no model map.
+    await invoke(IpcChannel.makeAgent, { ...agent, modelMap: { gpt: 'kimi-k3' } })
+    await invoke(IpcChannel.makeAgent, { ...agent, modelMap: { haiku: '' } })
+    expect(providers.addAgent.mock.calls).toEqual([[agent], [mapped]])
     send(IpcChannel.changeAgent, 'agent-1', { enabled: false, extraArgs: ['--verbose'] })
     send(IpcChannel.changeAgent, 'agent-1', { extraArgs: [3] })
+    send(IpcChannel.changeAgent, 'agent-1', { modelMap: { opus: 'kimi-k3.1-pro' } })
+    send(IpcChannel.changeAgent, 'agent-1', { modelMap: { opus: 3 } })
     expect(providers.updateAgent.mock.calls).toEqual([
       ['agent-1', { enabled: false, extraArgs: ['--verbose'] }],
+      ['agent-1', { modelMap: { opus: 'kimi-k3.1-pro' } }],
     ])
     send(IpcChannel.deleteAgent, 'agent-1')
     expect(providers.removeAgent).toHaveBeenCalledWith('agent-1')

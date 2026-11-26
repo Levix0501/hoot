@@ -867,10 +867,18 @@ export function planIdOf(preset: ProviderPreset, plan: PresetPlan): string | nul
   return preset.plans === undefined ? null : plan.id
 }
 
-/** A model a models.dev provider lists, as Hoot keeps it: its id and how many tokens of context it takes. */
+/**
+ * A model a models.dev provider lists, as Hoot keeps it: its id, how many
+ * tokens of context it takes and of answer it gives, and the effort levels
+ * it takes.
+ */
 export interface CatalogModel {
   id: string
   context: number | null
+  /** The most tokens it answers with, its thinking included; `null` where that is not known. */
+  output: number | null
+  /** The effort levels it takes, by models.dev's names, lowest first; none where it takes none. */
+  efforts: string[]
 }
 
 /**
@@ -883,6 +891,23 @@ export type ModelCatalogs = Readonly<Record<string, readonly CatalogModel[]>>
 /** The ids of a models.dev provider's models; none for one the catalogs lack. */
 export function catalogModelIds(catalogs: ModelCatalogs, catalog: string | null): string[] {
   return catalog === null ? [] : (catalogs[catalog] ?? []).map((model) => model.id)
+}
+
+/**
+ * What models.dev tells of a model of a provider of the user's, by the plan
+ * of its preset the provider is on; `null` for a model its catalog lacks, and
+ * for a provider Hoot has no preset of.
+ */
+export function catalogModelOf(
+  catalogs: ModelCatalogs,
+  provider: Pick<Provider, 'presetId' | 'planId' | 'urls' | 'cloud'>,
+  model: string,
+): CatalogModel | null {
+  const found = providerPlan(provider)
+  if (found === undefined) return null
+  const id = bareModel(model)
+  const catalog = catalogs[planCatalog(found.preset, found.plan)] ?? []
+  return catalog.find((entry) => entry.id === id) ?? null
 }
 
 /** Up to this many, a provider's models are all picked as it is made; past it, none are. */
@@ -975,15 +1000,106 @@ export function bareModel(model: string): string {
 }
 
 /**
- * The effort levels each agent offers on a provider of the user's: none for
- * Claude Code, whose levels other providers' models do not tell; for Codex,
- * those every provider Hoot knows takes; for OpenCode, the variants it gives
- * a model at an Anthropic-compatible address.
+ * The effort levels each agent offers on a provider of the user's, whatever
+ * the model: for Codex, those every provider Hoot knows takes; for OpenCode,
+ * the variants it gives a model at an Anthropic-compatible address. Claude
+ * Code offers each model's own instead (see `claudeEffortsOf`).
  */
 export const PROVIDER_EFFORTS: Readonly<Record<CodingToolId, readonly string[]>> = {
   claude: [],
   codex: ['low', 'high'],
   opencode: ['low', 'medium', 'high'],
+}
+
+/** Whether a model's id names one of Claude's, whose limits and effort levels Claude Code knows itself. */
+export function namesClaudeModel(model: string): boolean {
+  return /claude-/i.test(model)
+}
+
+/** The effort levels Claude Code takes, lowest first. */
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+/**
+ * The effort levels a Claude Code agent offers for a model of a provider of
+ * the user's: those models.dev lists for it that Claude Code takes too, which
+ * it sends the provider as they are; none for a model models.dev lists none
+ * for, such as one told how many tokens to think with instead.
+ */
+export function claudeEffortsOf(model: Pick<CatalogModel, 'efforts'> | null): string[] {
+  const levels = new Set(model?.efforts ?? [])
+  return CLAUDE_EFFORTS.filter((level) => levels.has(level))
+}
+
+/**
+ * The effort level a Claude Code session on a provider of the user's starts
+ * at while its agent picks none, in place of the user's own level, which
+ * Claude Code would send the provider as it is: `high`, as Claude Code sends
+ * a model it does not know, unless the model takes other levels and not that
+ * one; then the highest of them below it, else the lowest. `null` where that
+ * is `max`, which Claude Code's settings cannot keep.
+ */
+export function claudeDefaultEffort(levels: readonly string[]): string | null {
+  const known = CLAUDE_EFFORTS.filter((level) => levels.includes(level))
+  if (known.length === 0 || known.includes('high')) return 'high'
+  const below = known.filter(
+    (level) => CLAUDE_EFFORTS.indexOf(level) < CLAUDE_EFFORTS.indexOf('high'),
+  )
+  const level = below.at(-1) ?? known[0]!
+  return level === 'max' ? null : level
+}
+
+/**
+ * The roles Claude Code gives models besides the one a session starts with:
+ * its tiers, which `/model` offers and some of its own work runs on, Haiku's
+ * most, and the model its subagents start with.
+ */
+export const CLAUDE_ROLES = ['opus', 'sonnet', 'haiku', 'fable', 'subagent'] as const
+
+export type ClaudeRole = (typeof CLAUDE_ROLES)[number]
+
+/** How the Agents page names each of Claude Code's roles. */
+export const CLAUDE_ROLE_NAMES: Readonly<Record<ClaudeRole, string>> = {
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku',
+  fable: 'Fable',
+  subagent: 'Subagent',
+}
+
+/**
+ * The roles that take the model a session starts with while no model of
+ * their own is mapped to them. Fable's is left to Claude Code, which takes
+ * the model it is given for one of Fable's, and so are subagents', which
+ * otherwise start with the model each names, or their session's.
+ */
+export const FOLLOWING_ROLES: readonly ClaudeRole[] = ['opus', 'sonnet', 'haiku']
+
+/**
+ * The models of its provider a Claude Code agent on a provider of the user's
+ * runs Claude Code's roles on, by role; a role left out takes its default
+ * (see `FOLLOWING_ROLES`).
+ */
+export type ModelMap = Partial<Record<ClaudeRole, string>>
+
+/** A model map without blank models and roles Claude Code does not have. */
+export function cleanModelMap(map: ModelMap): ModelMap {
+  const clean: ModelMap = {}
+  for (const role of CLAUDE_ROLES) {
+    const model = map[role]?.trim()
+    if (model) clean[role] = model
+  }
+  return clean
+}
+
+/** A model map on another provider: the roles mapped to a model that provider offers too. */
+export function modelMapOn(map: ModelMap, provider: Pick<Provider, 'models' | 'own'>): ModelMap {
+  if (provider.own !== null) return {}
+  const kept: ModelMap = {}
+  for (const role of CLAUDE_ROLES) {
+    const model = map[role]
+    if (model !== undefined && provider.models.includes(model)) kept[role] = model
+  }
+  return kept
 }
 
 /** Whether an agent's own models need it signed in: OpenCode's free ones do not. */
@@ -1049,6 +1165,11 @@ export interface Agent {
   effort: string | null
   /** Arguments added to the end of its sessions' own arguments, in order. */
   extraArgs: string[]
+  /**
+   * For Claude Code on a provider of the user's, the models of it Claude
+   * Code's roles run on; empty for every role's default.
+   */
+  modelMap: ModelMap
   /** Milliseconds since the Unix epoch, when it was made, which orders the agents. */
   createdAt: number
 }
@@ -1059,6 +1180,7 @@ export interface NewAgent {
   providerId: string
   model: string | null
   name?: string | null
+  modelMap?: ModelMap
 }
 
 /**
@@ -1072,6 +1194,8 @@ export interface AgentChange {
   model?: string | null
   effort?: string | null
   extraArgs?: string[]
+  /** Its whole model map, in place of the one it has. */
+  modelMap?: ModelMap
 }
 
 /** An agent with a change applied: a blank name or model is none. */
@@ -1084,6 +1208,7 @@ export function withAgentChange(agent: Agent, change: AgentChange): Agent {
     ...(change.model === undefined ? {} : { model: change.model?.trim() || null }),
     ...(change.effort === undefined ? {} : { effort: change.effort }),
     ...(change.extraArgs === undefined ? {} : { extraArgs: [...change.extraArgs] }),
+    ...(change.modelMap === undefined ? {} : { modelMap: cleanModelMap(change.modelMap) }),
   }
 }
 

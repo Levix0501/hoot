@@ -32,6 +32,7 @@ function agent(id: string, harness: Agent['harness'], change: Partial<Agent> = {
     model: null,
     effort: null,
     extraArgs: [],
+    modelMap: {},
     createdAt: 1,
     ...change,
   }

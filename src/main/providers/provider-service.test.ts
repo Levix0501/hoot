@@ -293,6 +293,37 @@ describe('ProviderService', () => {
     expect(providers.agent(made.agent.id)).toMatchObject({ name: 'Plain', model: null })
   })
 
+  it('keeps the models a Claude Code agent maps Claude Code’s roles to, as Hoot opens again', () => {
+    const providers = service()
+    const added = providers.addProvider(deepseek)
+    if (!added.ok) throw new Error(added.message)
+    const made = providers.addAgent({
+      harness: 'claude',
+      providerId: added.provider.id,
+      model: 'deepseek-pro',
+      modelMap: { haiku: ' deepseek-pro ', fable: '' },
+    })
+    if (!made.ok) throw new Error(made.message)
+    expect(made.agent.modelMap).toEqual({ haiku: 'deepseek-pro' })
+    providers.updateAgent(made.agent.id, { modelMap: { opus: 'deepseek-flash[1m]' } })
+    expect(service().agent(made.agent.id)?.modelMap).toEqual({ opus: 'deepseek-flash[1m]' })
+    // One made without a map has every role's default.
+    const plain = providers.addAgent({
+      harness: 'claude',
+      providerId: added.provider.id,
+      model: null,
+    })
+    expect(plain.ok && plain.agent.modelMap).toEqual({})
+    // A map this Hoot cannot read counts as none, a role it does not know as left out.
+    db.prepare('UPDATE agents SET model_map = ? WHERE id = ?').run('[1]', made.agent.id)
+    expect(service().agent(made.agent.id)?.modelMap).toEqual({})
+    db.prepare('UPDATE agents SET model_map = ? WHERE id = ?').run(
+      '{"gpt": "x", "sonnet": "deepseek-pro", "haiku": 3}',
+      made.agent.id,
+    )
+    expect(service().agent(made.agent.id)?.modelMap).toEqual({ sonnet: 'deepseek-pro' })
+  })
+
   it('keeps the user’s provider fields as typed, trimmed, with each model once', () => {
     const providers = service()
     const added = providers.addProvider({

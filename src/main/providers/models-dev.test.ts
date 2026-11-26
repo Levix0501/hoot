@@ -6,6 +6,7 @@ import {
   CATALOG_IDS,
   catalogsOf,
   keptCatalogs,
+  MODELS_DEV_FORMAT,
   MODELS_DEV_MAX_AGE_MS,
   MODELS_DEV_URL,
   ModelsDev,
@@ -13,6 +14,7 @@ import {
   type Fetch,
   type ModelsDevCopy,
 } from './models-dev'
+import type { CatalogModel } from '../../shared/providers'
 
 let folder: string
 
@@ -50,7 +52,17 @@ function modelsDevFile(
 
 /** A copy as Hoot keeps it, of models.dev's file at a time. */
 function copyOf(file: Record<string, unknown>, fetchedAt: number, etag: string | null = null) {
-  return { fetchedAt, etag, catalogs: keptCatalogs(file)! } satisfies ModelsDevCopy
+  return {
+    format: MODELS_DEV_FORMAT,
+    fetchedAt,
+    etag,
+    catalogs: keptCatalogs(file)!,
+  } satisfies ModelsDevCopy
+}
+
+/** A model as Hoot lists it, of 128,000 tokens of context and 8,000 of answer unless changed. */
+function listed(id: string, change: Partial<CatalogModel> = {}): CatalogModel {
+  return { id, context: 128_000, output: 8_000, efforts: [], ...change }
 }
 
 const DAY = MODELS_DEV_MAX_AGE_MS
@@ -65,8 +77,23 @@ describe('models.dev', () => {
       tool_call: true,
       modalities: { output: ['text'] },
       release_date: '2026-01-01',
-      limit: { context: 128_000 },
+      limit: { context: 128_000, output: 8_000 },
     })
+    // Of its ways of reasoning, its effort levels.
+    const reasoning = keptCatalogs(
+      modelsDevFile({
+        r: model('r', {
+          reasoning_options: [
+            { type: 'toggle' },
+            { type: 'effort', values: ['low', 'high', 'max'] },
+            { type: 'budget_tokens', max: 131_072 },
+          ],
+        }),
+      }),
+    )!
+    expect(reasoning.deepseek?.models.r?.reasoning_options).toEqual([
+      { type: 'effort', values: ['low', 'high', 'max'] },
+    ])
     expect(keptCatalogs([])).toBeNull()
     expect(keptCatalogs({ deepseek: { models: { b: { name: 'no id' } } } })).toEqual({
       deepseek: { models: {} },
@@ -90,10 +117,24 @@ describe('models.dev', () => {
     }
     const catalogs = catalogsOf(copyOf(modelsDevFile(models), 0))
     expect(catalogs.deepseek).toEqual([
-      { id: 'new', context: 1_000_000 },
-      { id: 'gpt', context: 128_000 },
-      { id: 'claude', context: 128_000 },
-      { id: 'old', context: 128_000 },
+      listed('new', { context: 1_000_000, output: null }),
+      listed('gpt'),
+      listed('claude'),
+      listed('old'),
+    ])
+  })
+
+  it('lists the effort levels of a model, and how many tokens it answers with', () => {
+    const models = {
+      thinks: model('thinks', {
+        limit: { context: 1_000_000, output: 384_000 },
+        reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'high', 'max'] }],
+      }),
+      budget: model('budget', { reasoning_options: [{ type: 'budget_tokens', max: 81_920 }] }),
+    }
+    expect(catalogsOf(copyOf(modelsDevFile(models), 0)).deepseek).toEqual([
+      listed('thinks', { context: 1_000_000, output: 384_000, efforts: ['low', 'high', 'max'] }),
+      listed('budget'),
     ])
   })
 
@@ -128,9 +169,7 @@ describe('ModelsDev', () => {
     const models = modelsDev()
     await models.start()
     models.stop()
-    expect(models.catalogs().deepseek).toEqual([{ id: 'shipped', context: 128_000 }])
-    expect(models.context('deepseek', 'shipped')).toBe(128_000)
-    expect(models.context('deepseek', 'missing')).toBeNull()
+    expect(models.catalogs().deepseek).toEqual([listed('shipped')])
     expect(requests).toEqual([])
   })
 
@@ -144,16 +183,16 @@ describe('ModelsDev', () => {
     await models.start()
     models.stop()
     expect(requests).toEqual([{ 'If-None-Match': '"v1"' }])
-    expect(models.catalogs().deepseek).toEqual([{ id: 'fresh', context: 128_000 }])
-    expect(told).toEqual([[{ id: 'fresh', context: 128_000 }]])
+    expect(models.catalogs().deepseek).toEqual([listed('fresh')])
+    expect(told).toEqual([[listed('fresh')]])
     const saved = JSON.parse(fs.readFileSync(savedFile(), 'utf8')) as ModelsDevCopy
-    expect(saved).toMatchObject({ fetchedAt: 11 * DAY, etag: '"v2"' })
+    expect(saved).toMatchObject({ format: MODELS_DEV_FORMAT, fetchedAt: 11 * DAY, etag: '"v2"' })
     // The next Hoot takes the saved copy, newer than the one it ships with.
     now = 11 * DAY + 1
     const next = modelsDev()
     await next.start()
     next.stop()
-    expect(next.catalogs().deepseek).toEqual([{ id: 'fresh', context: 128_000 }])
+    expect(next.catalogs().deepseek).toEqual([listed('fresh')])
     expect(requests).toHaveLength(1)
   })
 
@@ -168,7 +207,7 @@ describe('ModelsDev', () => {
     models.stop()
     expect(requests).toHaveLength(1)
     expect(told).toEqual([])
-    expect(models.catalogs().deepseek).toEqual([{ id: 'shipped', context: 128_000 }])
+    expect(models.catalogs().deepseek).toEqual([listed('shipped')])
     expect(JSON.parse(fs.readFileSync(savedFile(), 'utf8'))).toMatchObject({ fetchedAt: 11 * DAY })
   })
 
@@ -177,13 +216,13 @@ describe('ModelsDev', () => {
     answer = () => Promise.reject(new TypeError('Failed to fetch'))
     const models = modelsDev()
     await models.start()
-    expect(models.catalogs().deepseek).toEqual([{ id: 'shipped', context: 128_000 }])
+    expect(models.catalogs().deepseek).toEqual([listed('shipped')])
     expect(fs.existsSync(savedFile())).toBe(false)
     answer = () => Response.json(modelsDevFile({ fresh: model('fresh') }))
     await models.refreshIfStale()
     models.stop()
     expect(requests).toHaveLength(2)
-    expect(models.catalogs().deepseek).toEqual([{ id: 'fresh', context: 128_000 }])
+    expect(models.catalogs().deepseek).toEqual([listed('fresh')])
   })
 
   it('keeps the models of a provider models.dev no longer lists', async () => {
@@ -194,8 +233,8 @@ describe('ModelsDev', () => {
     const models = modelsDev()
     await models.start()
     models.stop()
-    expect(models.catalogs().deepseek).toEqual([{ id: 'fresh', context: 128_000 }])
-    expect(models.catalogs().openrouter).toEqual([{ id: 'shipped', context: 128_000 }])
+    expect(models.catalogs().deepseek).toEqual([listed('fresh')])
+    expect(models.catalogs().openrouter).toEqual([listed('shipped')])
   })
 
   it('leaves out a saved copy that lacks a provider this Hoot knows, as an earlier Hoot’s', async () => {
@@ -205,6 +244,15 @@ describe('ModelsDev', () => {
     const models = modelsDev()
     await models.start()
     models.stop()
-    expect(models.catalogs().deepseek).toEqual([{ id: 'shipped', context: 128_000 }])
+    expect(models.catalogs().deepseek).toEqual([listed('shipped')])
+  })
+
+  it('leaves out a copy an earlier Hoot saved without the fields this one reads', async () => {
+    const { format: _, ...earlier } = copyOf(modelsDevFile({ saved: model('saved') }), 10 * DAY + 1)
+    fs.writeFileSync(savedFile(), JSON.stringify(earlier))
+    const models = modelsDev()
+    await models.start()
+    models.stop()
+    expect(models.catalogs().deepseek).toEqual([listed('shipped')])
   })
 })

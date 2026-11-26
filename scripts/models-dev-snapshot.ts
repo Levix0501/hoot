@@ -31,6 +31,16 @@ function defined(fields: Json): Json | undefined {
   return Object.keys(kept).length === 0 ? undefined : kept
 }
 
+/** The ways of reasoning of a model that are effort levels, with the levels. */
+function effortOptions(options: unknown): Json[] | undefined {
+  if (!Array.isArray(options)) return undefined
+  const efforts = options.flatMap((option) => {
+    const fields = objectOf(option)
+    return fields?.type === 'effort' ? [defined({ type: 'effort', values: fields.values })!] : []
+  })
+  return efforts.length === 0 ? undefined : efforts
+}
+
 /** The fields of a model that Hoot reads. */
 function keptModel(model: Json): Json {
   const modalities = objectOf(model.modalities)
@@ -43,7 +53,8 @@ function keptModel(model: Json): Json {
       tool_call: model.tool_call,
       modalities: defined({ output: modalities?.output }),
       release_date: model.release_date,
-      limit: defined({ context: limit?.context }),
+      limit: defined({ context: limit?.context, output: limit?.output }),
+      reasoning_options: effortOptions(model.reasoning_options),
       provider: defined({ npm: provider?.npm, api: provider?.api }),
     }) ?? {}
   )
@@ -54,7 +65,8 @@ if (!response.ok) throw new Error(`models.dev answered ${response.status}.`)
 const file = objectOf(await response.json())
 if (file === undefined) throw new Error('models.dev answered with something other than an object.')
 
-const lines = ['{', `  "fetchedAt": ${Date.now()},`]
+// The form of the copy, MODELS_DEV_FORMAT in src/main/providers/models-dev.ts.
+const lines = ['{', '  "format": 2,', `  "fetchedAt": ${Date.now()},`]
 lines.push(`  "etag": ${JSON.stringify(response.headers.get('etag'))},`, '  "catalogs": {')
 const ids = catalogIds()
 ids.forEach((id, index) => {

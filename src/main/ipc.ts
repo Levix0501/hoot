@@ -55,7 +55,14 @@ import { MAX_PROMPT_LENGTH } from '../shared/hoot-cli'
 import { browserLink } from '../shared/links'
 import { SIDEBAR_GROUPS } from '../shared/sidebar-groups'
 import type { ParentChange } from '../shared/sub-issues'
-import { canRun, type KeyHeader, type ProviderCloud, type WireFormat } from '../shared/providers'
+import {
+  canRun,
+  CLAUDE_ROLES,
+  modelMapOn,
+  type KeyHeader,
+  type ProviderCloud,
+  type WireFormat,
+} from '../shared/providers'
 import { CODING_TOOL_IDS, TOOL_IDS, type CodingToolId } from '../shared/tools'
 import { plainFirstMessage } from '../shared/workflow-text'
 import type { WorkflowStep } from '../shared/workflows'
@@ -289,11 +296,14 @@ const providerChange = z.strictObject({
   cloud: providerCloud.optional(),
 })
 const agentModel = z.string().max(1_000).nullable()
+/** The models of its provider a Claude Code agent maps Claude Code's roles to, by role. */
+const modelMap = z.partialRecord(z.enum(CLAUDE_ROLES), z.string().min(1).max(1_000))
 const newAgent = z.strictObject({
   harness: toolId,
   providerId: z.string().min(1).max(100),
   model: agentModel,
   name: z.string().max(1_000).nullable().optional(),
+  modelMap: modelMap.optional(),
 })
 const agentChange = z.strictObject({
   providerId: z.string().min(1).max(100).optional(),
@@ -302,6 +312,7 @@ const agentChange = z.strictObject({
   model: agentModel.optional(),
   effort: z.string().min(1).max(100).nullable().optional(),
   extraArgs: z.array(z.string().min(1).max(10_000)).max(1_000).optional(),
+  modelMap: modelMap.optional(),
 })
 /**
  * Text put on the clipboard: what is selected in a session's terminal, up to
@@ -635,6 +646,8 @@ export function registerIpc(deps: IpcDependencies): void {
    */
   const preparedAgent = (prepared: PreparedChatSession): AgentLaunch => {
     const agent = prepared.agentId === null ? undefined : deps.providers.agent(prepared.agentId)
+    const provider =
+      prepared.providerId === null ? null : (deps.providers.provider(prepared.providerId) ?? null)
     return {
       settings: {
         enabled: true,
@@ -642,10 +655,10 @@ export function registerIpc(deps: IpcDependencies): void {
         effort: agent?.effort ?? null,
         extraArgs: agent?.extraArgs ?? [],
       },
-      provider:
-        prepared.providerId === null
-          ? null
-          : (deps.providers.provider(prepared.providerId) ?? null),
+      provider,
+      // Its agent's, of the models the provider it keeps offers.
+      modelMap:
+        agent === undefined || provider === null ? {} : modelMapOn(agent.modelMap, provider),
     }
   }
 
@@ -670,6 +683,7 @@ export function registerIpc(deps: IpcDependencies): void {
         extraArgs: agent.extraArgs,
       },
       provider,
+      modelMap: agent.modelMap,
     }
   }
 

@@ -5,7 +5,7 @@ import { quote } from 'shell-quote'
 import { parse as parseToml } from 'smol-toml'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
-import { ownProvider, type Provider } from '../../shared/providers'
+import { ownProvider, type CatalogModel, type Provider } from '../../shared/providers'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
@@ -107,8 +107,9 @@ function context(
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     provider: null,
+    modelMap: {},
     claudeUserVariables: async () => [],
-    modelContext: () => null,
+    catalogModel: () => null,
     settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
@@ -620,8 +621,9 @@ describe('resolveLaunch', () => {
     // Those of the settings for the session's own folder.
     expect(folders).toEqual([project])
     expect(onKimi.args).toContain('kimi-k3')
-    // No model the settings save: the one the command picks, else the account's default.
-    expect(writtenSettings().model).toBe('')
+    // The model it runs, over any the user's settings save, and the effort level it starts at.
+    expect(writtenSettings().model).toBe('kimi-k3')
+    expect(writtenSettings().effortLevel).toBe('high')
     expect(writtenSettings().env).toEqual({
       ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic',
       ANTHROPIC_AUTH_TOKEN: 'sk-kimi',
@@ -634,6 +636,9 @@ describe('resolveLaunch', () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k3',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k3',
       CLAUDE_CODE_SUBAGENT_MODEL: '',
+      // Unset where models.dev does not tell them.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '',
       CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
     })
     onKimi.cleanup?.()
@@ -648,6 +653,7 @@ describe('resolveLaunch', () => {
       ANTHROPIC_AUTH_TOKEN: '',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3.1-pro',
     })
+    expect(writtenSettings().model).toBe('kimi-k3.1-pro')
     // On its subscription, every provider variable is unset, and none is set.
     await resolveLaunch(
       {
@@ -662,10 +668,87 @@ describe('resolveLaunch', () => {
     expect(Object.values(own).every((value) => value === '')).toBe(true)
     expect(own).toHaveProperty('ANTHROPIC_CUSTOM_HEADERS', '')
     expect(writtenSettings().model).toBe('')
+    expect(writtenSettings()).not.toHaveProperty('effortLevel')
     // An agent on its own configuration, as a chat from before providers, gets none of it.
     await resolveLaunch(context(loginEnv), 'claude', project)
     expect(writtenSettings()).not.toHaveProperty('env')
     expect(writtenSettings()).not.toHaveProperty('model')
+  })
+
+  it("tells Claude Code its provider's model, its limits, effort levels and roles, as models.dev lists them", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    const bailian: Provider = {
+      id: 'p-bailian',
+      name: 'Bailian Plan',
+      presetId: 'bailian-plan',
+      planId: null,
+      apiKey: 'sk-bailian',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic' },
+      models: ['deepseek-v4.1-flash-1017', 'qwen3.8-max'],
+      cloud: null,
+      own: null,
+    }
+    const models: Record<string, CatalogModel> = {
+      'deepseek-v4.1-flash-1017': {
+        id: 'deepseek-v4.1-flash-1017',
+        context: 1_000_000,
+        output: 384_000,
+        efforts: ['low', 'high', 'max'],
+      },
+      'qwen3.8-max': {
+        id: 'qwen3.8-max',
+        context: 983_616,
+        output: 65_536,
+        efforts: ['low', 'medium', 'xhigh'],
+      },
+    }
+    const onBailian = (agent: Partial<AgentLaunchSettings>, modelMap = {}) =>
+      resolveLaunch(
+        {
+          ...context(loginEnv, { claude: agent }),
+          provider: bailian,
+          modelMap,
+          catalogModel: (provider, model) => {
+            expect(provider).toBe(bailian)
+            return models[model] ?? null
+          },
+        },
+        'claude',
+        project,
+      )
+
+    const picked = await onBailian({ model: 'deepseek-v4.1-flash-1017' })
+    expect(picked.args).toEqual(expect.arrayContaining(['--model', 'deepseek-v4.1-flash-1017']))
+    expect(writtenSettings()).toMatchObject({
+      model: 'deepseek-v4.1-flash-1017',
+      effortLevel: 'high',
+      env: {
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000',
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: '384000',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4.1-flash-1017[1m]',
+      },
+    })
+    // Default runs the provider's first, named; one without `high` starts at the highest below it.
+    await onBailian({}, { haiku: 'qwen3.8-max', subagent: 'qwen3.8-max' })
+    expect(writtenSettings()).toMatchObject({
+      model: 'deepseek-v4.1-flash-1017',
+      env: {
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4.1-flash-1017[1m]',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'qwen3.8-max',
+        CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.8-max',
+      },
+    })
+    await onBailian({ model: 'qwen3.8-max' })
+    expect(writtenSettings()).toMatchObject({
+      model: 'qwen3.8-max',
+      effortLevel: 'medium',
+      env: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: '983616', CLAUDE_CODE_MAX_OUTPUT_TOKENS: '65536' },
+    })
+    // An effort level of the agent's goes in its command, and none in its settings.
+    const effort = await onBailian({ model: 'deepseek-v4.1-flash-1017', effort: 'max' })
+    expect(effort.args).toEqual(expect.arrayContaining(['--effort', 'max']))
+    expect(writtenSettings()).not.toHaveProperty('effortLevel')
   })
 
   it('gives a Codex that runs hooks in the background, and only such a Codex, the hook that reports its conversations', async () => {

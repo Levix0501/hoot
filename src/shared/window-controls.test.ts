@@ -7,9 +7,9 @@ import {
 } from './window-controls'
 
 describe('windowControlsFor', () => {
-  it('has Windows draw its buttons over the top row, with or without the switch', () => {
-    expect(windowControlsFor('win32', false)).toBe('overlay')
-    expect(windowControlsFor('win32', true)).toBe('overlay')
+  it('has the page draw the buttons of Windows in the top row, with or without the switch', () => {
+    expect(windowControlsFor('win32', false)).toBe('custom')
+    expect(windowControlsFor('win32', true)).toBe('custom')
   })
 
   it('keeps the traffic lights on macOS, leaving the room of the buttons of Windows only with the switch', () => {
@@ -20,7 +20,7 @@ describe('windowControlsFor', () => {
 
 describe('windowControlsFromArguments', () => {
   it('reads back what the argument passes on', () => {
-    for (const controls of ['traffic-lights', 'overlay', 'placeholder'] as WindowControls[]) {
+    for (const controls of ['traffic-lights', 'custom', 'placeholder'] as WindowControls[]) {
       expect(windowControlsFromArguments(['--foo', windowControlsArgument(controls)])).toBe(
         controls,
       )

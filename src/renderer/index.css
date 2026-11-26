@@ -132,18 +132,17 @@
 
 /*
  * The room the page leaves at the right end of the window's top row for the
- * window's own buttons (src/shared/window-controls.ts): as wide as the buttons
- * Windows draws there, or 140px, about as wide, on macOS started with
- * --windows-layout. The content of the row stops short of it.
+ * window's own buttons (src/shared/window-controls.ts): as wide as the three
+ * buttons the page draws there on Windows, the navigation's, 28px each with
+ * 4px between and 8px at the window's edge, or 140px, about as wide, on macOS
+ * started with --windows-layout. The content of the row stops short of it.
  */
 :root {
   --window-controls-width: 0px;
 }
 
-:root[data-window-controls='overlay'] {
-  --window-controls-width: calc(
-    100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 140px))
-  );
+:root[data-window-controls='custom'] {
+  --window-controls-width: 100px;
 }
 
 :root[data-window-controls='placeholder'] {

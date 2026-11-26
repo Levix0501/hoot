@@ -77,7 +77,7 @@ import { findCommand } from './tools/find-command'
 import { ToolService } from './tools/tool-service'
 import { UpdateService } from './updates/update-service'
 import { WorkflowExecutor } from './workflows/workflow-executor'
-import { titleBarOverlay, windowBackground } from './window-colors'
+import { windowBackground } from './window-colors'
 import { WorktreeLayout } from './worktrees/layout'
 import { WorktreeService } from './worktrees/worktree-service'
 import { WorktreeStore } from './worktrees/worktree-store'
@@ -113,8 +113,9 @@ const testHooks = app.commandLine.hasSwitch('test-hooks')
 // For unattended runs: keep the window off screen until the user asks for it,
 // so that Hoot never covers or takes focus from other apps.
 const openInBackground = app.commandLine.hasSwitch('background')
-// The window's own buttons: macOS's traffic lights, or those Windows draws.
-// With --windows-layout, macOS also leaves the room of the latter empty.
+// The window's own buttons: macOS's traffic lights, or those the page draws on
+// Windows. With --windows-layout, macOS also leaves the room of the latter
+// empty.
 const windowControls = windowControlsFor(
   process.platform,
   app.commandLine.hasSwitch(WINDOWS_LAYOUT_SWITCH),
@@ -458,14 +459,11 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
     title: 'Hoot',
     // No title bar: the page takes the whole window. The traffic lights
     // (x 15–75, y 16–30) sit in the middle of the page's 46px top row, which
-    // leaves them room. On Windows, Windows draws its minimize, maximize and
-    // close buttons over the right end of the row instead, and a window
-    // without a title bar has no menu bar either.
+    // leaves them room. On Windows, the page draws the minimize, maximize and
+    // close buttons at the right end of the row, and a window without a title
+    // bar has no menu bar either.
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 15, y: 16 },
-    ...(windowControls === 'overlay'
-      ? { titleBarOverlay: titleBarOverlay(nativeTheme.shouldUseDarkColors) }
-      : {}),
     show: false,
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: {
@@ -503,6 +501,10 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   // navigation into their place.
   window.on('enter-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, true))
   window.on('leave-full-screen', () => window.webContents.send(IpcChannel.fullScreenChanged, false))
+  // The page draws the window's buttons on Windows, and shows the maximize or
+  // the restore one as the window is.
+  window.on('maximize', () => window.webContents.send(IpcChannel.windowMaximizedChanged, true))
+  window.on('unmaximize', () => window.webContents.send(IpcChannel.windowMaximizedChanged, false))
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
 
@@ -512,15 +514,11 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
 }
 
 // The window's colors follow the appearance in effect, also when macOS
-// changes its appearance while Hoot follows it: its background, and on
-// Windows the buttons Windows draws.
+// changes its appearance while Hoot follows it: its background.
 nativeTheme.on('updated', () => {
   const window = getWindow()
   if (!window) return
   window.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors))
-  if (windowControls === 'overlay') {
-    window.setTitleBarOverlay(titleBarOverlay(nativeTheme.shouldUseDarkColors))
-  }
 })
 
 /**

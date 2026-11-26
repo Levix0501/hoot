@@ -419,6 +419,13 @@ function trustedIpc(getWindow: () => BrowserWindow | null) {
   return { handle, on, send }
 }
 
+/** Maximizes the window, or restores the size it had before, as its own button does. */
+function toggleMaximized(window: BrowserWindow | null): void {
+  if (!window) return
+  if (window.isMaximized()) window.unmaximize()
+  else window.maximize()
+}
+
 /**
  * The messages the window can send while the database cannot be opened: it
  * learns why, and can show the file in Finder (File Explorer on Windows) or
@@ -445,6 +452,10 @@ export function registerDatabaseErrorIpc(options: {
     shell.showItemInFolder(target)
   })
   on(IpcChannel.quit, () => app.quit())
+  // The window's own buttons, which the page draws on Windows.
+  on(IpcChannel.minimizeWindow, () => options.getWindow()?.minimize())
+  on(IpcChannel.toggleMaximizeWindow, () => toggleMaximized(options.getWindow()))
+  on(IpcChannel.closeWindow, () => options.getWindow()?.close())
 }
 
 export function registerIpc(deps: IpcDependencies): void {
@@ -711,6 +722,10 @@ export function registerIpc(deps: IpcDependencies): void {
     fullScreen: deps.getWindow()?.isFullScreen() ?? false,
     focused: deps.getWindow()?.isFocused() ?? false,
   }))
+  // The window's own buttons, which the page draws on Windows.
+  on(IpcChannel.minimizeWindow, () => deps.getWindow()?.minimize())
+  on(IpcChannel.toggleMaximizeWindow, () => toggleMaximized(deps.getWindow()))
+  on(IpcChannel.closeWindow, () => deps.getWindow()?.close())
   on(IpcChannel.setSidebarOpen, (open) => {
     const parsed = z.boolean().safeParse(open)
     if (parsed.success) deps.sidebar.setOpen(parsed.data)

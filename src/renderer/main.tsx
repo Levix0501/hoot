@@ -5,6 +5,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { DatabaseErrorPage } from './components/database-error-page'
+import { WindowControls } from './components/window-controls'
 import { WindowControlsPlaceholder } from './components/window-controls-placeholder'
 import { api } from './lib/api'
 import { useAppStore } from './store/app-store'
@@ -22,6 +23,7 @@ function render(content: ReactNode): void {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {content}
         <WindowControlsPlaceholder />
+        <WindowControls />
       </ThemeProvider>
     </StrictMode>,
   )

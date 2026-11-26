@@ -39,7 +39,7 @@ export const TOOLTIP_CLASS =
 /** Where the navigation starts now. */
 function useNavigationStart(): number {
   const fullScreen = useAppStore((store) => store.fullScreen)
-  return fullScreen || api.windowControls === 'overlay'
+  return fullScreen || api.windowControls === 'custom'
     ? NAVIGATION_START.nearEdge
     : NAVIGATION_START.pastTrafficLights
 }

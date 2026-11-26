@@ -47,7 +47,14 @@ vi.mock('electron', () => electron)
 const { registerIpc } = await import('./ipc')
 
 const webContents = { send: vi.fn<(channel: string, ...args: unknown[]) => void>() }
-const window = { isDestroyed: () => false, webContents } as unknown as BrowserWindow
+const windowCalls = {
+  minimize: vi.fn<() => void>(),
+  isMaximized: vi.fn<() => boolean>(() => false),
+  maximize: vi.fn<() => void>(),
+  unmaximize: vi.fn<() => void>(),
+  close: vi.fn<() => void>(),
+}
+const window = { isDestroyed: () => false, webContents, ...windowCalls } as unknown as BrowserWindow
 const trusted = { sender: webContents }
 
 const emitter = () => new EventEmitter()
@@ -428,6 +435,32 @@ beforeEach(() => {
 
 const invoke = (channel: string, ...args: unknown[]) =>
   electron.handlers.get(channel)?.(trusted, ...args)
+
+describe("the window's own buttons", () => {
+  it('minimize, maximize or restore, and close the window', () => {
+    electron.listeners.get(IpcChannel.minimizeWindow)!(trusted)
+    expect(windowCalls.minimize).toHaveBeenCalledTimes(1)
+    windowCalls.isMaximized.mockReturnValue(true)
+    electron.listeners.get(IpcChannel.toggleMaximizeWindow)!(trusted)
+    expect(windowCalls.unmaximize).toHaveBeenCalledTimes(1)
+    windowCalls.isMaximized.mockReturnValue(false)
+    electron.listeners.get(IpcChannel.toggleMaximizeWindow)!(trusted)
+    expect(windowCalls.maximize).toHaveBeenCalledTimes(1)
+    electron.listeners.get(IpcChannel.closeWindow)!(trusted)
+    expect(windowCalls.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('answer only the window itself', () => {
+    const stranger = { sender: {} }
+    electron.listeners.get(IpcChannel.minimizeWindow)!(stranger)
+    electron.listeners.get(IpcChannel.toggleMaximizeWindow)!(stranger)
+    electron.listeners.get(IpcChannel.closeWindow)!(stranger)
+    expect(windowCalls.minimize).not.toHaveBeenCalled()
+    expect(windowCalls.maximize).not.toHaveBeenCalled()
+    expect(windowCalls.unmaximize).not.toHaveBeenCalled()
+    expect(windowCalls.close).not.toHaveBeenCalled()
+  })
+})
 
 describe("the file panel's messages", () => {
   it('read and write only in a folder the panel may show', async () => {

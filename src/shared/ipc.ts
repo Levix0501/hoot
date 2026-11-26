@@ -351,6 +351,10 @@ export const IpcChannel = {
   listArchivedSessions: 'archive:list',
   archivedSessionsChanged: 'archive:changed',
   getWindowState: 'window:get-state',
+  minimizeWindow: 'window:minimize',
+  toggleMaximizeWindow: 'window:toggle-maximize',
+  closeWindow: 'window:close',
+  windowMaximizedChanged: 'window:maximized-changed',
   setSidebarOpen: 'window:set-sidebar-open',
   setSidebarWidth: 'window:set-sidebar-width',
   setGroupExpanded: 'window:set-group-expanded',
@@ -624,6 +628,17 @@ export interface HootApi {
   /** The archived chats and saved sessions changed: one was archived, unarchived or deleted. */
   onArchivedSessionsChanged(listener: (sessions: ArchivedSessionInfo[]) => void): () => void
   getWindowState(): Promise<WindowState>
+  /** Minimizes the window, as the window's own minimize button does. */
+  minimizeWindow(): void
+  /** Maximizes the window, or restores the size it had before, as its own button does. */
+  toggleMaximizeWindow(): void
+  /**
+   * Closes the window, as its own close button does; while sessions run, Hoot
+   * asks whether to quit first.
+   */
+  closeWindow(): void
+  /** The window was maximized, or restored to the size it had before. */
+  onWindowMaximizedChanged(listener: (maximized: boolean) => void): () => void
   /** Saves whether the sidebar is expanded, so that Hoot opens with it as it was left. */
   setSidebarOpen(open: boolean): void
   /** Saves the sidebar's width, so that Hoot opens with it as wide as it was left. */

@@ -1,5 +1,27 @@
 # hoot
 
+## 0.1.0-alpha.33
+
+### Minor Changes
+
+- [`ab8bfa1`](https://github.com/Levix0501/hoot/commit/ab8bfa13824ee7074758d2e3dd8a0b56bfbc651c) - Chats and saved sessions can be archived from the button on their row, which takes them out of the sidebar with a toast that can undo it, and the settings' Archive page brings them back or deletes them for good.
+
+### Patch Changes
+
+- [`f7a8352`](https://github.com/Levix0501/hoot/commit/f7a8352e03424fa31586d86f508920087548a3b8) - An agent's side panel no longer has Make default, which the agent's ⋯ menu and the Default agent picker on the Agents page still do.
+
+- [`2d2eb58`](https://github.com/Levix0501/hoot/commit/2d2eb5849ad83c83177134cce1b19c750e21d5b4) - Clicking the name atop an agent's side panel now edits it instead of dragging the window, and the panel no longer draws a focus ring around itself.
+
+- [`5fb4189`](https://github.com/Levix0501/hoot/commit/5fb41891f13c23d131885cf76e73400d1c81a632) - Closing or archiving a running session, or removing a missing worktree, takes its page away at once, while its agent ends in the background.
+
+- [`ab8bfa1`](https://github.com/Levix0501/hoot/commit/ab8bfa13824ee7074758d2e3dd8a0b56bfbc651c) - Closing a running session no longer asks first, and the Confirm before closing switch is gone from the Agents page.
+
+- [`da3450d`](https://github.com/Levix0501/hoot/commit/da3450d5e564759138a8117a9c834f3014a17871) - A Custom provider can now be added without models, and a Claude Code agent on one also offers Claude's models, on which Opus, Sonnet, Haiku, Fable and subagents run Claude Code's own models until mapped to others.
+
+- [`c9d9d55`](https://github.com/Levix0501/hoot/commit/c9d9d550d0a3a4d76e81f6db074fd415198adffb) - Providers are now added and edited in a side panel like agents, which saves each change as it is made and shows a preset's addresses read-only, and an agent's own models, such as the Claude subscription, open there too.
+
+- [`741411c`](https://github.com/Levix0501/hoot/commit/741411c9d97d0b76c0461880f0c6de3aa33cff89) - Notifications show centered at the top of the window as compact cards, tinted when something worked or failed, each with a close button.
+
 ## 0.1.0-alpha.32
 
 ### Patch Changes

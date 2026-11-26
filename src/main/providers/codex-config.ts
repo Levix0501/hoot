@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { parse } from 'smol-toml'
-import { bareModel, providerUrl, type GlobalConfig, type Provider } from '../../shared/providers'
+import {
+  bareModel,
+  CODEX_PROVIDER_EFFORT,
+  providerUrl,
+  type GlobalConfig,
+  type Provider,
+} from '../../shared/providers'
 import { codexConfigPath } from '../agents/codex-options'
 import { envVariable, type Env } from '../env/env'
 import type { GlobalReading } from './provider-service'
@@ -16,13 +22,6 @@ export const CODEX_KEY_VARIABLE = 'HOOT_CODEX_API_KEY'
 
 /** OpenAI's own API, which a key Codex signed in with goes to. */
 export const OPENAI_API_URL = 'https://api.openai.com/v1'
-
-/**
- * The effort level a Codex session on a provider of the user's starts with
- * when its agent picks none: one every provider Hoot knows takes, in place
- * of the user's own, which may be one only OpenAI's models take.
- */
-export const CODEX_PROVIDER_EFFORT = 'high'
 
 function objectOf(value: unknown): JsonObject | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

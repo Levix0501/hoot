@@ -1322,13 +1322,17 @@ describe('the messages of the Agents page', () => {
 
     const agent = { harness: 'claude', providerId: 'p-kimi', model: 'kimi-k3.1-pro' }
     const mapped = { ...agent, modelMap: { haiku: 'kimi-k3', subagent: 'kimi-k3' } }
+    const tuned = { ...agent, effort: 'max', extraArgs: ['--verbose'] }
     await invoke(IpcChannel.makeAgent, agent)
     await invoke(IpcChannel.makeAgent, mapped)
+    await invoke(IpcChannel.makeAgent, tuned)
     await invoke(IpcChannel.makeAgent, { ...agent, harness: 'shell' })
     // A role Claude Code does not have, or a blank model, is no model map.
     await invoke(IpcChannel.makeAgent, { ...agent, modelMap: { gpt: 'kimi-k3' } })
     await invoke(IpcChannel.makeAgent, { ...agent, modelMap: { haiku: '' } })
-    expect(providers.addAgent.mock.calls).toEqual([[agent], [mapped]])
+    await invoke(IpcChannel.makeAgent, { ...agent, effort: '' })
+    await invoke(IpcChannel.makeAgent, { ...agent, extraArgs: [''] })
+    expect(providers.addAgent.mock.calls).toEqual([[agent], [mapped], [tuned]])
     send(IpcChannel.changeAgent, 'agent-1', { enabled: false, extraArgs: ['--verbose'] })
     send(IpcChannel.changeAgent, 'agent-1', { extraArgs: [3] })
     send(IpcChannel.changeAgent, 'agent-1', { modelMap: { opus: 'kimi-k3.1-pro' } })

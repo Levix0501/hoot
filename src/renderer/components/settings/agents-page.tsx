@@ -33,7 +33,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog'
-import { AgentItem, DefaultAgentPicker, HarnessAgents, useCopied } from './agent-items'
+import { DefaultAgentPicker, DormantAgentItem, HarnessAgents } from './agent-items'
+import { useCopied } from './agent-panel'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
@@ -592,7 +593,7 @@ function NotInstalledGroup({
                   />
                 </div>
                 {waiting.map((made) => (
-                  <AgentItem key={made.id} agent={made} state={agent} dormant />
+                  <DormantAgentItem key={made.id} agent={made} />
                 ))}
               </div>
             )

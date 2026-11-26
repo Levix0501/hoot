@@ -234,7 +234,8 @@ describe('providers', () => {
     const flash = agent('flash')
     const both = { providers: [deepseek], agents: [own, pro, flash] }
     expect(agentName(pro, both)).toBe('DeepSeek · deepseek-pro')
-    expect(agentName(flash, both)).toBe('DeepSeek · Default')
+    // One made without a model runs its provider's first.
+    expect(agentName(flash, both)).toBe('DeepSeek · deepseek-flash[1m]')
     expect(agentName({ ...flash, name: '  Fast  ' }, both)).toBe('Fast')
     // Another harness's agent on the same provider is no sibling.
     const opencode = agent('oc', { harness: 'opencode' })

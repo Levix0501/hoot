@@ -1011,6 +1011,13 @@ export const PROVIDER_EFFORTS: Readonly<Record<CodingToolId, readonly string[]>>
   opencode: ['low', 'medium', 'high'],
 }
 
+/**
+ * The effort level a Codex session on a provider of the user's starts with
+ * when its agent picks none: one every provider Hoot knows takes, in place
+ * of the user's own, which may be one only OpenAI's models take.
+ */
+export const CODEX_PROVIDER_EFFORT = 'high'
+
 /** Whether a model's id names one of Claude's, whose limits and effort levels Claude Code knows itself. */
 export function namesClaudeModel(model: string): boolean {
   return /claude-/i.test(model)
@@ -1051,7 +1058,7 @@ export function claudeDefaultEffort(levels: readonly string[]): string | null {
 /**
  * The roles Claude Code gives models besides the one a session starts with:
  * its tiers, which `/model` offers and some of its own work runs on, Haiku's
- * most, and the model its subagents start with.
+ * most, and the model its subagents start with where they name none.
  */
 export const CLAUDE_ROLES = ['opus', 'sonnet', 'haiku', 'fable', 'subagent'] as const
 
@@ -1067,17 +1074,9 @@ export const CLAUDE_ROLE_NAMES: Readonly<Record<ClaudeRole, string>> = {
 }
 
 /**
- * The roles that take the model a session starts with while no model of
- * their own is mapped to them. Fable's is left to Claude Code, which takes
- * the model it is given for one of Fable's, and so are subagents', which
- * otherwise start with the model each names, or their session's.
- */
-export const FOLLOWING_ROLES: readonly ClaudeRole[] = ['opus', 'sonnet', 'haiku']
-
-/**
  * The models of its provider a Claude Code agent on a provider of the user's
- * runs Claude Code's roles on, by role; a role left out takes its default
- * (see `FOLLOWING_ROLES`).
+ * runs Claude Code's roles on, by role; a role left out runs the model the
+ * session starts with.
  */
 export type ModelMap = Partial<Record<ClaudeRole, string>>
 
@@ -1180,6 +1179,8 @@ export interface NewAgent {
   providerId: string
   model: string | null
   name?: string | null
+  effort?: string | null
+  extraArgs?: string[]
   modelMap?: ModelMap
 }
 
@@ -1285,8 +1286,9 @@ export function findProvider(providers: readonly Provider[], id: string): Provid
 
 /**
  * The name an agent shows: the one the user gave it; else, on the harness's
- * own models, the harness's name; else its provider's, with its model when
- * another agent of the harness runs the same provider.
+ * own models, the harness's name; else its provider's, with the model it
+ * runs when another agent of the harness runs the same provider: its own, or
+ * the provider's first, which an agent made without one runs.
  */
 export function agentName(
   agent: Agent,
@@ -1303,7 +1305,8 @@ export function agentName(
       other.providerId === agent.providerId &&
       (other.name === null || other.name.trim() === ''),
   )
-  return shared ? `${provider.name} · ${agent.model ?? 'Default'}` : provider.name
+  const model = agent.model ?? provider.models[0] ?? null
+  return shared && model !== null ? `${provider.name} · ${model}` : provider.name
 }
 
 /**

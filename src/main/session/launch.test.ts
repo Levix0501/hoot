@@ -631,11 +631,11 @@ describe('resolveLaunch', () => {
       ANTHROPIC_MODEL: '',
       ANTHROPIC_SMALL_FAST_MODEL: '',
       ANTHROPIC_CUSTOM_HEADERS: '',
-      ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'kimi-k3',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k3',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k3',
-      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'kimi-k3',
       // Unset where models.dev does not tell them.
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: '',
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '',

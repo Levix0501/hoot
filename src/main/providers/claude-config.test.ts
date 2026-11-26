@@ -138,9 +138,8 @@ describe("Claude Code's own configuration", () => {
       ANTHROPIC_API_KEY: '',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
-      // Fable and subagents are left to Claude Code while none is mapped to them.
-      ANTHROPIC_DEFAULT_FABLE_MODEL: '',
-      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'deepseek-flash[1m]',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash[1m]',
       CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
     })
     const pro = claudeSessionEnv(deepseek, { model: 'deepseek-pro' }, [], catalogModel)
@@ -189,7 +188,7 @@ describe("Claude Code's own configuration", () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-pro',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-pro',
       ANTHROPIC_DEFAULT_FABLE_MODEL: 'deepseek-pro',
-      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-pro',
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: '128000',
     })
     const subagents = claudeSessionEnv(
@@ -220,8 +219,8 @@ describe("Claude Code's own configuration", () => {
     expect(claudeSessionModel(deepseek, 'haiku', map)).toBe('deepseek-pro')
     expect(claudeSessionModel(deepseek, 'sonnet[1m]', map)).toBe('deepseek-flash')
     expect(claudeSessionModel(deepseek, 'Opus', {})).toBe('deepseek-flash')
-    // Fable's own, while none is mapped to it.
-    expect(claudeSessionModel(deepseek, 'fable', map)).toBeNull()
+    expect(claudeSessionModel(deepseek, 'fable', map)).toBe('deepseek-flash')
+    expect(claudeSessionModel(deepseek, 'fable', { fable: 'deepseek-pro' })).toBe('deepseek-pro')
     expect(claudeSessionModel({ models: [] }, null, {})).toBeNull()
   })
 

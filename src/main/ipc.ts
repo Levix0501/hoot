@@ -298,11 +298,15 @@ const providerChange = z.strictObject({
 const agentModel = z.string().max(1_000).nullable()
 /** The models of its provider a Claude Code agent maps Claude Code's roles to, by role. */
 const modelMap = z.partialRecord(z.enum(CLAUDE_ROLES), z.string().min(1).max(1_000))
+const agentEffort = z.string().min(1).max(100).nullable()
+const agentExtraArgs = z.array(z.string().min(1).max(10_000)).max(1_000)
 const newAgent = z.strictObject({
   harness: toolId,
   providerId: z.string().min(1).max(100),
   model: agentModel,
   name: z.string().max(1_000).nullable().optional(),
+  effort: agentEffort.optional(),
+  extraArgs: agentExtraArgs.optional(),
   modelMap: modelMap.optional(),
 })
 const agentChange = z.strictObject({
@@ -310,8 +314,8 @@ const agentChange = z.strictObject({
   name: z.string().max(1_000).nullable().optional(),
   enabled: z.boolean().optional(),
   model: agentModel.optional(),
-  effort: z.string().min(1).max(100).nullable().optional(),
-  extraArgs: z.array(z.string().min(1).max(10_000)).max(1_000).optional(),
+  effort: agentEffort.optional(),
+  extraArgs: agentExtraArgs.optional(),
   modelMap: modelMap.optional(),
 })
 /**

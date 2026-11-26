@@ -307,13 +307,26 @@ describe('ProviderService', () => {
     expect(made.agent.modelMap).toEqual({ haiku: 'deepseek-pro' })
     providers.updateAgent(made.agent.id, { modelMap: { opus: 'deepseek-flash[1m]' } })
     expect(service().agent(made.agent.id)?.modelMap).toEqual({ opus: 'deepseek-flash[1m]' })
-    // One made without a map has every role's default.
+    // One made without a map has every role on its model.
     const plain = providers.addAgent({
       harness: 'claude',
       providerId: added.provider.id,
       model: null,
     })
     expect(plain.ok && plain.agent.modelMap).toEqual({})
+    // One made with an effort level and arguments keeps them.
+    const tuned = providers.addAgent({
+      harness: 'claude',
+      providerId: added.provider.id,
+      model: 'deepseek-pro',
+      effort: 'max',
+      extraArgs: ['--verbose'],
+    })
+    if (!tuned.ok) throw new Error(tuned.message)
+    expect(service().agent(tuned.agent.id)).toMatchObject({
+      effort: 'max',
+      extraArgs: ['--verbose'],
+    })
     // A map this Hoot cannot read counts as none, a role it does not know as left out.
     db.prepare('UPDATE agents SET model_map = ? WHERE id = ?').run('[1]', made.agent.id)
     expect(service().agent(made.agent.id)?.modelMap).toEqual({})

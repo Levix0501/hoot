@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addedClaudeModels,
   agentName,
   agentsToMake,
   canRun,
   catalogModelOf,
+  claudeAgentModels,
   claudeDefaultEffort,
   claudeEffortsOf,
   cleanModelMap,
   findProvider,
+  firstClaudeModel,
   freeProviderName,
   hasGlobal,
+  isCustomProvider,
+  leavesRolesToClaude,
   maskKey,
   modelMapOn,
   namesProvider,
@@ -58,6 +63,31 @@ const kimi: Provider = {
   cloud: null,
   own: null,
 }
+
+/** A Custom provider without models of its own, as one that relays Claude's may be. */
+const custom: Provider = {
+  id: 'p-relay',
+  name: 'Relay',
+  presetId: null,
+  planId: null,
+  apiKey: 'sk-relay',
+  keyHeader: 'bearer',
+  urls: { anthropic: 'https://relay.example.com' },
+  models: [],
+  cloud: null,
+  own: null,
+}
+
+const OPUS = {
+  id: 'claude-opus-5-5',
+  context: 1_000_000,
+  output: 128_000,
+  efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+}
+const HAIKU = { id: 'claude-haiku-4-5', context: 200_000, output: 64_000, efforts: [] }
+
+/** Claude's models, newest first, as models.dev lists them. */
+const CLAUDE_MODELS = { anthropic: [OPUS, HAIKU] }
 
 function agent(id: string, change: Partial<Agent> = {}): Agent {
   return {
@@ -298,8 +328,14 @@ describe('Claude Code on a provider of the user’s', () => {
       opus: 'kimi-k3',
     })
     const map = { opus: 'kimi-k3', haiku: 'kimi-k3.1-pro' }
-    expect(modelMapOn(map, { models: ['kimi-k3'], own: null })).toEqual({ opus: 'kimi-k3' })
-    expect(modelMapOn(map, ownProvider('claude'))).toEqual({})
+    expect(modelMapOn(map, { ...kimi, models: ['kimi-k3'] }, {})).toEqual({ opus: 'kimi-k3' })
+    expect(modelMapOn(map, ownProvider('claude'), {})).toEqual({})
+    // A Custom provider offers Claude's models too.
+    const claude = { haiku: 'claude-haiku-4-5', opus: 'kimi-k3' }
+    expect(modelMapOn(claude, { ...kimi, models: ['kimi-k3'] }, CLAUDE_MODELS)).toEqual({
+      opus: 'kimi-k3',
+    })
+    expect(modelMapOn(claude, custom, CLAUDE_MODELS)).toEqual({ haiku: 'claude-haiku-4-5' })
     const changed = withAgentChange(agent('a'), { modelMap: { subagent: ' kimi-k3 ' } })
     expect(changed.modelMap).toEqual({ subagent: 'kimi-k3' })
     expect(withAgentChange(changed, { name: 'Mine' }).modelMap).toEqual({ subagent: 'kimi-k3' })
@@ -316,6 +352,56 @@ describe('Claude Code on a provider of the user’s', () => {
     expect(catalogModelOf(catalogs, made, 'deepseek-flash[1m]')).toEqual(flash)
     expect(catalogModelOf(catalogs, made, 'deepseek-next')).toBeNull()
     expect(catalogModelOf(catalogs, { ...made, presetId: null }, 'deepseek-flash')).toBeNull()
+    // Of a Custom provider, of Claude's models alone.
+    expect(catalogModelOf(CLAUDE_MODELS, custom, 'claude-haiku-4-5')).toEqual(HAIKU)
+    expect(catalogModelOf(CLAUDE_MODELS, custom, 'relay-model')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, deepseek, 'claude-haiku-4-5')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, ownProvider('claude'), 'claude-haiku-4-5')).toBeNull()
+  })
+})
+
+describe('Claude Code on a Custom provider', () => {
+  it('offers Claude’s models after the provider’s, on a Custom provider alone', () => {
+    expect(isCustomProvider(custom)).toBe(true)
+    expect(isCustomProvider(deepseek)).toBe(false)
+    expect(isCustomProvider(ownProvider('claude'))).toBe(false)
+    expect(claudeAgentModels(custom, CLAUDE_MODELS)).toEqual([
+      'claude-opus-5-5',
+      'claude-haiku-4-5',
+    ])
+    // One the provider lists itself comes once, among its own.
+    const relay = { ...custom, models: ['glm-5', 'claude-haiku-4-5'] }
+    expect(addedClaudeModels(relay, CLAUDE_MODELS)).toEqual(['claude-opus-5-5'])
+    expect(claudeAgentModels(relay, CLAUDE_MODELS)).toEqual([
+      'glm-5',
+      'claude-haiku-4-5',
+      'claude-opus-5-5',
+    ])
+    expect(claudeAgentModels(deepseek, CLAUDE_MODELS)).toEqual(deepseek.models)
+  })
+
+  it('starts on Claude’s newest Opus, else Claude’s newest', () => {
+    const newest = { ...HAIKU, id: 'claude-fable-5-2' }
+    expect(firstClaudeModel({ anthropic: [newest, OPUS, HAIKU] })).toBe('claude-opus-5-5')
+    expect(firstClaudeModel({ anthropic: [newest, HAIKU] })).toBe('claude-fable-5-2')
+    expect(firstClaudeModel({})).toBeNull()
+  })
+
+  it('leaves the roles it does not map to Claude Code while it runs one of Claude’s models', () => {
+    expect(leavesRolesToClaude(custom, 'claude-opus-5-5', CLAUDE_MODELS)).toBe(true)
+    expect(leavesRolesToClaude(custom, 'claude-opus-5-5[1m]', CLAUDE_MODELS)).toBe(true)
+    // With no models of its own, it runs Claude's.
+    expect(leavesRolesToClaude(custom, null, CLAUDE_MODELS)).toBe(true)
+    const relay = { ...custom, models: ['glm-5'] }
+    expect(leavesRolesToClaude(relay, 'glm-5', CLAUDE_MODELS)).toBe(false)
+    expect(leavesRolesToClaude(relay, null, CLAUDE_MODELS)).toBe(false)
+    expect(leavesRolesToClaude(relay, 'claude-haiku-4-5', CLAUDE_MODELS)).toBe(true)
+    // An alias, or a Claude model models.dev does not list, is none of them.
+    expect(leavesRolesToClaude(relay, 'opus', CLAUDE_MODELS)).toBe(false)
+    expect(leavesRolesToClaude(relay, 'anthropic/claude-opus-5-5', CLAUDE_MODELS)).toBe(false)
+    // A preset's provider runs its own models for them, Claude's included.
+    const anthropic = { ...custom, presetId: 'anthropic', models: ['claude-opus-5-5'] }
+    expect(leavesRolesToClaude(anthropic, 'claude-opus-5-5', CLAUDE_MODELS)).toBe(false)
   })
 })
 

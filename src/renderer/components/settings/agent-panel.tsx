@@ -13,6 +13,7 @@ import {
 import {
   agentName,
   canRun,
+  CLAUDE_ROLE_DEFAULTS,
   CLAUDE_ROLE_NAMES,
   CLAUDE_ROLES,
   ownProvider,
@@ -29,8 +30,10 @@ import {
   draftOnProvider,
   draftWithModel,
   effortsOf,
+  leavesRoles,
   mapsRoles,
   modelChoices,
+  modelGroups,
   shownDraft,
   typedName,
   withRole,
@@ -115,7 +118,7 @@ function useDraftName(draft: AgentDraft, id: string | null): { name: string; own
 export function useAgentSummary(agent: Agent, state: AgentState | undefined, name: string): string {
   const catalogs = useAppStore((app) => app.modelCatalogs)
   const provider = useAgentProvider(agent)
-  const shown = shownDraft(draftOf(agent), provider, state)
+  const shown = shownDraft(draftOf(agent), provider, state, catalogs)
   const level =
     shown.effort ?? defaultEffortOf(shown.harness, shown.model, provider, state, catalogs)
   const parts: string[] = []
@@ -184,12 +187,15 @@ function ProviderSelect({
   )
 }
 
-/** The models of a model picker, after the picked one where its provider no longer offers it. */
+/**
+ * The models of a model picker, a group at a time, after the picked one
+ * where its provider no longer offers it.
+ */
 function ModelItems({
-  models,
+  groups,
   missing,
 }: {
-  models: { value: string; label: string }[]
+  groups: { value: string; label: string }[][]
   missing: string | null
 }) {
   return (
@@ -205,20 +211,25 @@ function ModelItems({
           <SelectSeparator />
         </>
       )}
-      <SelectGroup>
-        {models.map((model) => (
-          <SelectItem
-            key={model.value}
-            value={model.value}
-            data-testid={`agent-model-option-${model.value}`}
-          >
-            <span className="font-mono text-xs">{model.value}</span>
-            {model.label !== model.value && (
-              <span className="text-xs text-muted-foreground">{model.label}</span>
-            )}
-          </SelectItem>
-        ))}
-      </SelectGroup>
+      {groups.map((models, index) => (
+        <Fragment key={index}>
+          {index > 0 && <SelectSeparator />}
+          <SelectGroup>
+            {models.map((model) => (
+              <SelectItem
+                key={model.value}
+                value={model.value}
+                data-testid={`agent-model-option-${model.value}`}
+              >
+                <span className="font-mono text-xs">{model.value}</span>
+                {model.label !== model.value && (
+                  <span className="text-xs text-muted-foreground">{model.label}</span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </Fragment>
+      ))}
     </>
   )
 }
@@ -236,7 +247,8 @@ function ModelSelect({
   onChange: (model: string) => void
 }) {
   const catalogs = useAppStore((app) => app.modelCatalogs)
-  const models = modelChoices(draft.harness, provider, state, catalogs)
+  const groups = modelGroups(draft.harness, provider, state, catalogs)
+  const models = groups.flat()
   const current = draft.model
   const known = provider?.own === null || state?.launchOptions != null
   const missing = current !== null && known && !models.some((model) => model.value === current)
@@ -263,7 +275,7 @@ function ModelSelect({
         <span className="flex-1" />
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-64">
-        <ModelItems models={models} missing={missing ? current : null} />
+        <ModelItems groups={groups} missing={missing ? current : null} />
       </SelectContent>
     </Select>
   )
@@ -345,28 +357,41 @@ function EffortSelect({
   )
 }
 
-/** The model one of Claude Code's roles runs: the agent's own, unless another is picked. */
+/** The choice of a role's picker that leaves the role to Claude Code. */
+const CLAUDE_OWN = '\u0000claude-own'
+
+/**
+ * The model one of Claude Code's roles runs: the agent's own, or where the
+ * agent leaves the roles it does not map to Claude Code, Claude Code's own,
+ * which the picker names greyed out and offers first; unless another is
+ * picked.
+ */
 function RoleSelect({
   role,
-  provider,
+  groups,
   runs,
+  leaves,
   value,
   onChange,
 }: {
   role: ClaudeRole
-  provider: Provider
+  /** The models the agent's provider offers it, a group at a time. */
+  groups: { value: string; label: string }[][]
   /** The model the agent runs, which the role follows while it has none of its own. */
   runs: string | null
+  /** Whether the role is left to Claude Code while it has none of its own (see `leavesRoles`). */
+  leaves: boolean
   value: string | undefined
-  onChange: (model: string) => void
+  /** Given `null` where the role is left to Claude Code. */
+  onChange: (model: string | null) => void
 }) {
-  const shown = value ?? runs
-  const missing = shown !== null && !provider.models.includes(shown)
+  const shown = value ?? (leaves ? null : runs)
+  const missing = shown !== null && !groups.some((models) => models.some((m) => m.value === shown))
   return (
     <Select
-      value={shown}
+      value={shown ?? (leaves ? CLAUDE_OWN : null)}
       onValueChange={(picked) => {
-        if (typeof picked === 'string') onChange(picked)
+        if (typeof picked === 'string') onChange(picked === CLAUDE_OWN ? null : picked)
       }}
     >
       <SelectTrigger
@@ -376,14 +401,29 @@ function RoleSelect({
         data-testid={`agent-panel-role-${role}`}
       >
         {missing && <CircleAlertIcon className="size-3.5" />}
-        <span className="truncate font-mono text-xs">{shown}</span>
+        {shown === null && leaves ? (
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {CLAUDE_ROLE_DEFAULTS[role]}
+          </span>
+        ) : (
+          <span className="truncate font-mono text-xs">{shown}</span>
+        )}
         <span className="flex-1" />
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-64">
-        <ModelItems
-          models={provider.models.map((model) => ({ value: model, label: model }))}
-          missing={missing ? shown : null}
-        />
+        {leaves && (
+          <>
+            <SelectGroup>
+              <SelectItem value={CLAUDE_OWN} data-testid={`agent-role-own-${role}`}>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {CLAUDE_ROLE_DEFAULTS[role]}
+                </span>
+              </SelectItem>
+            </SelectGroup>
+            <SelectSeparator />
+          </>
+        )}
+        <ModelItems groups={groups} missing={missing ? shown : null} />
       </SelectContent>
     </Select>
   )
@@ -553,6 +593,7 @@ function PanelFields({
 }) {
   const catalogs = useAppStore((app) => app.modelCatalogs)
   const provider = useAgentProvider(draft)
+  const leaves = leavesRoles(draft.harness, provider, draft.model, catalogs)
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-0.5">
@@ -560,7 +601,9 @@ function PanelFields({
           <ProviderSelect
             harness={draft.harness}
             value={draft.providerId}
-            onChange={(picked) => onChange(draftOnProvider(draft, picked, state))}
+            onChange={(picked) =>
+              onChange(draftOnProvider(draft, picked, state, catalogs, provider))
+            }
           />
         </Property>
         <Property label="Model">
@@ -586,13 +629,14 @@ function PanelFields({
             <Property key={role} label={CLAUDE_ROLE_NAMES[role]}>
               <RoleSelect
                 role={role}
-                provider={provider}
+                groups={modelGroups(draft.harness, provider, state, catalogs)}
                 runs={draft.model}
+                leaves={leaves}
                 value={draft.modelMap[role]}
                 onChange={(model) =>
                   onChange({
                     ...draft,
-                    modelMap: withRole(draft.modelMap, role, model, draft.model),
+                    modelMap: withRole(draft.modelMap, role, model, draft.model, leaves),
                   })
                 }
               />
@@ -696,11 +740,12 @@ function EditPanel({
   const deleteAgent = useAppStore((app) => app.deleteAgent)
   const setDefaultAgent = useAppStore((app) => app.setDefaultAgent)
   const isDefault = useIsDefault(agent.id)
+  const catalogs = useAppStore((app) => app.modelCatalogs)
   const provider = useAgentProvider(agent)
   const saved = draftOf(agent)
   // One made without a model shows the model it runs, and names none until
   // a change to its model or provider.
-  const shown = shownDraft(saved, provider, state)
+  const shown = shownDraft(saved, provider, state, catalogs)
   const { own } = useDraftName(saved, agent.id)
   // The name being typed; `null` while it is not changed.
   const [typed, setTyped] = useState<string | null>(null)
@@ -810,7 +855,7 @@ function NewPanel({
   const provider = useAgentProvider(draft)
   // On the model its provider starts with until another is picked, once
   // its harness's detection says which that is.
-  const shown = shownDraft(draft, provider, state)
+  const shown = shownDraft(draft, provider, state, catalogs)
   const [nameText, setNameText] = useState('')
   const { own } = useDraftName(shown, null)
   const [busy, setBusy] = useState(false)

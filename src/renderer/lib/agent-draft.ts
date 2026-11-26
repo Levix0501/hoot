@@ -1,10 +1,13 @@
 import type { AgentModelOption, AgentState } from '../../shared/agents'
 import {
+  addedClaudeModels,
   catalogModelOf,
   CLAUDE_ROLES,
   claudeDefaultEffort,
   claudeEffortsOf,
   CODEX_PROVIDER_EFFORT,
+  firstClaudeModel,
+  leavesRolesToClaude,
   modelMapOn,
   namesClaudeModel,
   PROVIDER_EFFORTS,
@@ -37,23 +40,57 @@ export function draftOf(agent: Agent): AgentDraft {
 }
 
 /**
- * The models an agent on a provider can pick: on its harness's own models,
- * those its configuration offers, as the harness's detection read them; on a
- * provider of the user's, that provider's.
+ * The models an agent on a provider can pick, in groups: on its harness's own
+ * models, those its configuration offers, as the harness's detection read
+ * them; on a provider of the user's, that provider's, and for Claude Code on
+ * a Custom one, then Claude's (see `addedClaudeModels`).
  */
+export function modelGroups(
+  harness: CodingToolId,
+  provider: Provider | undefined,
+  state: AgentState | undefined,
+  catalogs: ModelCatalogs,
+): AgentModelOption[][] {
+  if (provider === undefined) return []
+  const groups: AgentModelOption[][] =
+    provider.own !== null
+      ? [state?.launchOptions?.models ?? []]
+      : [provider.models, harness === 'claude' ? addedClaudeModels(provider, catalogs) : []].map(
+          (models) =>
+            models.map((model) => ({
+              value: model,
+              label: model,
+              efforts: effortsOf(harness, model, provider, state, catalogs),
+            })),
+        )
+  return groups.filter((group) => group.length > 0)
+}
+
+/** The models an agent on a provider can pick (see `modelGroups`). */
 export function modelChoices(
   harness: CodingToolId,
   provider: Provider | undefined,
   state: AgentState | undefined,
   catalogs: ModelCatalogs,
 ): AgentModelOption[] {
-  if (provider === undefined) return []
-  if (provider.own !== null) return state?.launchOptions?.models ?? []
-  return provider.models.map((model) => ({
-    value: model,
-    label: model,
-    efforts: effortsOf(harness, model, provider, state, catalogs),
-  }))
+  return modelGroups(harness, provider, state, catalogs).flat()
+}
+
+/**
+ * The model an agent on a provider of the user's runs while it names none:
+ * the provider's first; for Claude Code on a Custom one without models of its
+ * own, Claude's it starts with (see `firstClaudeModel`).
+ */
+function providerFirst(
+  harness: CodingToolId,
+  provider: Provider,
+  catalogs: ModelCatalogs,
+): string | null {
+  const first = provider.models[0]
+  if (first !== undefined) return first
+  return harness === 'claude' && addedClaudeModels(provider, catalogs).length > 0
+    ? firstClaudeModel(catalogs)
+    : null
 }
 
 /**
@@ -72,8 +109,8 @@ export function effortsOf(
 ): string[] {
   if (provider?.own === null) {
     if (harness !== 'claude') return [...PROVIDER_EFFORTS[harness]]
-    const runs = model ?? provider.models[0]
-    return runs === undefined ? [] : claudeEffortsOf(catalogModelOf(catalogs, provider, runs))
+    const runs = model ?? providerFirst(harness, provider, catalogs)
+    return runs === null ? [] : claudeEffortsOf(catalogModelOf(catalogs, provider, runs))
   }
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
@@ -104,8 +141,8 @@ export function defaultEffortOf(
   if (provider.own !== null) return configuredTaken
   switch (harness) {
     case 'claude': {
-      const runs = model ?? provider.models[0]
-      if (runs === undefined) return null
+      const runs = model ?? providerFirst(harness, provider, catalogs)
+      if (runs === null) return null
       return namesClaudeModel(runs) ? configuredTaken : claudeDefaultEffort(efforts)
     }
     case 'codex':
@@ -117,17 +154,19 @@ export function defaultEffortOf(
 
 /**
  * The model an agent runs on a provider while it names none: on a provider
- * of the user's, its first; on the harness's own models, the one the
- * harness's configuration names where it is offered, else for Claude Code
- * Opus, which it starts with, else the first offered. `null` where nothing
- * is offered.
+ * of the user's, its first (see `providerFirst`); on the harness's own
+ * models, the one the harness's configuration names where it is offered,
+ * else for Claude Code Opus, which it starts with, else the first offered.
+ * `null` where nothing is offered.
  */
 export function impliedModel(
+  harness: CodingToolId,
   provider: Provider | undefined,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
 ): string | null {
   if (provider === undefined) return null
-  if (provider.own === null) return provider.models[0] ?? null
+  if (provider.own === null) return providerFirst(harness, provider, catalogs)
   const options = state?.launchOptions
   if (!options) return null
   const offered = (value: string | undefined) =>
@@ -143,8 +182,11 @@ export function shownDraft(
   draft: AgentDraft,
   provider: Provider | undefined,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
 ): AgentDraft {
-  return draft.model !== null ? draft : { ...draft, model: impliedModel(provider, state) }
+  return draft.model !== null
+    ? draft
+    : { ...draft, model: impliedModel(draft.harness, provider, state, catalogs) }
 }
 
 /** Whether an agent maps Claude Code's roles to models: Claude Code on a provider of the user's. */
@@ -153,72 +195,119 @@ export function mapsRoles(harness: CodingToolId, provider: Provider | undefined)
 }
 
 /**
- * A model map with one of Claude Code's roles given a model: given the model
- * the agent runs, the role follows that model again, wherever it goes.
+ * Whether an agent running a model leaves each of Claude Code's roles it
+ * does not map to Claude Code, rather than to that model (see
+ * `leavesRolesToClaude`).
+ */
+export function leavesRoles(
+  harness: CodingToolId,
+  provider: Provider | undefined,
+  model: string | null,
+  catalogs: ModelCatalogs,
+): boolean {
+  return mapsRoles(harness, provider) && leavesRolesToClaude(provider!, model, catalogs)
+}
+
+/**
+ * A model map with one of Claude Code's roles given a model, or none, which
+ * leaves the role to Claude Code where the agent leaves roles to it (see
+ * `leavesRoles`). Elsewhere, given the model the agent runs, the role follows
+ * that model again, wherever it goes.
  */
 export function withRole(
   modelMap: ModelMap,
   role: ClaudeRole,
-  model: string,
+  model: string | null,
   runs: string | null,
+  leaves: boolean,
 ): ModelMap {
   const next = { ...modelMap }
-  if (model === runs) delete next[role]
+  if (model === null || (!leaves && model === runs)) delete next[role]
   else next[role] = model
   return next
 }
 
 /**
- * A model map once the agent runs another model: the roles on the model it
- * ran go with it to the new one, as do those on the new one; the others keep
- * their own.
+ * A model map once the agent runs another model, by whether it left the
+ * roles it does not map to Claude Code before and does after (see
+ * `leavesRoles`): where they followed the model it ran, the roles on that
+ * model go with them, and where they follow the new one, those on that one
+ * join them; the others keep their own. Where roles are left to Claude Code,
+ * a role is on a model only as the user mapped it, so it keeps it.
  */
-export function followMap(modelMap: ModelMap, from: string | null, to: string | null): ModelMap {
+export function followMap(
+  modelMap: ModelMap,
+  from: string | null,
+  to: string | null,
+  leftBefore: boolean,
+  leftAfter: boolean,
+): ModelMap {
   const next: ModelMap = {}
   for (const role of CLAUDE_ROLES) {
     const model = modelMap[role]
-    if (model !== undefined && model !== from && model !== to) next[role] = model
+    if (model === undefined) continue
+    if ((!leftBefore && model === from) || (!leftAfter && model === to)) continue
+    next[role] = model
   }
   return next
 }
 
-/** The model an agent takes on another provider: its own where that one offers it, else that one's. */
+/**
+ * The model an agent takes on another provider: its own where that one lists
+ * it, else the one that one starts with. A provider of the user's lists its
+ * own models, and Claude's only while it has none (see `addedClaudeModels`),
+ * so that one with models of its own starts on its first.
+ */
 function modelOn(
+  harness: CodingToolId,
   model: string | null,
   provider: Provider,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
 ): string | null {
-  const offered =
-    provider.own === null
+  const listed =
+    provider.own === null && provider.models.length > 0
       ? provider.models
-      : (state?.launchOptions?.models ?? []).map((option) => option.value)
-  return model !== null && offered.includes(model) ? model : impliedModel(provider, state)
+      : modelChoices(harness, provider, state, catalogs).map((option) => option.value)
+  return model !== null && listed.includes(model)
+    ? model
+    : impliedModel(harness, provider, state, catalogs)
 }
 
 /**
- * An agent on another provider: its model where that provider offers it,
- * else the one that provider starts with; its roles' models where offered,
- * the others following its model; its effort level back to its model's.
+ * An agent on another provider, from the one it was on: its model where that
+ * provider lists it, else the one that provider starts with (see
+ * `modelOn`); its roles' models where offered, the others following its
+ * model or left to Claude Code (see `followMap`); its effort level back to
+ * its model's.
  */
 export function draftOnProvider(
   draft: AgentDraft,
   provider: Provider,
   state: AgentState | undefined,
+  catalogs: ModelCatalogs,
+  from: Provider | undefined,
 ): AgentDraft {
-  const model = modelOn(draft.model, provider, state)
+  const model = modelOn(draft.harness, draft.model, provider, state, catalogs)
   return {
     ...draft,
     providerId: provider.id,
     model,
     effort: null,
-    modelMap: followMap(modelMapOn(draft.modelMap, provider), draft.model, model),
+    modelMap: followMap(
+      modelMapOn(draft.modelMap, provider, catalogs),
+      draft.model,
+      model,
+      leavesRoles(draft.harness, from, draft.model, catalogs),
+      leavesRoles(draft.harness, provider, model, catalogs),
+    ),
   }
 }
 
 /**
  * An agent with another model: the roles that followed its model follow it
- * to the new one, and an effort level the new model does not take goes back
- * to the new model's.
+ * to the new one, or are left to Claude Code with it (see `followMap`), and
+ * an effort level the new model does not take goes back to the new model's.
  */
 export function draftWithModel(
   draft: AgentDraft,
@@ -229,7 +318,14 @@ export function draftWithModel(
 ): AgentDraft {
   const efforts = effortsOf(draft.harness, model, provider, state, catalogs)
   const effort = draft.effort !== null && efforts.includes(draft.effort) ? draft.effort : null
-  return { ...draft, model, effort, modelMap: followMap(draft.modelMap, draft.model, model) }
+  const modelMap = followMap(
+    draft.modelMap,
+    draft.model,
+    model,
+    leavesRoles(draft.harness, provider, draft.model, catalogs),
+    leavesRoles(draft.harness, provider, model, catalogs),
+  )
+  return { ...draft, model, effort, modelMap }
 }
 
 /** What changed from one draft of an agent to another, for its saved agent to take. */

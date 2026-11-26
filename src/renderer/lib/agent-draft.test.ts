@@ -9,7 +9,9 @@ import {
   effortsOf,
   followMap,
   impliedModel,
+  leavesRoles,
   mapsRoles,
+  modelGroups,
   shownDraft,
   typedName,
   withRole,
@@ -101,33 +103,45 @@ function startsAt(change: Partial<AgentDraft>, provider: Provider, state?: Agent
 
 describe('the model an agent runs while it names none', () => {
   it('is its provider’s first, or on its harness’s own models, what its configuration names', () => {
-    expect(impliedModel(bailian, undefined)).toBe('deepseek-v4.1-flash-1017')
-    expect(impliedModel({ ...bailian, models: [] }, undefined)).toBeNull()
-    expect(impliedModel(undefined, undefined)).toBeNull()
+    expect(impliedModel('claude', bailian, undefined, catalogs)).toBe('deepseek-v4.1-flash-1017')
+    expect(impliedModel('claude', { ...bailian, models: [] }, undefined, catalogs)).toBeNull()
+    expect(impliedModel('claude', undefined, undefined, catalogs)).toBeNull()
     // Claude Code starts with Opus where nothing else is named.
-    expect(impliedModel(subscription, stateWith({}))).toBe('opus')
+    expect(impliedModel('claude', subscription, stateWith({}), catalogs)).toBe('opus')
     expect(
-      impliedModel(subscription, stateWith({ defaultModel: { value: 'fable', source: 'x' } })),
+      impliedModel(
+        'claude',
+        subscription,
+        stateWith({ defaultModel: { value: 'fable', source: 'x' } }),
+        catalogs,
+      ),
     ).toBe('fable')
     // A named model that is not offered counts as none.
     expect(
-      impliedModel(subscription, stateWith({ defaultModel: { value: 'gone', source: 'x' } })),
+      impliedModel(
+        'claude',
+        subscription,
+        stateWith({ defaultModel: { value: 'gone', source: 'x' } }),
+        catalogs,
+      ),
     ).toBe('opus')
     expect(
       impliedModel(
+        'codex',
         ownProvider('codex'),
         stateWith({ models: [{ value: 'gpt', label: 'gpt', efforts: [] }] }),
+        catalogs,
       ),
     ).toBe('gpt')
     // Before its detection read what it offers, it is not known.
-    expect(impliedModel(subscription, undefined)).toBeNull()
+    expect(impliedModel('claude', subscription, undefined, catalogs)).toBeNull()
   })
 
   it('is the one the panel shows for an agent made without one', () => {
-    expect(shownDraft(draft({ model: null }), bailian, undefined).model).toBe(
+    expect(shownDraft(draft({ model: null }), bailian, undefined, catalogs).model).toBe(
       'deepseek-v4.1-flash-1017',
     )
-    expect(shownDraft(draft({ model: 'qwen3.8-max' }), bailian, undefined).model).toBe(
+    expect(shownDraft(draft({ model: 'qwen3.8-max' }), bailian, undefined, catalogs).model).toBe(
       'qwen3.8-max',
     )
   })
@@ -143,14 +157,14 @@ describe('the roles of Claude Code', () => {
 
   it('follow the agent’s model, unless given one of their own', () => {
     const runs = 'deepseek-v4.1-flash-1017'
-    expect(withRole({}, 'haiku', 'qwen3.8-max', runs)).toEqual({ haiku: 'qwen3.8-max' })
+    expect(withRole({}, 'haiku', 'qwen3.8-max', runs, false)).toEqual({ haiku: 'qwen3.8-max' })
     // Given the agent's model, a role follows it again.
-    expect(withRole({ haiku: 'qwen3.8-max' }, 'haiku', runs, runs)).toEqual({})
+    expect(withRole({ haiku: 'qwen3.8-max' }, 'haiku', runs, runs, false)).toEqual({})
   })
 
   it('go with the agent’s model to another, those given one of their own staying', () => {
     const map = { haiku: 'deepseek-v4-flash-0731', fable: 'qwen3.8-max' }
-    expect(followMap(map, 'deepseek-v4.1-flash-1017', 'qwen3.8-max')).toEqual({
+    expect(followMap(map, 'deepseek-v4.1-flash-1017', 'qwen3.8-max', false, false)).toEqual({
       haiku: 'deepseek-v4-flash-0731',
     })
     const moved = draftWithModel(
@@ -171,6 +185,8 @@ describe('an agent on another provider', () => {
       draft({ model: 'qwen3.8-max', effort: 'low', modelMap: { haiku: 'deepseek-v4-flash-0731' } }),
       both,
       undefined,
+      catalogs,
+      bailian,
     )
     expect(kept).toMatchObject({ providerId: both.id, model: 'qwen3.8-max', effort: null })
     expect(kept.modelMap).toEqual({})
@@ -178,6 +194,8 @@ describe('an agent on another provider', () => {
       draft({ modelMap: { haiku: 'qwen3.8-max', opus: 'deepseek-v4-flash-0731' } }),
       both,
       undefined,
+      catalogs,
+      bailian,
     )
     expect(moved).toMatchObject({ model: 'deepseek-v4-pro', modelMap: { haiku: 'qwen3.8-max' } })
   })
@@ -187,9 +205,11 @@ describe('an agent on another provider', () => {
       draft({ modelMap: { haiku: 'qwen3.8-max' } }),
       subscription,
       stateWith({}),
+      catalogs,
+      bailian,
     )
     expect(own).toMatchObject({ providerId: subscription.id, model: 'opus', modelMap: {} })
-    const back = draftOnProvider(own, bailian, undefined)
+    const back = draftOnProvider(own, bailian, undefined, catalogs, subscription)
     expect(back.model).toBe('deepseek-v4.1-flash-1017')
   })
 })
@@ -262,5 +282,134 @@ describe('a change to an agent', () => {
     expect(typedName('  ', 'Bailian Plan')).toBeNull()
     expect(typedName(' Bailian Plan ', 'Bailian Plan')).toBeNull()
     expect(typedName(' Fast ', 'Bailian Plan')).toBe('Fast')
+  })
+})
+
+/** The models of each group of a model picker. */
+const ids = (groups: { value: string }[][]) => groups.map((group) => group.map((m) => m.value))
+
+/** A draft of an agent on a provider, with a change. */
+const on = (provider: Provider, change: Partial<AgentDraft>) =>
+  draft({ providerId: provider.id, model: null, ...change })
+
+describe('Claude Code on a Custom provider', () => {
+  const OPUS = {
+    id: 'claude-opus-5-5',
+    context: 1_000_000,
+    output: 128_000,
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+  }
+  const HAIKU = { id: 'claude-haiku-4-5', context: 200_000, output: 64_000, efforts: [] }
+  const FABLE = { ...OPUS, id: 'claude-fable-5-2' }
+  const withClaude: ModelCatalogs = { ...catalogs, anthropic: [FABLE, OPUS, HAIKU] }
+  const CLAUDE_IDS = ['claude-fable-5-2', 'claude-opus-5-5', 'claude-haiku-4-5']
+  // A relay of Claude's models, with none of its own.
+  const relay: Provider = {
+    ...bailian,
+    id: 'p-relay',
+    name: 'Relay',
+    presetId: null,
+    urls: { anthropic: 'https://relay.example.com' },
+    models: [],
+  }
+  // A relay with models of its own besides Claude's.
+  const mixed: Provider = { ...relay, id: 'p-mixed', models: ['glm-5', 'claude-haiku-4-5'] }
+
+  it('offers Claude’s models after the provider’s own, to Claude Code alone', () => {
+    expect(ids(modelGroups('claude', relay, undefined, withClaude))).toEqual([CLAUDE_IDS])
+    expect(ids(modelGroups('claude', mixed, undefined, withClaude))).toEqual([
+      ['glm-5', 'claude-haiku-4-5'],
+      ['claude-fable-5-2', 'claude-opus-5-5'],
+    ])
+    expect(ids(modelGroups('opencode', relay, undefined, withClaude))).toEqual([])
+    expect(ids(modelGroups('claude', bailian, undefined, withClaude))).toEqual([bailian.models])
+  })
+
+  it('starts on Claude’s newest Opus without models of its own, else on its first', () => {
+    expect(impliedModel('claude', relay, undefined, withClaude)).toBe('claude-opus-5-5')
+    expect(impliedModel('opencode', relay, undefined, withClaude)).toBeNull()
+    expect(impliedModel('claude', mixed, undefined, withClaude)).toBe('glm-5')
+    const made = draftOnProvider(draft(), relay, undefined, withClaude, bailian)
+    expect(made).toMatchObject({ providerId: relay.id, model: 'claude-opus-5-5', modelMap: {} })
+    // One with models of its own starts on its first, though it offers Claude's too ...
+    const moved = draftOnProvider(made, mixed, undefined, withClaude, relay)
+    expect(moved.model).toBe('glm-5')
+    // ... unless the agent's model is one of them; one without keeps Claude's.
+    const haiku = { ...made, model: 'claude-haiku-4-5' }
+    expect(draftOnProvider(haiku, mixed, undefined, withClaude, relay).model).toBe(
+      'claude-haiku-4-5',
+    )
+    const back = draftOnProvider(
+      { ...moved, model: 'claude-fable-5-2' },
+      relay,
+      undefined,
+      withClaude,
+      mixed,
+    )
+    expect(back.model).toBe('claude-fable-5-2')
+  })
+
+  it('offers the effort levels models.dev lists for Claude’s models, Claude Code’s own default', () => {
+    expect(effortsOf('claude', 'claude-opus-5-5', relay, undefined, withClaude)).toEqual(
+      OPUS.efforts,
+    )
+    expect(effortsOf('claude', null, relay, undefined, withClaude)).toEqual(OPUS.efforts)
+    expect(effortsOf('claude', 'glm-5', mixed, undefined, withClaude)).toEqual([])
+    const xhigh = stateWith({ defaultEffort: { value: 'xhigh', source: 'settings.json' } })
+    expect(defaultEffortOf('claude', 'claude-opus-5-5', relay, xhigh, withClaude)).toBe('xhigh')
+    expect(defaultEffortOf('claude', 'claude-opus-5-5', relay, undefined, withClaude)).toBeNull()
+  })
+
+  it('leaves the roles it does not map to Claude Code while it runs one of Claude’s models', () => {
+    expect(leavesRoles('claude', relay, 'claude-opus-5-5', withClaude)).toBe(true)
+    expect(leavesRoles('claude', mixed, 'claude-haiku-4-5', withClaude)).toBe(true)
+    expect(leavesRoles('claude', mixed, 'glm-5', withClaude)).toBe(false)
+    expect(leavesRoles('claude', bailian, 'deepseek-v4.1-flash-1017', withClaude)).toBe(false)
+    expect(leavesRoles('opencode', relay, 'claude-opus-5-5', withClaude)).toBe(false)
+  })
+
+  it('keeps a role the user mapped while the roles are left to Claude Code, the agent’s model too', () => {
+    const runs = 'claude-opus-5-5'
+    expect(withRole({}, 'haiku', runs, runs, true)).toEqual({ haiku: runs })
+    expect(withRole({ haiku: runs }, 'haiku', null, runs, true)).toEqual({})
+    expect(withRole({}, 'haiku', 'claude-haiku-4-5', runs, true)).toEqual({
+      haiku: 'claude-haiku-4-5',
+    })
+  })
+
+  it('switches the roles not mapped between following the model and Claude Code', () => {
+    // On its own model, a role on Claude's: mapped by the user.
+    const own = on(mixed, { model: 'glm-5', modelMap: { haiku: 'claude-haiku-4-5' } })
+    const claude = draftWithModel(own, 'claude-opus-5-5', mixed, undefined, withClaude)
+    expect(claude.modelMap).toEqual({ haiku: 'claude-haiku-4-5' })
+    const back = draftWithModel(claude, 'glm-5', mixed, undefined, withClaude)
+    expect(back.modelMap).toEqual({ haiku: 'claude-haiku-4-5' })
+    // A role mapped to the agent's model stays where roles are left to Claude Code ...
+    const pinned = on(relay, { model: 'claude-opus-5-5', modelMap: { haiku: 'claude-opus-5-5' } })
+    expect(
+      draftWithModel(pinned, 'claude-haiku-4-5', relay, undefined, withClaude).modelMap,
+    ).toEqual({ haiku: 'claude-opus-5-5' })
+    // ... and follows it once on a model of the provider's own, the one it is on.
+    const onGlm = on(mixed, { model: 'claude-opus-5-5', modelMap: { opus: 'glm-5' } })
+    expect(draftWithModel(onGlm, 'glm-5', mixed, undefined, withClaude).modelMap).toEqual({})
+  })
+
+  it('keeps on another provider the roles mapped to models it offers', () => {
+    const anthropic: Provider = {
+      ...relay,
+      id: 'p-anthropic',
+      presetId: 'anthropic',
+      urls: { ...presetById('anthropic')!.urls },
+      models: ['claude-opus-5-5', 'claude-haiku-4-5'],
+    }
+    const left = on(relay, { model: 'claude-opus-5-5', modelMap: { haiku: 'claude-haiku-4-5' } })
+    const moved = draftOnProvider(left, anthropic, undefined, withClaude, relay)
+    expect(moved).toMatchObject({
+      model: 'claude-opus-5-5',
+      modelMap: { haiku: 'claude-haiku-4-5' },
+    })
+    expect(draftOnProvider(moved, relay, undefined, withClaude, anthropic).modelMap).toEqual({
+      haiku: 'claude-haiku-4-5',
+    })
   })
 })

@@ -98,28 +98,32 @@ async function readSettings(file: string): Promise<JsonObject | null> {
  * The model a session on a provider of the user's runs: the one it starts
  * with, or the one an alias of Claude Code's stands for there, as a model a
  * session picked with `/model` may be, through its agent's model map; else
- * the provider's first. `null` for a provider with no models.
+ * the provider's first, unless its agent leaves the roles it does not map to
+ * Claude Code (see `leavesRolesToClaude`), which then runs its own. `null`
+ * for Claude Code's own, and for a provider with no models.
  */
 export function claudeSessionModel(
   provider: Pick<Provider, 'models'>,
   model: string | null,
   modelMap: ModelMap,
+  leavesRoles = false,
 ): string | null {
   const first = provider.models[0] ?? null
   if (model === null) return first
+  const unmapped = leavesRoles ? null : first
   switch (bareModel(model).trim().toLowerCase()) {
     case 'default':
-      return first
+      return unmapped
     case 'opus':
     case 'best':
     case 'opusplan':
-      return modelMap.opus ?? first
+      return modelMap.opus ?? unmapped
     case 'sonnet':
-      return modelMap.sonnet ?? first
+      return modelMap.sonnet ?? unmapped
     case 'haiku':
-      return modelMap.haiku ?? first
+      return modelMap.haiku ?? unmapped
     case 'fable':
-      return modelMap.fable ?? first
+      return modelMap.fable ?? unmapped
     default:
       return model
   }
@@ -147,8 +151,10 @@ export function claudeModel(model: string, context: number | null): string {
  * the user's gives where Claude Code reaches it: Amazon Bedrock's region and
  * API key, Vertex AI's region and project, or else its address and its key,
  * in the header it takes. It gives each of Claude Code's roles its model
- * (see `ModelMap`): the one the agent maps to it, else the session's, marked
- * where it takes a million tokens of context (see `claudeModel`). It tells Claude Code how many tokens of context the
+ * (see `ModelMap`), marked where it takes a million tokens of context (see
+ * `claudeModel`): the one the agent maps to it, else the session's, unless
+ * the agent leaves the role to Claude Code (see `leavesRolesToClaude`),
+ * which then runs its own. It tells Claude Code how many tokens of context the
  * session's model takes and of answer it gives, as models.dev lists them,
  * which Claude Code does not know of another maker's model: it otherwise
  * assumes a million tokens of context, and warns of it as it starts, and
@@ -167,6 +173,8 @@ export function claudeSessionEnv(
     model: string | null
     /** The models its agent maps Claude Code's roles to. */
     modelMap?: ModelMap
+    /** Whether its agent leaves to Claude Code each role it does not map (see `leavesRolesToClaude`). */
+    leavesRoles?: boolean
   },
   /**
    * The variables its other settings and the login shell's environment set
@@ -200,10 +208,12 @@ export function claudeSessionEnv(
       provider.apiKey
   }
   const modelMap = session.modelMap ?? {}
-  const runs = claudeSessionModel(provider, session.model, modelMap)
-  const main = runs ?? provider.models[0] ?? null
+  const leaves = session.leavesRoles ?? false
+  const runs = claudeSessionModel(provider, session.model, modelMap, leaves)
+  const main = leaves ? null : (runs ?? provider.models[0] ?? null)
   const marked = (model: string) => claudeModel(model, catalogModel(model)?.context ?? null)
   for (const role of CLAUDE_ROLES) {
+    // Unset for a role left to Claude Code, which runs its own.
     const model = modelMap[role] ?? main
     if (model !== null) env[ROLE_VARIABLES[role]] = marked(model)
   }

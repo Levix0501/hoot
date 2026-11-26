@@ -100,13 +100,19 @@ export function draftOfProvider(provider: Provider): FormDraft {
   }
 }
 
-/** Whether a draft can be saved: a model, a key, and what else its preset asks for. */
+/**
+ * Whether a draft can be saved: a key, what else its preset asks for, and a
+ * model, which one of the user's own at an Anthropic-compatible address can
+ * do without, its Claude Code agents offering Claude's models (see
+ * `addedClaudeModels`).
+ */
 export function canAdd(draft: FormDraft, preset: ProviderPreset | null): boolean {
-  if (draft.models.length === 0) return false
   if (preset === null) {
     const hasUrl = Object.values(draft.urls).some((url) => (url ?? '').trim() !== '')
-    return draft.name.trim() !== '' && hasUrl && draft.apiKey.trim() !== ''
+    const hasModel = draft.models.length > 0 || (draft.urls.anthropic ?? '').trim() !== ''
+    return draft.name.trim() !== '' && hasUrl && hasModel && draft.apiKey.trim() !== ''
   }
+  if (draft.models.length === 0) return false
   if (preset.cloud === 'vertex') return draft.project.trim() !== ''
   if (preset.endpoint !== undefined && azureResource(draft.endpoint) === '') return false
   return draft.apiKey.trim() !== ''

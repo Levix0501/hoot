@@ -895,19 +895,90 @@ export function catalogModelIds(catalogs: ModelCatalogs, catalog: string | null)
 
 /**
  * What models.dev tells of a model of a provider of the user's, by the plan
- * of its preset the provider is on; `null` for a model its catalog lacks, and
- * for a provider Hoot has no preset of.
+ * of its preset the provider is on, and of a Custom one, of Claude's models
+ * (see `CLAUDE_CATALOG`); `null` for a model its catalog lacks, and for one of
+ * an agent's own models.
  */
 export function catalogModelOf(
   catalogs: ModelCatalogs,
-  provider: Pick<Provider, 'presetId' | 'planId' | 'urls' | 'cloud'>,
+  provider: Pick<Provider, 'presetId' | 'planId' | 'urls' | 'cloud' | 'own'>,
   model: string,
 ): CatalogModel | null {
   const found = providerPlan(provider)
-  if (found === undefined) return null
+  const catalog =
+    found !== undefined
+      ? planCatalog(found.preset, found.plan)
+      : isCustomProvider(provider)
+        ? CLAUDE_CATALOG
+        : null
+  if (catalog === null) return null
   const id = bareModel(model)
-  const catalog = catalogs[planCatalog(found.preset, found.plan)] ?? []
-  return catalog.find((entry) => entry.id === id) ?? null
+  return (catalogs[catalog] ?? []).find((entry) => entry.id === id) ?? null
+}
+
+/**
+ * The models.dev provider of Claude's own models, which a Claude Code agent
+ * on a Custom provider offers besides the provider's (see
+ * `addedClaudeModels`), as such a provider often relays Claude's.
+ */
+export const CLAUDE_CATALOG = 'anthropic'
+
+/** Whether a provider is a Custom one: of the user's, made of no preset. */
+export function isCustomProvider(provider: Pick<Provider, 'presetId' | 'own'>): boolean {
+  return provider.own === null && provider.presetId === null
+}
+
+/**
+ * The models of Claude's a Claude Code agent on a provider offers besides the
+ * provider's own: on a Custom provider, those of models.dev's that the
+ * provider does not list itself, newest first; none on another.
+ */
+export function addedClaudeModels(
+  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  catalogs: ModelCatalogs,
+): string[] {
+  if (!isCustomProvider(provider)) return []
+  return catalogModelIds(catalogs, CLAUDE_CATALOG).filter((id) => !provider.models.includes(id))
+}
+
+/**
+ * The models a Claude Code agent on a provider of the user's offers: the
+ * provider's, then Claude's on a Custom one (see `addedClaudeModels`).
+ */
+export function claudeAgentModels(
+  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  catalogs: ModelCatalogs,
+): string[] {
+  return [...provider.models, ...addedClaudeModels(provider, catalogs)]
+}
+
+/**
+ * The model a Claude Code agent on a Custom provider without models of its
+ * own starts with: Claude's newest Opus, which Claude Code starts with
+ * itself, else Claude's newest; `null` while models.dev lists none.
+ */
+export function firstClaudeModel(catalogs: ModelCatalogs): string | null {
+  const ids = catalogModelIds(catalogs, CLAUDE_CATALOG)
+  return ids.find((id) => id.startsWith('claude-opus-')) ?? ids[0] ?? null
+}
+
+/**
+ * Whether a Claude Code agent on a provider of the user's leaves each of
+ * Claude Code's roles it does not map to Claude Code, which then runs its own
+ * model of the role, as on Claude's own API: on a Custom provider, while the
+ * agent runs one of Claude's models, as models.dev lists them (see
+ * `CLAUDE_CATALOG`), or the provider has no models of its own. Elsewhere a
+ * role it does not map runs the model the agent runs, since Claude Code's own
+ * would be one the provider lacks.
+ */
+export function leavesRolesToClaude(
+  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  model: string | null,
+  catalogs: ModelCatalogs,
+): boolean {
+  if (!isCustomProvider(provider)) return false
+  const runs = model ?? provider.models[0] ?? null
+  return runs === null || catalogModelIds(catalogs, CLAUDE_CATALOG).includes(bareModel(runs))
 }
 
 /** Up to this many, a provider's models are all picked as it is made; past it, none are. */
@@ -1074,6 +1145,19 @@ export const CLAUDE_ROLE_NAMES: Readonly<Record<ClaudeRole, string>> = {
 }
 
 /**
+ * What Claude Code runs a role on that an agent leaves to it (see
+ * `leavesRolesToClaude`), by the name Claude Code gives it: its own model of
+ * each tier, and for subagents, the model of the session they run in.
+ */
+export const CLAUDE_ROLE_DEFAULTS: Readonly<Record<ClaudeRole, string>> = {
+  opus: 'opus',
+  sonnet: 'sonnet',
+  haiku: 'haiku',
+  fable: 'fable',
+  subagent: 'inherit',
+}
+
+/**
  * The models of its provider a Claude Code agent on a provider of the user's
  * runs Claude Code's roles on, by role; a role left out runs the model the
  * session starts with.
@@ -1090,13 +1174,21 @@ export function cleanModelMap(map: ModelMap): ModelMap {
   return clean
 }
 
-/** A model map on another provider: the roles mapped to a model that provider offers too. */
-export function modelMapOn(map: ModelMap, provider: Pick<Provider, 'models' | 'own'>): ModelMap {
+/**
+ * A model map on another provider: the roles mapped to a model that provider
+ * offers too (see `claudeAgentModels`).
+ */
+export function modelMapOn(
+  map: ModelMap,
+  provider: Pick<Provider, 'models' | 'own' | 'presetId'>,
+  catalogs: ModelCatalogs,
+): ModelMap {
   if (provider.own !== null) return {}
+  const offered = claudeAgentModels(provider, catalogs)
   const kept: ModelMap = {}
   for (const role of CLAUDE_ROLES) {
     const model = map[role]
-    if (model !== undefined && provider.models.includes(model)) kept[role] = model
+    if (model !== undefined && offered.includes(model)) kept[role] = model
   }
   return kept
 }

@@ -53,6 +53,11 @@ export interface LaunchContext {
   /** The models of its provider the session's agent maps Claude Code's roles to. */
   modelMap: ModelMap
   /**
+   * Whether the session's agent leaves to Claude Code each of its roles it
+   * does not map (see `leavesRolesToClaude`).
+   */
+  leavesRoles: boolean
+  /**
    * The variables of Claude Code's environment that say which provider it
    * runs on, as its settings for a session in `cwd` and the login shell's
    * environment set them, which a session on another provider unsets (see
@@ -79,6 +84,11 @@ export interface AgentLaunch {
   provider: Provider | null
   /** For Claude Code, the models of the provider its agent maps Claude Code's roles to. */
   modelMap?: ModelMap
+  /**
+   * For Claude Code, whether its agent leaves to Claude Code each role it
+   * does not map, by the model the agent runs (see `leavesRolesToClaude`).
+   */
+  leavesRoles?: boolean
 }
 
 /**
@@ -193,17 +203,17 @@ export function claudeSettingsFilePath(folder: string, sessionId: string): strin
  * model it runs, named, as Claude Code otherwise takes its default for one
  * of Claude's and so for a million tokens of context, and while its agent
  * picks no effort level, the one it starts at (see `claudeDefaultEffort`),
- * unless the model is one of Claude's, whose levels Claude Code knows; on
- * its subscription, the account's default.
+ * unless the model is one of Claude's, whose levels Claude Code knows, as it
+ * does those of its own model of a role the agent leaves to it; on its
+ * subscription, the account's default.
  */
 function claudeSessionNote(context: LaunchContext, agent: AgentLaunchSettings): ClaudeSessionNote {
   const provider = context.provider
   if (provider === null || provider.own !== null) return { model: '', effortLevel: null }
-  const runs = claudeSessionModel(provider, agent.model, context.modelMap)
+  const runs = claudeSessionModel(provider, agent.model, context.modelMap, context.leavesRoles)
   const model = runs ?? ''
-  if (agent.effort !== null || (runs !== null && namesClaudeModel(runs))) {
-    return { model, effortLevel: null }
-  }
+  const claudes = runs === null ? context.leavesRoles : namesClaudeModel(runs)
+  if (agent.effort !== null || claudes) return { model, effortLevel: null }
   const levels = runs === null ? [] : claudeEffortsOf(context.catalogModel(provider, runs))
   return { model, effortLevel: claudeDefaultEffort(levels) }
 }
@@ -220,7 +230,7 @@ async function writeClaudeSettings(
       ? null
       : claudeSessionEnv(
           provider,
-          { model: agent.model, modelMap: context.modelMap },
+          { model: agent.model, modelMap: context.modelMap, leavesRoles: context.leavesRoles },
           await context.claudeUserVariables(cwd),
           (id) => context.catalogModel(provider, id),
         )

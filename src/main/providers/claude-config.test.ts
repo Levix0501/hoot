@@ -56,6 +56,17 @@ const deepseekModels: Record<string, CatalogModel> = {
 }
 const catalogModel = (model: string) => deepseekModels[model] ?? null
 
+/** A Custom provider that relays Claude's models, with none of its own. */
+const relay: Provider = {
+  ...deepseek,
+  id: 'p-relay',
+  name: 'Relay',
+  presetId: null,
+  apiKey: 'sk-relay',
+  urls: { anthropic: 'https://relay.example.com' },
+  models: [],
+}
+
 /** A provider of the user's reached through a cloud, unless changed. */
 function cloud(change: Partial<Provider>): Provider {
   return {
@@ -222,6 +233,55 @@ describe("Claude Code's own configuration", () => {
     expect(claudeSessionModel(deepseek, 'fable', map)).toBe('deepseek-flash')
     expect(claudeSessionModel(deepseek, 'fable', { fable: 'deepseek-pro' })).toBe('deepseek-pro')
     expect(claudeSessionModel({ models: [] }, null, {})).toBeNull()
+    // Where its agent leaves the roles it does not map to Claude Code, Claude Code knows the rest.
+    expect(claudeSessionModel(relay, 'sonnet', {}, true)).toBeNull()
+    expect(claudeSessionModel(relay, 'haiku', map, true)).toBe('deepseek-pro')
+    expect(claudeSessionModel(relay, 'default', {}, true)).toBeNull()
+    expect(claudeSessionModel(relay, 'claude-opus-5-5', {}, true)).toBe('claude-opus-5-5')
+  })
+
+  it('leaves to Claude Code the roles an agent leaves to it, on Claude’s models at a Custom address', () => {
+    const claudeModels: Record<string, CatalogModel> = {
+      'claude-opus-5-5': {
+        id: 'claude-opus-5-5',
+        context: 1_000_000,
+        output: 128_000,
+        efforts: [],
+      },
+      'claude-haiku-4-5': { id: 'claude-haiku-4-5', context: 200_000, output: 64_000, efforts: [] },
+    }
+    const env = claudeSessionEnv(
+      relay,
+      { model: 'claude-opus-5-5', modelMap: { haiku: 'claude-haiku-4-5' }, leavesRoles: true },
+      ['ANTHROPIC_DEFAULT_FABLE_MODEL'],
+      (model) => claudeModels[model] ?? null,
+    )
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://relay.example.com',
+      ANTHROPIC_AUTH_TOKEN: 'sk-relay',
+      ANTHROPIC_MODEL: '',
+      // Unset, as the user's own are, for Claude Code's own models.
+      ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5',
+      // Claude Code knows Claude's limits.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '',
+    })
+    // A session on a model of the provider's own runs the roles not mapped on it.
+    const own = claudeSessionEnv(
+      { ...relay, models: ['glm-5'] },
+      { model: 'glm-5', modelMap: { haiku: 'claude-haiku-4-5' }, leavesRoles: false },
+      [],
+      (model) => claudeModels[model] ?? null,
+    )
+    expect(own).toMatchObject({
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'glm-5',
+    })
   })
 
   it('runs a session on Amazon Bedrock and Vertex AI through Claude Code’s own support for them', () => {

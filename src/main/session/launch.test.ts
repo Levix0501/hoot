@@ -108,6 +108,7 @@ function context(
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     provider: null,
     modelMap: {},
+    leavesRoles: false,
     claudeUserVariables: async () => [],
     catalogModel: () => null,
     settingsFolder: settingsFolder(),
@@ -748,6 +749,59 @@ describe('resolveLaunch', () => {
     // An effort level of the agent's goes in its command, and none in its settings.
     const effort = await onBailian({ model: 'deepseek-v4.1-flash-1017', effort: 'max' })
     expect(effort.args).toEqual(expect.arrayContaining(['--effort', 'max']))
+    expect(writtenSettings()).not.toHaveProperty('effortLevel')
+  })
+
+  it('leaves Claude Code its own roles and levels on Claude’s models at a Custom address', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    // A relay of Claude's models, with none of its own.
+    const relay: Provider = {
+      id: 'p-relay',
+      name: 'Relay',
+      presetId: null,
+      planId: null,
+      apiKey: 'sk-relay',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://relay.example.com' },
+      models: [],
+      cloud: null,
+      own: null,
+    }
+    const onRelay = (agent: Partial<AgentLaunchSettings>, modelMap = {}) =>
+      resolveLaunch(
+        {
+          ...context(loginEnv, { claude: agent }),
+          provider: relay,
+          modelMap,
+          leavesRoles: true,
+          catalogModel: (_provider, model) =>
+            model.startsWith('claude-')
+              ? { id: model, context: 1_000_000, output: 128_000, efforts: ['low', 'high'] }
+              : null,
+        },
+        'claude',
+        project,
+      )
+    const picked = await onRelay({ model: 'claude-opus-5-5' }, { haiku: 'claude-haiku-4-5' })
+    expect(picked.args).toEqual(expect.arrayContaining(['--model', 'claude-opus-5-5']))
+    expect(writtenSettings()).toMatchObject({
+      model: 'claude-opus-5-5',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://relay.example.com',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5[1m]',
+        CLAUDE_CODE_SUBAGENT_MODEL: '',
+      },
+    })
+    // Claude Code knows the levels of Claude's models, and of its own for a role.
+    expect(writtenSettings()).not.toHaveProperty('effortLevel')
+    // A session that picked an alias with /model runs Claude Code's own model of it.
+    const resumed = await onRelay({ model: 'sonnet' })
+    expect(resumed.args).toEqual(expect.arrayContaining(['--model', 'sonnet']))
+    expect(writtenSettings()).toMatchObject({
+      model: '',
+      env: { ANTHROPIC_DEFAULT_SONNET_MODEL: '' },
+    })
     expect(writtenSettings()).not.toHaveProperty('effortLevel')
   })
 

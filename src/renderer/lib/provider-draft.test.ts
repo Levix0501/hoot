@@ -84,6 +84,13 @@ describe('a provider being added', () => {
     const custom = { ...draftOf(null, catalogs), name: 'Mine', apiKey: 'k', models: ['m'] }
     expect(canAdd(custom, null)).toBe(false)
     expect(canAdd({ ...custom, urls: { anthropic: 'https://x.example.com' } }, null)).toBe(true)
+    // One of the user's own at an Anthropic-compatible address can do without models.
+    const relay = { ...custom, models: [], urls: { anthropic: 'https://relay.example.com' } }
+    expect(canAdd(relay, null)).toBe(true)
+    expect(canAdd({ ...relay, urls: { responses: 'https://relay.example.com/v1' } }, null)).toBe(
+      false,
+    )
+    expect(canAdd({ ...relay, apiKey: '' }, null)).toBe(false)
   })
 
   it('saves a preset’s plan’s addresses, whatever the draft holds, with its cloud', () => {

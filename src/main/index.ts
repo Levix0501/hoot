@@ -181,6 +181,7 @@ const sessions: SessionManager = new SessionManager({
         }),
         provider: agent?.provider ?? null,
         modelMap: agent?.modelMap ?? {},
+        leavesRoles: agent?.leavesRoles ?? false,
         claudeUserVariables: async (folder) =>
           claudeUserVariables(os.homedir(), (await tools.getLoginEnvironment()).env, folder),
         catalogModel: (provider, model) => catalogModelOf(modelsDev.catalogs(), provider, model),

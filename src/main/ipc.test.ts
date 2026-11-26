@@ -374,6 +374,7 @@ const claudeLaunch = {
   settings: { enabled: true, model: null, effort: 'high', extraArgs: ['--verbose'] },
   provider: ownProvider('claude'),
   modelMap: {},
+  leavesRoles: false,
 }
 
 beforeEach(() => {
@@ -650,6 +651,81 @@ describe('the messages of chats', () => {
     expect(sessionManager.closeOf.mock.invocationCallOrder.at(-1)).toBeLessThan(
       chats.prepareSession.mock.invocationCallOrder.at(-1)!,
     )
+  })
+
+  it('leaves Claude Code its own roles by the model of a chat’s agent on Claude’s models at a Custom address', async () => {
+    const relay: Provider = {
+      id: 'p-relay',
+      name: 'Relay',
+      presetId: null,
+      planId: null,
+      apiKey: 'sk-relay',
+      keyHeader: 'bearer',
+      urls: { anthropic: 'https://relay.example.com' },
+      models: ['glm-5'],
+      cloud: null,
+      own: null,
+    }
+    const onRelay: Agent = {
+      ...ownAgent('claude'),
+      id: 'agent-relay',
+      providerId: relay.id,
+      model: 'claude-opus-5-5',
+      modelMap: { haiku: 'claude-haiku-4-5', opus: 'gone' },
+    }
+    const claudeModels = {
+      anthropic: ['claude-opus-5-5', 'claude-haiku-4-5'].map((id) => ({
+        id,
+        context: 200_000,
+        output: null,
+        efforts: [],
+      })),
+    }
+    providers.provider.mockImplementation((id) => (id === relay.id ? relay : undefined))
+    providers.agent.mockImplementation((id) => (id === onRelay.id ? onRelay : undefined))
+    models.catalogs.mockImplementation(() => claudeModels as unknown as typeof catalogs)
+    /** Starts the chat as one on the relay with a model, and expects its agent to start so. */
+    const startsWith = async (model: string, agentId: string | null, launch: object) => {
+      chats.prepareSession.mockResolvedValueOnce({
+        folder: chat.folder,
+        launch: { conversationId: chat.conversationId, resume: true },
+        providerId: relay.id,
+        model,
+        agentId,
+      })
+      await invoke(IpcChannel.startSession, {
+        id: 's1',
+        projectRoot: chat.folder,
+        worktreePath: null,
+        chatId: chat.id,
+        toolId: 'claude',
+        issueId: null,
+        cols: 80,
+        rows: 24,
+      })
+      expect(sessionManager.start).toHaveBeenLastCalledWith(
+        expect.anything(),
+        null,
+        expect.anything(),
+        launch,
+      )
+    }
+    try {
+      // A chat that picked Sonnet with /model goes on leaving the roles to Claude Code.
+      await startsWith('sonnet', onRelay.id, {
+        settings: { enabled: true, model: 'sonnet', effort: 'high', extraArgs: ['--verbose'] },
+        provider: relay,
+        modelMap: { haiku: 'claude-haiku-4-5' },
+        leavesRoles: true,
+      })
+      // With its agent gone, by the chat's own model.
+      await startsWith('claude-opus-5-5', null, expect.objectContaining({ leavesRoles: true }))
+      await startsWith('glm-5', null, expect.objectContaining({ leavesRoles: false, modelMap: {} }))
+    } finally {
+      providers.provider.mockImplementation((id) => findProvider([], id))
+      providers.agent.mockImplementation((id) => madeAgents.find((a) => a.id === id))
+      models.catalogs.mockImplementation(() => catalogs)
+    }
   })
 
   it('gives the saved sessions, makes one in a worktree, and passes on every change of them', async () => {

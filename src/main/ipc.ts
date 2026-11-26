@@ -60,6 +60,7 @@ import type { ParentChange } from '../shared/sub-issues'
 import {
   canRun,
   CLAUDE_ROLES,
+  leavesRolesToClaude,
   modelMapOn,
   type KeyHeader,
   type ProviderCloud,
@@ -650,17 +651,25 @@ export function registerIpc(deps: IpcDependencies): void {
     const agent = prepared.agentId === null ? undefined : deps.providers.agent(prepared.agentId)
     const provider =
       prepared.providerId === null ? null : (deps.providers.provider(prepared.providerId) ?? null)
+    const catalogs = deps.models.catalogs()
+    const model = prepared.model ?? agent?.model ?? null
     return {
       settings: {
         enabled: true,
-        model: prepared.model ?? agent?.model ?? null,
+        model,
         effort: agent?.effort ?? null,
         extraArgs: agent?.extraArgs ?? [],
       },
       provider,
       // Its agent's, of the models the provider it keeps offers.
       modelMap:
-        agent === undefined || provider === null ? {} : modelMapOn(agent.modelMap, provider),
+        agent === undefined || provider === null
+          ? {}
+          : modelMapOn(agent.modelMap, provider, catalogs),
+      // By its agent's model, which a pick with `/model` leaves as it is.
+      leavesRoles:
+        provider !== null &&
+        leavesRolesToClaude(provider, agent === undefined ? model : agent.model, catalogs),
     }
   }
 
@@ -686,6 +695,7 @@ export function registerIpc(deps: IpcDependencies): void {
       },
       provider,
       modelMap: agent.modelMap,
+      leavesRoles: leavesRolesToClaude(provider, agent.model, deps.models.catalogs()),
     }
   }
 

@@ -55,6 +55,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { SIDE_PANEL, TitleName } from './side-panel'
 
 /** The choice of a provider picker that adds a provider. */
 const ADD_PROVIDER = '\u0000add-provider'
@@ -661,53 +662,6 @@ function PanelFields({
   )
 }
 
-/**
- * The name atop a panel, which reads as a title and edits in place, the one
- * it gets left blank as its placeholder: an agent's own name, a provider's
- * saved one. Esc puts back the name it had, where it was changed.
- */
-export function TitleName({
-  value,
-  own,
-  onChange,
-  onCommit,
-  onRevert,
-  autoFocus = false,
-  testId = 'agent-panel-name',
-}: {
-  value: string
-  own: string
-  onChange: (text: string) => void
-  onCommit?: () => void
-  /** Puts back the name it had; `null` where nothing was changed. */
-  onRevert?: (() => void) | null
-  autoFocus?: boolean
-  testId?: string
-}) {
-  return (
-    <input
-      autoFocus={autoFocus}
-      value={value}
-      placeholder={own}
-      onChange={(event) => onChange(event.target.value)}
-      onBlur={onCommit}
-      onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing) return
-        if (event.key === 'Enter') event.currentTarget.blur()
-        if (event.key === 'Escape' && onRevert) {
-          // Only the change goes; the next Esc closes the panel.
-          event.stopPropagation()
-          onRevert()
-        }
-      }}
-      spellCheck={false}
-      aria-label="Name"
-      className="-ml-1.5 h-8 min-w-0 flex-1 rounded-md bg-transparent px-1.5 text-base font-semibold outline-none placeholder:text-foreground hover:bg-muted/60 focus:bg-transparent focus:ring-3 focus:ring-ring/50"
-      data-testid={testId}
-    />
-  )
-}
-
 /** The switch that turns an agent on and off, which shows it in the new session menus. */
 export function AgentSwitch({ agent }: { agent: Agent }) {
   const changeAgent = useAppStore((app) => app.changeAgent)
@@ -946,7 +900,7 @@ export function AgentPanel({
         side="right"
         showCloseButton={false}
         initialFocus={shown?.id === null}
-        className="w-[26rem] gap-0 p-0 sm:max-w-md"
+        className={cn(SIDE_PANEL, 'w-[26rem] sm:max-w-md')}
         data-testid="agent-panel"
       >
         {shown !== null &&

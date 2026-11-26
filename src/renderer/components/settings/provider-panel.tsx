@@ -1,4 +1,5 @@
 import { Trash2Icon } from 'lucide-react'
+import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '../../lib/toast'
 import type { AgentModelOption } from '../../../shared/agents'
@@ -27,9 +28,9 @@ import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { TitleName } from './agent-panel'
 import { useInstalled } from './provider-catalog'
 import { Field, ProviderFields } from './provider-fields'
+import { SIDE_PANEL, TitleName } from './side-panel'
 
 /** The installed harnesses whose global a provider is. */
 function useGlobalOf(providerId: string): CodingToolId[] {
@@ -340,7 +341,7 @@ export function ProviderPanel({
         showCloseButton={false}
         initialFocus={false}
         // Wider than an agent's, for the addresses on one line each.
-        className="gap-0 p-0 data-[side=right]:sm:max-w-[30rem]"
+        className={cn(SIDE_PANEL, 'data-[side=right]:sm:max-w-[30rem]')}
         data-testid="provider-panel"
       >
         {own !== undefined ? (

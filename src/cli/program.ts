@@ -259,13 +259,44 @@ function inputText(field: unknown): string | null {
 }
 
 /**
- * The event of a Claude Code or Codex hook whose input is `input`, the JSON
- * the agent gives a hook on standard input, or the plugin Hoot gives OpenCode
- * gives in the same form, when it is one Hoot takes, whether a subagent met
- * it (the input names the agent), the turn it belongs to, and the
- * conversation it belongs to, with the folder the agent works in for it and
- * why a session started or ended; for a message Codex tells of, the model
- * it goes to; `null` for any other input.
+ * The event of a hook of Antigravity CLI whose input, which names its
+ * fields in camel case, is `value`, when it tells of the conversation the
+ * user's last message went to: the hooks Hoot gives it run as a
+ * conversation starts, with its first message, and as each turn ends (see
+ * `antigravityHooksFolder`), which hoot reports as a `UserPromptSubmit` of
+ * the kind Codex's gives. A hook of a subagent's conversation, which no
+ * message of the user's went to, as its empty last input tells, reports
+ * none, nor does one of any other event.
+ */
+function antigravityHookEvent(value: object): Omit<HookEventReport, 'startedAt'> | null {
+  const {
+    hookEventName: name,
+    conversationId: conversation,
+    lastUserInput: message,
+  } = value as { hookEventName?: unknown; conversationId?: unknown; lastUserInput?: unknown }
+  if (name !== 'SessionStart' && name !== 'Stop') return null
+  const conversationId = inputText(conversation)
+  if (conversationId === null || inputText(message) === null) return null
+  return {
+    event: 'UserPromptSubmit',
+    subagent: false,
+    turn: null,
+    conversationId,
+    source: null,
+    reason: null,
+    folder: null,
+  }
+}
+
+/**
+ * The event of a Claude Code, Codex or Antigravity CLI hook whose input is
+ * `input`, the JSON the agent gives a hook on standard input, or the plugin
+ * Hoot gives OpenCode gives in the same form, when it is one Hoot takes,
+ * whether a subagent met it (the input names the agent), the turn it belongs
+ * to, and the conversation it belongs to, with the folder the agent works in
+ * for it and why a session started or ended; for a message Codex tells of,
+ * the model it goes to; `null` for any other input. Antigravity CLI's tell of
+ * the conversation alone (see `antigravityHookEvent`).
  */
 export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt'> | null {
   let value: unknown
@@ -275,6 +306,7 @@ export function hookEventOf(input: Uint8Array): Omit<HookEventReport, 'startedAt
     return null
   }
   if (typeof value !== 'object' || value === null) return null
+  if ('hookEventName' in value) return antigravityHookEvent(value)
   const {
     hook_event_name: name,
     agent_id: agent,
@@ -807,15 +839,16 @@ export function hootProgram(io: CliIo): Command {
       io.write(`${worktreePath}\n`)
     })
 
-  // Not for people: the command of the hooks Hoot adds to its Claude Code and
-  // Codex sessions, and of the plugin it gives its OpenCode sessions.
+  // Not for people: the command of the hooks Hoot adds to its Claude Code,
+  // Codex and Antigravity CLI sessions, and of the plugin it gives its
+  // OpenCode sessions.
   program
     .command('hook', { hidden: true })
     .description(
-      "Report the event of a Claude Code or Codex hook, or of Hoot's OpenCode plugin, from the " +
-        "hook's input on standard input, to Hoot, which shows what the session is doing and " +
-        'which conversation it is in. It prints nothing and always succeeds, so that it never ' +
-        'changes what the agent does.',
+      'Report the event of a Claude Code, Codex or Antigravity CLI hook, or of ' +
+        "Hoot's OpenCode plugin, from the hook's input on standard input, to Hoot, which " +
+        'shows what the session is doing and which conversation it is in. It prints ' +
+        'nothing and always succeeds, so that it never changes what the agent does.',
     )
     .action(async () => {
       try {

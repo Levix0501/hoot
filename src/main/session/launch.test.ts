@@ -98,6 +98,16 @@ const openCodePlugin = path.join(
   'opencode-plugin',
 )
 
+/** The folder of the hooks Hoot gives Antigravity CLI, as a packaged Hoot has it. */
+const antigravityHooks = path.join(
+  path.sep,
+  'Applications',
+  'Hoot.app',
+  'Contents',
+  'Resources',
+  'antigravity-hooks',
+)
+
 const hoot = {
   binDirectory: '/Applications/Hoot.app/Contents/Resources/bin',
   node: '/Applications/Hoot.app/Contents/MacOS/Hoot',
@@ -108,7 +118,7 @@ const hoot = {
 
 function context(
   loginEnv: Record<string, string>,
-  agents: Partial<Record<'claude' | 'codex' | 'opencode', Partial<AgentLaunchSettings>>> = {},
+  agents: Partial<Record<CodingToolId, Partial<AgentLaunchSettings>>> = {},
   yoloMode = true,
 ): LaunchContext {
   return {
@@ -129,6 +139,7 @@ function context(
     settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
+    antigravityHooks,
     openCodeServer: null,
   }
 }
@@ -498,6 +509,73 @@ describe('resolveLaunch', () => {
       resume: false,
     })
     expect(plain.args).not.toContain('--')
+  })
+
+  it('gives Antigravity CLI the folder of Hoot’s hooks, and trusts a chat’s own folder for it', async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    await writeNodeCommand(path.join(bin, 'agy'), '')
+    const agy = program(bin, 'agy')
+    const hooks = ['--add-dir', antigravityHooks]
+    const plain = await resolveLaunch(
+      context(loginEnv, { antigravity: { model: 'gemini-4-neon', effort: 'high' } }),
+      'antigravity',
+      project,
+    )
+    expect(plain.args).toEqual([
+      ...agy.args,
+      '--dangerously-skip-permissions',
+      '--model',
+      'gemini-4-neon',
+      '--effort',
+      'high',
+      ...hooks,
+    ])
+    // It follows its latest version, and updates itself as it does.
+    expect(plain.env).not.toHaveProperty('AGY_CLI_DISABLE_AUTO_UPDATE')
+
+    const chatFolder = path.join(root, 'home', '.hoot', 'chats', 'antigravity-a1b2c3')
+    fs.mkdirSync(chatFolder, { recursive: true })
+    const trusted = ['--settings', JSON.stringify({ trustedWorkspaces: [chatFolder] })]
+    const started = await resolveLaunch(context(loginEnv), 'antigravity', chatFolder, null, {
+      conversationId: null,
+      resume: false,
+      firstMessage: '-a\0b',
+      ownFolder: true,
+    })
+    expect(started.args).toEqual([
+      ...agy.args,
+      '--dangerously-skip-permissions',
+      ...hooks,
+      ...trusted,
+      '--prompt-interactive=-ab',
+    ])
+    const resumed = await resolveLaunch(context(loginEnv), 'antigravity', chatFolder, null, {
+      conversationId: 'e7ee69e1-321a-4054-978a-8aa5edf7eb48',
+      resume: true,
+      ownFolder: true,
+    })
+    expect(resumed.args).toEqual([
+      ...agy.args,
+      '--dangerously-skip-permissions',
+      ...hooks,
+      ...trusted,
+      '--conversation=e7ee69e1-321a-4054-978a-8aa5edf7eb48',
+    ])
+    // A saved session's project folder is the user's to trust, as are settings the agent gives.
+    const saved = await resolveLaunch(context(loginEnv, {}, false), 'antigravity', project, null, {
+      conversationId: 'c1',
+      resume: true,
+      ownFolder: false,
+    })
+    expect(saved.args).toEqual([...agy.args, ...hooks, '--conversation=c1'])
+    const ownSettings = await resolveLaunch(
+      context(loginEnv, { antigravity: { extraArgs: ['--settings', '/me/agy.json'] } }, false),
+      'antigravity',
+      chatFolder,
+      null,
+      { conversationId: null, resume: false, ownFolder: true },
+    )
+    expect(ownSettings.args).toEqual([...agy.args, '--settings', '/me/agy.json', ...hooks])
   })
 
   it('gives a resumed chat the agent’s extra arguments too', async () => {
@@ -1333,6 +1411,7 @@ describe('firstMessageArguments', () => {
     expect(firstMessageArguments('claude', '-a\0b')).toEqual(['--', '-ab'])
     expect(firstMessageArguments('codex', '-a\0b')).toEqual(['--', '-ab'])
     expect(firstMessageArguments('opencode', '-a\0b')).toEqual(['--prompt=-ab'])
+    expect(firstMessageArguments('antigravity', '-a\0b')).toEqual(['--prompt-interactive=-ab'])
   })
 })
 

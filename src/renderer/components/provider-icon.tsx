@@ -11,6 +11,7 @@ import BedrockIcon from '../assets/provider-icons/bedrock-color.svg?react'
 import CommandCodeIcon from '../assets/provider-icons/commandcode.svg?react'
 import DeepSeekIcon from '../assets/provider-icons/deepseek-color.svg?react'
 import FireworksIcon from '../assets/provider-icons/fireworks-color.svg?react'
+import GoogleIcon from '../assets/provider-icons/google-color.svg?react'
 import GroqIcon from '../assets/provider-icons/groq.svg?react'
 import HuaweiCloudIcon from '../assets/provider-icons/huaweicloud-color.svg?react'
 import KimiIcon from '../assets/provider-icons/kimi-color.svg?react'
@@ -46,6 +47,7 @@ const MARKS: Record<Exclude<ProviderMark, 'custom' | 'opencode'>, Svg> = {
   commandcode: CommandCodeIcon,
   deepseek: DeepSeekIcon,
   fireworks: FireworksIcon,
+  google: GoogleIcon,
   groq: GroqIcon,
   huaweicloud: HuaweiCloudIcon,
   kimi: KimiIcon,

@@ -106,6 +106,11 @@ export interface LaunchContext {
   /** The folder of the plugin Hoot gives OpenCode (see `openCodePluginFolder`). */
   openCodePlugin: string
   /**
+   * The folder of the hooks Hoot gives Antigravity CLI, which its sessions
+   * take as a folder of their workspace (see `antigravityHooksFolder`).
+   */
+  antigravityHooks: string
+  /**
    * The server of Hoot's an OpenCode session connects to (see
    * `OpenCodeServers`), which has the user's providers; `null` for the
    * background service of the user's own OpenCode, as for a chat made before
@@ -142,6 +147,12 @@ export interface ChatLaunch {
   conversationId: string | null
   resume: boolean
   firstMessage?: string
+  /**
+   * Whether the chat runs in a folder Hoot made for it, rather than in a
+   * worktree or a project's folder: Antigravity CLI, which asks whether to
+   * trust a folder the first time it runs there, is told to trust it.
+   */
+  ownFolder?: boolean
 }
 
 /**
@@ -483,8 +494,9 @@ function picksServer(extraArgs: readonly string[]): boolean {
 
 /**
  * The arguments that continue a chat's conversation: Claude Code's
- * `--resume`, OpenCode's `-s` and Codex's `resume` subcommand. A new
- * conversation starts as any other session does, with an id the agent picks.
+ * `--resume`, OpenCode's `-s`, Codex's `resume` subcommand and Antigravity
+ * CLI's `--conversation`. A new conversation starts as any other session
+ * does, with an id the agent picks.
  */
 export function chatLaunchArguments(
   tool: CodingToolId,
@@ -501,6 +513,8 @@ export function chatLaunchArguments(
       return { before: [], after: ['-s', id] }
     case 'codex':
       return { before: ['resume', id], after: [] }
+    case 'antigravity':
+      return { before: [], after: [`--conversation=${id}`] }
   }
 }
 
@@ -508,9 +522,10 @@ export function chatLaunchArguments(
  * The arguments that send an agent the first message of a conversation it
  * starts, after all its others, without its NUL characters: for Claude Code
  * and Codex the message after `--`, which ends the options, so that one
- * starting with `-` is still the message, and for OpenCode the value of its
- * `--prompt`, given with `=`, as one argument. Each agent sends it as soon as
- * it is ready, without the user typing anything.
+ * starting with `-` is still the message, and for OpenCode and Antigravity
+ * CLI the value of its `--prompt` or `--prompt-interactive`, given with `=`,
+ * as one argument. Each agent sends it as soon as it is ready, without the
+ * user typing anything.
  */
 export function firstMessageArguments(tool: CodingToolId, message: string): string[] {
   const text = withoutNul(message)
@@ -520,7 +535,35 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
       return ['--', text]
     case 'opencode':
       return [`--prompt=${text}`]
+    case 'antigravity':
+      return [`--prompt-interactive=${text}`]
   }
+}
+
+/**
+ * The arguments Hoot adds to every Antigravity CLI session: the folder of
+ * its hooks, as a folder of the session's workspace, whose hooks Antigravity
+ * CLI runs as it runs those of its own folders, without asking whether to
+ * trust it. In a chat's own folder (see `ChatLaunch`), the setting that
+ * trusts that folder for the session alone, as it would be once the user
+ * said so, unless the extra arguments give settings of their own: it is the
+ * one folder of the session Antigravity CLI would ask about.
+ */
+export function antigravityArguments(
+  hooks: string,
+  cwd: string,
+  chat: ChatLaunch | null,
+  extraArgs: readonly string[],
+): string[] {
+  const own = chat?.ownFolder === true
+  const settings = extraArgs.some(
+    (argument) => argument === '--settings' || argument.startsWith('--settings='),
+  )
+  return [
+    '--add-dir',
+    hooks,
+    ...(own && !settings ? ['--settings', JSON.stringify({ trustedWorkspaces: [cwd] })] : []),
+  ]
 }
 
 /**
@@ -540,7 +583,8 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
  * their folder. A Codex that takes it also runs without its shared
  * background server (see `CODEX_NO_DAEMON_VERSION`), and on a provider of
  * the user's, with a catalog of the provider's models (see
- * `CODEX_CATALOG_VERSION`). OpenCode gets Hoot's plugin instead, in its
+ * `CODEX_CATALOG_VERSION`). Antigravity CLI gets the folder of Hoot's hooks
+ * (see `antigravityArguments`). OpenCode gets Hoot's plugin instead, in its
  * environment (see `openCodeCliConfig`), with no argument for it, and
  * connects to Hoot's server of OpenCode where it is given one, with its
  * password in its environment, unless its extra arguments pick a server of
@@ -679,6 +723,8 @@ export async function resolveLaunch(
       hookArguments = ['-c', CODEX_HOOK_SETTING]
     }
     if (!ownUpdates) providerArguments = [...providerArguments, ...CODEX_NO_UPDATE_CHECK]
+  } else if (tool.id === 'antigravity') {
+    hookArguments = antigravityArguments(context.antigravityHooks, cwd, chat, agent.extraArgs)
   }
   const removeSettings = () => {
     if (settingsFile !== null) rmSync(settingsFile, { force: true })

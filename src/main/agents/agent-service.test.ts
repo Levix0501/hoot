@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import which from 'which'
 import { shownCommand, type AgentsState } from '../../shared/agents'
-import type { CodingToolId } from '../../shared/tools'
+import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
 import { nodeCommandProgram, writeNodeCommand, writeNodeScript } from '../tools/test-support'
 import { ToolService } from '../tools/tool-service'
 import { AgentService } from './agent-service'
@@ -125,7 +125,10 @@ function updateTo(version: string) {
   return { kind: 'update', version, route: null, path: null } as const
 }
 
-const PACKAGES: Record<CodingToolId, string> = {
+/** The agents that come in npm packages, as Antigravity CLI does not. */
+type NpmAgent = Exclude<CodingToolId, 'antigravity'>
+
+const PACKAGES: Record<NpmAgent, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
   opencode: '@opencode/cli',
@@ -164,7 +167,7 @@ function npmScript(body: string): void {
 }
 
 /** Installs a stand-in of an agent at a version into a global folder, as npm does. */
-async function installInto(folder: string, id: CodingToolId, version: string): Promise<void> {
+async function installInto(folder: string, id: NpmAgent, version: string): Promise<void> {
   const script = path.join(npmPackagesFolder(folder), PACKAGES[id], 'bin', id)
   const report = `require('node:fs').writeSync(1, ${JSON.stringify(`${version} (stand-in)\n`)})\n`
   // On Windows the batch file runs the script with node, as npm's packages ask.
@@ -280,14 +283,11 @@ function setup(
     },
     getLoginEnvironment: () => tools.getLoginEnvironment(),
     home,
-    latestRelease: async (npmPackage) => {
-      latestCalls.push(npmPackage)
-      const id = (Object.keys(PACKAGES) as CodingToolId[]).find(
-        (key) => PACKAGES[key] === npmPackage,
-      )
-      const latest = id ? options.latest?.[id] : undefined
+    latestRelease: async (tool) => {
+      latestCalls.push(tool.id)
+      const latest = options.latest?.[tool.id]
       if (latest === null) return null
-      return { version: latest ?? '2.0.0', node: (id && options.latestNode?.[id]) || null }
+      return { version: latest ?? '2.0.0', node: options.latestNode?.[tool.id] ?? null }
     },
     runningSessions: () => options.sessions?.() ?? [],
     closeSessions: async (id) => {
@@ -408,7 +408,7 @@ describe('AgentService detection', () => {
       prefix,
       displayPrefix: prefix,
     })
-    expect(latestCalls.toSorted()).toEqual(Object.values(PACKAGES).toSorted())
+    expect(latestCalls.toSorted()).toEqual([...CODING_TOOL_IDS].toSorted())
   })
 
   it('installs with each official installer, with npm where there is none for the platform', async () => {
@@ -1352,6 +1352,60 @@ describe('AgentService versions', () => {
       `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@2.0.0 --loglevel=http`,
     ])
   })
+
+  it.skipIf(windows)(
+    'keeps Antigravity CLI on its latest version, which its own update installs, its updater off as Hoot reads its version',
+    async () => {
+      // As its installer leaves it: its program in ~/.local/bin, which says its version
+      // until `agy update` puts another in its place.
+      const state = path.join(root, 'agy-version')
+      const log = path.join(root, 'agy.log')
+      fs.writeFileSync(state, '1.5.18')
+      await writeNodeCommand(
+        path.join(home, '.local', 'bin', 'agy'),
+        [
+          "const fs = require('node:fs')",
+          `const state = ${JSON.stringify(state)}`,
+          `fs.appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + ' ' + (process.env.AGY_CLI_DISABLE_AUTO_UPDATE ?? '-') + '\\n')`,
+          "if (process.argv[2] === '--version') fs.writeSync(1, fs.readFileSync(state, 'utf8') + '\\n')",
+          "else if (process.argv[2] === 'update') fs.writeFileSync(state, '1.6.0')",
+          '',
+        ].join('\n'),
+      )
+      const { service, agent, ended, latestCalls } = setup({
+        latest: { antigravity: '1.6.0' },
+        releases: { antigravity: { versions: ['1.6.0', '1.5.18'] } },
+      })
+      await service.detect()
+      expect(latestCalls).toContain('antigravity')
+      expect(agent('antigravity')).toMatchObject({
+        installation: { method: 'official', version: '1.5.18', switchable: false, removable: true },
+        latest: '1.6.0',
+        follow: { kind: 'latest' },
+        installRoute: 'official',
+      })
+      // Its versions are not read: Hoot can install its latest alone, and stays on none.
+      service.setFollow('antigravity', { kind: 'stay', version: '1.5.18' })
+      expect(agent('antigravity').follow).toEqual({ kind: 'latest' })
+      expect(agent('antigravity').operation).toBeNull()
+      expect(agent('antigravity').releases).toBeNull()
+
+      service.update('antigravity')
+      await ended('antigravity')
+      expect(agent('antigravity').operation).toMatchObject({
+        kind: 'update',
+        version: '1.6.0',
+        status: 'succeeded',
+      })
+      expect(agent('antigravity').installation?.version).toBe('1.6.0')
+      // Its own update runs as the user's environment has it; Hoot's readings of its version, without its updater.
+      expect(fs.readFileSync(log, 'utf8').trim().split('\n')).toEqual([
+        '--version true',
+        'update -',
+        '--version true',
+      ])
+    },
+  )
 
   it('goes back to the version it stays on where another has taken its place', async () => {
     await installInto(prefix, 'opencode', '2.0.0')

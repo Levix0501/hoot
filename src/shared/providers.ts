@@ -10,12 +10,14 @@ export type WireFormat = 'anthropic' | 'responses'
  * The formats in which each agent can run a provider of the user's, the one
  * it takes first leading; an agent with none runs only on its own models.
  * Codex runs a provider at its Responses address alone; OpenCode at its
- * Anthropic-compatible one, else at its Responses one.
+ * Anthropic-compatible one, else at its Responses one; Antigravity CLI runs
+ * only the models of the Google account it is signed in with.
  */
 export const FORMATS_OF: Readonly<Record<CodingToolId, readonly WireFormat[]>> = {
   claude: ['anthropic'],
   codex: ['responses'],
   opencode: ['anthropic', 'responses'],
+  antigravity: [],
 }
 
 /**
@@ -35,6 +37,7 @@ export type ProviderMark =
   | 'commandcode'
   | 'deepseek'
   | 'fireworks'
+  | 'google'
   | 'groq'
   | 'huaweicloud'
   | 'kimi'
@@ -1108,15 +1111,21 @@ export const OWN_PROVIDER_IDS: Readonly<Record<CodingToolId, string>> = {
   claude: 'claude-subscription',
   codex: 'chatgpt-subscription',
   opencode: 'opencode-free',
+  antigravity: 'google-account',
 }
 
 const OWN_PROVIDER_NAMES: Readonly<Record<CodingToolId, string>> = {
   claude: 'Claude subscription',
   codex: 'ChatGPT subscription',
   opencode: 'OpenCode free models',
+  antigravity: 'Google account',
 }
 
-/** An agent's own models: its subscription, or for OpenCode, the free models it comes with. */
+/**
+ * An agent's own models: its subscription, for OpenCode the free models it
+ * comes with, and for Antigravity CLI those of the Google account it is
+ * signed in with.
+ */
 export function ownProvider(harness: CodingToolId): Provider {
   return {
     id: OWN_PROVIDER_IDS[harness],
@@ -1390,6 +1399,8 @@ export function providerMark(provider: Pick<Provider, 'presetId' | 'own'>): Prov
       return 'openai'
     case 'opencode':
       return 'opencode'
+    case 'antigravity':
+      return 'google'
     case null:
       return presetById(provider.presetId)?.mark ?? 'custom'
   }

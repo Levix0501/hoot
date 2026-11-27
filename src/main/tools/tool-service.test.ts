@@ -48,6 +48,7 @@ describe('ToolService', () => {
       claude: true,
       codex: false,
       opencode: false,
+      antigravity: false,
       shell: true,
     })
     expect(state.tools.find((tool) => tool.id === 'claude')?.path).toSatisfy(isCommand(claude))

@@ -58,6 +58,20 @@ describe('extraArgumentKinds', () => {
       model: false,
       effort: false,
     })
+    expect(
+      extraArgumentKinds('antigravity', [
+        '--mode',
+        'plan',
+        '--model=gemini-4-neon',
+        '--effort',
+        'max',
+      ]),
+    ).toEqual({ permission: true, model: true, effort: true })
+    expect(extraArgumentKinds('antigravity', ['--dangerously-skip-permissions'])).toEqual({
+      permission: true,
+      model: false,
+      effort: false,
+    })
   })
 
   it('does not take the value of a config override for another option', () => {

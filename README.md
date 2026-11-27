@@ -30,8 +30,8 @@ Linear-style issues, and hand an issue to a running agent by dragging it onto th
 
 ## Features
 
-- **Every agent in one window.** Claude Code, Codex and OpenCode run in embedded terminals, as many
-  sessions at a time as you like. Sessions you are not looking at keep running.
+- **Every agent in one window.** Claude Code, Codex, OpenCode and Antigravity CLI run in embedded
+  terminals, as many sessions at a time as you like. Sessions you are not looking at keep running.
 - **Chats without a project.** Click **New chat** in the sidebar to talk to the default agent
   without adding a project. Hoot keeps the chat, and resumes its conversation after the agent exits
   or Hoot restarts.
@@ -89,7 +89,7 @@ On macOS, ⌘1 to ⌘9 switch between sessions, and ⌘[ and ⌘] go back and fo
 
 > [!WARNING]
 > YOLO mode is on by default: every new session starts its agent with the option that lets it act
-> without asking for approval (`--dangerously-skip-permissions` for Claude Code,
+> without asking for approval (`--dangerously-skip-permissions` for Claude Code and Antigravity CLI,
 > `--dangerously-bypass-approvals-and-sandbox` for Codex and `--auto` for OpenCode). Turn it off in
 > **Settings › Agents** to have each agent follow its own permission settings.
 
@@ -114,8 +114,9 @@ Run `hoot --help` for every command and option.
   `~/Library/Application Support/Hoot` on macOS and `%APPDATA%\Hoot` on Windows. Worktrees go in
   `~/.hoot/worktrees`, and the folders chats run in, under `~/.hoot/chats`.
 - Hoot collects no telemetry. It goes online to look for new versions, of itself on GitHub and of
-  your agents on the npm registry, to download the updates and agents you ask for, and once a day
-  to read from models.dev which models the providers it knows offer.
+  your agents on the npm registry, or for Antigravity CLI on Google's update server, to download
+  the updates and agents you ask for, and once a day to read from models.dev which models the
+  providers it knows offer.
 - Hoot leaves your agents' configuration files alone: it passes its settings to each session on
   the command line, or to OpenCode in an environment variable. For an issue, it writes the issue to
   `.hoot/tmp` in the issue's worktree, which Git ignores.

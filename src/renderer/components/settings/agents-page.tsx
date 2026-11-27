@@ -148,7 +148,8 @@ function FailureDialog({
   const retry = useAppStore((state) => state.retryAgentOperation)
   const [copied, markCopied] = useCopied()
   const { agent } = failure
-  const label = CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id
+  const tool = CODING_TOOLS.find((candidate) => candidate.id === agent.id)
+  const label = tool?.label ?? agent.id
   const operation = agent.operation
   const failed = failure.kind === 'operation' && operation?.status === 'failed' ? operation : null
   const installation = agent.installation
@@ -234,6 +235,7 @@ function FailureDialog({
           {failed?.kind === 'install' &&
             failed.route === 'official' &&
             npmUsable &&
+            tool?.npmPackage != null &&
             agent.nodeRequirement === null && (
               <Button
                 variant="outline"

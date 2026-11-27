@@ -93,6 +93,7 @@ const SWITCH_COMMANDS: Readonly<Record<CodingToolId, readonly string[]>> = {
   claude: ['/clear', '/resume', '/branch'],
   codex: ['/new', '/clear', '/resume', '/fork'],
   opencode: ['/new', '/clear', '/sessions', '/resume', '/continue', '/fork'],
+  antigravity: ['/new', '/clear', '/resume', '/switch', '/conversation', '/fork'],
 }
 
 /** How a run of a chat's agent went, as Hoot saw it, once its process ended. */
@@ -119,18 +120,20 @@ interface EndedRun {
  * of one, and one that never did goes once its agent ends, as when the user
  * turned off Claude Code's hooks. Codex tells of the conversation each
  * message goes to through the hook Hoot gives it, once the user trusted that
- * hook, and OpenCode 2.0.6 and later through the plugin Hoot gives it, unless
- * the user turned that off: a Codex or OpenCode chat in a conversation its
- * agent told of goes on in another only when the agent tells of that one,
- * whatever the agent records in the chat's folder and however a later run
- * went. An OpenCode chat goes on only in a conversation in its folder, or in
- * a folder in it. For any other Codex or OpenCode chat, Hoot reads the
- * agent's own records to tell whether the chat's conversation got a message
- * and which conversation a chat went on to, as before Hoot learned
- * conversations from the agents. When a chat's process ends, and when
- * Hoot starts for a run it did not see end, the chat can go on only to one
- * that started in that run and got a message. When Hoot starts, it also
- * reads each Codex chat in no conversation and without such a run, and each
+ * hook, OpenCode 2.0.6 and later through the plugin Hoot gives it, unless
+ * the user turned that off, and Antigravity CLI through the hooks Hoot gives
+ * it, as a conversation starts and as each turn ends: a Codex, OpenCode or
+ * Antigravity CLI chat in a conversation its agent told of goes on in
+ * another only when the agent tells of that one, whatever the agent records
+ * in the chat's folder and however a later run went. An OpenCode chat goes
+ * on only in a conversation in its folder, or in a folder in it. For any
+ * other Codex, OpenCode or Antigravity CLI chat, Hoot reads the agent's own
+ * records to tell whether the chat's conversation got a message and which
+ * conversation a chat went on to, as before Hoot learned conversations from
+ * the agents. When a chat's process ends, and when Hoot starts for a run it
+ * did not see end, the chat can go on only to one that started in that run
+ * and got a message. When Hoot starts, it also reads each Codex or
+ * Antigravity CLI chat in no conversation and without such a run, and each
  * OpenCode chat in a conversation an earlier version of Hoot gave OpenCode
  * the id of and had not seen get a message, with no run to go by: such a
  * chat may take up, or go on to, one that started at any time and got a
@@ -345,10 +348,10 @@ export class ChatManager extends EventEmitter<{
     const conversationId = chat.conversationId
     const resume = chat.hasMessages && conversationId !== null
     const firstMessage = this.firstMessages.get(id)
-    // Kept until the agent of a Codex or OpenCode chat reports a conversation
-    // in the run, or Hoot sees it end: what Hoot reads when it starts again
-    // after quitting without that. A conversation its agent reported is not
-    // read again.
+    // Kept until the agent of a Codex, OpenCode or Antigravity CLI chat
+    // reports a conversation in the run, or Hoot sees it end: what Hoot reads
+    // when it starts again after quitting without that. A conversation its
+    // agent reported is not read again.
     if (chat.toolId !== 'claude' && !chat.conversationReported) {
       this.chats.update(id, { unreportedRun: { startedAt } })
     }
@@ -358,6 +361,7 @@ export class ChatManager extends EventEmitter<{
         conversationId,
         resume,
         ...(firstMessage === undefined || resume ? {} : { firstMessage }),
+        ownFolder: chat.projectRoot === null,
       },
       providerId: chat.providerId,
       model: chat.model,
@@ -461,6 +465,7 @@ export class ChatManager extends EventEmitter<{
           this.chats.update(chatId, { hasMessages: true, conversationReported: true })
           this.emitChanged()
         }
+        await this.takeRecordedTitle(chatId)
         return
       }
       const titleAtSwitch = this.titlesAtSwitch.get(chatId)
@@ -472,7 +477,28 @@ export class ChatManager extends EventEmitter<{
         title: chat.conversationId === null ? chat.title : titleAfterSwitch(chat, titleAtSwitch),
       })
       this.emitChanged()
+      await this.takeRecordedTitle(chatId)
     })
+  }
+
+  /**
+   * Gives an Antigravity CLI chat the title Antigravity CLI recorded for its
+   * conversation, which it makes up once the conversation is under way: it
+   * sets no terminal title, which names the chats of the other agents. Read
+   * as its hooks tell of the conversation, and once its process ends.
+   */
+  private async takeRecordedTitle(chatId: string): Promise<void> {
+    const chat = this.chats.get(chatId)
+    if (!chat || chat.deleted || chat.toolId !== 'antigravity' || chat.conversationId === null) {
+      return
+    }
+    const recorded = await this.conversations.antigravityConversations(chat.folder)
+    const title = recorded?.find((conversation) => conversation.id === chat.conversationId)?.title
+    const now = this.chats.get(chatId)
+    if (!now || now.deleted || now.conversationId !== chat.conversationId) return
+    if (title === undefined || title === null || title === now.title) return
+    this.chats.update(chatId, { title })
+    this.emitChanged()
   }
 
   /**
@@ -542,6 +568,7 @@ export class ChatManager extends EventEmitter<{
     void this.enqueue(id, async () => {
       await this.reconcileChat(id, run)
       if (run.startedAt !== null) this.endUnreportedRun(id, run.startedAt)
+      await this.takeRecordedTitle(id)
     })
   }
 
@@ -559,10 +586,11 @@ export class ChatManager extends EventEmitter<{
    * Reads the records of every chat's and saved session's agent, as when Hoot
    * starts: first for those the user deleted before Hoot learned which
    * conversation they were in, so that no other takes it up. A run of a
-   * Codex or OpenCode chat's agent that Hoot did not see end, as when Hoot
-   * quit without ending it, and in which the agent reported no conversation,
-   * is read as Hoot reads such a run when it ends. A Codex chat in a
-   * conversation, or an OpenCode chat, is read for no other: Hoot read each
+   * Codex, OpenCode or Antigravity CLI chat's agent that Hoot did not see
+   * end, as when Hoot quit without ending it, and in which the agent reported
+   * no conversation, is read as Hoot reads such a run when it ends. A Codex
+   * or Antigravity CLI chat in a conversation, or an OpenCode chat, is read
+   * for no other: Hoot read each
    * run it saw end when it ended, and does not read one whose conversation
    * its agent reported at all. An OpenCode chat in a conversation an earlier
    * version of Hoot gave OpenCode the id of, which Hoot had not seen get a
@@ -578,7 +606,13 @@ export class ChatManager extends EventEmitter<{
       ].flatMap((chat) => this.chats.get(chat.id) ?? [])
       for (const chat of chats) {
         const run = chat.unreportedRun
-        if (chat.toolId === 'codex' && chat.conversationId !== null && run === null) continue
+        if (
+          (chat.toolId === 'codex' || chat.toolId === 'antigravity') &&
+          chat.conversationId !== null &&
+          run === null
+        ) {
+          continue
+        }
         if (chat.toolId === 'opencode' && run === null && !chat.deleted && !givenByHoot(chat)) {
           continue
         }
@@ -626,11 +660,11 @@ export class ChatManager extends EventEmitter<{
    * Deletes a chat or saved session the user no longer wants, once its agent
    * has ended: it leaves the lists for good, and the agent's own records of
    * its conversations stay as they are. As those records still hold its
-   * conversation, a Codex or OpenCode one keeps its row, with the
-   * conversation it was in, once Hoot read which that is: no other chat or
-   * saved session in its folder takes it up then, and Hoot does not list it
-   * as one of its own again. A Claude Code one, whose conversations no other
-   * takes up, goes altogether. A chat's own folder goes to the Trash with
+   * conversation, a Codex, OpenCode or Antigravity CLI one keeps its row,
+   * with the conversation it was in, once Hoot read which that is: no other
+   * chat or saved session in its folder takes it up then, and Hoot does not
+   * list it as one of its own again. A Claude Code one, whose conversations
+   * no other takes up, goes altogether. A chat's own folder goes to the Trash with
    * what is in it, once no other chat runs in it; a folder that cannot be
    * moved there stays as it is. A saved session's worktree or project folder
    * stays as it is.
@@ -663,10 +697,10 @@ export class ChatManager extends EventEmitter<{
 
   /**
    * Reads what the chat's agent recorded: whether its conversation got a
-   * message, and which conversation the chat went on to. A Codex or OpenCode
-   * chat without a conversation takes up the newest one no other chat has,
-   * and one with a conversation goes on to the newest that came after it,
-   * when it is the chat opened last in its folder; a conversation either
+   * message, and which conversation the chat went on to. A Codex, OpenCode
+   * or Antigravity CLI chat without a conversation takes up the newest one no
+   * other chat has, and one with a conversation goes on to the newest that
+   * came after it, when it is the chat opened last in its folder; a conversation either
    * leaves is no longer the chat's, nor any other's. Once its agent ended,
    * only a conversation that started in that run can be the next one: the
    * agent records one only once a message was sent in it, so a run that sent
@@ -706,10 +740,7 @@ export class ChatManager extends EventEmitter<{
     }
 
     if (chat.conversationReported || run?.reported === true) return
-    const recorded =
-      chat.toolId === 'codex'
-        ? await this.conversations.codexConversations(chat.folder)
-        : await this.conversations.openCodeConversations(chat.folder)
+    const recorded = await this.recordedConversations(chat)
     // Without the agent's records, the chat is left as it is.
     if (recorded === null) return
     chat = this.chats.get(chatId)
@@ -776,6 +807,20 @@ export class ChatManager extends EventEmitter<{
     }
   }
 
+  /** The conversations a chat's agent recorded in its folder (see `ChatConversations`). */
+  private recordedConversations(chat: ChatInfo): Promise<AgentConversation[] | null> {
+    switch (chat.toolId) {
+      case 'claude':
+        return Promise.resolve(null)
+      case 'codex':
+        return this.conversations.codexConversations(chat.folder)
+      case 'opencode':
+        return this.conversations.openCodeConversations(chat.folder)
+      case 'antigravity':
+        return this.conversations.antigravityConversations(chat.folder)
+    }
+  }
+
   /** Whether another chat in the folder holds a conversation. */
   private hasConversationSibling(chat: ChatInfo): boolean {
     return this.chats
@@ -829,8 +874,8 @@ export class ChatManager extends EventEmitter<{
 
   /**
    * Whether a chat runs in a folder Hoot made for it alone: one under
-   * `~/.hoot/chats` for a Codex or OpenCode chat, which chats that earlier
-   * versions of Hoot split off from it share. Claude Code's shared folder,
+   * `~/.hoot/chats` for a Codex, OpenCode or Antigravity CLI chat, which
+   * chats that earlier versions of Hoot split off from it share. Claude Code's shared folder,
    * and a saved session's worktree or project folder, are not.
    */
   private ownsFolder(chat: ChatInfo): boolean {

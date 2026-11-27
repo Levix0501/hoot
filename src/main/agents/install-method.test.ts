@@ -164,6 +164,22 @@ describe('detectInstallMethod', () => {
     expect(await detectInstallMethod(getCodingTool('opencode'), opencode, context())).toEqual({
       kind: 'official',
     })
+
+    // Antigravity CLI's installer copies its program there; on Windows, into %LOCALAPPDATA%.
+    const local = path.join(root, 'LocalAppData')
+    const agy = file(
+      process.platform === 'win32'
+        ? path.join(local, 'agy', 'bin', 'agy.exe')
+        : path.join(home, '.local', 'bin', 'agy'),
+    )
+    const withLocal = context({ env: { LOCALAPPDATA: local } })
+    expect(await detectInstallMethod(getCodingTool('antigravity'), agy, withLocal)).toEqual({
+      kind: 'official',
+    })
+    const manual = file(path.join(root, 'manual', program('agy')))
+    expect(await detectInstallMethod(getCodingTool('antigravity'), manual, withLocal)).toEqual({
+      kind: 'unknown',
+    })
   })
 
   it.runIf(process.platform === 'win32')(

@@ -19,8 +19,8 @@
  * - `POST /sessions`: starts a session for an issue of the project, from a
  *   `SessionRequest`.
  * - `POST /hook-events`: reports an event of a hook Hoot adds to the
- *   session's Claude Code or Codex, or a message the plugin Hoot gives the
- *   session's OpenCode tells of, from a `HookEventReport`.
+ *   session's Claude Code, Codex or Antigravity CLI, or a message the plugin
+ *   Hoot gives the session's OpenCode tells of, from a `HookEventReport`.
  *
  * Each request names its session in the `SESSION_HEADER` header, and each
  * answer is a JSON `HootAnswer`.
@@ -208,7 +208,8 @@ export interface SessionRequest {
  * error (`StopFailure`). The hook Hoot adds to Codex is on `UserPromptSubmit`
  * alone, for the conversation of each message, and the plugin Hoot gives
  * OpenCode reports a `UserPromptSubmit` of the same kind for each message the
- * user sends.
+ * user sends, as hoot does for the hooks Hoot gives Antigravity CLI, which
+ * run as a conversation starts and as a turn ends.
  */
 export const HOOK_EVENTS = [
   'SessionStart',
@@ -242,8 +243,8 @@ export const REPORTED_EVENTS = [...HOOK_EVENTS, MODEL_EVENT, MODEL_SWITCH_EVENT]
 export type HookEvent = (typeof REPORTED_EVENTS)[number]
 
 /**
- * An event of a hook of the session's Claude Code or Codex, or of the plugin
- * Hoot gives its OpenCode, as hoot reports it.
+ * An event of a hook of the session's Claude Code, Codex or Antigravity CLI,
+ * or of the plugin Hoot gives its OpenCode, as hoot reports it.
  */
 export interface HookEventReport {
   /** The event, by the name the agent gives it. */

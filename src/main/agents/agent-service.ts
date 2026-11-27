@@ -28,13 +28,19 @@ import {
   type InstallTarget,
   type UnmetNodeRequirement,
 } from '../../shared/agents'
-import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../shared/tools'
+import {
+  CODING_TOOLS,
+  getCodingTool,
+  type CodingToolDefinition,
+  type CodingToolId,
+} from '../../shared/tools'
 import type { Env } from '../env/env'
 import { prependToPath } from '../env/session-env'
 import type { Detection, LoginEnvironment } from '../tools/tool-service'
 import { commandProgram } from '../tools/command-program'
 import { findAgentCopies } from './agent-command'
 import { canonicalPath, homeDisplayPath, samePath } from './agent-paths'
+import { withoutAntigravityUpdates } from './antigravity'
 import {
   detectInstallMethod,
   OFFICIAL_UPDATE_COMMANDS,
@@ -91,14 +97,16 @@ export interface AgentServiceOptions {
   /** The home folder. */
   home: string
   /**
-   * The latest version of an agent's npm package on registry.npmjs.org, and
-   * the Node.js it needs where the agent's command runs on Node.js; `null`
-   * when it cannot be read.
+   * The latest version of an agent (see `fetchAgentRelease`), and the
+   * Node.js it needs where the agent's command runs on Node.js; `null` when
+   * it cannot be read.
    */
-  latestRelease(npmPackage: string, command: string): Promise<LatestRelease | null>
+  latestRelease(tool: CodingToolDefinition): Promise<LatestRelease | null>
   /**
-   * The versions of an agent its version menu offers (see `fetchReleases`);
-   * `null` when they cannot be read. None are offered without it.
+   * The versions of an agent its version menu offers, for one that comes in
+   * an npm package and can be installed in any of its versions (see
+   * `fetchReleases`); `null` when they cannot be read. None are offered
+   * without it.
    */
   releases?(tool: CodingToolId, npmPackage: string, command: string): Promise<Releases | null>
   /** Where what each agent follows is kept; only while Hoot runs without it. */
@@ -205,14 +213,9 @@ interface AgentRecord {
   launchOptions: AgentLaunchOptions | null
 }
 
-/** The arguments npm installs an agent's latest version with, in a global folder. */
-function npmInstallArgs(tool: CodingToolDefinition): string[] {
-  return ['install', '-g', `${tool.npmPackage}@latest`, '--loglevel=http']
-}
-
-/** The arguments npm installs one version of an agent with, in a global folder. */
-function npmVersionArgs(tool: CodingToolDefinition, version: string): string[] {
-  return ['install', '-g', `${tool.npmPackage}@${version}`, '--loglevel=http']
+/** The arguments npm installs a version of an npm package with, in a global folder. */
+function npmInstallArgs(npmPackage: string, version: string): string[] {
+  return ['install', '-g', `${npmPackage}@${version}`, '--loglevel=http']
 }
 
 /**
@@ -232,9 +235,10 @@ function updateCommandOf(
 ): UserCommand | null {
   switch (method.kind) {
     case 'npm':
+      if (tool.npmPackage === null) return null
       return {
         program: method.npm,
-        args: latest ? npmInstallArgs(tool) : npmVersionArgs(tool, version),
+        args: npmInstallArgs(tool.npmPackage, latest ? 'latest' : version),
       }
     case 'homebrew':
       return {
@@ -289,7 +293,7 @@ async function packageVersion(
   method: DetectedInstallMethod,
   platform: NodeJS.Platform,
 ): Promise<string | null> {
-  if (method.kind !== 'npm') return null
+  if (method.kind !== 'npm' || tool.npmPackage === null) return null
   const paths = platform === 'win32' ? path.win32 : path.posix
   const modules =
     platform === 'win32'
@@ -302,6 +306,14 @@ async function packageVersion(
   } catch {
     return null
   }
+}
+
+/**
+ * The environment Hoot runs an agent in to read its version: for Antigravity
+ * CLI, without its own updater, which any run of it can start.
+ */
+function versionEnv(tool: CodingToolDefinition, env: Env): Env {
+  return tool.id === 'antigravity' ? withoutAntigravityUpdates(env) : env
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -423,9 +435,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     }
   }
 
-  /** What an agent's installation follows, which its sessions are run under. */
+  /**
+   * What an agent's installation follows, which its sessions are run under:
+   * its latest version, for one Hoot can install no other version of.
+   */
   followOf(tool: CodingToolId): AgentFollow {
-    return this.follows.get(tool)
+    return getCodingTool(tool).versions ? this.follows.get(tool) : { kind: 'latest' }
   }
 
   /**
@@ -511,11 +526,13 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    * on, unless it is installed; the latest version, or Stable's, when it is
    * newer than the one installed and Hoot can update it. Stable never
    * installs an older version: the installation waits for Stable to catch up.
+   * An agent Hoot can install no other version of follows its latest alone.
    */
   setFollow(id: CodingToolId, follow: AgentFollow): void {
     const record = this.record(id)
     if (isPending(record.operation)) return
     if (follow.kind === 'stable' && id !== 'claude') return
+    if (follow.kind !== 'latest' && !record.tool.versions) return
     this.follows.set(id, follow)
     const installed = record.installation?.version ?? null
     if (installed !== null) {
@@ -781,10 +798,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const id = record.latestId
     this.changed()
     try {
-      const { tool } = record
-      const release = await this.options
-        .latestRelease(tool.npmPackage, tool.command)
-        .catch(() => null)
+      const release = await this.options.latestRelease(record.tool).catch(() => null)
       if (id === record.latestId) {
         record.latest = release?.version ?? null
         record.latestNode = release?.node ?? null
@@ -802,11 +816,12 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    */
   private async readReleases(record: AgentRecord): Promise<void> {
     const read = this.options.releases
-    if (read === undefined) return
+    const { tool } = record
+    const npmPackage = tool.npmPackage
+    if (read === undefined || npmPackage === null || !tool.versions) return
     record.releasesId += 1
     const id = record.releasesId
-    const { tool } = record
-    const releases = await read(tool.id, tool.npmPackage, tool.command).catch(() => null)
+    const releases = await read(tool.id, npmPackage, tool.command).catch(() => null)
     if (id !== record.releasesId || releases === null) return
     record.releases = releases.versions
     record.releaseNode = releases.node
@@ -854,7 +869,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     const { home } = this.options
     const [method, version, displayPath] = await Promise.all([
       detectInstallMethod(tool, command, this.methodContext(env, npm)),
-      readVersion(command, env, home, this.platform),
+      readVersion(command, versionEnv(tool, env), home, this.platform),
       this.displayPath(command),
     ])
     const writable =
@@ -907,7 +922,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         try {
           const [method, version] = await Promise.all([
             detectInstallMethod(tool, file, this.methodContext(env, npm)),
-            readVersion(file, env, home, this.platform),
+            readVersion(file, versionEnv(tool, env), home, this.platform),
           ])
           const writable =
             method.kind === 'npm' ? await canInstallInto(method.prefix, this.platform) : true
@@ -1106,11 +1121,14 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
           }
           return this.commandPlan('the installer', command, env)
         }
+        if (tool.npmPackage === null) {
+          throw new OperationFailure(`${tool.label} cannot be installed with npm`)
+        }
         const npm = await findComputerNpm(env, this.options.home, this.platform)
         if (npm === null) throw new OperationFailure(INSTALL_NEEDS_NODE_MESSAGE)
         if (!npm.usable) throw new OperationFailure(INSTALL_NEEDS_WRITE_ACCESS_MESSAGE)
         await this.checkNode(record, env, null)
-        return this.npmPlan(npm.path, npmInstallArgs(tool), env)
+        return this.npmPlan(npm.path, npmInstallArgs(tool.npmPackage, 'latest'), env)
       }
       case 'uninstall': {
         const copy = this.copyAt(record, target.path)

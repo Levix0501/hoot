@@ -29,7 +29,8 @@ import { systemFolders } from './agents/agent-command'
 import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
 import { readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
-import { fetchLatestRelease } from './agents/latest-version'
+import { readAntigravityLaunchOptions } from './agents/antigravity'
+import { fetchAgentRelease } from './agents/latest-version'
 import { fetchReleases } from './agents/releases'
 import { readVersion } from './agents/version'
 import { readAppInfo } from './app-info'
@@ -68,6 +69,7 @@ import { ProviderStore } from './providers/provider-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
 import { resolveLaunch, type AgentLaunch, type ChatLaunch } from './session/launch'
+import { antigravityHooksFolder } from './session/antigravity-hooks'
 import { openCodePluginFolder } from './session/opencode-plugin'
 import { SessionError, SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
@@ -110,6 +112,12 @@ const hootCli = hootCliSetup({
 })
 // The plugin Hoot gives OpenCode, which OpenCode loads from its folder.
 const openCodePlugin = openCodePluginFolder({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+})
+// The folder of the hooks Hoot gives Antigravity CLI, which it adds to the workspace.
+const antigravityHooks = antigravityHooksFolder({
   packaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
   appPath: app.getAppPath(),
@@ -219,6 +227,7 @@ const sessions: SessionManager = new SessionManager({
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,
+        antigravityHooks,
         openCodeServer: server,
       },
       toolId,
@@ -380,8 +389,7 @@ const agents = new AgentService({
   getLoginEnvironment: () => tools.getLoginEnvironment(),
   home: os.homedir(),
   // Through Electron's network stack, which takes the system's proxy settings.
-  latestRelease: (npmPackage, command) =>
-    fetchLatestRelease(npmPackage, command, (url, init) => net.fetch(url, init)),
+  latestRelease: (tool) => fetchAgentRelease(tool, (url, init) => net.fetch(url, init)),
   releases: (tool, npmPackage, command) =>
     fetchReleases(tool, npmPackage, command, (url, init) => net.fetch(url, init)),
   follows: agentFollows,
@@ -404,8 +412,11 @@ const agents = new AgentService({
     if (tool === 'claude') {
       return readClaudeLaunchOptions({ home: os.homedir(), env })
     }
-    const command = detection.state.tools.find((entry) => entry.id === 'codex')?.path
+    const command = detection.state.tools.find((entry) => entry.id === tool)?.path
     if (!command) return { models: [], defaultEfforts: [], defaultModel: null, defaultEffort: null }
+    if (tool === 'antigravity') {
+      return readAntigravityLaunchOptions({ command, env, home: os.homedir() })
+    }
     return readCodexLaunchOptions({ command, env, home: os.homedir() })
   },
 })

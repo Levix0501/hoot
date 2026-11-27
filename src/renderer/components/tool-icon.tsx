@@ -1,5 +1,6 @@
 import { SquareTerminalIcon } from 'lucide-react'
 import type { ToolId } from '../../shared/tools'
+import antigravityMark from '../assets/provider-icons/antigravity-color.svg'
 import ClaudeCodeIcon from '../assets/brand-icons/claude-code.svg?react'
 import CodexIcon from '../assets/brand-icons/codex.svg?react'
 import OpenCodeOnDarkIcon from '../assets/brand-icons/opencode-on-dark.svg?react'
@@ -28,6 +29,10 @@ export function ToolIcon({ toolId, className }: { toolId: ToolId; className?: st
           />
         </>
       )
+    case 'antigravity':
+      // Antigravity's mark is drawn with a mask and blurs, by ids that its
+      // copies on a page would share, so it is drawn as an image of its own.
+      return <img {...props} src={antigravityMark} alt="" draggable={false} aria-hidden />
     case 'shell':
       return <SquareTerminalIcon {...props} />
   }

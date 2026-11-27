@@ -492,6 +492,55 @@ describe('the upgrade to labels', () => {
     db.close()
   })
 
+  it('keeps the chats, saved sessions and agents of the version before, and takes Antigravity CLI for them', () => {
+    let db = openDatabase(file, MIGRATIONS.slice(0, 14))
+    db.exec(`
+      INSERT INTO chats (id, tool_id, folder, conversation_id, title, custom_name, has_messages,
+          created_at, opened_at, project_root, worktree_path, deleted_at, conversation_reported,
+          unreported_run_started_at, provider_id, model, agent_id, archived_at)
+        VALUES
+          ('chat', 'codex', '/home/.hoot/chats/codex-1', 't', 'T', 'Mine', 1, 1, 2, NULL, NULL,
+            NULL, 1, NULL, 'chatgpt-subscription', 'gpt-5', 'a', 9),
+          ('saved', 'opencode', '/work/app', NULL, '', NULL, 0, 3, 4, '/work/app', '/work/app-wt',
+            5, 0, 6, NULL, NULL, NULL, NULL);
+      INSERT INTO agents (id, harness, provider_id, name, enabled, model, effort, extra_args,
+          created_at, model_map)
+        VALUES ('a', 'claude', 'p', 'Kimi', 0, 'kimi-k3', 'high', '["--verbose"]', 7,
+          '{"haiku":"kimi-k3"}');
+    `)
+    const chats = db.prepare('SELECT * FROM chats ORDER BY id').all()
+    const agents = db.prepare('SELECT * FROM agents').all()
+    db.close()
+    db = openDatabase(file)
+    expect(userVersion(db)).toBe(MIGRATIONS.length)
+    expect(db.prepare('SELECT * FROM chats ORDER BY id').all()).toEqual(chats)
+    expect(db.prepare('SELECT * FROM agents').all()).toEqual(agents)
+    db.exec(`
+      INSERT INTO chats (id, tool_id, folder, created_at, opened_at)
+        VALUES ('agy', 'antigravity', '/home/.hoot/chats/antigravity-1', 8, 8);
+      INSERT INTO agents (id, harness, provider_id, created_at)
+        VALUES ('b', 'antigravity', 'google-account', 8);
+    `)
+    expect(() =>
+      db.exec(
+        "INSERT INTO chats (id, tool_id, folder, created_at, opened_at) VALUES ('x', 'shell', '/x', 1, 1)",
+      ),
+    ).toThrow(/CHECK constraint/)
+    expect(() =>
+      db.exec(
+        "INSERT INTO agents (id, harness, provider_id, created_at) VALUES ('c', 'shell', 'p', 1)",
+      ),
+    ).toThrow(/CHECK constraint/)
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'chats' AND sql IS NOT NULL ORDER BY name",
+        )
+        .all(),
+    ).toEqual([{ name: 'chats_by_opened' }, { name: 'chats_by_worktree' }])
+    db.close()
+  })
+
   it('refuses names taken whatever their case, colors that are not hexadecimal, and an issue with a label twice', () => {
     const db = openDatabase(file)
     const issue = insertIssue(db, {})

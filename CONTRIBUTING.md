@@ -82,8 +82,10 @@ runtime dependency.
   the data already there. A migration that has been released is never changed.
 - **Icons** come from [lucide](https://lucide.dev), except the agents' marks in
   `src/renderer/assets/brand-icons`: Claude Code's and Codex's are taken from Anthropic's and
-  OpenAI's extensions for VS Code, and OpenCode's from its brand assets. They are their owners'
-  trademarks.
+  OpenAI's extensions for VS Code, and OpenCode's from its brand assets. Antigravity CLI's, like
+  the providers' marks in `src/renderer/assets/provider-icons`, comes from
+  [LobeHub's icons](https://github.com/lobehub/lobe-icons), under the license beside them. They
+  are their owners' trademarks.
 
 ## Commits and changesets
 

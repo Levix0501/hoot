@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HookEventReport } from '../../shared/hoot-cli'
 import { OWN_PROVIDER_IDS } from '../../shared/providers'
 import type { SessionInfo } from '../../shared/session'
+import type { CodingToolId } from '../../shared/tools'
 import { openDatabase } from '../database/database'
 import { ChatManager, ownConversations, visibleInput, type ChatAgent } from './chat-manager'
 import { ChatStore } from './chat-store'
@@ -15,6 +16,7 @@ class FakeConversations implements ChatConversations {
   claude = false
   codex: AgentConversation[] | null = []
   opencode: AgentConversation[] | null = []
+  antigravity: AgentConversation[] | null = []
 
   async claudeConversation(): Promise<boolean> {
     return this.claude
@@ -26,6 +28,10 @@ class FakeConversations implements ChatConversations {
 
   async openCodeConversations(): Promise<AgentConversation[] | null> {
     return this.opencode
+  }
+
+  async antigravityConversations(): Promise<AgentConversation[] | null> {
+    return this.antigravity
   }
 }
 
@@ -45,7 +51,7 @@ const hook = (
 })
 
 /** What a chat or saved session of a harness's own agent is made with, by the harness. */
-function agentOf(toolId: 'claude' | 'codex' | 'opencode'): ChatAgent {
+function agentOf(toolId: CodingToolId): ChatAgent {
   return { toolId, providerId: OWN_PROVIDER_IDS[toolId], model: null, agentId: `agent-${toolId}` }
 }
 
@@ -87,7 +93,7 @@ const endedLocal = (
   program: null,
 })
 
-const ended = (chatId: string, toolId: 'claude' | 'codex' | 'opencode'): SessionInfo => ({
+const ended = (chatId: string, toolId: CodingToolId): SessionInfo => ({
   id: `session-${chatId}`,
   projectRoot: `/chats/${chatId}`,
   worktreePath: null,
@@ -376,6 +382,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(chat.id))?.launch).toEqual({
       conversationId: first,
       resume: true,
+      ownFolder: true,
     })
   })
 
@@ -457,6 +464,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(chat.id))?.launch).toEqual({
       conversationId: 'conversation-1',
       resume: true,
+      ownFolder: true,
     })
   })
 
@@ -495,6 +503,7 @@ describe('ChatManager', () => {
     expect((await again.prepareSession(chat.id))?.launch).toEqual({
       conversationId: chat.conversationId,
       resume: true,
+      ownFolder: true,
     })
     await again.reconcileAll()
     expect(again.get('unseen')).toMatchObject({ hasMessages: true })
@@ -530,6 +539,50 @@ describe('ChatManager', () => {
     expect(manager.list()).toEqual([
       expect.objectContaining({ id: chat.id, conversationId: 'thread-new', hasMessages: true }),
     ])
+  })
+
+  it('takes up the conversation Antigravity CLI recorded for a chat its hooks told of none, then goes on in those they tell of', async () => {
+    const chat = await manager.create(agentOf('antigravity'))
+    expect(path.basename(chat.folder)).toMatch(/^antigravity-/)
+    expect((await manager.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: null,
+      resume: false,
+      ownFolder: true,
+    })
+    manager.opened(chat.id)
+    manager.typed(chat.id, 'session-1', 'What is 21+21?\r')
+    conversations.antigravity = [{ id: 'e7ee69e1', title: 'Addition', createdAt: clock }]
+    manager.sessionEnded(ended(chat.id, 'antigravity'))
+    await manager.flush()
+    // Named by the title Antigravity CLI recorded, as it sets no terminal title.
+    expect(manager.get(chat.id)).toMatchObject({
+      conversationId: 'e7ee69e1',
+      hasMessages: true,
+      title: 'Addition',
+    })
+
+    // Its hooks tell of the next, as `/clear` starts one, which it takes the title of once
+    // Antigravity CLI recorded one; Hoot reads no other conversation from the records then.
+    await start(chat.id)
+    manager.typed(chat.id, 'session-2', '/clear\r')
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'dc824547', null, ++clock))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'dc824547', title: '' })
+    conversations.antigravity = [
+      { id: 'dc824547', title: 'Sum', createdAt: clock },
+      { id: 'later', title: 'Later', createdAt: ++clock },
+    ]
+    manager.noteHookEvent(chat.id, hook('UserPromptSubmit', 'dc824547', null, ++clock))
+    await manager.flush()
+    expect(manager.get(chat.id)).toMatchObject({ conversationId: 'dc824547', title: 'Sum' })
+    manager.sessionEnded(ended(chat.id, 'antigravity'))
+    await manager.flush()
+    expect(manager.get(chat.id)?.conversationId).toBe('dc824547')
+    expect((await manager.prepareSession(chat.id))?.launch).toEqual({
+      conversationId: 'dc824547',
+      resume: true,
+      ownFolder: true,
+    })
   })
 
   it('keeps an OpenCode chat in its conversation after /new until a message is sent in the next one', async () => {
@@ -905,6 +958,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(other.id))?.launch).toEqual({
       conversationId: 'conversation-1',
       resume: true,
+      ownFolder: false,
     })
     const gone = manager.createSavedSession(project, null, agentOf('opencode'), {
       firstMessage: 'Hi.',
@@ -1718,6 +1772,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(chat.id))?.launch).toEqual({
       conversationId: 'thread-fork',
       resume: true,
+      ownFolder: true,
     })
   })
 
@@ -2027,6 +2082,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(saved.id))?.launch).toEqual({
       conversationId: 'ses_given',
       resume: false,
+      ownFolder: false,
     })
     manager.opened(saved.id)
     manager.noteHookEvent(saved.id, openCodeMessage('ses_given', folder))
@@ -2035,6 +2091,7 @@ describe('ChatManager', () => {
     expect((await manager.prepareSession(saved.id))?.launch).toEqual({
       conversationId: 'ses_given',
       resume: true,
+      ownFolder: false,
     })
   })
 

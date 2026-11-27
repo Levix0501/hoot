@@ -1,5 +1,5 @@
 /** Tools that run an agent CLI. */
-export const CODING_TOOL_IDS = ['claude', 'codex', 'opencode'] as const
+export const CODING_TOOL_IDS = ['claude', 'codex', 'opencode', 'antigravity'] as const
 
 export const TOOL_IDS = [...CODING_TOOL_IDS, 'shell'] as const
 
@@ -12,8 +12,16 @@ export interface CodingToolDefinition {
   label: string
   /** Command looked up in the login shell PATH. */
   command: string
-  /** The npm package the tool comes in, which Hoot installs and updates with npm. */
-  npmPackage: string
+  /**
+   * The npm package the tool comes in, which Hoot can install and update it
+   * with; `null` for one that comes in none.
+   */
+  npmPackage: string | null
+  /**
+   * Whether Hoot can install any of its versions, not only its latest, and
+   * so keep it on one.
+   */
+  versions: boolean
 }
 
 export interface ShellToolDefinition {
@@ -22,6 +30,7 @@ export interface ShellToolDefinition {
   /** The user's default shell runs instead of a command. */
   command: null
   npmPackage: null
+  versions: false
 }
 
 export type ToolDefinition = CodingToolDefinition | ShellToolDefinition
@@ -32,24 +41,37 @@ export const TOOLS: readonly ToolDefinition[] = [
     label: 'Claude Code',
     command: 'claude',
     npmPackage: '@anthropic-ai/claude-code',
+    versions: true,
   },
   {
     id: 'codex',
     label: 'Codex',
     command: 'codex',
     npmPackage: '@openai/codex',
+    versions: true,
   },
   {
     id: 'opencode',
     label: 'OpenCode',
     command: 'opencode',
     npmPackage: '@opencode/cli',
+    versions: true,
+  },
+  {
+    // Only its latest version can be installed: its installer and its own
+    // `agy update` take no other.
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    command: 'agy',
+    npmPackage: null,
+    versions: false,
   },
   {
     id: 'shell',
     label: 'Terminal',
     command: null,
     npmPackage: null,
+    versions: false,
   },
 ]
 
@@ -59,7 +81,10 @@ export function getTool(id: ToolId): ToolDefinition {
   return tool
 }
 
-/** The coding tools, which run an agent: Claude Code, Codex and OpenCode, in this order. */
+/**
+ * The coding tools, which run an agent: Claude Code, Codex, OpenCode and
+ * Antigravity CLI, in this order.
+ */
 export const CODING_TOOLS: readonly CodingToolDefinition[] = TOOLS.filter(
   (tool): tool is CodingToolDefinition => tool.command !== null,
 )

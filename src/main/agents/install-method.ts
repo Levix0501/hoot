@@ -1,7 +1,7 @@
 import path from 'node:path'
 import which from 'which'
 import type { CodingToolDefinition, CodingToolId } from '../../shared/tools'
-import type { Env } from '../env/env'
+import { envVariable, type Env } from '../env/env'
 import { commandTarget } from '../tools/command-program'
 import { canonicalPath, isInside, samePath } from './agent-paths'
 import type { ComputerNpm } from './npm'
@@ -45,6 +45,7 @@ export const OFFICIAL_UPDATE_COMMANDS: Record<CodingToolId, string> = {
   claude: 'update',
   codex: 'update',
   opencode: 'upgrade',
+  antigravity: 'update',
 }
 
 async function isExecutable(file: string): Promise<boolean> {
@@ -90,6 +91,7 @@ async function npmMethod(
   context: ResolvedContext,
 ): Promise<DetectedInstallMethod | null> {
   const { platform } = context
+  if (tool.npmPackage === null) return null
   const prefix = npmPrefixOf(target, tool.npmPackage, platform)
   if (prefix === null) return null
   const computer = context.computerNpm
@@ -133,8 +135,9 @@ async function homebrewMethod(target: string): Promise<DetectedInstallMethod | n
  * `~/.local/bin/claude` (a symbolic link into that folder on macOS, the
  * program itself on Windows), and on Windows also in `~/.claude/bin/claude.exe`;
  * Codex's is in the `packages/standalone/` folder of where it keeps its files
- * (`CODEX_HOME`, or `~/.codex`), which holds on Windows too; and OpenCode's
- * command is `~/.opencode/bin/opencode`.
+ * (`CODEX_HOME`, or `~/.codex`), which holds on Windows too; OpenCode's
+ * command is `~/.opencode/bin/opencode`; and Antigravity CLI's program is
+ * `~/.local/bin/agy`, on Windows `%LOCALAPPDATA%\agy\bin\agy.exe`.
  */
 async function isOfficialInstallation(
   tool: CodingToolDefinition,
@@ -182,6 +185,23 @@ async function isOfficialInstallation(
         samePath(await canonicalPath(paths.dirname(command)), bin, platform) &&
         paths.basename(command).toLowerCase() ===
           (platform === 'win32' ? 'opencode.exe' : 'opencode')
+      )
+    }
+    case 'antigravity': {
+      const local = envVariable(context.env, 'LOCALAPPDATA', platform)
+      const folder =
+        platform !== 'win32'
+          ? paths.join(context.home, '.local', 'bin')
+          : local && paths.isAbsolute(local)
+            ? paths.join(local, 'agy', 'bin')
+            : null
+      if (folder === null) return false
+      return (
+        samePath(
+          await canonicalPath(paths.dirname(command)),
+          await canonicalPath(folder),
+          platform,
+        ) && paths.basename(command).toLowerCase() === (platform === 'win32' ? 'agy.exe' : 'agy')
       )
     }
   }

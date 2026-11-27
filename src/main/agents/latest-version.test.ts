@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fetchLatestRelease, type Fetch } from './latest-version'
+import { getCodingTool } from '../../shared/tools'
+import {
+  antigravityPlatform,
+  fetchAgentRelease,
+  fetchAntigravityRelease,
+  fetchLatestRelease,
+  type Fetch,
+} from './latest-version'
 
 /** A request without a network. */
 const offline: Fetch = async () => {
@@ -106,5 +113,66 @@ describe('fetchLatestRelease', () => {
     expect(signal?.aborted).toBe(true)
     // And when the request ends once it is aborted.
     expect(await fetchLatestRelease('@openai/codex', 'codex', untilAborted, 50)).toBeNull()
+  })
+})
+
+/** The manifest Antigravity CLI's installer reads, as its server gave it for 1.5.18. */
+const ANTIGRAVITY_MANIFEST = {
+  version: '1.5.18',
+  url: 'https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.18-6386224290725888/darwin-arm/cli_mac_arm64.tar.gz',
+  sha512: 'd10e124f',
+}
+
+describe('fetchAntigravityRelease', () => {
+  it("reads the version its installer's manifest for the platform names, afresh", async () => {
+    const fetch = vi.fn<Fetch>(async () => json(ANTIGRAVITY_MANIFEST))
+    expect(await fetchAntigravityRelease(fetch, 'darwin', 'arm64')).toEqual({
+      version: '1.5.18',
+      node: null,
+    })
+    const [url, init] = fetch.mock.calls[0] ?? []
+    expect(url).toBe(
+      'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/darwin_arm64.json',
+    )
+    expect(init?.cache).toBe('no-store')
+  })
+
+  it('names each platform as its installers do, and none it has no build for', () => {
+    expect(antigravityPlatform('darwin', 'x64')).toBe('darwin_amd64')
+    expect(antigravityPlatform('win32', 'x64')).toBe('windows_amd64')
+    expect(antigravityPlatform('win32', 'arm64')).toBe('windows_arm64')
+    expect(antigravityPlatform('linux', 'arm64')).toBe('linux_arm64')
+    expect(antigravityPlatform('freebsd', 'x64')).toBeNull()
+    expect(antigravityPlatform('darwin', 'ia32')).toBeNull()
+  })
+
+  it('reads none from an answer without a valid version, without a network, or for no build', async () => {
+    expect(await fetchAntigravityRelease(async () => json({}, 404), 'darwin', 'arm64')).toBeNull()
+    expect(
+      await fetchAntigravityRelease(async () => json({ version: 'soon' }), 'darwin', 'arm64'),
+    ).toBeNull()
+    expect(await fetchAntigravityRelease(offline, 'win32', 'x64')).toBeNull()
+    const fetch = vi.fn<Fetch>(async () => json(ANTIGRAVITY_MANIFEST))
+    expect(await fetchAntigravityRelease(fetch, 'freebsd', 'x64')).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchAgentRelease', () => {
+  it("reads an agent's npm package, or Antigravity CLI's manifest, which comes in none", async () => {
+    const fetch = vi.fn<Fetch>(async (url) =>
+      json(url.includes('manifests') ? ANTIGRAVITY_MANIFEST : { version: '0.163.0' }),
+    )
+    expect(await fetchAgentRelease(getCodingTool('codex'), fetch)).toEqual({
+      version: '0.163.0',
+      node: null,
+    })
+    expect(await fetchAgentRelease(getCodingTool('antigravity'), fetch)).toMatchObject({
+      version: '1.5.18',
+    })
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://registry.npmjs.org/@openai/codex/latest',
+      expect.stringMatching(/\/manifests\/[a-z]+_[a-z0-9]+\.json$/),
+    ])
   })
 })

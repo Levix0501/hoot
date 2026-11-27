@@ -1,0 +1,6 @@
+{
+  "hoot": {
+    "SessionStart": [{ "type": "command", "command": "hoot hook" }],
+    "Stop": [{ "type": "command", "command": "hoot hook" }]
+  }
+}

@@ -6,6 +6,7 @@ export const YOLO_ARGUMENTS: Readonly<Record<CodingToolId, readonly string[]>> =
   claude: ['--dangerously-skip-permissions'],
   codex: ['--dangerously-bypass-approvals-and-sandbox'],
   opencode: ['--auto'],
+  antigravity: ['--dangerously-skip-permissions'],
 }
 
 /** Which of an agent's own launch settings its extra arguments already decide. */
@@ -87,6 +88,15 @@ export function extraArgumentKinds(
       case 'opencode':
         if (option === '--auto') kinds.permission = true
         break
+      case 'antigravity':
+        if (option === '--dangerously-skip-permissions' || option === '--mode') {
+          kinds.permission = true
+        } else if (option === '--model') {
+          kinds.model = true
+        } else if (option === '--effort') {
+          kinds.effort = true
+        }
+        break
     }
   }
   return kinds
@@ -101,6 +111,7 @@ export function modelArguments(tool: CodingToolId, model: string): string[] {
 export function effortArguments(tool: CodingToolId, effort: string): string[] {
   switch (tool) {
     case 'claude':
+    case 'antigravity':
       return ['--effort', effort]
     case 'codex':
       return ['-c', `model_reasoning_effort=${effort}`]

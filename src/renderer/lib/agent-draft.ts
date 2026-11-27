@@ -105,6 +105,9 @@ export function effortsOf(
         return codexEffortsOf(listed)
       case 'opencode':
         return openCodeEffortsOf(listed, providerFormat(provider, harness) ?? 'anthropic')
+      case 'antigravity':
+        // It runs no provider of the user's.
+        return []
     }
   }
   const options = state?.launchOptions
@@ -148,6 +151,8 @@ export function defaultEffortOf(
         ? null
         : openCodeDefaultEffort(catalogModelOf(catalogs, harness, provider, runs))
     }
+    case 'antigravity':
+      return null
   }
 }
 

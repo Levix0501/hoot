@@ -1,8 +1,11 @@
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
+import { DatabaseSync } from 'node:sqlite'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Env } from '../env/env'
 import { commandProgram } from '../tools/command-program'
@@ -35,6 +38,11 @@ export interface ChatConversations {
   codexConversations(folder: string): Promise<AgentConversation[] | null>
   /** The conversations OpenCode recorded in this folder, oldest first; `null` when they cannot be read. */
   openCodeConversations(folder: string): Promise<AgentConversation[] | null>
+  /**
+   * The conversations Antigravity CLI recorded in this folder, oldest first;
+   * `null` when they cannot be read.
+   */
+  antigravityConversations(folder: string): Promise<AgentConversation[] | null>
 }
 
 /** Whether two folder paths name the same folder. */
@@ -328,9 +336,154 @@ async function openCodeConversations(
   }
 }
 
+/** Where Antigravity CLI keeps its records, in the home folder. */
+function antigravityRecords(home: string): string {
+  return path.join(home, '.gemini', 'antigravity-cli')
+}
+
+/**
+ * When Antigravity CLI's conversation `id` started, as the first step of its
+ * transcript, the first message, gives it: to the second, which counts here
+ * as its end, so that a conversation started in the second a run began is
+ * not taken for one from before it. `NaN` when the transcript gives none.
+ */
+async function antigravityStartedAt(home: string, id: string): Promise<number> {
+  const transcript = path.join(
+    antigravityRecords(home),
+    'brain',
+    id,
+    '.system_generated',
+    'logs',
+    'transcript.jsonl',
+  )
+  try {
+    const at = milliseconds(objectLine(await firstLine(transcript))?.created_at)
+    return Number.isNaN(at) || at % 1000 !== 0 ? at : at + 999
+  } catch {
+    return Number.NaN
+  }
+}
+
+/** What Hoot reads of each conversation in Antigravity CLI's summaries of them. */
+interface AntigravitySummary {
+  conversation_id: unknown
+  title: unknown
+  workspace_uris: unknown
+  parent_conversation_id: unknown
+  nesting_depth: unknown
+  last_user_input_time: unknown
+}
+
+const SUMMARIES_QUERY =
+  'SELECT conversation_id, title, workspace_uris, parent_conversation_id, nesting_depth, ' +
+  'last_user_input_time FROM conversation_summaries'
+
+/** The rows of the summaries in the database `file`, opened to be read alone. */
+function readSummaries(file: string, readOnly: boolean): AntigravitySummary[] {
+  const db = new DatabaseSync(file, { readOnly, timeout: 1000 })
+  try {
+    return db.prepare(SUMMARIES_QUERY).all() as unknown as AntigravitySummary[]
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * The summaries Antigravity CLI keeps of its conversations, read as they
+ * are, or from a copy of the database and its log when it cannot be opened
+ * to be read alone, as when a running Antigravity CLI holds them in a way
+ * that needs a reader that can write.
+ */
+async function antigravitySummaries(file: string): Promise<AntigravitySummary[]> {
+  try {
+    return readSummaries(file, true)
+  } catch {
+    const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'hoot-antigravity-'))
+    try {
+      const copy = path.join(folder, path.basename(file))
+      await fs.copyFile(file, copy)
+      await fs.copyFile(`${file}-wal`, `${copy}-wal`).catch(() => {})
+      return readSummaries(copy, false)
+    } finally {
+      await fs.rm(folder, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+}
+
+/**
+ * The folders of a conversation's workspace, from the JSON list of their
+ * file URLs that Antigravity CLI keeps.
+ */
+function workspaceFolders(uris: unknown): string[] {
+  if (typeof uris !== 'string') return []
+  let value: unknown
+  try {
+    value = JSON.parse(uris)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(value)) return []
+  return value.flatMap((uri) => {
+    if (typeof uri !== 'string') return []
+    try {
+      return [fileURLToPath(uri)]
+    } catch {
+      return []
+    }
+  })
+}
+
+/**
+ * The conversations Antigravity CLI recorded in a folder, as its summaries
+ * of them give them: those whose workspace has the folder, with the titles
+ * it gave them. Only those the user sent a message in are conversations
+ * here: a subagent's, which another conversation started and which keeps
+ * no time of a message of the user's, is none. `null` when the summaries
+ * cannot be read.
+ */
+async function antigravityConversations(
+  home: string,
+  folder: string,
+): Promise<AgentConversation[] | null> {
+  const file = path.join(antigravityRecords(home), 'conversation_summaries.db')
+  let summaries: AntigravitySummary[]
+  try {
+    await fs.access(file)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    return null
+  }
+  try {
+    summaries = await antigravitySummaries(file)
+  } catch {
+    return null
+  }
+  const conversations: AgentConversation[] = []
+  for (const summary of summaries) {
+    const id = summary.conversation_id
+    if (typeof id !== 'string' || id === '') continue
+    if (summary.parent_conversation_id !== '' || Number(summary.nesting_depth) !== 0) continue
+    // Antigravity CLI writes the zero time of Go, 0001-01-01, for none.
+    const messaged = summary.last_user_input_time
+    if (typeof messaged !== 'string' || messaged === '' || messaged.startsWith('0001-')) continue
+    if (!workspaceFolders(summary.workspace_uris).some((other) => sameFolder(other, folder))) {
+      continue
+    }
+    const startedAt = await antigravityStartedAt(home, id)
+    const title = summary.title
+    conversations.push({
+      id,
+      title: typeof title === 'string' && title !== '' ? title : null,
+      createdAt: Number.isNaN(startedAt) ? 0 : startedAt,
+    })
+  }
+  return conversations.toSorted((a, b) => a.createdAt - b.createdAt)
+}
+
 /**
  * The agent records Hoot reads on this computer: Claude Code's transcripts,
- * Codex's session files and OpenCode's session list.
+ * Codex's session files, OpenCode's session list and Antigravity CLI's
+ * summaries of its conversations.
  */
 export function localChatConversations(options: {
   home: string
@@ -356,6 +509,9 @@ export function localChatConversations(options: {
     },
     async openCodeConversations(folder) {
       return openCodeConversations(folder, (await options.getLoginEnvironment()).env)
+    },
+    antigravityConversations(folder) {
+      return antigravityConversations(options.home, folder)
     },
   }
 }

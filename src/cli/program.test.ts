@@ -1790,6 +1790,23 @@ const reported = (
   folder: '/work/gamma',
 })
 
+/** The input Antigravity CLI 1.5.18 gives the hooks in the folder of Hoot's hooks. */
+const antigravityInput = (event: string, conversationId: string, lastUserInput: string) =>
+  JSON.stringify({
+    artifactDirectoryPath: `/home/.gemini/antigravity-cli/brain/${conversationId}`,
+    conversationId,
+    cwd: '/Applications/Hoot.app/Contents/Resources/antigravity-hooks',
+    hookEventName: event,
+    lastUserInput,
+    modelName: 'gemini-4-neon-high',
+    transcriptPath: `/home/.gemini/antigravity-cli/brain/${conversationId}/.system_generated/logs/transcript_full.jsonl`,
+    workspacePaths: [
+      '/Applications/Hoot.app/Contents/Resources/antigravity-hooks',
+      '/home/.hoot/chats/antigravity-a1b2c3',
+    ],
+    ...(event === 'Stop' ? { fullyIdle: true, terminationReason: 'NO_TOOL_CALL' } : {}),
+  })
+
 describe('hoot hook', () => {
   it("reports to Hoot each event Hoot takes, from the hook's input, with when hoot started, and prints nothing", async () => {
     for (const event of [
@@ -1880,6 +1897,33 @@ describe('hoot hook', () => {
         folder: '/work/gamma/sub',
       },
     ])
+  })
+
+  it("reports the conversation Antigravity CLI starts, and each in which a turn ends, but no subagent's", async () => {
+    const main = 'e7ee69e1-321a-4054-978a-8aa5edf7eb48'
+    const subagent = 'b32d1f04-6d8b-4d6f-8018-5b5a22580abc'
+    for (const stdin of [
+      antigravityInput('SessionStart', main, 'What is 21+21?'),
+      // A subagent's conversation, which no message of the user's went to.
+      antigravityInput('SessionStart', subagent, ''),
+      antigravityInput('PreInvocation', main, 'What is 21+21?'),
+      antigravityInput('Stop', subagent, ''),
+      antigravityInput('Stop', main, 'What is 21+21?'),
+    ]) {
+      expect(await run(['hook'], { stdin })).toEqual({ code: 0, stdout: '', stderr: '' })
+    }
+    const message = {
+      sessionId: 'gamma-session',
+      event: 'UserPromptSubmit',
+      startedAt: STARTED_AT,
+      subagent: false,
+      turn: null,
+      conversationId: main,
+      source: null,
+      reason: null,
+      folder: null,
+    }
+    expect(hoot.hookEvents).toEqual([message, message])
   })
 
   it('reports nothing for any other input, and still succeeds without a word', async () => {

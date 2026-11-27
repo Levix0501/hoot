@@ -19,7 +19,8 @@ function pathRules(platform: NodeJS.Platform): path.PlatformPath {
  * add `~/.local/bin` to it, and a shell such as fish does not read the
  * profile the others add theirs to. Claude Code's is `~/.local/bin`; Codex's
  * the folder `CODEX_INSTALL_DIR` names, else `~/.local/bin`, on Windows
- * `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`; OpenCode's `~/.opencode/bin`.
+ * `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`; OpenCode's `~/.opencode/bin`;
+ * Antigravity CLI's `~/.local/bin`, on Windows `%LOCALAPPDATA%\agy\bin`.
  */
 export function installerFolders(
   tool: CodingToolId,
@@ -42,6 +43,11 @@ export function installerFolders(
     }
     case 'opencode':
       return [paths.join(home, '.opencode', 'bin')]
+    case 'antigravity': {
+      if (platform !== 'win32') return [paths.join(home, '.local', 'bin')]
+      const local = envVariable(env, 'LOCALAPPDATA', platform)
+      return local && paths.isAbsolute(local) ? [paths.join(local, 'agy', 'bin')] : []
+    }
   }
 }
 

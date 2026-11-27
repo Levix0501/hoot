@@ -7,6 +7,7 @@ import {
   Trash2Icon,
 } from 'lucide-react'
 import type { AgentFollow, AgentState } from '../../../shared/agents'
+import { getCodingTool } from '../../../shared/tools'
 import { useAppStore } from '../../store/app-store'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
@@ -198,7 +199,9 @@ function revealChecked(list: HTMLDivElement | null) {
  * Claude Code's Stable, or staying on the installed one; the other versions
  * it offers, newest first, picking one of which installs it and stays on
  * it; and Uninstall. Where Hoot cannot install versions in its place, only
- * Latest and Stay are offered.
+ * Latest and Stay are offered; for an agent Hoot can install the latest
+ * version of alone, as Antigravity CLI, only Uninstall, and where it cannot
+ * uninstall it either, the version is no button.
  */
 export function VersionMenu({
   agent,
@@ -211,6 +214,18 @@ export function VersionMenu({
   const installation = agent.installation
   if (installation === null || installation.version === null) return null
   const id = agent.id
+  const follows = getCodingTool(id).versions
+  const uninstallable = installation.removable || agent.copies.some((copy) => copy.removable)
+  if (!follows && !uninstallable) {
+    return (
+      <span
+        className="shrink-0 px-2 text-xs text-muted-foreground tabular-nums"
+        data-testid={`agent-version-${id}`}
+      >
+        {installation.version}
+      </span>
+    )
+  }
   const pending = isPending(agent)
   const switchable = installation.switchable
   const versions = switchable ? versionsOf(agent) : []
@@ -218,7 +233,6 @@ export function VersionMenu({
   const stayOn = stayVersionOf(agent)
   const selected = selectedOf(agent.follow)
   const pick = (value: unknown) => setFollow(id, followOf(String(value)))
-  const uninstallable = installation.removable || agent.copies.some((copy) => copy.removable)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -238,40 +252,42 @@ export function VersionMenu({
         <ChevronDownIcon className="size-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56" data-testid={`agent-version-menu-${id}`}>
-        <DropdownMenuRadioGroup value={selected} onValueChange={pick}>
-          <DropdownMenuRadioItem
-            closeOnClick
-            value="latest"
-            disabled={pending}
-            data-testid={`agent-follow-latest-${id}`}
-          >
-            <ChannelText stable={false} version={agent.latest} />
-          </DropdownMenuRadioItem>
-          {stable !== null && (
+        {follows && (
+          <DropdownMenuRadioGroup value={selected} onValueChange={pick}>
             <DropdownMenuRadioItem
               closeOnClick
-              value="stable"
+              value="latest"
               disabled={pending}
-              data-testid={`agent-follow-stable-${id}`}
+              data-testid={`agent-follow-latest-${id}`}
             >
-              <ChannelText stable version={stable} />
+              <ChannelText stable={false} version={agent.latest} />
             </DropdownMenuRadioItem>
-          )}
-          {stayOn !== null && (
-            <DropdownMenuRadioItem
-              closeOnClick
-              value={stayOn}
-              disabled={pending}
-              data-testid={`agent-follow-stay-${id}`}
-            >
-              <LockIcon className={MUTED_ICON} />
-              <span className="flex-1">
-                Stay on <span className="tabular-nums">{stayOn}</span>
-              </span>
-            </DropdownMenuRadioItem>
-          )}
-        </DropdownMenuRadioGroup>
-        {versions.length > 1 && (
+            {stable !== null && (
+              <DropdownMenuRadioItem
+                closeOnClick
+                value="stable"
+                disabled={pending}
+                data-testid={`agent-follow-stable-${id}`}
+              >
+                <ChannelText stable version={stable} />
+              </DropdownMenuRadioItem>
+            )}
+            {stayOn !== null && (
+              <DropdownMenuRadioItem
+                closeOnClick
+                value={stayOn}
+                disabled={pending}
+                data-testid={`agent-follow-stay-${id}`}
+              >
+                <LockIcon className={MUTED_ICON} />
+                <span className="flex-1">
+                  Stay on <span className="tabular-nums">{stayOn}</span>
+                </span>
+              </DropdownMenuRadioItem>
+            )}
+          </DropdownMenuRadioGroup>
+        )}
+        {follows && versions.length > 1 && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuSub>
@@ -314,7 +330,7 @@ export function VersionMenu({
         )}
         {uninstallable && (
           <>
-            <DropdownMenuSeparator />
+            {follows && <DropdownMenuSeparator />}
             <UninstallEntry agent={agent} onUninstall={onUninstall} />
           </>
         )}

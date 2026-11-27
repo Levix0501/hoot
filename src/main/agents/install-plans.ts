@@ -24,6 +24,7 @@ const INSTALL_SCRIPTS: Record<CodingToolId, string> = {
   claude: 'curl -fsSL https://claude.ai/install.sh | bash',
   codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
   opencode: 'curl -fsSL https://opencode.ai/v2/install | bash',
+  antigravity: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
 }
 
 /**
@@ -33,6 +34,7 @@ const INSTALL_SCRIPTS: Record<CodingToolId, string> = {
 const WINDOWS_INSTALL_SCRIPTS: Partial<Record<CodingToolId, string>> = {
   claude: 'irm https://claude.ai/install.ps1 | iex',
   codex: 'irm https://chatgpt.com/codex/install.ps1 | iex',
+  antigravity: 'irm https://antigravity.google/cli/install.ps1 | iex',
 }
 
 /**
@@ -92,7 +94,8 @@ export function officialInstallCommand(
  * beside its others; Codex's installer installs that release; OpenCode's own
  * `upgrade` takes any version, older ones too. `null` where Hoot cannot pick
  * a version: for Homebrew, which keeps only its newest, for an installation
- * Hoot cannot tell how was made, and for Codex's installer on Windows.
+ * Hoot cannot tell how was made, for Codex's installer on Windows, and for
+ * Antigravity CLI, whose installer and own `update` take no version.
  */
 export function switchCommandOf(
   tool: CodingToolDefinition,
@@ -103,6 +106,7 @@ export function switchCommandOf(
 ): UserCommand | null {
   switch (method.kind) {
     case 'npm':
+      if (tool.npmPackage === null) return null
       return {
         program: method.npm,
         args: ['install', '-g', `${tool.npmPackage}@${version}`, '--loglevel=http'],
@@ -143,8 +147,10 @@ export type UninstallPlan =
  * Claude Code's launcher and the folder of its builds, `~/.local/share/claude`;
  * Codex's commands that lead into `packages/standalone` in where it keeps its
  * files, and that folder; OpenCode's program and the `opencode2` beside it,
- * which `opencode uninstall` leaves to the user. Codex's and OpenCode's on
- * Windows are left alone, untried there. Settings, sign-ins and history stay.
+ * which `opencode uninstall` leaves to the user; Antigravity CLI's program,
+ * which its installer says to delete for a fresh installation. Codex's,
+ * OpenCode's and Antigravity CLI's on Windows are left alone, untried there.
+ * Settings, sign-ins and history stay.
  */
 async function officialFiles(
   tool: CodingToolId,
@@ -174,6 +180,9 @@ async function officialFiles(
     case 'opencode':
       if (platform === 'win32') return null
       return [command, paths.join(paths.dirname(command), 'opencode2')]
+    case 'antigravity':
+      if (platform === 'win32') return null
+      return [command]
   }
 }
 
@@ -192,7 +201,7 @@ export async function uninstallPlanOf(
 ): Promise<UninstallPlan | null> {
   switch (method.kind) {
     case 'npm':
-      if (!context.writable) return null
+      if (!context.writable || tool.npmPackage === null) return null
       return {
         kind: 'command',
         command: {

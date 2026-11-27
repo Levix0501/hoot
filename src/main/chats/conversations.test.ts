@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { onPath, writeNodeCommand } from '../tools/test-support'
 import { localChatConversations } from './conversations'
@@ -249,5 +251,111 @@ describe('localChatConversations', () => {
     expect(
       await conversations({ PATH: onPath('/usr/bin') }).openCodeConversations(folder),
     ).toBeNull()
+  })
+
+  /** Where Antigravity CLI keeps its records in the test's home folder. */
+  const antigravity = () => path.join(home, '.gemini', 'antigravity-cli')
+
+  /**
+   * Antigravity CLI's summaries of its conversations, as 1.5.18 keeps them,
+   * with the columns Hoot reads, kept open by `writer` as a running
+   * Antigravity CLI keeps them, in its log, until it is closed.
+   */
+  function summaries(
+    rows: Array<{
+      id: string
+      folders: string[]
+      title?: string
+      parent?: string
+      depth?: number
+      messaged?: string
+    }>,
+  ): DatabaseSync {
+    fs.mkdirSync(antigravity(), { recursive: true })
+    const writer = new DatabaseSync(path.join(antigravity(), 'conversation_summaries.db'))
+    writer.exec('PRAGMA journal_mode = WAL')
+    writer.exec(
+      'CREATE TABLE `conversation_summaries` (`conversation_id` text, `title` text NOT NULL DEFAULT "", ' +
+        '`step_count` integer NOT NULL DEFAULT 0, `workspace_uris` text NOT NULL, ' +
+        '`parent_conversation_id` text NOT NULL DEFAULT "", `nesting_depth` integer NOT NULL DEFAULT 0, ' +
+        '`last_user_input_time` datetime NOT NULL, PRIMARY KEY (`conversation_id`))',
+    )
+    const insert = writer.prepare(
+      'INSERT INTO conversation_summaries (conversation_id, title, step_count, workspace_uris, ' +
+        'parent_conversation_id, nesting_depth, last_user_input_time) VALUES (?, ?, 2, ?, ?, ?, ?)',
+    )
+    for (const row of rows) {
+      insert.run(
+        row.id,
+        row.title ?? '',
+        JSON.stringify(row.folders.map((each) => pathToFileURL(each).href)),
+        row.parent ?? '',
+        row.depth ?? 0,
+        row.messaged ?? '2026-11-27 08:46:07.833792+00:00',
+      )
+    }
+    return writer
+  }
+
+  /** The transcript of an Antigravity CLI conversation, whose first step is the first message. */
+  function antigravityTranscript(id: string, createdAt: string): void {
+    const logs = path.join(antigravity(), 'brain', id, '.system_generated', 'logs')
+    fs.mkdirSync(logs, { recursive: true })
+    const step = {
+      step_index: 0,
+      source: 'USER_EXPLICIT',
+      type: 'USER_INPUT',
+      created_at: createdAt,
+    }
+    fs.writeFileSync(path.join(logs, 'transcript.jsonl'), `${JSON.stringify(step)}\n`)
+  }
+
+  it('finds the Antigravity CLI conversations a folder is in the workspace of, but no subagent’s', async () => {
+    // As Hoot runs it: with the folder of its hooks in the workspace too.
+    const hooks = path.join(home, 'Hoot Resources', 'antigravity-hooks')
+    const writer = summaries([
+      { id: 'main', folders: [hooks, folder], title: 'Addition of 44 and 44' },
+      { id: 'earlier', folders: [hooks, folder] },
+      { id: 'unknown-start', folders: [folder], title: 'Old' },
+      // A subagent's, which keeps the zero time of Go for no message of the user's.
+      {
+        id: 'subagent',
+        folders: [hooks, folder],
+        parent: 'main',
+        depth: 1,
+        messaged: '0001-01-01 00:00:00+00:00',
+      },
+      { id: 'elsewhere', folders: [path.join(home, 'project')], title: 'Elsewhere' },
+    ])
+    antigravityTranscript('main', '2026-11-27T08:46:07Z')
+    antigravityTranscript('earlier', '2026-11-27T08:40:00.250Z')
+    antigravityTranscript('subagent', '2026-11-27T08:46:10Z')
+    try {
+      // Read while Antigravity CLI holds them, as it runs.
+      expect(await conversations().antigravityConversations(folder)).toEqual([
+        { id: 'unknown-start', title: 'Old', createdAt: 0 },
+        { id: 'earlier', title: null, createdAt: Date.parse('2026-11-27T08:40:00.250Z') },
+        // Kept to the second: the end of that second.
+        {
+          id: 'main',
+          title: 'Addition of 44 and 44',
+          createdAt: Date.parse('2026-11-27T08:46:07.999Z'),
+        },
+      ])
+    } finally {
+      writer.close()
+    }
+    expect(
+      (await conversations().antigravityConversations(folder))?.map(
+        (conversation) => conversation.id,
+      ),
+    ).toEqual(['unknown-start', 'earlier', 'main'])
+  })
+
+  it('gives no Antigravity CLI conversations when it keeps none, and none it cannot read', async () => {
+    expect(await conversations().antigravityConversations(folder)).toEqual([])
+    fs.mkdirSync(antigravity(), { recursive: true })
+    fs.writeFileSync(path.join(antigravity(), 'conversation_summaries.db'), 'not a database')
+    expect(await conversations().antigravityConversations(folder)).toBeNull()
   })
 })

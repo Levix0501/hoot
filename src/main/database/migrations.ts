@@ -324,4 +324,89 @@ export const MIGRATIONS: readonly string[] = [
   -- NULL while it is not archived.
   ALTER TABLE chats ADD COLUMN archived_at INTEGER;
   `,
+  // 15: Antigravity CLI among the harnesses of chats, saved sessions and agents.
+  `
+  -- SQLite changes a CHECK only by making the table again: each is made anew
+  -- with the columns it has, in their order, and takes the rows of the old.
+  CREATE TABLE chats_15 (
+    -- A UUID that Hoot picks.
+    id TEXT PRIMARY KEY,
+    tool_id TEXT NOT NULL CHECK (tool_id IN ('claude', 'codex', 'opencode', 'antigravity')),
+    -- The folder its agent runs in, which Hoot creates.
+    folder TEXT NOT NULL,
+    -- The agent's own id of the conversation; NULL until Hoot learns it.
+    conversation_id TEXT,
+    -- The last terminal title the agent set in the conversation; may be empty.
+    title TEXT NOT NULL DEFAULT '',
+    -- The name the user gave it; NULL while it has none.
+    custom_name TEXT,
+    -- Whether the conversation has been sent a message.
+    has_messages INTEGER NOT NULL DEFAULT 0 CHECK (has_messages IN (0, 1)),
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL,
+    -- When the chat was last opened, which orders the sidebar's Chats group.
+    opened_at INTEGER NOT NULL,
+    -- For a saved session, its project and worktree (see version 7).
+    project_root TEXT,
+    worktree_path TEXT,
+    -- When the user deleted it (see version 8).
+    deleted_at INTEGER,
+    -- Whether the agent reported its conversation (see version 9).
+    conversation_reported INTEGER NOT NULL DEFAULT 0 CHECK (conversation_reported IN (0, 1)),
+    -- The run Hoot has not seen end (see version 10).
+    unreported_run_started_at INTEGER,
+    -- Its provider, model and agent (see version 11).
+    provider_id TEXT,
+    model TEXT,
+    agent_id TEXT,
+    -- When the user archived it (see version 14).
+    archived_at INTEGER
+  ) STRICT;
+
+  INSERT INTO chats_15 (
+    id, tool_id, folder, conversation_id, title, custom_name, has_messages, created_at,
+    opened_at, project_root, worktree_path, deleted_at, conversation_reported,
+    unreported_run_started_at, provider_id, model, agent_id, archived_at
+  )
+  SELECT
+    id, tool_id, folder, conversation_id, title, custom_name, has_messages, created_at,
+    opened_at, project_root, worktree_path, deleted_at, conversation_reported,
+    unreported_run_started_at, provider_id, model, agent_id, archived_at
+  FROM chats;
+
+  DROP TABLE chats;
+  ALTER TABLE chats_15 RENAME TO chats;
+  CREATE INDEX chats_by_opened ON chats (opened_at DESC, created_at DESC);
+  CREATE INDEX chats_by_worktree ON chats (worktree_path, created_at);
+
+  CREATE TABLE agents_15 (
+    -- A UUID that Hoot picks.
+    id TEXT PRIMARY KEY,
+    harness TEXT NOT NULL CHECK (harness IN ('claude', 'codex', 'opencode', 'antigravity')),
+    -- A row of providers, or the id of the harness's own models.
+    provider_id TEXT NOT NULL,
+    -- The name the user gave it; NULL for the one made from its provider.
+    name TEXT,
+    -- Whether the new session menus list it.
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    -- The model and effort level its sessions start with; NULL for the harness's default.
+    model TEXT,
+    effort TEXT,
+    -- A JSON array of the arguments added to the end of its sessions' own.
+    extra_args TEXT NOT NULL DEFAULT '[]',
+    -- Milliseconds since the Unix epoch.
+    created_at INTEGER NOT NULL,
+    -- The models of its provider Claude Code's roles run on (see version 13).
+    model_map TEXT NOT NULL DEFAULT '{}'
+  ) STRICT;
+
+  INSERT INTO agents_15 (
+    id, harness, provider_id, name, enabled, model, effort, extra_args, created_at, model_map
+  )
+  SELECT id, harness, provider_id, name, enabled, model, effort, extra_args, created_at, model_map
+  FROM agents;
+
+  DROP TABLE agents;
+  ALTER TABLE agents_15 RENAME TO agents;
+  `,
 ]

@@ -163,7 +163,7 @@ export type ProviderResult = { ok: true; provider: Provider } | { ok: false; mes
 /** An agent made, or why not. */
 export type AgentResult = { ok: true; agent: Agent } | { ok: false; message: string }
 
-/** Whether a provider was deleted, or a global changed, or why not. */
+/** Whether a provider was deleted, or why not. */
 export type ProviderChangeResult = { ok: true } | { ok: false; message: string }
 
 /** A chat Hoot made, or why it could not. */
@@ -320,8 +320,6 @@ export const IpcChannel = {
   addProvider: 'providers:add',
   updateProvider: 'providers:update',
   removeProvider: 'providers:remove',
-  setGlobalProvider: 'providers:set-global',
-  setGlobalModel: 'providers:set-global-model',
   makeAgent: 'agents:make',
   changeAgent: 'agents:change',
   deleteAgent: 'agents:delete',
@@ -539,14 +537,9 @@ export interface HootApi {
   getModelCatalogs(): Promise<ModelCatalogs>
   onModelCatalogsChanged(listener: (catalogs: ModelCatalogs) => void): () => void
   addProvider(provider: NewProvider): Promise<ProviderResult>
-  /** Changes a provider; one that is a global is written into its agent's configuration too. */
   updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
-  /** Deletes a provider no agent runs on and that is no global. */
+  /** Deletes a provider no agent runs on. */
   removeProvider(id: string): Promise<ProviderChangeResult>
-  /** Makes a provider an agent's global, writing it into the agent's own configuration. */
-  setGlobalProvider(harness: CodingToolId, providerId: string): Promise<ProviderChangeResult>
-  /** Writes another model into an agent's own configuration, keeping its provider. */
-  setGlobalModel(harness: CodingToolId, model: string | null): Promise<ProviderChangeResult>
   /** Makes an agent of a harness and a provider. */
   makeAgent(agent: NewAgent): Promise<AgentResult>
   /** Changes an agent, for the sessions that start from now on. */

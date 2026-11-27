@@ -169,10 +169,6 @@ export class ChatStore {
              model = ?
          WHERE id = ?`,
       ),
-      assignProvider: db.prepare(
-        `UPDATE chats SET provider_id = ?, agent_id = coalesce(agent_id, ?)
-         WHERE provider_id IS NULL AND tool_id = ?`,
-      ),
       markArchived: db.prepare('UPDATE chats SET archived_at = ? WHERE id = ?'),
       unarchive: db.prepare('UPDATE chats SET archived_at = NULL WHERE id = ?'),
       markDeleted: db.prepare('UPDATE chats SET deleted_at = ? WHERE id = ?'),
@@ -255,16 +251,6 @@ export class ChatStore {
       id,
     )
     return true
-  }
-
-  /**
-   * Gives the chats and saved sessions of an agent made before providers,
-   * which have none, the provider its configuration names, and an agent of
-   * it, which their sessions take their launch settings from; the number of
-   * them.
-   */
-  assignProvider(toolId: CodingToolId, providerId: string, agentId: string | null): number {
-    return Number(this.statements.assignProvider.run(providerId, agentId, toolId).changes)
   }
 
   /**

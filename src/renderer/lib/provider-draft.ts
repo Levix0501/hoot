@@ -108,18 +108,15 @@ export function draftOfProvider(provider: Provider): FormDraft {
 
 /**
  * Whether a draft can be added: a key, what else its preset asks for, and a
- * model, which one of the user's own at an Anthropic-compatible or a
- * Responses address can do without, its Claude Code or Codex agents
- * offering Claude's or OpenAI's models (see `addedModels`). One left unnamed
- * gets a name (see `newProviderName`).
+ * model, which one of the user's own can do without, its agents offering the
+ * models of its address's maker, Claude's at an Anthropic-compatible address
+ * and OpenAI's at a Responses one (see `addedModels`). One left unnamed gets
+ * a name (see `newProviderName`).
  */
 export function canAdd(draft: FormDraft, preset: ProviderPreset | null): boolean {
   if (preset === null) {
     const hasUrl = Object.values(draft.urls).some((url) => (url ?? '').trim() !== '')
-    const offersModels =
-      (draft.urls.anthropic ?? '').trim() !== '' || (draft.urls.responses ?? '').trim() !== ''
-    const hasModel = draft.models.length > 0 || offersModels
-    return hasUrl && hasModel && draft.apiKey.trim() !== ''
+    return hasUrl && draft.apiKey.trim() !== ''
   }
   if (draft.models.length === 0) return false
   if (preset.cloud === 'vertex') return draft.project.trim() !== ''
@@ -146,10 +143,9 @@ function sameAddresses(
 /**
  * An edited provider's draft with what keeps it from being saved (see
  * `canSave`) put back as the provider has it: a blank name, key, endpoint or
- * project; for one of the user's own, addresses that leave it none, and the
- * Anthropic address or the models, whichever went, where it is left with
- * neither; for a preset's, its models, where none is left. The draft itself
- * where nothing is put back.
+ * project; for one of the user's own, addresses that leave it none; for a
+ * preset's, its models, where none is left. The draft itself where nothing
+ * is put back.
  */
 export function savableDraft(
   draft: FormDraft,
@@ -166,10 +162,6 @@ export function savableDraft(
   if (preset?.cloud === 'vertex' && blank(next.project)) next.project = saved.project
   if (preset === null) {
     if (Object.values(next.urls).every((url) => blank(url))) next.urls = saved.urls
-    if (next.models.length === 0 && blank(next.urls.anthropic)) {
-      if (sameAddresses(next.urls, saved.urls)) next.models = saved.models
-      else next.urls = saved.urls
-    }
   } else if (next.models.length === 0) {
     next.models = saved.models
   }

@@ -4,7 +4,6 @@ import {
   addedModels,
   agentModels,
   agentName,
-  agentsToMake,
   canRun,
   catalogModelOf,
   claudeAgentModels,
@@ -17,31 +16,30 @@ import {
   findProvider,
   firstClaudeModel,
   firstCodexModel,
-  freeProviderName,
-  hasGlobal,
   isCustomProvider,
   leavesRolesToClaude,
+  makerCatalog,
   maskKey,
   modelMapOn,
-  namesProvider,
+  openCodeDefaultEffort,
+  openCodeEffortsOf,
+  openCodeSessionEffort,
   firstPicks,
   OWN_PROVIDER_IDS,
   ownProvider,
   presetById,
   presetHarnesses,
-  presetPlanOfUrl,
   presetPlans,
   PROVIDER_PRESETS,
   providerFirstModel,
-  providerFromConfig,
+  providerFormat,
   providerMark,
-  providerNamed,
   providerPlan,
+  providerUrl,
   sessionAgent,
   usableAgents,
   withAgentChange,
   type Agent,
-  type GlobalConfig,
   type Provider,
 } from './providers'
 
@@ -117,15 +115,6 @@ function agent(id: string, change: Partial<Agent> = {}): Agent {
   }
 }
 
-/** Claude Code's global, by provider, signed in to its subscription or not. */
-function claudeGlobal(providerId: string, signedIn: boolean) {
-  return { providers: [deepseek], globals: { claude: { providerId, model: null, signedIn } } }
-}
-
-function config(change: Partial<GlobalConfig> = {}): GlobalConfig {
-  return { url: '', apiKey: '', keyHeader: 'bearer', model: null, ...change }
-}
-
 describe('providers', () => {
   it('runs a provider only on the agents that speak one of its formats', () => {
     expect(canRun(deepseek, 'claude')).toBe(true)
@@ -147,124 +136,6 @@ describe('providers', () => {
     expect(providerMark(ownProvider('claude'))).toBe('anthropic')
     expect(providerMark(ownProvider('codex'))).toBe('openai')
     expect(providerMark({ presetId: null, own: null })).toBe('custom')
-  })
-
-  it('tells a configuration by its address and key, not its model', () => {
-    const named = config({
-      url: 'https://api.deepseek.com/anthropic/',
-      apiKey: 'sk-deepseek',
-      model: 'other-model',
-    })
-    expect(namesProvider(deepseek, 'claude', named)).toBe(true)
-    expect(namesProvider(deepseek, 'claude', { ...named, apiKey: 'sk-new' })).toBe(false)
-    expect(namesProvider(ownProvider('claude'), 'claude', config())).toBe(true)
-    expect(namesProvider(ownProvider('claude'), 'claude', named)).toBe(false)
-  })
-
-  it('keeps the global that the configuration still names, else finds another', () => {
-    const twin = { ...deepseek, id: 'p-twin', name: 'DeepSeek 2' }
-    const named = config({ url: deepseek.urls.anthropic, apiKey: 'sk-deepseek' })
-    expect(providerNamed([deepseek, twin], 'claude', named, 'p-twin')?.id).toBe('p-twin')
-    expect(providerNamed([deepseek, twin], 'claude', named, 'p-kimi')?.id).toBe('p-deepseek')
-    expect(providerNamed([deepseek], 'claude', config(), 'p-deepseek')?.id).toBe(
-      OWN_PROVIDER_IDS.claude,
-    )
-    expect(providerNamed([deepseek], 'claude', { ...named, apiKey: 'sk-new' }, null)).toBeNull()
-  })
-
-  it('makes a provider of a configuration from the preset of its address, numbered when taken', () => {
-    const catalogs = {
-      deepseek: [
-        { id: 'deepseek-flash', context: 1_000_000, output: null, efforts: [] },
-        { id: 'deepseek-pro', context: 128_000, output: null, efforts: [] },
-      ],
-    }
-    const made = providerFromConfig(
-      [deepseek],
-      'claude',
-      {
-        url: 'https://api.deepseek.com/anthropic',
-        apiKey: 'sk-new',
-        keyHeader: 'bearer',
-        model: 'deepseek-pro',
-      },
-      catalogs,
-    )
-    expect(made).toEqual({
-      name: 'DeepSeek 2',
-      presetId: 'deepseek',
-      planId: null,
-      apiKey: 'sk-new',
-      keyHeader: 'bearer',
-      urls: {
-        anthropic: 'https://api.deepseek.com/anthropic',
-        responses: 'https://api.deepseek.com',
-      },
-      models: ['deepseek-flash', 'deepseek-pro'],
-      cloud: null,
-    })
-    const unknown = providerFromConfig(
-      [],
-      'claude',
-      {
-        url: ' https://gateway.example.com/v1 ',
-        apiKey: 'sk-x',
-        keyHeader: 'x-api-key',
-        model: null,
-      },
-      catalogs,
-    )
-    expect(unknown).toMatchObject({
-      name: 'gateway.example.com',
-      presetId: null,
-      planId: null,
-      urls: { anthropic: 'https://gateway.example.com/v1' },
-      models: [],
-      keyHeader: 'x-api-key',
-    })
-    expect(freeProviderName([deepseek, { ...kimi, name: 'DeepSeek 2' }], 'DeepSeek')).toBe(
-      'DeepSeek 3',
-    )
-  })
-
-  it('counts a subscription as a global only while signed in, and OpenCode’s free models always', () => {
-    expect(hasGlobal(claudeGlobal(OWN_PROVIDER_IDS.claude, true), 'claude')).toBe(true)
-    expect(hasGlobal(claudeGlobal(OWN_PROVIDER_IDS.claude, false), 'claude')).toBe(false)
-    expect(hasGlobal(claudeGlobal('p-deepseek', false), 'claude')).toBe(true)
-    expect(hasGlobal(claudeGlobal('p-gone', true), 'claude')).toBe(false)
-    expect(hasGlobal(claudeGlobal(OWN_PROVIDER_IDS.claude, true), 'codex')).toBe(false)
-    expect(
-      hasGlobal(
-        {
-          providers: [],
-          globals: {
-            opencode: { providerId: OWN_PROVIDER_IDS.opencode, model: null, signedIn: false },
-          },
-        },
-        'opencode',
-      ),
-    ).toBe(true)
-  })
-
-  it('makes an agent of the global of each harness that has none', () => {
-    const globals = {
-      claude: { providerId: 'p-deepseek', model: 'deepseek-pro', signedIn: false },
-      codex: { providerId: OWN_PROVIDER_IDS.codex, model: null, signedIn: true },
-      opencode: { providerId: OWN_PROVIDER_IDS.opencode, model: null, signedIn: false },
-    }
-    expect(
-      agentsToMake({ providers: [deepseek], agents: [], globals }, ['claude', 'codex', 'opencode']),
-    ).toEqual([
-      { harness: 'claude', providerId: 'p-deepseek', model: 'deepseek-pro' },
-      { harness: 'codex', providerId: OWN_PROVIDER_IDS.codex, model: null },
-      { harness: 'opencode', providerId: OWN_PROVIDER_IDS.opencode, model: null },
-    ])
-    // A harness with an agent, even one turned off, gets none.
-    expect(
-      agentsToMake({ providers: [deepseek], agents: [agent('a', { enabled: false })], globals }, [
-        'claude',
-      ]),
-    ).toEqual([])
   })
 
   it('names an agent after its provider, its harness on its own models, or as the user named it', () => {
@@ -367,12 +238,15 @@ describe('Claude Code on a provider of the user’s', () => {
     expect(
       catalogModelOf(catalogs, 'claude', { ...made, presetId: null }, 'deepseek-flash'),
     ).toBeNull()
-    // Of a Custom provider, of the models of its harness's maker alone.
+    // Of a Custom provider, of the models of the maker of the format the agent runs it in alone.
+    const both = { ...custom, urls: { ...custom.urls, responses: 'https://relay.example.com/v1' } }
     expect(catalogModelOf(CLAUDE_MODELS, 'claude', custom, 'claude-haiku-4-5')).toEqual(HAIKU)
     expect(catalogModelOf(CLAUDE_MODELS, 'claude', custom, 'relay-model')).toBeNull()
-    expect(catalogModelOf(CLAUDE_MODELS, 'codex', custom, 'claude-haiku-4-5')).toBeNull()
-    expect(catalogModelOf(OPENAI_MODELS, 'codex', custom, 'gpt-6.2-sol')).toEqual(SOL)
-    expect(catalogModelOf(OPENAI_MODELS, 'opencode', custom, 'gpt-6.2-sol')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, 'codex', both, 'claude-haiku-4-5')).toBeNull()
+    expect(catalogModelOf(OPENAI_MODELS, 'codex', both, 'gpt-6.2-sol')).toEqual(SOL)
+    expect(catalogModelOf(OPENAI_MODELS, 'codex', custom, 'gpt-6.2-sol')).toBeNull()
+    expect(catalogModelOf(OPENAI_MODELS, 'opencode', both, 'gpt-6.2-sol')).toBeNull()
+    expect(catalogModelOf(CLAUDE_MODELS, 'opencode', both, 'claude-haiku-4-5')).toEqual(HAIKU)
     expect(catalogModelOf(CLAUDE_MODELS, 'claude', deepseek, 'claude-haiku-4-5')).toBeNull()
     expect(
       catalogModelOf(CLAUDE_MODELS, 'claude', ownProvider('claude'), 'claude-haiku-4-5'),
@@ -426,13 +300,16 @@ describe('Claude Code on a Custom provider', () => {
 })
 
 describe("Codex on a provider of the user's", () => {
+  /** A Custom provider at a Responses address. */
+  const responses: Provider = { ...custom, urls: { responses: 'https://relay.example.com/v1' } }
+
   it('offers OpenAI’s models after the provider’s, on a Custom provider alone', () => {
-    expect(addedModels('codex', custom, OPENAI_MODELS)).toEqual([
+    expect(addedModels('codex', responses, OPENAI_MODELS)).toEqual([
       'gpt-6.2-sol-healthcare',
       'gpt-6.2-sol',
       'gpt-6.2-astra',
     ])
-    const relay = { ...custom, models: ['glm-5', 'gpt-6.2-sol'] }
+    const relay = { ...responses, models: ['glm-5', 'gpt-6.2-sol'] }
     expect(agentModels('codex', relay, OPENAI_MODELS)).toEqual([
       'glm-5',
       'gpt-6.2-sol',
@@ -440,21 +317,18 @@ describe("Codex on a provider of the user's", () => {
       'gpt-6.2-astra',
     ])
     expect(agentModels('codex', deepseek, OPENAI_MODELS)).toEqual(deepseek.models)
-    // OpenCode is made by no maker of models.
-    expect(addedModels('opencode', custom, OPENAI_MODELS)).toEqual([])
   })
 
   it('starts on OpenAI’s newest GPT of a tier alone, else OpenAI’s newest', () => {
     expect(firstCodexModel(OPENAI_MODELS)).toBe('gpt-6.2-sol')
     expect(firstCodexModel({ openai: [SOL_HEALTHCARE] })).toBe('gpt-6.2-sol-healthcare')
     expect(firstCodexModel({})).toBeNull()
-    expect(providerFirstModel('codex', custom, OPENAI_MODELS)).toBe('gpt-6.2-sol')
+    expect(providerFirstModel('codex', responses, OPENAI_MODELS)).toBe('gpt-6.2-sol')
     expect(providerFirstModel('claude', custom, CLAUDE_MODELS)).toBe('claude-opus-5-5')
-    expect(providerFirstModel('codex', { ...custom, models: ['glm-5'] }, OPENAI_MODELS)).toBe(
+    expect(providerFirstModel('codex', { ...responses, models: ['glm-5'] }, OPENAI_MODELS)).toBe(
       'glm-5',
     )
     expect(providerFirstModel('codex', deepseek, OPENAI_MODELS)).toBe(deepseek.models[0])
-    expect(providerFirstModel('opencode', custom, OPENAI_MODELS)).toBeNull()
   })
 
   it('offers the levels models.dev lists, and starts at `high`, else the highest below it', () => {
@@ -511,8 +385,8 @@ describe('presets', () => {
     expect(harnesses('deepseek')).toEqual(['claude', 'codex', 'opencode'])
     expect(harnesses('openrouter')).toEqual(['claude', 'codex', 'opencode'])
     expect(harnesses('siliconflow')).toEqual(['claude', 'opencode'])
-    expect(harnesses('openai')).toEqual(['codex'])
-    expect(harnesses('azure')).toEqual(['codex'])
+    expect(harnesses('openai')).toEqual(['codex', 'opencode'])
+    expect(harnesses('azure')).toEqual(['codex', 'opencode'])
     expect(harnesses('vertex')).toEqual(['claude'])
   })
 
@@ -542,13 +416,6 @@ describe('presets', () => {
     expect(providerPlan(on({ presetId: null }))).toBeUndefined()
   })
 
-  it('finds the preset and plan of an address in a harness’s formats', () => {
-    const found = presetPlanOfUrl('https://api.moonshot.ai/v1/', 'codex')
-    expect([found?.preset.id, found?.plan.id]).toEqual(['kimi', 'global'])
-    expect(presetPlanOfUrl('https://api.moonshot.ai/v1', 'claude')).toBeUndefined()
-    expect(presetPlanOfUrl(' ', 'claude')).toBeUndefined()
-  })
-
   it('runs a cloud’s provider on Claude Code alone, without an address', () => {
     const vertex: Provider = {
       ...deepseek,
@@ -563,5 +430,63 @@ describe('presets', () => {
   it('picks a short list of models whole as a provider is made, a long one not at all', () => {
     expect(firstPicks(models(12))).toEqual(models(12))
     expect(firstPicks(models(13))).toEqual([])
+  })
+})
+
+describe("OpenCode on a provider of the user's", () => {
+  const both: Provider = {
+    ...custom,
+    urls: { anthropic: 'https://relay.example.com', responses: 'https://relay.example.com/v1' },
+  }
+  const responses: Provider = { ...custom, urls: { responses: 'https://relay.example.com/v1' } }
+
+  it('runs a provider at its Anthropic-compatible address, else at its Responses one', () => {
+    expect(providerFormat(both, 'opencode')).toBe('anthropic')
+    expect(providerFormat(responses, 'opencode')).toBe('responses')
+    expect(providerFormat(responses, 'claude')).toBeNull()
+    expect(providerUrl(responses, 'opencode')).toBe('https://relay.example.com/v1')
+    expect(canRun(responses, 'opencode')).toBe(true)
+    expect(canRun(responses, 'claude')).toBe(false)
+  })
+
+  it('offers on a Custom provider the models of the maker of the format it runs it in', () => {
+    const catalogs = { ...CLAUDE_MODELS, ...OPENAI_MODELS }
+    expect(makerCatalog('opencode', both)).toBe('anthropic')
+    expect(makerCatalog('opencode', responses)).toBe('openai')
+    expect(makerCatalog('opencode', { urls: {} })).toBeNull()
+    expect(addedModels('opencode', both, catalogs)).toEqual(['claude-opus-5-5', 'claude-haiku-4-5'])
+    expect(addedModels('opencode', responses, catalogs)).toEqual([
+      'gpt-6.2-sol-healthcare',
+      'gpt-6.2-sol',
+      'gpt-6.2-astra',
+    ])
+    expect(providerFirstModel('opencode', both, catalogs)).toBe('claude-opus-5-5')
+    expect(providerFirstModel('opencode', responses, catalogs)).toBe('gpt-6.2-sol')
+    expect(catalogModelOf(catalogs, 'opencode', responses, 'gpt-6.2-sol')).toEqual(SOL)
+    // A preset's provider offers its own models alone.
+    expect(addedModels('opencode', deepseek, catalogs)).toEqual([])
+  })
+
+  it('offers the levels models.dev lists, else OpenCode’s own, and starts at `high` where it lists some', () => {
+    expect(openCodeEffortsOf({ efforts: ['low', 'max'] }, 'anthropic')).toEqual(['low', 'max'])
+    expect(openCodeEffortsOf({ efforts: [] }, 'anthropic')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(openCodeEffortsOf(null, 'responses')).toEqual(['low', 'medium', 'high'])
+    expect(openCodeDefaultEffort({ efforts: ['low', 'high', 'max'] })).toBe('high')
+    expect(openCodeDefaultEffort({ efforts: ['minimal', 'medium', 'xhigh'] })).toBe('medium')
+    // None where models.dev lists no levels, as the model may not reason.
+    expect(openCodeDefaultEffort({ efforts: [] })).toBeNull()
+    expect(openCodeDefaultEffort(null)).toBeNull()
+    // The agent's level while the model takes it, else the model's.
+    expect(openCodeSessionEffort('max', { efforts: ['low', 'max'] }, 'anthropic')).toBe('max')
+    expect(openCodeSessionEffort('xhigh', { efforts: ['low', 'max'] }, 'anthropic')).toBe('low')
+    expect(openCodeSessionEffort('xhigh', null, 'anthropic')).toBe('xhigh')
+    expect(openCodeSessionEffort('xhigh', null, 'responses')).toBeNull()
+    expect(openCodeSessionEffort(null, null, 'anthropic')).toBeNull()
   })
 })

@@ -615,16 +615,6 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
     return deps.providers.removeProvider(parsed.data)
   })
-  handle(IpcChannel.setGlobalProvider, (_event, ...args) => {
-    const parsed = z.tuple([toolId, agentId]).safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid provider.' }
-    return deps.providers.setGlobal(...parsed.data)
-  })
-  handle(IpcChannel.setGlobalModel, (_event, ...args) => {
-    const parsed = z.tuple([toolId, agentModel]).safeParse(args)
-    if (!parsed.success) return { ok: false, message: 'Invalid model.' }
-    return deps.providers.setGlobalModel(...parsed.data)
-  })
   handle(IpcChannel.makeAgent, (_event, value) => {
     const parsed = newAgent.safeParse(value)
     if (!parsed.success) return { ok: false, message: 'Invalid agent.' }

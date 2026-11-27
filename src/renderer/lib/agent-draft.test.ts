@@ -268,8 +268,16 @@ describe('the effort level of an agent', () => {
     expect(effortsOf('codex', 'unknown', deepseek, undefined, catalogs)).toEqual([])
     expect(effortsOf('opencode', 'deepseek-v4-pro', deepseek, undefined, catalogs)).toEqual([
       'low',
+      'high',
+      'max',
+    ])
+    // For a model models.dev lists no levels for, those OpenCode gives it itself.
+    expect(effortsOf('opencode', 'unknown', deepseek, undefined, catalogs)).toEqual([
+      'low',
       'medium',
       'high',
+      'xhigh',
+      'max',
     ])
   })
 
@@ -280,7 +288,10 @@ describe('the effort level of an agent', () => {
     expect(startsAt({ harness: 'codex', model: 'deepseek-v4-pro' }, deepseek)).toBe('high')
     expect(startsAt({ harness: 'codex', model: 'deepseek-v4-flash' }, deepseek)).toBe('medium')
     expect(startsAt({ harness: 'codex', model: 'unknown' }, deepseek)).toBe('high')
-    expect(startsAt({ harness: 'opencode', model: 'deepseek-v4-pro' }, deepseek)).toBeNull()
+    expect(startsAt({ harness: 'opencode', model: 'deepseek-v4-pro' }, deepseek)).toBe('high')
+    expect(startsAt({ harness: 'opencode', model: 'deepseek-v4-flash' }, deepseek)).toBe('medium')
+    // OpenCode runs a model models.dev lists no levels for without one.
+    expect(startsAt({ harness: 'opencode', model: 'unknown' }, deepseek)).toBeNull()
     // On its own models, and for one of Claude's, the level its configuration names, where the model takes it.
     const xhigh = stateWith({ defaultEffort: { value: 'xhigh', source: 'settings.json' } })
     expect(startsAt({ model: 'opus' }, subscription, xhigh)).toBe('xhigh')
@@ -363,19 +374,19 @@ describe('Claude Code on a Custom provider', () => {
   // A relay with models of its own besides Claude's.
   const mixed: Provider = { ...relay, id: 'p-mixed', models: ['glm-5', 'claude-haiku-4-5'] }
 
-  it('offers Claude’s models after the provider’s own, to Claude Code alone', () => {
+  it('offers Claude’s models after the provider’s own, to the agents at its Anthropic-compatible address', () => {
     expect(ids(modelGroups('claude', relay, undefined, withClaude))).toEqual([CLAUDE_IDS])
     expect(ids(modelGroups('claude', mixed, undefined, withClaude))).toEqual([
       ['glm-5', 'claude-haiku-4-5'],
       ['claude-fable-5-2', 'claude-opus-5-5'],
     ])
-    expect(ids(modelGroups('opencode', relay, undefined, withClaude))).toEqual([])
+    expect(ids(modelGroups('opencode', relay, undefined, withClaude))).toEqual([CLAUDE_IDS])
     expect(ids(modelGroups('claude', bailian, undefined, withClaude))).toEqual([bailian.models])
   })
 
   it('starts on Claude’s newest Opus without models of its own, else on its first', () => {
     expect(impliedModel('claude', relay, undefined, withClaude)).toBe('claude-opus-5-5')
-    expect(impliedModel('opencode', relay, undefined, withClaude)).toBeNull()
+    expect(impliedModel('opencode', relay, undefined, withClaude)).toBe('claude-opus-5-5')
     expect(impliedModel('claude', mixed, undefined, withClaude)).toBe('glm-5')
     const made = draftOnProvider(draft(), relay, undefined, withClaude, bailian)
     expect(made).toMatchObject({ providerId: relay.id, model: 'claude-opus-5-5', modelMap: {} })

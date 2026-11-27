@@ -46,8 +46,6 @@ const providers: ProvidersState = {
     agent('claude', 'claude', { createdAt: 2 }),
     agent('opencode', 'opencode', { createdAt: 3 }),
   ],
-  globals: {},
-  ready: true,
 }
 
 /** The id of the agent a new chat uses. */
@@ -97,9 +95,8 @@ describe('chats', () => {
     )
   })
 
-  it('checks for the agents until Hoot has made those it makes as it opens', () => {
+  it('checks for the agents until the window has them', () => {
     expect(agentsChecking(tools(['claude']), providers)).toBe(false)
-    expect(agentsChecking(tools(['claude']), { ...providers, ready: false })).toBe(true)
     expect(agentsChecking(tools(['claude']), null)).toBe(true)
     expect(agentsChecking({ detecting: true, tools: [], error: null }, providers)).toBe(true)
   })

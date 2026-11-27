@@ -123,6 +123,7 @@ function context(
     settingsFolder: settingsFolder(),
     hoot,
     openCodePlugin,
+    openCodeServer: null,
   }
 }
 
@@ -401,6 +402,47 @@ describe('resolveLaunch', () => {
       resume: false,
     })
     expect(opencodeUnused.args).toEqual([...program(bin, 'opencode').args, '--auto'])
+  })
+
+  it("connects OpenCode to Hoot's server where it is given one, its password in its environment", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin'), OPENCODE_PASSWORD: 'the-users-own' }
+    await writeNodeCommand(path.join(bin, 'opencode'), '')
+    const server = { url: 'http://127.0.0.1:4321', password: 'hoots' }
+    const opencode = await resolveLaunch(
+      { ...context(loginEnv), openCodeServer: server },
+      'opencode',
+      project,
+      null,
+      { conversationId: 'ses_one', resume: true },
+    )
+    expect(opencode.args).toEqual([
+      ...program(bin, 'opencode').args,
+      '--server',
+      'http://127.0.0.1:4321',
+      '--auto',
+      '-s',
+      'ses_one',
+    ])
+    expect(opencode.env.OPENCODE_PASSWORD).toBe('hoots')
+    // Extra arguments that pick a server of their own keep it.
+    for (const extraArgs of [['--standalone'], ['--server', 'http://elsewhere'], ['--server=x']]) {
+      const own = await resolveLaunch(
+        { ...context(loginEnv, { opencode: { extraArgs } }), openCodeServer: server },
+        'opencode',
+        project,
+      )
+      expect(own.args).not.toContain('http://127.0.0.1:4321')
+      expect(own.env.OPENCODE_PASSWORD).toBe('the-users-own')
+    }
+    // Only OpenCode connects to it.
+    await writeNodeCommand(path.join(bin, 'claude'), '')
+    const claude = await resolveLaunch(
+      { ...context(loginEnv), openCodeServer: server },
+      'claude',
+      project,
+    )
+    expect(claude.args).not.toContain('--server')
+    expect(claude.env.OPENCODE_PASSWORD).toBe('the-users-own')
   })
 
   it('sends the first message of a conversation it starts after every other argument', async () => {

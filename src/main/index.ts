@@ -13,12 +13,12 @@ import { defaultAgentLaunchSettings } from '../shared/launch-settings'
 import { MODEL_EVENT, MODEL_SWITCH_EVENT } from '../shared/hoot-cli'
 import {
   bareModel,
+  catalogModelOf,
   issueAgent,
+  openCodeSessionEffort,
+  providerFormat,
   providerOfOpenCodeId,
-  type GlobalHarness,
-  type Provider,
 } from '../shared/providers'
-import { CODING_TOOL_IDS } from '../shared/tools'
 import { startBlockers } from '../shared/start-blockers'
 import {
   WINDOWS_LAYOUT_SWITCH,
@@ -52,14 +52,16 @@ import { claudeUserVariables } from './providers/claude-config'
 import { readCodexCatalogSupport, type CodexCatalogSupport } from './providers/codex-catalog'
 import {
   createOpenCodeSession,
+  hootOpenCodeConfig,
   openCodeModelRef,
-  readOpenCodeGlobal,
   readOpenCodeLaunchOptions,
+  removeHootProviders,
   takesProviders,
-  writeOpenCodeConfig,
+  type OpenCodeServer,
 } from './providers/opencode-config'
+import { OpenCodeServers } from './providers/opencode-server'
 import { ModelsDev } from './providers/models-dev'
-import { ProviderService, type GlobalReading } from './providers/provider-service'
+import { ProviderService } from './providers/provider-service'
 import { ProviderStore } from './providers/provider-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
@@ -150,7 +152,6 @@ let terminalOptions: TerminalEnvOptions | null = null
  * that did not quit left behind go as Hoot starts.
  */
 const sessionSettingsFolder = path.join(app.getPath('userData'), 'session-settings')
-fs.rmSync(sessionSettingsFolder, { recursive: true, force: true })
 /**
  * The models of the providers Hoot knows, as models.dev lists them, read
  * through Electron's network stack, which takes the system's proxy settings.
@@ -159,13 +160,33 @@ const modelsDev = new ModelsDev({
   file: path.join(app.getPath('userData'), 'models-dev.json'),
   fetch: (url, init) => net.fetch(url, init),
 })
+/**
+ * The servers of OpenCode's Hoot runs for its OpenCode sessions on providers,
+ * which take the user's providers from Hoot's file, beside the user's own
+ * configuration, which Hoot leaves alone.
+ */
+const openCodeServers = new OpenCodeServers({
+  configFile: path.join(app.getPath('userData'), 'opencode', 'opencode.json'),
+  config: () =>
+    hootOpenCodeConfig(providerService?.getState().providers ?? [], modelsDev.catalogs()),
+  stateFile: path.join(app.getPath('userData'), 'opencode-servers.json'),
+  cwd: os.homedir(),
+})
+/** Writes Hoot's configuration of OpenCode again, for the servers that run (see `OpenCodeServers`). */
+function writeOpenCodeConfig(): void {
+  openCodeServers
+    .configChanged()
+    .catch((error: unknown) =>
+      console.error("Could not write Hoot's OpenCode configuration:", error),
+    )
+}
 const sessions: SessionManager = new SessionManager({
   host: ptyHost,
   resolveLaunch: async (toolId, cwd, issue, givenChat, agent, sessionId) => {
-    const chat =
+    const { chat, server } =
       toolId === 'opencode'
-        ? await openCodeConversation(cwd, givenChat, agent, sessionId)
-        : givenChat
+        ? await openCodeLaunch(cwd, givenChat, agent, sessionId)
+        : { chat: givenChat, server: null }
     return resolveLaunch(
       {
         shell,
@@ -191,6 +212,7 @@ const sessions: SessionManager = new SessionManager({
         settingsFolder: sessionSettingsFolder,
         hoot: { ...hootCli, sessionId },
         openCodePlugin,
+        openCodeServer: server,
       },
       toolId,
       cwd,
@@ -256,45 +278,80 @@ async function openCodeOnProviders(env: Env): Promise<string | null> {
 }
 
 /**
- * The conversation an OpenCode chat's session opens: one it goes on with, or
- * a new one, which Hoot makes first through OpenCode's background service on
- * the chat's provider and model, with its effort level as the variant, its
- * provider written into OpenCode's configuration before, and records as the
- * chat's. OpenCode then opens it with `-s`, as one it continues. Where Hoot
- * cannot make one, with OpenCode 1 or when making it fails, an agent on
- * OpenCode's own models opens a new conversation of OpenCode's, as before
- * Hoot had providers; one on a provider of the user's does not start.
+ * Takes out of OpenCode's own configuration the providers an earlier Hoot
+ * wrote into it (see `removeHootProviders`), once a run of Hoot's, before its
+ * first server of OpenCode starts, which takes that configuration too.
  */
-async function openCodeConversation(
+let openCodeConfigCleaned: Promise<void> | null = null
+function cleanOpenCodeConfig(env: Env): Promise<void> {
+  openCodeConfigCleaned ??= removeHootProviders(env, os.homedir()).then(
+    () => {},
+    (error: unknown) => console.error("Could not tidy OpenCode's configuration:", error),
+  )
+  return openCodeConfigCleaned
+}
+
+/**
+ * What an OpenCode session opens, and where: on a provider, with OpenCode 2
+ * and later, Hoot's server of OpenCode (see `OpenCodeServers`), with the
+ * conversation its chat goes on with, or a new one, which Hoot makes first
+ * on that server on the provider and model, with the effort level as the
+ * variant (see `openCodeSessionEffort`), and records as its chat's; OpenCode
+ * then opens it with `-s`, as one it continues. A chat made before providers
+ * opens its conversation with OpenCode's background service, as before.
+ * Where Hoot cannot start its server or make the conversation, as with
+ * OpenCode 1, an agent on OpenCode's free models opens a new conversation of
+ * OpenCode's with that service, as before Hoot had providers; one on a
+ * provider of the user's does not start.
+ */
+async function openCodeLaunch(
   cwd: string,
   chat: ChatLaunch | null,
   agent: AgentLaunch | null,
   sessionId: string,
-): Promise<ChatLaunch | null> {
+): Promise<{ chat: ChatLaunch | null; server: OpenCodeServer | null }> {
   const provider = agent?.provider ?? null
-  if (chat === null || chat.resume || provider === null || agent === null) return chat
+  if (provider === null || agent === null) return { chat, server: null }
   const login = await tools.getLoginEnvironment()
   const command = await openCodeOnProviders(login.env)
   if (command === null) {
-    if (provider.own !== null) return chat
+    if (provider.own !== null) return { chat, server: null }
     throw new SessionError(
       'This agent runs on OpenCode 2 and later. Update OpenCode on the Agents page.',
     )
   }
+  let server: OpenCodeServer
+  try {
+    await cleanOpenCodeConfig(login.env)
+    server = await openCodeServers.ensure(command, login.env)
+  } catch (error) {
+    if (provider.own !== null) {
+      console.error("Could not start Hoot's server of OpenCode; it uses its own:", error)
+      return { chat, server: null }
+    }
+    throw new SessionError(
+      `Could not start OpenCode: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (chat?.resume === true) return { chat, server }
+  const catalogs = modelsDev.catalogs()
+  const model = openCodeModelRef(provider, agent.settings.model, catalogs)
+  const format = providerFormat(provider, 'opencode')
+  const variant =
+    provider.own !== null || format === null
+      ? agent.settings.effort
+      : openCodeSessionEffort(
+          agent.settings.effort,
+          catalogModelOf(catalogs, 'opencode', provider, model.slice(model.indexOf('/') + 1)),
+          format,
+        )
   let conversationId: string
   try {
-    if (provider.own === null) await syncOpenCodeProviders()
-    conversationId = await createOpenCodeSession(
-      command,
-      login.env,
-      cwd,
-      openCodeModelRef(provider, agent.settings.model),
-      agent.settings.effort,
-    )
+    conversationId = await createOpenCodeSession(command, login.env, server, cwd, model, variant)
   } catch (error) {
     if (provider.own !== null) {
       console.error("Could not make OpenCode's conversation; it makes its own:", error)
-      return chat
+      return { chat, server }
     }
     throw new SessionError(
       `Could not start OpenCode's conversation: ${error instanceof Error ? error.message : String(error)}`,
@@ -302,7 +359,7 @@ async function openCodeConversation(
   }
   const chatId = sessions.chatIdOf(sessionId) ?? sessions.savedSessionIdOf(sessionId)
   if (chatId !== null) chatManager?.giveConversation(chatId, conversationId)
-  return { ...chat, conversationId, resume: true }
+  return { chat: { ...chat, conversationId, resume: true }, server }
 }
 
 const agents = new AgentService({
@@ -336,52 +393,6 @@ const getWindow = () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : 
 
 /** Answers hoot in the sessions, once the database is open. */
 let hootServer: HootServer | null = null
-
-/**
- * Reads what a harness's own configuration names: for OpenCode, its default
- * model. Claude Code's and Codex's are not read for a global (see
- * `GLOBAL_HARNESSES`).
- */
-async function readHarnessGlobal(harness: GlobalHarness): Promise<GlobalReading | null> {
-  const { env } = await tools.getLoginEnvironment()
-  switch (harness) {
-    case 'opencode':
-      return readOpenCodeGlobal(env, os.homedir())
-  }
-}
-
-/**
- * Writes the user's providers that OpenCode can run into its own
- * configuration, while an OpenCode that takes them is installed, as each
- * OpenCode session may pick one with `/models`.
- */
-async function syncOpenCodeProviders(): Promise<void> {
-  if (providerService === null) return
-  const installed = tools.getState().tools.some((tool) => tool.id === 'opencode' && tool.available)
-  if (!installed) return
-  const { env } = await tools.getLoginEnvironment()
-  if ((await openCodeOnProviders(env)) === null) return
-  await writeOpenCodeConfig(env, os.homedir(), providerService.getState().providers)
-}
-
-/** Writes a provider and a model into a harness's own configuration, as its global. */
-async function writeHarnessGlobal(
-  harness: GlobalHarness,
-  provider: Provider,
-  model: string | null,
-): Promise<void> {
-  const { env } = await tools.getLoginEnvironment()
-  switch (harness) {
-    case 'opencode':
-      if ((await openCodeOnProviders(env)) === null) {
-        throw new Error('OpenCode takes it from version 2 on. Update OpenCode on the Agents page.')
-      }
-      await writeOpenCodeConfig(env, os.homedir(), providerService?.getState().providers ?? [], {
-        provider,
-        model,
-      })
-  }
-}
 
 /** The chats, once the database is open. */
 let chatManager: ChatManager | null = null
@@ -514,8 +525,6 @@ function createMainWindow(options: { reveal: boolean }): BrowserWindow {
   window.on('focus', () => {
     worktrees?.refreshAll()
     projectFolders?.refreshAll()
-    // OpenCode's own configuration, which anything may have changed.
-    void providerService?.refreshGlobals()
   })
   // A session shown while the window is the active one counts as seen.
   window.on('focus', () => window.webContents.send(IpcChannel.windowFocusChanged, true))
@@ -561,6 +570,10 @@ function tryOpenDatabase(
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // What a Hoot that did not quit left behind: the files of its sessions, and
+  // its servers of OpenCode. Only the one Hoot that runs may take them.
+  fs.rmSync(sessionSettingsFolder, { recursive: true, force: true })
+  void openCodeServers.stopLeftOver()
   // Starting Hoot again shows the window, unless that start is unattended too.
   app.on('second-instance', (_event, argv) => {
     if (!argv.includes('--background')) showMainWindow()
@@ -584,6 +597,8 @@ if (!app.requestSingleInstanceLock()) {
       // hoot then says that Hoot is not running.
       await hootServer?.stop()
       await sessions.endAll()
+      // Once its sessions ended, as their windows connect to it.
+      await openCodeServers.stopAll()
       // What the agents recorded before they ended, such as a new conversation.
       await chatManager?.flush()
       await ptyHost.stop()
@@ -618,13 +633,7 @@ function startWithDatabase(database: DatabaseSync): void {
   const projects = new ProjectStore(database)
   const issues = new IssueStore(database)
   const labels = new LabelStore(database)
-  const providers = new ProviderService({
-    store: new ProviderStore(database),
-    readGlobal: readHarnessGlobal,
-    writeGlobal: writeHarnessGlobal,
-    catalogs: () => modelsDev.catalogs(),
-    legacyLaunchSettings: (harness) => launchSettings.legacyAgent(harness),
-  })
+  const providers = new ProviderService({ store: new ProviderStore(database) })
   providerService = providers
   // Electron's network stack works once the app is ready.
   void app.whenReady().then(() => modelsDev.start())
@@ -638,55 +647,24 @@ function startWithDatabase(database: DatabaseSync): void {
     trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
-  // As Hoot opens, and as harnesses get installed, it reads the global of
-  // OpenCode and makes it an agent when it has one and no agent. Its chats
-  // made before providers take the provider its configuration names, and its
-  // first agent; the default agent of an earlier Hoot, a coding tool, is the
-  // agent made of it. Claude Code and Codex get no agent this way, and their
-  // chats from before providers go on with their own configurations, as they
-  // started.
-  const followInstalled = (state: ToolsState) => {
-    if (state.detecting || state.tools.length === 0) return
-    const installed = CODING_TOOL_IDS.filter((id) =>
-      state.tools.some((tool) => tool.id === id && tool.available),
-    )
-    void providers.installedChanged(installed).then((pass) => {
-      const { agents: kept, globals } = providers.getState()
-      for (const harness of installed) {
-        const global = globals[harness]
-        const first = kept.find((agent) => agent.harness === harness)
-        if (global !== undefined)
-          chats.assignProvider(harness, global.providerId, first?.id ?? null)
-      }
-      if (!pass.opening) return
-      const tool = launchSettings.legacyDefaultTool()
-      const made = pass.made.find((agent) => agent.harness === tool)
-      if (made !== undefined && launchSettings.all().defaultAgent === null) {
-        launchSettings.setDefaultAgent(made.id)
-      }
-      launchSettings.dropLegacy()
-    })
-  }
-  tools.on('changed', followInstalled)
-  followInstalled(tools.getState())
-  // OpenCode's configuration has the user's providers as they are, each
-  // window picking among them with `/models`.
-  let syncedProviders = ''
-  const syncOnChange = () => {
-    const now = JSON.stringify(providers.getState().providers)
-    if (now === syncedProviders) return
-    syncedProviders = now
-    syncOpenCodeProviders().catch((error: unknown) =>
-      console.error("Could not write the providers into OpenCode's configuration:", error),
-    )
-  }
-  providers.on('changed', syncOnChange)
-  tools.on('changed', (state) => {
-    if (!state.detecting) {
-      syncedProviders = ''
-      syncOnChange()
+  // Agents are made by hand: what an earlier Hoot kept for its coding tools,
+  // before agents, goes.
+  launchSettings.dropLegacy()
+  // OpenCode's own configuration loses the providers an earlier Hoot wrote
+  // into it, once OpenCode is found installed.
+  const tidyOpenCode = (state: ToolsState) => {
+    if (state.detecting || !state.tools.some((tool) => tool.id === 'opencode' && tool.available)) {
+      return
     }
-  })
+    void tools.getLoginEnvironment().then(({ env }) => cleanOpenCodeConfig(env))
+  }
+  tools.on('changed', tidyOpenCode)
+  tidyOpenCode(tools.getState())
+  // Hoot's servers of OpenCode take the user's providers as they are, each
+  // window picking among them with `/models`, with what models.dev tells of
+  // their models.
+  providers.on('changed', writeOpenCodeConfig)
+  modelsDev.on('changed', writeOpenCodeConfig)
   // A deleted default agent leaves none: the first usable agent stands in.
   providers.on('removed', (id) => {
     if (launchSettings.all().defaultAgent === id) launchSettings.setDefaultAgent(null)

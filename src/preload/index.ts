@@ -58,9 +58,6 @@ const api: HootApi = {
   addProvider: (provider) => ipcRenderer.invoke(IpcChannel.addProvider, provider),
   updateProvider: (id, change) => ipcRenderer.invoke(IpcChannel.updateProvider, id, change),
   removeProvider: (id) => ipcRenderer.invoke(IpcChannel.removeProvider, id),
-  setGlobalProvider: (harness, providerId) =>
-    ipcRenderer.invoke(IpcChannel.setGlobalProvider, harness, providerId),
-  setGlobalModel: (harness, model) => ipcRenderer.invoke(IpcChannel.setGlobalModel, harness, model),
   makeAgent: (agent) => ipcRenderer.invoke(IpcChannel.makeAgent, agent),
   changeAgent: (id, change) => ipcRenderer.send(IpcChannel.changeAgent, id, change),
   deleteAgent: (id) => ipcRenderer.send(IpcChannel.deleteAgent, id),

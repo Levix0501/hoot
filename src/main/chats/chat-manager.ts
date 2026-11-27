@@ -366,15 +366,6 @@ export class ChatManager extends EventEmitter<{
   }
 
   /**
-   * Gives the chats and saved sessions of an agent made before providers the
-   * provider its configuration names, and an agent, as Hoot reads that
-   * configuration (see `ChatStore.assignProvider`).
-   */
-  assignProvider(toolId: CodingToolId, providerId: string, agentId: string | null): void {
-    if (this.chats.assignProvider(toolId, providerId, agentId) > 0) this.emitChanged()
-  }
-
-  /**
    * Records the conversation Hoot made for a chat's agent to start in, as it
    * makes OpenCode's on the chat's provider and model, until the agent
    * reports a message in it.

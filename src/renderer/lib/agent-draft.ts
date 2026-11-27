@@ -10,8 +10,10 @@ import {
   leavesRolesToClaude,
   modelMapOn,
   namesClaudeModel,
-  OPENCODE_PROVIDER_EFFORTS,
+  openCodeDefaultEffort,
+  openCodeEffortsOf,
   providerFirstModel,
+  providerFormat,
   type Agent,
   type AgentChange,
   type ClaudeRole,
@@ -44,8 +46,9 @@ export function draftOf(agent: Agent): AgentDraft {
  * The models an agent on a provider can pick, in groups: on its harness's own
  * models, those its configuration offers, as the harness's detection read
  * them; on a provider of the user's, that provider's, and on a Custom one,
- * then those of its harness's maker, Claude's for Claude Code and OpenAI's
- * for Codex (see `addedModels`).
+ * then those of the maker of the format the agent runs it in, Claude's at an
+ * Anthropic-compatible address and OpenAI's at a Responses one (see
+ * `addedModels`).
  */
 export function modelGroups(
   harness: CodingToolId,
@@ -79,10 +82,10 @@ export function modelChoices(
 
 /**
  * The effort levels of a model, or of the one an agent made without a model
- * runs, on a provider: on a provider of the user's, for Claude Code and
- * Codex, those models.dev lists for the model (see `claudeEffortsOf` and
- * `codexEffortsOf`), for OpenCode, those it offers for any; on the harness's
- * own models, those its configuration gives the model.
+ * runs, on a provider: on a provider of the user's, those models.dev lists
+ * for the model, as each harness takes them (see `claudeEffortsOf`,
+ * `codexEffortsOf` and `openCodeEffortsOf`); on the harness's own models,
+ * those its configuration gives the model.
  */
 export function effortsOf(
   harness: CodingToolId,
@@ -92,11 +95,17 @@ export function effortsOf(
   catalogs: ModelCatalogs,
 ): string[] {
   if (provider?.own === null) {
-    if (harness === 'opencode') return [...OPENCODE_PROVIDER_EFFORTS]
     const runs = model ?? providerFirstModel(harness, provider, catalogs)
     if (runs === null) return []
     const listed = catalogModelOf(catalogs, harness, provider, runs)
-    return harness === 'claude' ? claudeEffortsOf(listed) : codexEffortsOf(listed)
+    switch (harness) {
+      case 'claude':
+        return claudeEffortsOf(listed)
+      case 'codex':
+        return codexEffortsOf(listed)
+      case 'opencode':
+        return openCodeEffortsOf(listed, providerFormat(provider, harness) ?? 'anthropic')
+    }
   }
   const options = state?.launchOptions
   if (model === null) return options?.defaultEfforts ?? []
@@ -108,10 +117,10 @@ export function effortsOf(
  * Hoot knows it: on a provider of the user's, the one Hoot starts them at,
  * for Claude Code (see `claudeDefaultEffort`), unless the model is one of
  * Claude's, which Claude Code knows itself, then the one its configuration
- * names where the model takes it, and for Codex (see `codexDefaultEffort`);
- * on the harness's own models, the one its configuration names where the
- * model takes it. `null` where the harness picks one Hoot does not know, as
- * OpenCode does.
+ * names where the model takes it, for Codex (see `codexDefaultEffort`) and
+ * for OpenCode (see `openCodeDefaultEffort`); on the harness's own models,
+ * the one its configuration names where the model takes it. `null` where
+ * the harness picks one Hoot does not know.
  */
 export function defaultEffortOf(
   harness: CodingToolId,
@@ -133,8 +142,12 @@ export function defaultEffortOf(
     }
     case 'codex':
       return codexDefaultEffort(efforts)
-    case 'opencode':
-      return null
+    case 'opencode': {
+      const runs = model ?? providerFirstModel(harness, provider, catalogs)
+      return runs === null
+        ? null
+        : openCodeDefaultEffort(catalogModelOf(catalogs, harness, provider, runs))
+    }
   }
 }
 
@@ -241,7 +254,7 @@ export function followMap(
 /**
  * The model an agent takes on another provider: its own where that one lists
  * it, else the one that one starts with. A provider of the user's lists its
- * own models, and its harness's maker's only while it has none (see
+ * own models, and a maker's only while it has none (see
  * `addedModels`), so that one with models of its own starts on its first.
  */
 function modelOn(

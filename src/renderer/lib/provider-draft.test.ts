@@ -268,14 +268,13 @@ describe('a provider being edited', () => {
     expect(savableDraft({ ...draft, urls: { anthropic: ' ' } }, custom, null).urls).toEqual(
       custom.urls,
     )
-    // Without models, it needs its Anthropic address, which comes back ...
+    // Without models, a Responses address does as well as an Anthropic-compatible one.
     const responses = { anthropic: '', responses: 'https://relay.example.com/v1' }
-    expect(savableDraft({ ...draft, urls: responses }, custom, null).urls).toEqual(custom.urls)
-    // ... or, without one, the models that went.
+    const moved = { ...draft, urls: responses }
+    expect(savableDraft(moved, custom, null)).toBe(moved)
     const named = provider({ urls: { responses: 'https://relay.example.com/v1' }, models: ['m'] })
-    expect(savableDraft({ ...draftOfProvider(named), models: [] }, named, null).models).toEqual([
-      'm',
-    ])
+    const emptied = { ...draftOfProvider(named), models: [] }
+    expect(savableDraft(emptied, named, null)).toBe(emptied)
     const deepseek = provider({ presetId: 'deepseek', urls: { ...preset('deepseek').urls } })
     const none = { ...draftOfProvider(deepseek), models: [] }
     expect(savableDraft(none, deepseek, preset('deepseek')).models).toEqual(['m'])

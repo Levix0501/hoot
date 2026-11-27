@@ -7,7 +7,6 @@ import {
   agentName,
   CLAUDE_ROLE_NAMES,
   CLAUDE_ROLES,
-  ownNeedsSignIn,
   ownProvider,
   presetById,
   providerMark,
@@ -15,7 +14,7 @@ import {
   type ProviderMark,
   type ProviderPreset,
 } from '../../../shared/providers'
-import { getCodingTool, type CodingToolId } from '../../../shared/tools'
+import type { CodingToolId } from '../../../shared/tools'
 import {
   canAdd,
   canSave,
@@ -29,8 +28,6 @@ import {
 } from '../../lib/provider-draft'
 import { useAppStore } from '../../store/app-store'
 import { AgentIcon, ProviderMarkIcon } from '../provider-icon'
-import { ToolIcon } from '../tool-icon'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
@@ -40,53 +37,6 @@ import { SIDE_PANEL, TitleName } from './side-panel'
 
 /** A provider panel's classes: wider than an agent's, for the addresses on one line each. */
 const PROVIDER_PANEL = cn(SIDE_PANEL, 'data-[side=right]:sm:max-w-[30rem]')
-
-/** The installed harnesses whose global a provider is. */
-function useGlobalOf(providerId: string): CodingToolId[] {
-  const installed = useInstalled()
-  const globals = useAppStore((state) => state.providers?.globals)
-  return installed.filter((harness) => globals?.[harness]?.providerId === providerId)
-}
-
-/** Global, with the marks of the harnesses whose global the provider is. */
-export function GlobalBadge({ providerId }: { providerId: string }) {
-  const harnesses = useGlobalOf(providerId)
-  if (harnesses.length === 0) return null
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Badge variant="secondary" className="gap-1 pl-1.5" data-testid="provider-global-badge" />
-        }
-      >
-        {harnesses.map((harness) => (
-          <ToolIcon key={harness} toolId={harness} />
-        ))}
-        Global
-      </TooltipTrigger>
-      <TooltipContent>
-        {harnesses.map((harness) => getCodingTool(harness).label).join(' and ')} run
-        {harnesses.length === 1 ? 's' : ''} on it outside Hoot too
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-/** Says a subscription is not signed in, which then gives its harness no global. */
-export function SignedOut({ provider }: { provider: Provider }) {
-  const signedOut = useAppStore((state) => {
-    const harness = provider.own
-    if (harness === null || !ownNeedsSignIn(harness)) return false
-    const global = state.providers?.globals[harness]
-    return global?.providerId === provider.id && !global.signedIn
-  })
-  if (!signedOut) return null
-  return (
-    <span className="shrink-0 text-xs text-muted-foreground" data-testid="provider-signed-out">
-      Not signed in
-    </span>
-  )
-}
 
 /** The agents that run on a provider, each of which opens the Agents page. */
 function UsedBy({ provider }: { provider: Provider }) {
@@ -113,7 +63,7 @@ function UsedBy({ provider }: { provider: Provider }) {
   )
 }
 
-/** Delete, which a provider that is a global, or that agents run on, cannot be. */
+/** Delete, which a provider that agents run on cannot be. */
 function DeleteProviderButton({
   provider,
   onDeleted,
@@ -124,16 +74,11 @@ function DeleteProviderButton({
   const used = useAppStore(
     (state) => (state.providers?.agents ?? []).filter((a) => a.providerId === provider.id).length,
   )
-  const globalOf = useGlobalOf(provider.id)
   const removeProvider = useAppStore((state) => state.removeProvider)
   const blocked =
-    globalOf.length > 0
-      ? `${globalOf.map((harness) => getCodingTool(harness).label).join(' and ')} use${
-          globalOf.length === 1 ? 's' : ''
-        } it globally: pick another first`
-      : used > 0
-        ? `${used === 1 ? 'An agent runs' : `${used} agents run`} on it: delete them first`
-        : null
+    used > 0
+      ? `${used === 1 ? 'An agent runs' : `${used} agents run`} on it: delete them first`
+      : null
   const button = (
     <Button
       variant="ghost"
@@ -248,8 +193,6 @@ function EditProvider({ provider, onClose }: { provider: Provider; onClose: () =
             testId="provider-panel-name"
           />
         </SheetTitle>
-        <SignedOut provider={provider} />
-        <GlobalBadge providerId={provider.id} />
       </Header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
         <ProviderFields
@@ -399,8 +342,6 @@ function OwnProvider({ provider, harness }: { provider: Provider; harness: Codin
         <SheetTitle className="min-w-0 flex-1 truncate text-base leading-8 font-semibold">
           {provider.name}
         </SheetTitle>
-        <SignedOut provider={provider} />
-        <GlobalBadge providerId={provider.id} />
       </Header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
         {models !== undefined && models.length > 0 && (

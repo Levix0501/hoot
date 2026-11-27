@@ -118,10 +118,10 @@ export function firstDetectionRunning(tools: ToolsState): boolean {
 /**
  * Whether the agents are still being found for the first time since Hoot
  * started: the coding tools installed (see `firstDetectionRunning`), and the
- * agents Hoot makes of their globals as it opens.
+ * agents, until the window has them.
  */
 export function agentsChecking(tools: ToolsState, providers: ProvidersState | null): boolean {
-  return firstDetectionRunning(tools) || providers === null || !providers.ready
+  return firstDetectionRunning(tools) || providers === null
 }
 
 /**

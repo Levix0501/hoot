@@ -10,12 +10,12 @@ export type WireFormat = 'anthropic' | 'responses'
  * The formats in which each agent can run a provider of the user's, the one
  * it takes first leading; an agent with none runs only on its own models.
  * Codex runs a provider at its Responses address alone; OpenCode at its
- * Anthropic-compatible one.
+ * Anthropic-compatible one, else at its Responses one.
  */
 export const FORMATS_OF: Readonly<Record<CodingToolId, readonly WireFormat[]>> = {
   claude: ['anthropic'],
   codex: ['responses'],
-  opencode: ['anthropic'],
+  opencode: ['anthropic', 'responses'],
 }
 
 /**
@@ -910,7 +910,7 @@ export function catalogModelOf(
     found !== undefined
       ? planCatalog(found.preset, found.plan)
       : isCustomProvider(provider)
-        ? makerCatalog(harness)
+        ? makerCatalog(harness, provider)
         : null
   if (catalog === null) return null
   const id = bareModel(model)
@@ -918,32 +918,36 @@ export function catalogModelOf(
 }
 
 /**
- * The models.dev provider of Claude's own models, which a Claude Code agent
- * on a Custom provider offers besides the provider's (see
- * `addedClaudeModels`), as such a provider often relays Claude's.
+ * The models.dev provider of Claude's own models, which an agent on a Custom
+ * provider at an Anthropic-compatible address offers besides the provider's
+ * (see `addedModels`), as such a provider often relays Claude's.
  */
 export const CLAUDE_CATALOG = 'anthropic'
 
 /**
- * The models.dev provider of OpenAI's own models, which a Codex agent on a
- * Custom provider offers besides the provider's, as such a provider often
- * relays OpenAI's.
+ * The models.dev provider of OpenAI's own models, which an agent on a Custom
+ * provider at a Responses address offers besides the provider's, as such a
+ * provider often relays OpenAI's.
  */
 export const CODEX_CATALOG = 'openai'
 
 /**
- * The models.dev provider of the models of the maker of a harness, which an
- * agent of it on a Custom provider offers besides the provider's (see
- * `addedModels`): Claude's for Claude Code, OpenAI's for Codex; none for
- * OpenCode, which no maker of models makes.
+ * The models.dev provider of the models an agent on a Custom provider offers
+ * besides the provider's (see `addedModels`): of the maker of the format it
+ * runs the provider in, Claude's at an Anthropic-compatible address and
+ * OpenAI's at a Responses one, as for Claude Code and Codex, which those
+ * makers make; none where it runs the provider at neither.
  */
-export function makerCatalog(harness: CodingToolId): string | null {
-  switch (harness) {
-    case 'claude':
+export function makerCatalog(
+  harness: CodingToolId,
+  provider: Pick<Provider, 'urls'>,
+): string | null {
+  switch (providerFormat(provider, harness)) {
+    case 'anthropic':
       return CLAUDE_CATALOG
-    case 'codex':
+    case 'responses':
       return CODEX_CATALOG
-    case 'opencode':
+    case null:
       return null
   }
 }
@@ -954,24 +958,23 @@ export function isCustomProvider(provider: Pick<Provider, 'presetId' | 'own'>): 
 }
 
 /**
- * The models of its harness's maker an agent on a provider offers besides
- * the provider's own: on a Custom provider, those of models.dev's that the
- * provider does not list itself, newest first (see `makerCatalog`); none on
- * another.
+ * The models of a maker an agent on a provider offers besides the provider's
+ * own: on a Custom provider, those of models.dev's that the provider does
+ * not list itself, newest first (see `makerCatalog`); none on another.
  */
 export function addedModels(
   harness: CodingToolId,
-  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  provider: Pick<Provider, 'presetId' | 'own' | 'models' | 'urls'>,
   catalogs: ModelCatalogs,
 ): string[] {
-  const catalog = makerCatalog(harness)
+  const catalog = makerCatalog(harness, provider)
   if (catalog === null || !isCustomProvider(provider)) return []
   return catalogModelIds(catalogs, catalog).filter((id) => !provider.models.includes(id))
 }
 
 /** The models of Claude's a Claude Code agent on a provider offers besides the provider's (see `addedModels`). */
 export function addedClaudeModels(
-  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  provider: Pick<Provider, 'presetId' | 'own' | 'models' | 'urls'>,
   catalogs: ModelCatalogs,
 ): string[] {
   return addedModels('claude', provider, catalogs)
@@ -979,11 +982,11 @@ export function addedClaudeModels(
 
 /**
  * The models an agent on a provider of the user's offers: the provider's,
- * then its harness's maker's on a Custom one (see `addedModels`).
+ * then a maker's on a Custom one (see `addedModels`).
  */
 export function agentModels(
   harness: CodingToolId,
-  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  provider: Pick<Provider, 'presetId' | 'own' | 'models' | 'urls'>,
   catalogs: ModelCatalogs,
 ): string[] {
   return [...provider.models, ...addedModels(harness, provider, catalogs)]
@@ -994,7 +997,7 @@ export function agentModels(
  * provider's, then Claude's on a Custom one (see `addedClaudeModels`).
  */
 export function claudeAgentModels(
-  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  provider: Pick<Provider, 'presetId' | 'own' | 'models' | 'urls'>,
   catalogs: ModelCatalogs,
 ): string[] {
   return agentModels('claude', provider, catalogs)
@@ -1025,23 +1028,23 @@ export function firstCodexModel(catalogs: ModelCatalogs): string | null {
 /**
  * The model an agent on a provider of the user's starts with while it names
  * none: the provider's first; on a Custom one without models of its own, the
- * one its harness's maker's it offers starts with (see `firstClaudeModel`
- * and `firstCodexModel`); `null` where it offers none.
+ * one the maker's it offers starts with (see `firstClaudeModel` and
+ * `firstCodexModel`); `null` where it offers none.
  */
 export function providerFirstModel(
   harness: CodingToolId,
-  provider: Pick<Provider, 'presetId' | 'own' | 'models'>,
+  provider: Pick<Provider, 'presetId' | 'own' | 'models' | 'urls'>,
   catalogs: ModelCatalogs,
 ): string | null {
   const first = provider.models[0]
   if (first !== undefined) return first
   if (addedModels(harness, provider, catalogs).length === 0) return null
-  switch (harness) {
-    case 'claude':
+  switch (makerCatalog(harness, provider)) {
+    case CLAUDE_CATALOG:
       return firstClaudeModel(catalogs)
-    case 'codex':
+    case CODEX_CATALOG:
       return firstCodexModel(catalogs)
-    case 'opencode':
+    default:
       return null
   }
 }
@@ -1155,12 +1158,59 @@ export function bareModel(model: string): string {
 }
 
 /**
- * The effort levels OpenCode offers on a provider of the user's, whatever
- * the model: the variants it gives a model at an Anthropic-compatible
- * address. Claude Code and Codex offer each model's own instead (see
- * `claudeEffortsOf` and `codexEffortsOf`).
+ * The effort levels OpenCode gives a model of a provider of the user's
+ * that it is told no levels of, its variants, by the format it runs the
+ * provider in: Claude Code's at an Anthropic-compatible address, three at a
+ * Responses one.
  */
-export const OPENCODE_PROVIDER_EFFORTS: readonly string[] = ['low', 'medium', 'high']
+export const OPENCODE_FORMAT_EFFORTS: Readonly<Record<WireFormat, readonly string[]>> = {
+  anthropic: ['low', 'medium', 'high', 'xhigh', 'max'],
+  responses: ['low', 'medium', 'high'],
+}
+
+/**
+ * The effort levels an OpenCode agent offers for a model of a provider of
+ * the user's, which OpenCode runs it in the format of: those models.dev
+ * lists for it, as they are, which Hoot tells OpenCode as the model's
+ * variants (see `openCodeEntry`); for one it lists none for, those OpenCode
+ * gives it itself (see `OPENCODE_FORMAT_EFFORTS`).
+ */
+export function openCodeEffortsOf(
+  model: Pick<CatalogModel, 'efforts'> | null,
+  format: WireFormat,
+): string[] {
+  const listed = model?.efforts ?? []
+  return [...(listed.length > 0 ? listed : OPENCODE_FORMAT_EFFORTS[format])]
+}
+
+/**
+ * The effort level an OpenCode session on a provider of the user's starts
+ * at while its agent picks none, as Claude Code's and Codex's do, where
+ * models.dev lists levels for the model: `high`, unless the model takes
+ * other levels and not that one, then the highest of them below it, else
+ * the lowest. None for a model it lists none for, which OpenCode then runs
+ * without a variant, as it does itself, since the model may not reason.
+ */
+export function openCodeDefaultEffort(model: Pick<CatalogModel, 'efforts'> | null): string | null {
+  const listed = model?.efforts ?? []
+  return listed.length === 0 ? null : levelAtHigh(listed)
+}
+
+/**
+ * The effort level an OpenCode session on a provider of the user's starts
+ * at: its agent's, while the model takes it (see `openCodeEffortsOf`), else
+ * the model's (see `openCodeDefaultEffort`), as a model picked with
+ * `/models` may not take the agent's.
+ */
+export function openCodeSessionEffort(
+  effort: string | null,
+  model: Pick<CatalogModel, 'efforts'> | null,
+  format: WireFormat,
+): string | null {
+  return effort !== null && openCodeEffortsOf(model, format).includes(effort)
+    ? effort
+    : openCodeDefaultEffort(model)
+}
 
 /** The effort levels Codex knows by name, lowest first; it sends any other as it is too. */
 export const CODEX_EFFORTS = [
@@ -1191,7 +1241,15 @@ export function codexEffortsOf(model: Pick<CatalogModel, 'efforts'> | null): str
  * the highest of them below it, else the lowest.
  */
 export function codexDefaultEffort(levels: readonly string[]): string {
-  if (levels.length === 0 || levels.includes('high')) return 'high'
+  return levels.length === 0 ? 'high' : levelAtHigh(levels)
+}
+
+/**
+ * Of some effort levels, `high`, else the highest of them below it, else the
+ * lowest, by their order among `CODEX_EFFORTS`, which has models.dev's names.
+ */
+function levelAtHigh(levels: readonly string[]): string {
+  if (levels.includes('high')) return 'high'
   const below = levels.filter((level) => codexEffortRank(level) < codexEffortRank('high'))
   return below.toSorted(byCodexEffort).at(-1) ?? levels.toSorted(byCodexEffort)[0]!
 }
@@ -1310,7 +1368,7 @@ export function cleanModelMap(map: ModelMap): ModelMap {
  */
 export function modelMapOn(
   map: ModelMap,
-  provider: Pick<Provider, 'models' | 'own' | 'presetId'>,
+  provider: Pick<Provider, 'models' | 'own' | 'presetId' | 'urls'>,
   catalogs: ModelCatalogs,
 ): ModelMap {
   if (provider.own !== null) return {}
@@ -1321,11 +1379,6 @@ export function modelMapOn(
     if (model !== undefined && offered.includes(model)) kept[role] = model
   }
   return kept
-}
-
-/** Whether an agent's own models need it signed in: OpenCode's free ones do not. */
-export function ownNeedsSignIn(harness: CodingToolId): boolean {
-  return harness !== 'opencode'
 }
 
 /** The mark Hoot draws for a provider. */
@@ -1347,13 +1400,18 @@ export function trimUrl(url: string): string {
   return url.trim().replace(/\/+$/, '')
 }
 
-/** The address an agent runs a provider at: the first of the formats it speaks that the provider serves. */
-export function providerUrl(provider: Provider, harness: CodingToolId): string {
-  for (const format of FORMATS_OF[harness]) {
-    const url = (provider.urls[format] ?? '').trim()
-    if (url !== '') return url
-  }
-  return ''
+/** The format an agent runs a provider in: the first of those it speaks that the provider serves; `null` for none. */
+export function providerFormat(
+  provider: Pick<Provider, 'urls'>,
+  harness: CodingToolId,
+): WireFormat | null {
+  return FORMATS_OF[harness].find((format) => (provider.urls[format] ?? '').trim() !== '') ?? null
+}
+
+/** The address an agent runs a provider at, in its format (see `providerFormat`); `''` for none. */
+export function providerUrl(provider: Pick<Provider, 'urls'>, harness: CodingToolId): string {
+  const format = providerFormat(provider, harness)
+  return format === null ? '' : (provider.urls[format] ?? '').trim()
 }
 
 /** Whether an agent can run a provider: Claude Code a cloud's, any at an address it takes. */
@@ -1451,52 +1509,15 @@ export interface NewProvider {
 export type ProviderChange = Partial<NewProvider>
 
 /**
- * The harnesses whose own configuration Hoot reads for their global, the
- * provider they run on outside Hoot, and writes when that is changed here:
- * OpenCode. Claude Code's and Codex's own configurations are left alone:
- * Hoot neither reads a global from them nor writes them, and makes no agent
- * of them, their agents being made by hand, each session given its
- * provider by itself.
+ * The providers and agents, as the window shows them. Hoot reads no agent's
+ * own configuration for them and makes no agent by itself: agents are made
+ * by hand, and each session is given its provider by itself.
  */
-export const GLOBAL_HARNESSES = ['opencode'] as const satisfies readonly CodingToolId[]
-
-/** A harness whose own configuration names its global (see `GLOBAL_HARNESSES`). */
-export type GlobalHarness = (typeof GLOBAL_HARNESSES)[number]
-
-/** Whether a harness's own configuration names its global (see `GLOBAL_HARNESSES`). */
-export function isGlobalHarness(harness: CodingToolId): harness is GlobalHarness {
-  return GLOBAL_HARNESSES.some((global) => global === harness)
-}
-
-/**
- * What an agent's own configuration names, as Hoot reads it: the provider
- * that agent runs on outside Hoot, and the model.
- */
-export interface HarnessGlobal {
-  /** One of the user's providers, or the agent's own models. */
-  providerId: string
-  /** The model it names; `null` when it names none. */
-  model: string | null
-  /** For its own models, whether it is signed in to them; OpenCode's free models need no sign-in. */
-  signedIn: boolean
-}
-
-/** The providers and agents, and each installed agent's global, as the window shows them. */
 export interface ProvidersState {
   /** The user's providers, in the order they were made; the agents' own are not among them. */
   providers: Provider[]
   /** In the order they were made. */
   agents: Agent[]
-  /**
-   * For each installed harness of `GLOBAL_HARNESSES` Hoot read the
-   * configuration of, what it names; never Claude Code or Codex.
-   */
-  globals: Partial<Record<CodingToolId, HarnessGlobal>>
-  /**
-   * Whether Hoot has read the installed harnesses' configurations since it
-   * opened, and made the agents it makes as it opens.
-   */
-  ready: boolean
 }
 
 /** A provider by id: one of the user's, or an agent's own models. */
@@ -1580,55 +1601,6 @@ export function issueAgent(usable: readonly Agent[], defaultAgent: string | null
   return claude.find((agent) => agent.id === defaultAgent) ?? claude[0] ?? null
 }
 
-/**
- * What a harness's own configuration says of its provider: the address and
- * the key, empty where it gives none, how it sends the key, and the model,
- * which is the harness's own setting, not the provider's.
- */
-export interface GlobalConfig {
-  url: string
-  apiKey: string
-  keyHeader: KeyHeader
-  model: string | null
-}
-
-/**
- * Whether a harness's configuration names this provider: one of its addresses
- * and its key, or for its own models, neither. The model does not count.
- */
-export function namesProvider(
-  provider: Provider,
-  harness: CodingToolId,
-  config: GlobalConfig,
-): boolean {
-  if (!canRun(provider, harness)) return false
-  if (provider.own !== null) return trimUrl(config.url) === '' && config.apiKey === ''
-  const url = trimUrl(config.url)
-  return (
-    url !== '' &&
-    FORMATS_OF[harness].some((format) => trimUrl(provider.urls[format] ?? '') === url) &&
-    provider.apiKey === config.apiKey
-  )
-}
-
-/** The preset and plan one of whose addresses, in one of a harness's formats, an address is. */
-export function presetPlanOfUrl(
-  url: string,
-  harness: CodingToolId,
-): { preset: ProviderPreset; plan: PresetPlan } | undefined {
-  const wanted = trimUrl(url)
-  if (wanted === '') return undefined
-  for (const preset of PROVIDER_PRESETS) {
-    for (const plan of presetPlans(preset)) {
-      const urls = plan.urls
-      if (FORMATS_OF[harness].some((format) => trimUrl(urls[format] ?? '') === wanted)) {
-        return { preset, plan }
-      }
-    }
-  }
-  return undefined
-}
-
 /** A name no provider has yet: `base`, else `base` with 2, 3, … after it. */
 export function freeProviderName(providers: readonly Provider[], base: string): string {
   const taken = new Set(providers.map((provider) => provider.name))
@@ -1643,89 +1615,6 @@ export function hostOf(url: string): string | null {
   } catch {
     return null
   }
-}
-
-/**
- * The provider to make of a harness's configuration that names none of the
- * user's: the preset and plan of its address, with the plan's other
- * addresses and the models picked of its catalog at first (see
- * `firstPicks`), the configuration's model first; otherwise one named after
- * the address's host.
- */
-export function providerFromConfig(
-  providers: readonly Provider[],
-  harness: CodingToolId,
-  config: GlobalConfig,
-  catalogs: ModelCatalogs,
-): NewProvider {
-  const found = presetPlanOfUrl(config.url, harness)
-  const models = found
-    ? firstPicks(catalogModelIds(catalogs, planCatalog(found.preset, found.plan)))
-    : []
-  if (config.model !== null && config.model !== '' && !models.includes(config.model)) {
-    models.unshift(config.model)
-  }
-  const format = FORMATS_OF[harness][0] ?? 'anthropic'
-  return {
-    name: freeProviderName(providers, found?.preset.name ?? hostOf(config.url) ?? 'Custom'),
-    presetId: found?.preset.id ?? null,
-    planId: found ? planIdOf(found.preset, found.plan) : null,
-    apiKey: config.apiKey,
-    keyHeader: config.keyHeader,
-    urls: found ? { ...found.plan.urls } : { [format]: config.url.trim() },
-    models,
-    cloud: null,
-  }
-}
-
-/**
- * The provider a harness's configuration names: the global it has already
- * when that is still it, else the first of the user's that it names, else
- * none, and a new one must be made of it.
- */
-export function providerNamed(
-  providers: readonly Provider[],
-  harness: CodingToolId,
-  config: GlobalConfig,
-  current: string | null,
-): Provider | null {
-  const candidates = [ownProvider(harness), ...providers]
-  const kept = candidates.find((provider) => provider.id === current)
-  if (kept !== undefined && namesProvider(kept, harness, config)) return kept
-  return candidates.find((provider) => namesProvider(provider, harness, config)) ?? null
-}
-
-/**
- * Whether a harness has a global, which a new agent can be made of: a
- * provider of the user's that it can run, or its own models while it is
- * signed in to them where they need it.
- */
-export function hasGlobal(
-  state: Pick<ProvidersState, 'providers' | 'globals'>,
-  harness: CodingToolId,
-): boolean {
-  const global = state.globals[harness]
-  if (global === undefined) return false
-  const provider = findProvider(state.providers, global.providerId)
-  if (provider === undefined || !canRun(provider, harness)) return false
-  return provider.own === null || !ownNeedsSignIn(harness) || global.signedIn
-}
-
-/**
- * The agents to make as Hoot opens, or as harnesses get installed: one for
- * each of `harnesses` that is installed, has a global and has no agent, on
- * that global's provider and model, as one made by hand would be.
- */
-export function agentsToMake(
-  state: Pick<ProvidersState, 'providers' | 'agents' | 'globals'>,
-  harnesses: readonly CodingToolId[],
-): NewAgent[] {
-  return harnesses.flatMap((harness) => {
-    if (state.agents.some((agent) => agent.harness === harness)) return []
-    if (!hasGlobal(state, harness)) return []
-    const global = state.globals[harness]!
-    return [{ harness, providerId: global.providerId, model: global.model }]
-  })
 }
 
 /** The models an agent on a provider offers, besides the harness's default. */

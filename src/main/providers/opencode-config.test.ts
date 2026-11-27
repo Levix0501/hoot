@@ -1,19 +1,22 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { parse } from 'jsonc-parser'
+import { parse, type ParseError } from 'jsonc-parser'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ownProvider, type Provider } from '../../shared/providers'
+import { ownProvider, type ModelCatalogs, type Provider } from '../../shared/providers'
 import { writeNodeCommand } from '../tools/test-support'
 import {
   ANTHROPIC_COMPATIBLE,
+  createOpenCodeSession,
+  hootOpenCodeConfig,
   openCodeBaseUrl,
   openCodeConfigFile,
   openCodeModelRef,
-  readOpenCodeGlobal,
   readOpenCodeLaunchOptions,
+  removeHootProviders,
+  RESPONSES_COMPATIBLE,
   takesProviders,
-  writeOpenCodeConfig,
+  writeHootOpenCodeConfig,
 } from './opencode-config'
 
 let home: string
@@ -25,6 +28,14 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
 
 const folder = () => path.join(home, '.config', 'opencode')
+
+/** What a configuration holds, as OpenCode reads it: with trailing commas, and nothing else amiss. */
+function strict(text: string): unknown {
+  const errors: ParseError[] = []
+  const value: unknown = parse(text, errors, { allowTrailingComma: true })
+  expect(errors).toEqual([])
+  return value
+}
 
 function write(name: string, text: string): string {
   fs.mkdirSync(folder(), { recursive: true })
@@ -57,6 +68,21 @@ const deepseek: Provider = {
   models: ['deepseek-flash[1m]'],
 }
 
+/** What models.dev tells of some models. */
+const catalogs: ModelCatalogs = {
+  deepseek: [
+    { id: 'deepseek-pro', context: 1_000_000, output: 384_000, efforts: ['high', 'max'] },
+    { id: 'deepseek-chat', context: 128_000, output: null, efforts: [] },
+  ],
+  anthropic: [
+    { id: 'claude-opus-5-5', context: 1_000_000, output: 128_000, efforts: ['low', 'high', 'max'] },
+    { id: 'claude-sonnet-5-5', context: 1_000_000, output: 64_000, efforts: [] },
+  ],
+  openai: [
+    { id: 'gpt-6.2-sol', context: 400_000, output: 128_000, efforts: ['low', 'medium', 'high'] },
+  ],
+}
+
 describe("OpenCode's own configuration", () => {
   it('is opencode.jsonc where there is one, else opencode.json', async () => {
     expect(await openCodeConfigFile({}, home)).toBe(path.join(folder(), 'opencode.json'))
@@ -68,48 +94,7 @@ describe("OpenCode's own configuration", () => {
     )
   })
 
-  it('names its free models while its default model is none of another provider', async () => {
-    const free = { url: '', apiKey: '', keyHeader: 'bearer', model: null }
-    expect(await readOpenCodeGlobal({}, home)).toEqual({ config: free, signedIn: true })
-    write('opencode.json', '{ "model": "opencode/glm-5.3-flash-free" }')
-    expect(await readOpenCodeGlobal({}, home)).toEqual({
-      config: { ...free, model: 'glm-5.3-flash-free' },
-      signedIn: true,
-    })
-  })
-
-  it('names the provider of its default model by its address and key', async () => {
-    write(
-      'opencode.jsonc',
-      `// Mine.
-{
-  "providers": {
-    "mine": {
-      "package": "${ANTHROPIC_COMPATIBLE}",
-      "settings": { "baseURL": "https://api.moonshot.cn/anthropic/v1", "apiKey": "sk-kimi" },
-    },
-    "keyless": { "package": "${ANTHROPIC_COMPATIBLE}", "settings": { "baseURL": "https://x/v1" } },
-  },
-  "model": "mine/kimi-k3",
-}`,
-    )
-    expect(await readOpenCodeGlobal({}, home)).toEqual({
-      config: {
-        url: 'https://api.moonshot.cn/anthropic',
-        apiKey: 'sk-kimi',
-        keyHeader: 'bearer',
-        model: 'kimi-k3',
-      },
-      signedIn: false,
-    })
-    // A provider whose key OpenCode keeps elsewhere, or one Hoot cannot run OpenCode on, is none.
-    write('opencode.jsonc', '{ "model": "keyless/x" }')
-    expect(await readOpenCodeGlobal({}, home)).toBeNull()
-    write('opencode.jsonc', '{ "model": "anthropic/claude-sonnet-5-5" }')
-    expect(await readOpenCodeGlobal({}, home)).toBeNull()
-  })
-
-  it("writes the user's providers in place of Hoot's earlier ones, keeping the rest and its comments", async () => {
+  it('loses the providers an earlier Hoot wrote into it, keeping the rest and its comments', async () => {
     const file = write(
       'opencode.jsonc',
       `// The user's own comment.
@@ -118,50 +103,77 @@ describe("OpenCode's own configuration", () => {
   "providers": {
     "mine": { "package": "x" },
     "hoot-gone": { "package": "${ANTHROPIC_COMPATIBLE}" },
+    "hoot-p1": { "package": "${ANTHROPIC_COMPATIBLE}" },
   },
 }
 `,
     )
-    await writeOpenCodeConfig({}, home, [kimi, deepseek])
+    expect(await removeHootProviders({}, home)).toBe(true)
     const text = fs.readFileSync(file, 'utf8')
     expect(text.startsWith("// The user's own comment.")).toBe(true)
-    const config = parse(text) as {
-      providers: Record<string, unknown>
-      model?: string
-      $schema: string
-    }
+    const config = strict(text) as { providers: Record<string, unknown>; $schema: string }
     expect(config.$schema).toBe('https://opencode.ai/config.json')
-    expect(Object.keys(config.providers)).toEqual(['mine', 'hoot-p1', 'hoot-p2'])
-    expect(config.providers['hoot-p1']).toEqual({
-      name: 'Kimi',
-      package: ANTHROPIC_COMPATIBLE,
-      settings: { baseURL: 'https://api.moonshot.cn/anthropic/v1', apiKey: 'sk-kimi' },
-      models: { 'kimi-k3.1-pro': { name: 'kimi-k3.1-pro' }, 'glm-5.3': { name: 'glm-5.3' } },
-    })
-    expect(config.providers['hoot-p2']).toMatchObject({
-      settings: { baseURL: 'https://api.deepseek.com/anthropic/v1' },
-    })
-    expect(config.model).toBeUndefined()
+    expect(Object.keys(config.providers)).toEqual(['mine'])
     // Who may read it stays as it was.
     expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o644)
-
-    // A global is its default model too; one that is gone from Hoot goes from the file.
-    await writeOpenCodeConfig({}, home, [kimi], { provider: kimi, model: null })
-    const next = parse(fs.readFileSync(file, 'utf8')) as typeof config
-    expect(Object.keys(next.providers)).toEqual(['mine', 'hoot-p1'])
-    expect(next.model).toBe('hoot-p1/kimi-k3.1-pro')
-    expect(await readOpenCodeGlobal({}, home)).toMatchObject({
-      config: { url: 'https://api.moonshot.cn/anthropic', apiKey: 'sk-kimi' },
-    })
-    // Its free models, with none picked, take its own default again.
-    await writeOpenCodeConfig({}, home, [kimi], { provider: ownProvider('opencode'), model: null })
-    expect((parse(fs.readFileSync(file, 'utf8')) as typeof config).model).toBeUndefined()
+    // Nothing more to take out, nothing written.
+    const written = fs.statSync(file).mtimeMs
+    expect(await removeHootProviders({}, home)).toBe(false)
+    expect(fs.statSync(file).mtimeMs).toBe(written)
   })
 
-  it('leaves a file that holds no JSON object alone', async () => {
+  it('keeps the provider its default model is of, and drops `providers` where nothing else is left', async () => {
+    const file = write(
+      'opencode.json',
+      JSON.stringify({
+        model: 'hoot-p1/kimi-k3.1-pro',
+        providers: { 'hoot-p1': { name: 'Kimi' }, 'hoot-p2': { name: 'DeepSeek' } },
+      }),
+    )
+    await removeHootProviders({}, home)
+    expect(strict(fs.readFileSync(file, 'utf8'))).toEqual({
+      model: 'hoot-p1/kimi-k3.1-pro',
+      providers: { 'hoot-p1': { name: 'Kimi' } },
+    })
+    write('opencode.json', JSON.stringify({ theme: 'x', providers: { 'hoot-p2': {} } }))
+    await removeHootProviders({}, home)
+    expect(strict(fs.readFileSync(file, 'utf8'))).toEqual({ theme: 'x' })
+  })
+
+  it('leaves a configuration that parses, also where its entries end in commas', async () => {
+    const cases: Array<[string, unknown]> = [
+      ['{\n  "providers": {\n    "hoot-p1": { "a": 1 },\n  },\n}\n', {}],
+      [
+        '// mine\n{\n  "$schema": "x",\n  "providers": {\n    "hoot-p1": {},\n  },\n}\n',
+        { $schema: 'x' },
+      ],
+      [
+        '{\n  "providers": {\n    "hoot-p1": {},\n    "mine": {},\n  },\n}\n',
+        { providers: { mine: {} } },
+      ],
+      [
+        '{\n  "providers": {\n    "mine": {},\n    "hoot-p1": {},\n  },\n  "theme": "x",\n}\n',
+        { providers: { mine: {} }, theme: 'x' },
+      ],
+      [
+        '{ "providers": { "mine": {}, "hoot-p1": {}, "hoot-p2": {} }, "model": "mine/m" }',
+        { providers: { mine: {} }, model: 'mine/m' },
+      ],
+    ]
+    for (const [text, left] of cases) {
+      const file = write('opencode.jsonc', text)
+      expect(await removeHootProviders({}, home)).toBe(true)
+      expect(strict(fs.readFileSync(file, 'utf8'))).toEqual(left)
+    }
+  })
+
+  it('leaves a file that holds no JSON object alone, and makes none', async () => {
     const file = write('opencode.json', '{ not json')
-    await expect(writeOpenCodeConfig({}, home, [kimi])).rejects.toThrow(/JSON object/)
+    expect(await removeHootProviders({}, home)).toBe(false)
     expect(fs.readFileSync(file, 'utf8')).toBe('{ not json')
+    fs.rmSync(file)
+    expect(await removeHootProviders({}, home)).toBe(false)
+    expect(fs.existsSync(file)).toBe(false)
   })
 
   it('takes providers from OpenCode 2 on', () => {
@@ -212,8 +224,148 @@ process.exitCode = 1
       'https://api.moonshot.cn/anthropic/v1',
     )
     expect(openCodeBaseUrl('https://gateway.example/v1')).toBe('https://gateway.example/v1')
-    expect(openCodeModelRef(deepseek, null)).toBe('hoot-p2/deepseek-flash')
-    expect(openCodeModelRef(kimi, 'glm-5.3[1m]')).toBe('hoot-p1/glm-5.3')
-    expect(openCodeModelRef(ownProvider('opencode'), null)).toBe('opencode/big-pickle')
+    expect(openCodeModelRef(deepseek, null, catalogs)).toBe('hoot-p2/deepseek-flash')
+    expect(openCodeModelRef(kimi, 'glm-5.3[1m]', catalogs)).toBe('hoot-p1/glm-5.3')
+    expect(openCodeModelRef(ownProvider('opencode'), null, catalogs)).toBe('opencode/big-pickle')
+    // A Custom provider without models starts with its address's maker's.
+    const custom = {
+      ...kimi,
+      presetId: null,
+      models: [],
+      urls: { responses: 'https://x.example/v1' },
+    }
+    expect(openCodeModelRef(custom, null, catalogs)).toBe('hoot-p1/gpt-6.2-sol')
+  })
+})
+
+describe("Hoot's configuration of OpenCode", () => {
+  it('gives each provider at the address OpenCode runs it at, with its key in the header it asks for', () => {
+    const anthropicKey: Provider = {
+      ...kimi,
+      id: 'p3',
+      name: 'Anthropic',
+      presetId: null,
+      keyHeader: 'x-api-key',
+      urls: { anthropic: 'https://api.example.com' },
+      models: ['claude-opus-5-5'],
+    }
+    const openai: Provider = {
+      ...kimi,
+      id: 'p4',
+      name: 'OpenAI',
+      presetId: 'openai',
+      apiKey: 'sk-openai',
+      urls: { responses: 'https://api.openai.com/v1/' },
+      models: ['gpt-6.2-sol'],
+    }
+    const vertex: Provider = {
+      ...kimi,
+      id: 'p5',
+      presetId: 'vertex',
+      urls: {},
+      cloud: { kind: 'vertex', region: 'global', project: 'x' },
+    }
+    const config = hootOpenCodeConfig([kimi, anthropicKey, openai, vertex], catalogs) as {
+      providers: Record<string, Record<string, unknown>>
+    }
+    // One OpenCode cannot run, as a cloud's, is left out.
+    expect(Object.keys(config.providers)).toEqual(['hoot-p1', 'hoot-p3', 'hoot-p4'])
+    // A bearer token at an Anthropic-compatible address, in place of x-api-key.
+    expect(config.providers['hoot-p1']).toEqual({
+      name: 'Kimi',
+      package: ANTHROPIC_COMPATIBLE,
+      settings: { baseURL: 'https://api.moonshot.cn/anthropic/v1' },
+      headers: { Authorization: 'Bearer sk-kimi' },
+      models: { 'kimi-k3.1-pro': { name: 'kimi-k3.1-pro' }, 'glm-5.3': { name: 'glm-5.3' } },
+    })
+    expect(config.providers['hoot-p3']).toMatchObject({
+      settings: { baseURL: 'https://api.example.com/v1', apiKey: 'sk-kimi' },
+    })
+    expect(config.providers['hoot-p3']).not.toHaveProperty('headers')
+    // At a Responses address, the key as OpenAI's API takes it.
+    expect(config.providers['hoot-p4']).toEqual({
+      name: 'OpenAI',
+      package: RESPONSES_COMPATIBLE,
+      settings: { baseURL: 'https://api.openai.com/v1', apiKey: 'sk-openai' },
+      models: {
+        'gpt-6.2-sol': {
+          name: 'gpt-6.2-sol',
+          limit: { context: 400_000, output: 128_000 },
+          capabilities: { reasoning: { supported: true, effort: ['low', 'medium', 'high'] } },
+        },
+      },
+    })
+  })
+
+  it("tells OpenCode each model's limits and effort levels as models.dev lists them", () => {
+    const both: Provider = {
+      ...deepseek,
+      urls: {
+        anthropic: 'https://api.deepseek.com/anthropic',
+        responses: 'https://api.deepseek.com',
+      },
+      models: ['deepseek-pro', 'deepseek-chat', 'deepseek-unlisted'],
+    }
+    const custom: Provider = {
+      ...kimi,
+      id: 'p6',
+      presetId: null,
+      models: [],
+      urls: { anthropic: 'https://relay.example/anthropic' },
+    }
+    const config = hootOpenCodeConfig([both, custom], catalogs) as {
+      providers: Record<string, { package: string; models: Record<string, unknown> }>
+    }
+    // At its Anthropic-compatible address first.
+    expect(config.providers['hoot-p2']!.package).toBe(ANTHROPIC_COMPATIBLE)
+    expect(config.providers['hoot-p2']!.models).toEqual({
+      'deepseek-pro': {
+        name: 'deepseek-pro',
+        limit: { context: 1_000_000, output: 384_000 },
+        capabilities: { reasoning: { supported: true, effort: ['high', 'max'] } },
+      },
+      // Without levels, OpenCode gives its own.
+      'deepseek-chat': { name: 'deepseek-chat', limit: { context: 128_000 } },
+      'deepseek-unlisted': { name: 'deepseek-unlisted' },
+    })
+    // A Custom one without models has Claude's at an Anthropic-compatible address.
+    expect(Object.keys(config.providers['hoot-p6']!.models)).toEqual([
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+    ])
+  })
+
+  it('is written readable by its owner alone', async () => {
+    const file = path.join(home, 'hoot', 'opencode', 'opencode.json')
+    await writeHootOpenCodeConfig(file, { providers: {} })
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ providers: {} })
+    expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600)
+  })
+
+  it("makes a conversation through Hoot's server, with its password", async () => {
+    const calls = path.join(home, 'calls')
+    const opencode = await writeNodeCommand(
+      path.join(home, 'bin', 'opencode'),
+      `const fs = require('node:fs')
+fs.writeFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), password: process.env.OPENCODE_PASSWORD }))
+console.log(JSON.stringify({ data: { id: 'ses_1' } }))
+`,
+    )
+    const server = { url: 'http://127.0.0.1:4321', password: 'pw' }
+    expect(
+      await createOpenCodeSession(opencode, {}, server, home, 'hoot-p2/deepseek-pro', 'high'),
+    ).toBe('ses_1')
+    const call = JSON.parse(fs.readFileSync(calls, 'utf8')) as { args: string[]; password: string }
+    expect(call.password).toBe('pw')
+    expect(call.args.slice(0, 4)).toEqual([
+      'api',
+      '--server',
+      'http://127.0.0.1:4321',
+      'session.create',
+    ])
+    expect(JSON.parse(call.args[5]!)).toEqual({
+      model: { providerID: 'hoot-p2', id: 'deepseek-pro', variant: 'high' },
+      location: { directory: home },
+    })
   })
 })

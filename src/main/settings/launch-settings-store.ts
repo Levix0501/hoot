@@ -90,7 +90,7 @@ function readLegacy(value: unknown): LegacySettings | null {
  * user data directory. Sessions read YOLO mode when they start, so a change
  * to it applies to the next session and never to a running one. It also keeps
  * what an earlier Hoot kept for each coding tool, before agents were made of
- * providers, until the agents made of them take it. Permission levels and the
+ * providers, until Hoot drops it as it opens. Permission levels and the
  * switch for asking before a running session is closed, which earlier
  * versions kept, are ignored.
  */

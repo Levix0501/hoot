@@ -314,10 +314,7 @@ export interface AppState {
   agents: AgentsState | null
   /** The default agent and the YOLO mode switch; `null` until they are known. */
   launchSettings: LaunchSettings | null
-  /**
-   * The user's providers, the agents made of them, and each installed
-   * agent's global; `null` until they are known.
-   */
+  /** The user's providers and the agents made of them; `null` until they are known. */
   providers: ProvidersState | null
   /** The models of the providers Hoot knows, as models.dev lists them; none until they are known. */
   modelCatalogs: ModelCatalogs
@@ -517,13 +514,8 @@ export interface AppState {
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
   addProvider(provider: NewProvider): Promise<ProviderResult>
-  /** Changes a provider; one that is a global is written into its agent's configuration too. */
   updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
   removeProvider(id: string): Promise<ProviderChangeResult>
-  /** Makes a provider an agent's global, writing it into the agent's own configuration. */
-  setGlobalProvider(harness: CodingToolId, providerId: string): Promise<ProviderChangeResult>
-  /** Writes another model into an agent's own configuration. */
-  setGlobalModel(harness: CodingToolId, model: string | null): Promise<ProviderChangeResult>
   /** Makes an agent of a harness and a provider. */
   makeAgent(agent: NewAgent): Promise<AgentResult>
   /** Changes an agent for the sessions that start from now on. */
@@ -2763,18 +2755,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     removeProvider(id) {
       return api
         .removeProvider(id)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-    },
-
-    setGlobalProvider(harness, providerId) {
-      return api
-        .setGlobalProvider(harness, providerId)
-        .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
-    },
-
-    setGlobalModel(harness, model) {
-      return api
-        .setGlobalModel(harness, model)
         .catch((error: unknown) => ({ ok: false as const, message: errorMessage(error) }))
     },
 

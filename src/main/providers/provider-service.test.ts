@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
-import type { AgentLaunchSettings } from '../../shared/launch-settings'
-import { OWN_PROVIDER_IDS, type GlobalConfig, type Provider } from '../../shared/providers'
-import type { CodingToolId } from '../../shared/tools'
+import { OWN_PROVIDER_IDS, type Provider } from '../../shared/providers'
 import { openDatabase } from '../database/database'
-import { ProviderService, type GlobalReading } from './provider-service'
+import { ProviderService } from './provider-service'
 import { ProviderStore } from './provider-store'
 
 const DEEPSEEK_URL = 'https://api.deepseek.com/anthropic'
@@ -12,31 +10,11 @@ const DEEPSEEK_URL = 'https://api.deepseek.com/anthropic'
 /** DeepSeek's address for Codex. */
 const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com'
 
-/** What a harness's configuration names: nothing, its own models, unless a test says otherwise. */
-type Configs = Partial<Record<CodingToolId, GlobalReading>>
-
-function own(signedIn = true, model: string | null = null): GlobalReading {
-  return { config: { url: '', apiKey: '', keyHeader: 'bearer', model }, signedIn }
-}
-
-function keyed(url: string, apiKey: string, model: string | null = null): GlobalReading {
-  return { config: { url, apiKey, keyHeader: 'bearer', model }, signedIn: false }
-}
-
 let db: DatabaseSync
-let configs: Configs
-/** The harnesses whose configuration was read, in order. */
-let read: CodingToolId[]
-let written: Array<{ harness: CodingToolId; provider: string; model: string | null }>
-let legacy: Partial<Record<CodingToolId, AgentLaunchSettings>>
 let ids: number
 
 beforeEach(() => {
   db = openDatabase(':memory:')
-  configs = {}
-  read = []
-  written = []
-  legacy = {}
   ids = 0
 })
 
@@ -45,25 +23,6 @@ afterEach(() => db.close())
 function service(): ProviderService {
   return new ProviderService({
     store: new ProviderStore(db),
-    readGlobal: async (harness) => {
-      read.push(harness)
-      return configs[harness] ?? own()
-    },
-    writeGlobal: async (harness, provider, model) => {
-      written.push({ harness, provider: provider.id, model })
-      const config: GlobalConfig =
-        provider.own === null
-          ? {
-              url: provider.urls.anthropic ?? '',
-              apiKey: provider.apiKey,
-              keyHeader: 'bearer',
-              model,
-            }
-          : { url: '', apiKey: '', keyHeader: 'bearer', model }
-      configs[harness] = { config, signedIn: configs[harness]?.signedIn ?? true }
-    },
-    catalogs: () => ({}),
-    legacyLaunchSettings: (harness) => legacy[harness] ?? null,
     now: () => 1_000 + ids,
     newId: () => `id-${++ids}`,
   })
@@ -81,158 +40,38 @@ const deepseek = {
 }
 
 describe('ProviderService', () => {
-  it('makes an agent of each installed harness’s global as Hoot opens, and keeps them', async () => {
-    configs.opencode = keyed(DEEPSEEK_URL, 'sk-global', 'deepseek-pro')
-    // Reading OpenCode's configuration takes a while, until which Hoot is not ready.
-    const pending: { read?: () => void } = {}
-    const slowDb = openDatabase(':memory:')
-    const slow = new ProviderService({
-      store: new ProviderStore(slowDb),
-      readGlobal: (harness) =>
-        new Promise((resolve) => {
-          pending.read = () => resolve(configs[harness] ?? own())
-        }),
-      writeGlobal: async () => {},
-      catalogs: () => ({}),
-    })
-    const reading = slow.installedChanged(['opencode'])
-    await Promise.resolve()
-    expect(slow.getState().ready).toBe(false)
-    pending.read?.()
-    await reading
-    expect(slow.getState().ready).toBe(true)
-    slowDb.close()
-
+  it('makes no agent by itself: each is made by hand, on a provider it can run', () => {
     const providers = service()
-    expect(providers.getState().ready).toBe(false)
-    const pass = await providers.installedChanged(['claude', 'codex', 'opencode'])
-    expect(pass.opening).toBe(true)
-    expect(providers.getState().ready).toBe(true)
-    const state = providers.getState()
-    // The global names no provider yet: one is made of it, from the preset of its address.
-    expect(state.providers).toMatchObject([
-      { name: 'DeepSeek', presetId: 'deepseek', apiKey: 'sk-global' },
-    ])
-    expect(state.globals.opencode).toEqual({
-      providerId: state.providers[0]!.id,
-      model: 'deepseek-pro',
-      signedIn: false,
+    expect(providers.getState()).toEqual({ providers: [], agents: [] })
+    const added = providers.addProvider({
+      ...deepseek,
+      urls: { anthropic: DEEPSEEK_URL, responses: DEEPSEEK_RESPONSES_URL },
     })
-    // OpenCode's alone: Claude Code's and Codex's configurations are not read for one.
-    expect(read).toEqual(['opencode'])
-    expect(state.agents.map((agent) => [agent.harness, agent.providerId, agent.model])).toEqual([
-      ['opencode', state.providers[0]!.id, 'deepseek-pro'],
-    ])
-    // Kept, also by another Hoot on the same database.
-    const again = service()
-    expect(again.getState().agents).toEqual(state.agents)
-    expect(again.getState().providers).toEqual(state.providers)
-  })
-
-  it('never changes a provider by what a configuration names, and makes a new one instead', async () => {
-    const providers = service()
-    const added = providers.addProvider(deepseek)
     if (!added.ok) throw new Error(added.message)
-    configs.opencode = keyed(DEEPSEEK_URL, 'sk-deepseek', 'deepseek-flash[1m]')
-    await providers.installedChanged(['opencode'])
-    expect(providers.getState().globals.opencode?.providerId).toBe(added.provider.id)
-    // The same address with another key is another provider.
-    configs.opencode = keyed(DEEPSEEK_URL, 'sk-other')
-    await providers.refreshGlobals()
-    const state = providers.getState()
-    expect(state.providers.map((provider) => [provider.name, provider.apiKey])).toEqual([
-      ['DeepSeek', 'sk-deepseek'],
-      ['DeepSeek 2', 'sk-other'],
-    ])
-    expect(state.globals.opencode?.providerId).toBe(state.providers[1]!.id)
-    // Reading again finds it, and makes no third.
-    await providers.refreshGlobals()
-    expect(providers.getState().providers).toHaveLength(2)
-    // Only the model changed: the global stays.
-    configs.opencode = keyed(DEEPSEEK_URL, 'sk-other', 'deepseek-pro')
-    await providers.refreshGlobals()
-    expect(providers.getState().globals.opencode).toMatchObject({
-      providerId: state.providers[1]!.id,
-      model: 'deepseek-pro',
-    })
-  })
-
-  it('makes no agent for a harness that has one, also one turned off, and again one that has none', async () => {
-    const providers = service()
-    await providers.installedChanged(['opencode'])
-    const [made] = providers.getState().agents
-    expect(made).toMatchObject({ harness: 'opencode', providerId: OWN_PROVIDER_IDS.opencode })
-    providers.updateAgent(made!.id, { enabled: false })
-    await providers.installedChanged([])
-    await providers.installedChanged(['opencode'])
-    expect(providers.getState().agents).toHaveLength(1)
-    // Deleted, it comes back as Hoot opens again, or as the harness gets installed again.
-    providers.removeAgent(made!.id)
-    await providers.installedChanged(['opencode'])
-    expect(providers.getState().agents).toHaveLength(0)
-    await providers.installedChanged([])
-    const pass = await providers.installedChanged(['opencode'])
-    expect(pass.made).toHaveLength(1)
-    expect(service().getState().agents).toHaveLength(1)
-  })
-
-  it('gives the first agent of a harness the launch settings an earlier Hoot kept for it', async () => {
-    legacy.opencode = { enabled: false, model: 'kimi', effort: 'high', extraArgs: ['--print-logs'] }
-    legacy.codex = { enabled: false, model: 'gpt-6', effort: 'high', extraArgs: ['--search'] }
-    const providers = service()
-    await providers.installedChanged(['codex', 'opencode'])
-    expect(providers.getState().agents).toMatchObject([
-      {
+    expect(providers.getState().agents).toEqual([])
+    for (const harness of ['claude', 'codex', 'opencode'] as const) {
+      expect(
+        providers.addAgent({ harness, providerId: added.provider.id, model: 'deepseek-pro' }),
+      ).toMatchObject({ ok: true, agent: { harness, model: 'deepseek-pro' } })
+    }
+    expect(
+      providers.addAgent({
         harness: 'opencode',
-        enabled: false,
-        model: 'kimi',
-        effort: 'high',
-        extraArgs: ['--print-logs'],
-      },
-    ])
+        providerId: OWN_PROVIDER_IDS.opencode,
+        model: null,
+      }),
+    ).toMatchObject({ ok: true, agent: { harness: 'opencode', model: null } })
+    expect(
+      service()
+        .getState()
+        .agents.map((agent) => agent.harness),
+    ).toEqual(['claude', 'codex', 'opencode', 'opencode'])
   })
 
-  it('writes a global into the harness’s configuration, keeping a model the provider has', async () => {
+  it('keeps a provider an agent runs on', () => {
     const providers = service()
     const added = providers.addProvider(deepseek)
     if (!added.ok) throw new Error(added.message)
-    configs.opencode = own(true, 'big-pickle')
-    await providers.installedChanged(['opencode'])
-    expect(await providers.setGlobal('opencode', added.provider.id)).toEqual({ ok: true })
-    // The provider has no big-pickle: its first model.
-    expect(written).toEqual([
-      { harness: 'opencode', provider: added.provider.id, model: 'deepseek-flash[1m]' },
-    ])
-    expect(providers.getState().globals.opencode).toMatchObject({
-      providerId: added.provider.id,
-      model: 'deepseek-flash[1m]',
-    })
-    expect(await providers.setGlobalModel('opencode', 'deepseek-pro')).toEqual({ ok: true })
-    expect(written.at(-1)).toEqual({
-      harness: 'opencode',
-      provider: added.provider.id,
-      model: 'deepseek-pro',
-    })
-    // A global's key changed in Hoot is written there too, with its model.
-    const updated = await providers.updateProvider(added.provider.id, { apiKey: 'sk-new' })
-    expect(updated.ok).toBe(true)
-    expect(written.at(-1)).toEqual({
-      harness: 'opencode',
-      provider: added.provider.id,
-      model: 'deepseek-pro',
-    })
-    expect(configs.opencode?.config.apiKey).toBe('sk-new')
-    // An agent cannot run a provider without an address in its format.
-    const other = providers.addProvider({ ...deepseek, name: 'Gateway', urls: { responses: 'x' } })
-    if (!other.ok) throw new Error(other.message)
-    expect(await providers.setGlobal('opencode', other.provider.id)).toMatchObject({ ok: false })
-  })
-
-  it('keeps a provider an agent runs on or a harness has for its global', async () => {
-    const providers = service()
-    const added = providers.addProvider(deepseek)
-    if (!added.ok) throw new Error(added.message)
-    await providers.installedChanged(['claude', 'opencode'])
     const agent = providers.addAgent({
       harness: 'claude',
       providerId: added.provider.id,
@@ -241,51 +80,21 @@ describe('ProviderService', () => {
     if (!agent.ok) throw new Error(agent.message)
     expect(providers.removeProvider(added.provider.id)).toMatchObject({ ok: false })
     providers.removeAgent(agent.agent.id)
-    await providers.setGlobal('opencode', added.provider.id)
-    expect(providers.removeProvider(added.provider.id)).toMatchObject({ ok: false })
-    await providers.setGlobal('opencode', OWN_PROVIDER_IDS.opencode)
     expect(providers.removeProvider(added.provider.id)).toEqual({ ok: true })
     expect(service().getState().providers).toEqual([])
   })
 
-  it('leaves Claude Code’s and Codex’s own configurations alone: no global, no agent made of them, nothing written', async () => {
-    configs.claude = keyed(DEEPSEEK_URL, 'sk-global', 'deepseek-pro')
-    configs.codex = keyed(DEEPSEEK_RESPONSES_URL, 'sk-global', 'deepseek-pro')
-    legacy.claude = { enabled: true, model: 'opus', effort: null, extraArgs: [] }
-    legacy.codex = { enabled: true, model: 'gpt-6', effort: null, extraArgs: [] }
+  it('changes a provider as it is asked, keeping what it is not', () => {
     const providers = service()
-    const pass = await providers.installedChanged(['claude', 'codex'])
-    expect(read).toEqual([])
-    expect(pass.made).toEqual([])
-    expect(providers.getState()).toMatchObject({ providers: [], agents: [], ready: true })
-    expect(providers.getState().globals).toEqual({})
-    // Not when the window gets the focus either.
-    await providers.refreshGlobals()
-    expect(read).toEqual([])
-    const added = providers.addProvider({
-      ...deepseek,
-      urls: { anthropic: DEEPSEEK_URL, responses: DEEPSEEK_RESPONSES_URL },
-    })
+    const added = providers.addProvider(deepseek)
     if (!added.ok) throw new Error(added.message)
-    for (const harness of ['claude', 'codex'] as const) {
-      expect(await providers.setGlobal(harness, added.provider.id)).toMatchObject({ ok: false })
-      expect(await providers.setGlobalModel(harness, 'deepseek-pro')).toMatchObject({ ok: false })
-    }
-    expect(await providers.updateProvider(added.provider.id, { apiKey: 'sk-new' })).toMatchObject({
+    expect(providers.updateProvider(added.provider.id, { apiKey: ' sk-new ' })).toMatchObject({
       ok: true,
+      provider: { apiKey: 'sk-new', models: deepseek.models },
     })
-    expect(written).toEqual([])
-    // Their agents are made by hand.
-    expect(
-      providers.addAgent({ harness: 'claude', providerId: OWN_PROVIDER_IDS.claude, model: null }),
-    ).toMatchObject({ ok: true, agent: { harness: 'claude', model: null } })
-    expect(
-      providers.addAgent({
-        harness: 'codex',
-        providerId: added.provider.id,
-        model: 'deepseek-pro',
-      }),
-    ).toMatchObject({ ok: true, agent: { harness: 'codex', model: 'deepseek-pro' } })
+    expect(providers.updateProvider(added.provider.id, { urls: {} })).toMatchObject({ ok: false })
+    expect(providers.updateProvider('gone', { name: 'x' })).toMatchObject({ ok: false })
+    expect(service().provider(added.provider.id)).toMatchObject({ apiKey: 'sk-new' })
   })
 
   it('refuses agents on providers that are gone or cannot run them', () => {
@@ -378,7 +187,7 @@ describe('ProviderService', () => {
     expect(stored.map((provider: Provider) => provider.name)).toEqual(['Mine'])
   })
 
-  it('keeps the cloud Claude Code reaches a provider through, which needs no address', async () => {
+  it('keeps the cloud Claude Code reaches a provider through, which needs no address', () => {
     const providers = service()
     const added = providers.addProvider({
       ...deepseek,
@@ -397,7 +206,7 @@ describe('ProviderService', () => {
       },
     })
     const id = added.ok ? added.provider.id : ''
-    await providers.updateProvider(id, {
+    providers.updateProvider(id, {
       presetId: 'bedrock',
       planId: 'eu-west-1',
       cloud: { kind: 'bedrock', region: 'eu-west-1' },

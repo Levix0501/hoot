@@ -1,29 +1,48 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser'
+import { findNodeAtLocation, parse, parseTree, type JSONPath, type ParseError } from 'jsonc-parser'
 import { major, valid } from 'semver'
 import type { AgentLaunchOptions } from '../../shared/agents'
 import {
-  canRun,
-  OPENCODE_DEFAULT_FREE_MODEL,
+  agentModels,
   bareModel,
+  canRun,
+  catalogModelOf,
+  OPENCODE_DEFAULT_FREE_MODEL,
   openCodeProviderId,
+  providerFirstModel,
+  providerFormat,
   providerUrl,
   trimUrl,
-  type GlobalConfig,
+  type CatalogModel,
+  type ModelCatalogs,
   type Provider,
 } from '../../shared/providers'
 import { runCommand } from '../agents/processes'
-import type { Env } from '../env/env'
+import { setEnvVariable, type Env } from '../env/env'
 import { openCodeConfigFolder } from '../session/opencode-plugin'
 import { commandProgram } from '../tools/command-program'
-import type { GlobalReading } from './provider-service'
 
 type JsonObject = Record<string, unknown>
 
 /** The package OpenCode runs a provider at an Anthropic-compatible address with. */
 export const ANTHROPIC_COMPATIBLE = '@opencode/ai/providers/anthropic-compatible'
+
+/** The package OpenCode runs a provider at a Responses address with. */
+export const RESPONSES_COMPATIBLE = '@opencode/ai/providers/openai-compatible/responses'
+
+/**
+ * The variable that gives `opencode api`, and a window of OpenCode's, the
+ * password of the server it connects to with `--server`.
+ */
+export const OPENCODE_PASSWORD = 'OPENCODE_PASSWORD'
+
+/** A server of OpenCode's: where it listens, and the password it asks for. */
+export interface OpenCodeServer {
+  url: string
+  password: string
+}
 
 /** How long OpenCode may take to answer through its API. */
 const API_TIMEOUT_MS = 30_000
@@ -94,125 +113,188 @@ export function openCodeBaseUrl(url: string): string {
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
 }
 
-/** An address OpenCode takes, as Hoot keeps it: without the `/v1` it adds. */
-function hootUrl(baseUrl: string): string {
-  return trimUrl(baseUrl).replace(/\/v1$/, '')
-}
-
-/** A configuration that names OpenCode's free models, with a model. */
-function freeModels(model: string | null): GlobalReading {
-  return { config: { url: '', apiKey: '', keyHeader: 'bearer', model }, signedIn: true }
+/**
+ * A model of a provider of the user's as OpenCode's configuration holds it:
+ * how many tokens of context it takes and of answer it gives, and the effort
+ * levels it takes, as its variants, as models.dev lists them; OpenCode gives
+ * it its own where models.dev lists none (see `OPENCODE_FORMAT_EFFORTS`).
+ */
+function openCodeModelEntry(id: string, listed: CatalogModel | null): JsonObject {
+  const limit = {
+    ...(listed?.context == null ? {} : { context: listed.context }),
+    ...(listed?.output == null ? {} : { output: listed.output }),
+  }
+  const efforts = listed?.efforts ?? []
+  return {
+    name: id,
+    ...(Object.keys(limit).length === 0 ? {} : { limit }),
+    ...(efforts.length === 0
+      ? {}
+      : { capabilities: { reasoning: { supported: true, effort: [...efforts] } } }),
+  }
 }
 
 /**
- * What OpenCode's own configuration names as its global: its default model's
- * provider, `model` being `provider/model`. None, or one of OpenCode's own,
- * is its free models; one at an Anthropic-compatible address, Hoot's or
- * another the user wrote there with its key, is that address and key. `null`
- * for one Hoot cannot run, as one whose key OpenCode keeps elsewhere.
+ * A provider of the user's as OpenCode's configuration holds it: at its
+ * Anthropic-compatible address, else at its Responses one (see
+ * `providerFormat`), its key in the header it asks for, a bearer token at an
+ * Anthropic-compatible address taking the place of the `x-api-key` OpenCode
+ * sends there, and the models its agents offer (see `agentModels`), each as
+ * models.dev tells of it (see `openCodeModelEntry`). `null` for one OpenCode
+ * cannot run.
  */
-export async function readOpenCodeGlobal(env: Env, home: string): Promise<GlobalReading | null> {
-  let config: JsonObject
-  try {
-    ;({ config } = await readConfig(await openCodeConfigFile(env, home)))
-  } catch {
-    return freeModels(null)
-  }
-  const named = textOf(config.model)
-  if (named === null) return freeModels(null)
-  const slash = named.indexOf('/')
-  const providerId = slash === -1 ? named : named.slice(0, slash)
-  const model = slash === -1 ? null : named.slice(slash + 1) || null
-  if (providerId === 'opencode') return freeModels(model)
-  const entry = objectOf(objectOf(config.providers)?.[providerId])
-  const settings = objectOf(entry?.settings)
-  const baseUrl = textOf(settings?.baseURL)
-  const apiKey = textOf(settings?.apiKey)
-  if (entry?.package !== ANTHROPIC_COMPATIBLE || baseUrl === null || apiKey === null) return null
-  const global: GlobalConfig = { url: hootUrl(baseUrl), apiKey, keyHeader: 'bearer', model }
-  return { config: global, signedIn: false }
-}
-
-/** A provider of the user's as OpenCode's configuration holds it. */
-function openCodeEntry(provider: Provider): JsonObject {
+export function openCodeEntry(provider: Provider, catalogs: ModelCatalogs): JsonObject | null {
+  const format = providerFormat(provider, 'opencode')
+  if (provider.own !== null || format === null) return null
+  const url = providerUrl(provider, 'opencode')
+  const bearer = format === 'anthropic' && provider.keyHeader === 'bearer'
   return {
     name: provider.name,
-    package: ANTHROPIC_COMPATIBLE,
+    package: format === 'anthropic' ? ANTHROPIC_COMPATIBLE : RESPONSES_COMPATIBLE,
     settings: {
-      baseURL: openCodeBaseUrl(providerUrl(provider, 'opencode')),
-      apiKey: provider.apiKey,
+      baseURL: format === 'anthropic' ? openCodeBaseUrl(url) : trimUrl(url),
+      ...(bearer ? {} : { apiKey: provider.apiKey }),
     },
+    ...(bearer ? { headers: { Authorization: `Bearer ${provider.apiKey}` } } : {}),
     models: Object.fromEntries(
-      provider.models.map((model) => [bareModel(model), { name: bareModel(model) }]),
+      agentModels('opencode', provider, catalogs).map((model) => [
+        bareModel(model),
+        openCodeModelEntry(bareModel(model), catalogModelOf(catalogs, 'opencode', provider, model)),
+      ]),
     ),
   }
 }
 
-/** OpenCode's `provider/model` of a model on a provider: on its free models, the default one. */
-export function openCodeModelRef(provider: Provider, model: string | null): string {
-  const id =
-    model === null
-      ? provider.own === 'opencode'
-        ? OPENCODE_DEFAULT_FREE_MODEL
-        : bareModel(provider.models[0] ?? '')
-      : bareModel(model)
-  return `${openCodeProviderId(provider)}/${id}`
+/**
+ * Hoot's configuration of OpenCode, which the servers of OpenCode's that Hoot
+ * runs take besides the user's own (see `OpenCodeServers`): the user's
+ * providers that OpenCode can run, each as `hoot-<id>` (see
+ * `openCodeProviderId`), as each session may pick one with `/models`.
+ */
+export function hootOpenCodeConfig(
+  providers: readonly Provider[],
+  catalogs: ModelCatalogs,
+): JsonObject {
+  return {
+    providers: Object.fromEntries(
+      providers.flatMap((provider) => {
+        const entry = canRun(provider, 'opencode') ? openCodeEntry(provider, catalogs) : null
+        return entry === null ? [] : [[openCodeProviderId(provider), entry]]
+      }),
+    ),
+  }
 }
 
 /**
- * Writes the user's providers that OpenCode can run into its own
- * configuration, each as `hoot-<id>`, in place of those Hoot wrote before,
- * leaving everything else in the file as it is, its comments included. With
- * a global, it is the default model too: the provider and model, or for its
- * free models, a model of theirs, or none for its own default. The file is
- * replaced at once, keeping who may read it, or made readable by its owner
- * alone, as it holds keys; a file that holds no JSON object is left alone,
- * with an error.
+ * OpenCode's `provider/model` of a model on a provider: without one, on its
+ * free models, the one they start with, and on a provider of the user's, the
+ * one its agents start with (see `providerFirstModel`).
  */
-export async function writeOpenCodeConfig(
-  env: Env,
-  home: string,
-  providers: readonly Provider[],
-  global: { provider: Provider; model: string | null } | null = null,
-): Promise<void> {
-  const file = await openCodeConfigFile(env, home)
-  const { text, config } = await readConfig(file)
-  const formatting = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } }
-  let next = text
-  const set = (keys: string[], value: unknown) => {
-    next = applyEdits(next, modify(next, keys, value, formatting))
-  }
-  const wanted = new Map(
-    providers
-      .filter((provider) => provider.own === null && canRun(provider, 'opencode'))
-      .map((provider) => [openCodeProviderId(provider), openCodeEntry(provider)]),
-  )
-  for (const key of Object.keys(objectOf(config.providers) ?? {})) {
-    if (key.startsWith('hoot-') && !wanted.has(key)) set(['providers', key], undefined)
-  }
-  for (const [key, entry] of wanted) set(['providers', key], entry)
-  if (global !== null) {
-    const { provider, model } = global
-    set(
-      ['model'],
-      provider.own === 'opencode' && model === null ? undefined : openCodeModelRef(provider, model),
-    )
-  }
-  if (next === text) return
-  const mode = await fs
-    .stat(file)
-    .then((stats) => stats.mode & 0o777)
-    .catch(() => 0o600)
-  await fs.mkdir(path.dirname(file), { recursive: true })
+export function openCodeModelRef(
+  provider: Provider,
+  model: string | null,
+  catalogs: ModelCatalogs,
+): string {
+  const id =
+    model ??
+    (provider.own === 'opencode'
+      ? OPENCODE_DEFAULT_FREE_MODEL
+      : (providerFirstModel('opencode', provider, catalogs) ?? ''))
+  return `${openCodeProviderId(provider)}/${bareModel(id)}`
+}
+
+/**
+ * Replaces a file at once with the text given, keeping who may read it, or
+ * making it readable by its owner alone where it is new, as it may hold
+ * keys.
+ */
+async function replaceFile(file: string, text: string, mode?: number): Promise<void> {
+  const kept =
+    mode ??
+    (await fs
+      .stat(file)
+      .then((stats) => stats.mode & 0o777)
+      .catch(() => 0o600))
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
   const temporary = `${file}.hoot-${process.pid}-${Date.now()}`
   try {
-    await fs.writeFile(temporary, next, { mode })
-    await fs.chmod(temporary, mode)
+    await fs.writeFile(temporary, text, { mode: kept })
+    await fs.chmod(temporary, kept)
     await fs.rename(temporary, file)
   } catch (error) {
     await fs.rm(temporary, { force: true }).catch(() => {})
     throw error
   }
+}
+
+/**
+ * Writes Hoot's configuration of OpenCode (see `hootOpenCodeConfig`) into
+ * its file, readable by its owner alone, as it holds keys: replaced at once,
+ * as OpenCode reads it again as it changes.
+ */
+export async function writeHootOpenCodeConfig(file: string, config: unknown): Promise<void> {
+  await replaceFile(file, `${JSON.stringify(config, null, 2)}\n`, 0o600)
+}
+
+/**
+ * A configuration's text without the property at `where`, with the comma
+ * that went with it, the rest as it is; an object left without properties is
+ * `{}`. `null` where there is no such property. (`modify` of jsonc-parser
+ * 3.3 leaves the comma after an object's only property behind, which no
+ * longer parses.)
+ */
+function withoutProperty(text: string, where: JSONPath): string | null {
+  const root = parseTree(text, [], { allowTrailingComma: true })
+  const property = root === undefined ? undefined : findNodeAtLocation(root, where)?.parent
+  const object = property?.parent
+  if (property?.type !== 'property' || object === undefined) return null
+  const siblings = object.children ?? []
+  const index = siblings.indexOf(property)
+  const next = siblings[index + 1]
+  const previous = siblings[index - 1]
+  if (next !== undefined) return text.slice(0, property.offset) + text.slice(next.offset)
+  if (previous !== undefined) {
+    return (
+      text.slice(0, previous.offset + previous.length) +
+      text.slice(property.offset + property.length)
+    )
+  }
+  return text.slice(0, object.offset + 1) + text.slice(object.offset + object.length - 1)
+}
+
+/**
+ * Takes out of OpenCode's own configuration the providers an earlier Hoot
+ * wrote into it, each as `hoot-<id>`, but the one its default model is of,
+ * which OpenCode runs on outside Hoot, leaving everything else in the file as
+ * it is, its comments included; `providers` goes where nothing else is left
+ * in it. A file that holds no JSON object, or that would not parse after,
+ * is left alone. Returns whether the file changed.
+ */
+export async function removeHootProviders(env: Env, home: string): Promise<boolean> {
+  const file = await openCodeConfigFile(env, home)
+  let read: { text: string; config: JsonObject }
+  try {
+    read = await readConfig(file)
+  } catch {
+    return false
+  }
+  const { text, config } = read
+  const named = textOf(config.model)
+  const kept = named === null ? null : named.split('/')[0]
+  const entries = Object.keys(objectOf(config.providers) ?? {})
+  const gone = entries.filter((key) => key.startsWith('hoot-') && key !== kept)
+  if (gone.length === 0) return false
+  let next = text
+  for (const key of gone) next = withoutProperty(next, ['providers', key]) ?? next
+  if (gone.length === entries.length) next = withoutProperty(next, ['providers']) ?? next
+  const errors: ParseError[] = []
+  const left = objectOf(parse(next, errors, { allowTrailingComma: true }))
+  const providersLeft = Object.keys(objectOf(left?.providers) ?? {})
+  if (errors.length > 0 || left === null || providersLeft.some((key) => gone.includes(key))) {
+    return false
+  }
+  await replaceFile(file, next)
+  return true
 }
 
 /** What OpenCode's API answered, as `opencode api` writes it: its data, else the answer itself. */
@@ -221,16 +303,24 @@ function apiData(stdout: string): unknown {
   return answer !== null && 'data' in answer ? answer.data : answer
 }
 
-/** Runs `opencode api` with an operation and its input, and returns its data. */
+/**
+ * Runs `opencode api` with an operation and its input, through a server of
+ * Hoot's where one is given, else through OpenCode's background service, and
+ * returns its data.
+ */
 async function openCodeApi(
   command: string,
   env: Env,
   cwd: string,
   args: string[],
+  server: OpenCodeServer | null = null,
 ): Promise<unknown> {
   const program = await commandProgram(command, env)
+  const apiEnv = { ...env }
+  if (server !== null) setEnvVariable(apiEnv, OPENCODE_PASSWORD, server.password)
+  const through = server === null ? [] : ['--server', server.url]
   const result = await runCommand(
-    { file: program.file, args: [...program.args, 'api', ...args], env, cwd },
+    { file: program.file, args: [...program.args, 'api', ...through, ...args], env: apiEnv, cwd },
     API_TIMEOUT_MS,
   )
   if (result.code !== 0) {
@@ -241,13 +331,15 @@ async function openCodeApi(
 }
 
 /**
- * Makes a conversation in OpenCode, through its background service, in a
- * folder and on a model, `provider/model`, with an effort level as its
- * variant; returns its id, which a session of OpenCode's opens with `-s`.
+ * Makes a conversation in OpenCode, through a server of Hoot's, in a folder
+ * and on a model, `provider/model`, with an effort level as its variant;
+ * returns its id, which a session of OpenCode's on that server opens with
+ * `-s`.
  */
 export async function createOpenCodeSession(
   command: string,
   env: Env,
+  server: OpenCodeServer,
   cwd: string,
   model: string,
   variant: string | null,
@@ -262,7 +354,7 @@ export async function createOpenCodeSession(
     location: { directory: cwd },
   }
   const data = objectOf(
-    await openCodeApi(command, env, cwd, ['session.create', '-d', JSON.stringify(body)]),
+    await openCodeApi(command, env, cwd, ['session.create', '-d', JSON.stringify(body)], server),
   )
   const id = textOf(data?.id)
   if (id === null) throw new Error('OpenCode made no conversation.')
@@ -271,9 +363,11 @@ export async function createOpenCodeSession(
 
 /**
  * The free models OpenCode comes with, which its own agents offer, each with
- * the effort levels it takes, its variants, as its background service lists
- * them. A service that has just started lists none until it has read them,
- * a moment later, so an empty list is asked for again a few times.
+ * the effort levels it takes, its variants, as the background service of the
+ * user's own OpenCode lists them, which needs no server of Hoot's to be
+ * started for it. A service that has just started lists none until it has
+ * read them, a moment later, so an empty list is asked for again a few
+ * times.
  */
 export async function readOpenCodeLaunchOptions(
   command: string,

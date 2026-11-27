@@ -38,6 +38,7 @@ import {
 import { codexProviderLaunch, tomlString } from '../providers/codex-config'
 import type { LoginEnvironment } from '../tools/tool-service'
 import type { SessionFiles } from '../workflows/workflow-executor'
+import { OPENCODE_PASSWORD, type OpenCodeServer } from '../providers/opencode-config'
 import { OPENCODE_CLI_CONFIG, openCodeCliConfig } from './opencode-plugin'
 import { SessionError, type SessionLaunch } from './session-manager'
 
@@ -96,6 +97,13 @@ export interface LaunchContext {
   hoot: HootCliEnvOptions
   /** The folder of the plugin Hoot gives OpenCode (see `openCodePluginFolder`). */
   openCodePlugin: string
+  /**
+   * The server of Hoot's an OpenCode session connects to (see
+   * `OpenCodeServers`), which has the user's providers; `null` for the
+   * background service of the user's own OpenCode, as for a chat made before
+   * providers.
+   */
+  openCodeServer: OpenCodeServer | null
 }
 
 /**
@@ -443,6 +451,14 @@ async function checkFolder(cwd: string): Promise<void> {
   }
 }
 
+/** Whether OpenCode's extra arguments pick the server it runs with: another, or one of its own. */
+function picksServer(extraArgs: readonly string[]): boolean {
+  return extraArgs.some(
+    (argument) =>
+      argument === '--server' || argument.startsWith('--server=') || argument === '--standalone',
+  )
+}
+
 /**
  * The arguments that continue a chat's conversation: Claude Code's
  * `--resume`, OpenCode's `-s` and Codex's `resume` subcommand. A new
@@ -503,11 +519,13 @@ export function firstMessageArguments(tool: CodingToolId, message: string): stri
  * background server (see `CODEX_NO_DAEMON_VERSION`), and on a provider of
  * the user's, with a catalog of the provider's models (see
  * `CODEX_CATALOG_VERSION`). OpenCode gets Hoot's plugin instead, in its
- * environment (see `openCodeCliConfig`), with no argument for it: it still
- * runs with its background server. A chat's session also gets the arguments
- * that continue its conversation, and those that send the first message of
- * one it starts with one. Either environment also has what hoot needs to run
- * in the session.
+ * environment (see `openCodeCliConfig`), with no argument for it, and
+ * connects to Hoot's server of OpenCode where it is given one, with its
+ * password in its environment, unless its extra arguments pick a server of
+ * their own; else to its background service. A chat's session also gets the
+ * arguments that continue its conversation, and those that send the first
+ * message of one it starts with one. Either environment also has what hoot
+ * needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -565,8 +583,13 @@ export async function resolveLaunch(
   }
   const chatArguments = chatLaunchArguments(tool.id, chat)
   let agent = launch.agent
-  /** Codex's arguments that go before all others, as `--no-daemon`. */
-  let codexArguments: string[] = []
+  /** The agent's arguments that go before all others: Codex's `--no-daemon`, OpenCode's `--server`. */
+  let leadingArguments: string[] = []
+  const server = tool.id === 'opencode' ? context.openCodeServer : null
+  if (server !== null && !picksServer(agent.extraArgs)) {
+    leadingArguments = ['--server', server.url]
+    setEnvVariable(env, OPENCODE_PASSWORD, server.password)
+  }
   /** The arguments that run Codex on the session's provider. */
   let providerArguments: string[] = []
   let hookArguments: string[] = []
@@ -624,7 +647,7 @@ export async function resolveLaunch(
       codexAtLeast(version, CODEX_NO_DAEMON_VERSION) &&
       !agent.extraArgs.includes('--no-daemon')
     ) {
-      codexArguments = ['--no-daemon']
+      leadingArguments = ['--no-daemon']
     }
     if (codexAtLeast(version, CODEX_BACKGROUND_HOOKS_VERSION)) {
       hookArguments = ['-c', CODEX_HOOK_SETTING]
@@ -636,7 +659,7 @@ export async function resolveLaunch(
   const args = [
     ...program.args,
     ...chatArguments.before,
-    ...codexArguments,
+    ...leadingArguments,
     ...providerArguments,
     ...agentLaunchArguments({
       tool: tool.id,

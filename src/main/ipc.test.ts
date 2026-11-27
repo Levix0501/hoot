@@ -343,8 +343,6 @@ const madeAgents = [ownAgent('claude'), ownAgent('codex')]
 const providersState: ProvidersState = {
   providers: [],
   agents: madeAgents,
-  globals: {},
-  ready: true,
 }
 const catalogs = {
   deepseek: [{ id: 'deepseek-flash', context: 1_000_000, output: null, efforts: [] }],
@@ -357,14 +355,8 @@ const providers = Object.assign(emitter(), {
   agent: vi.fn<(id: string) => Agent | undefined>((id) => madeAgents.find((a) => a.id === id)),
   provider: vi.fn<(id: string) => Provider | undefined>((id) => findProvider([], id)),
   addProvider: vi.fn<(input: unknown) => unknown>(() => ({ ok: true })),
-  updateProvider: vi.fn<(id: string, change: unknown) => Promise<unknown>>(async () => ({
-    ok: true,
-  })),
+  updateProvider: vi.fn<(id: string, change: unknown) => unknown>(() => ({ ok: true })),
   removeProvider: vi.fn<(id: string) => unknown>(() => ({ ok: true })),
-  setGlobal: vi.fn<(harness: string, id: string) => Promise<unknown>>(async () => ({ ok: true })),
-  setGlobalModel: vi.fn<(harness: string, model: string | null) => Promise<unknown>>(async () => ({
-    ok: true,
-  })),
   addAgent: vi.fn<(input: unknown) => unknown>(() => ({ ok: true })),
   updateAgent: vi.fn<(id: string, change: unknown) => void>(),
   removeAgent: vi.fn<(id: string) => void>(),
@@ -1498,11 +1490,6 @@ describe('the messages of the Agents page', () => {
     expect(providers.updateProvider).toHaveBeenCalledWith('p-kimi', { apiKey: 'sk-new' })
     await invoke(IpcChannel.removeProvider, 'p-kimi')
     expect(providers.removeProvider).toHaveBeenCalledWith('p-kimi')
-    await invoke(IpcChannel.setGlobalProvider, 'claude', 'p-kimi')
-    await invoke(IpcChannel.setGlobalProvider, 'shell', 'p-kimi')
-    expect(providers.setGlobal.mock.calls).toEqual([['claude', 'p-kimi']])
-    await invoke(IpcChannel.setGlobalModel, 'claude', null)
-    expect(providers.setGlobalModel).toHaveBeenCalledWith('claude', null)
 
     const agent = { harness: 'claude', providerId: 'p-kimi', model: 'kimi-k3.1-pro' }
     const mapped = { ...agent, modelMap: { haiku: 'kimi-k3', subagent: 'kimi-k3' } }

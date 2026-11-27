@@ -1,6 +1,7 @@
 import type { HookEventReport } from '../../shared/hoot-cli'
 import { describeExit, isClaudeCodeWorkingTitle, type SessionExit } from '../../shared/session'
 import type { ToolId } from '../../shared/tools'
+import type { ProgramState } from '../terminal/program-status'
 
 /**
  * What the hooks of a Claude Code session last said waits for the user, until
@@ -42,7 +43,14 @@ export interface StateSource {
   /** The turn that stopped on an API error, until a later one starts. */
   failure: Failure | null
   /**
-   * Claude Code stopped working while the session was not being viewed, and
+   * What the program in the session's terminal reports of its status (see
+   * `ProgramStatusRecords.status`); `null` while it reports none, as before
+   * its first report.
+   */
+  programStatus: ProgramState | null
+  /**
+   * The session's program stopped working, or waiting for the user, while
+   * the session was not being viewed, or reported that it is done then, and
    * the user has not viewed it since.
    */
   unread: boolean
@@ -51,7 +59,8 @@ export interface StateSource {
 /**
  * The state of a session, which its light shows: starting, until its process
  * runs; ended, or ended unexpectedly when the terminal host stopped; and,
- * while it runs, running, or for Claude Code what it is doing.
+ * while it runs, what its program is doing, or running when it does not
+ * tell.
  */
 export type SessionState =
   | 'starting'
@@ -65,16 +74,36 @@ export type SessionState =
   | 'ended-unexpectedly'
 
 /**
- * The state of a session. A running Claude Code session waits for the user
- * while one of its dialogs does, works while its title says so, has stopped
- * on an error otherwise once a turn of its main agent did, until a later turn
- * starts (while a background agent goes on, its dialogs and its work show
- * first), is done once it stopped working while it was not viewed, until it
- * is viewed, and is idle otherwise.
+ * The state of a session. A running session whose program reports its status
+ * (see `ProgramStatusRecords.status`) works, waits for the user or has
+ * stopped on an error as it reports; once it stopped working or waiting
+ * while it was not viewed, or reported that it is done then, it is done
+ * until it is viewed, and idle otherwise.
+ *
+ * Without reports, as from a Claude Code older than 2.1.295, a running Claude
+ * Code session waits for the user while one of its dialogs does, works while
+ * its title says so, has stopped on an error otherwise once a turn of its
+ * main agent did, until a later turn starts (while a background agent goes
+ * on, its dialogs and its work show first), is done once it stopped working
+ * while it was not viewed, until it is viewed, and is idle otherwise. Any
+ * other session runs.
  */
 export function sessionState(session: StateSource): SessionState {
   if (session.status === 'starting') return 'starting'
   if (session.status === 'exited') return session.exit?.abnormal ? 'ended-unexpectedly' : 'ended'
+  switch (session.programStatus) {
+    case 'working':
+      return 'working'
+    case 'blocked':
+      return 'waiting'
+    case 'error':
+      return 'error'
+    case 'done':
+    case 'idle':
+      return session.unread ? 'done' : 'idle'
+    case null:
+      break
+  }
   if (session.toolId !== 'claude') return 'running'
   if (session.attention === 'waiting' || session.attention === 'subagent-waiting') return 'waiting'
   if (isClaudeCodeWorkingTitle(session.title)) return 'working'
@@ -84,7 +113,7 @@ export function sessionState(session: StateSource): SessionState {
 
 /** What changes about where a session's state comes from. */
 export type StateChange = Partial<
-  Pick<StateSource, 'workingSince' | 'attention' | 'turns' | 'failure' | 'unread'>
+  Pick<StateSource, 'workingSince' | 'attention' | 'turns' | 'failure' | 'programStatus' | 'unread'>
 >
 
 /**
@@ -92,7 +121,8 @@ export type StateChange = Partial<
  * output that arrived at `arrivedAt`, given whether the user is viewing the
  * session. Claude Code working again ends the dialog it waited on, which the
  * user answered. When it stops working, it is done unless the user is
- * viewing it.
+ * viewing it; while it reports its status, what it reports tells that
+ * instead (see `afterProgramStatus`).
  */
 export function afterTitle(
   session: StateSource,
@@ -101,12 +131,38 @@ export function afterTitle(
   arrivedAt: number,
 ): StateChange {
   if (session.toolId !== 'claude') return {}
+  const read = session.programStatus === null ? { unread: false } : {}
   if (isClaudeCodeWorkingTitle(title)) {
-    if (isClaudeCodeWorkingTitle(session.title)) return { attention: null, unread: false }
-    return { attention: null, unread: false, workingSince: arrivedAt }
+    if (isClaudeCodeWorkingTitle(session.title)) return { attention: null, ...read }
+    return { attention: null, ...read, workingSince: arrivedAt }
   }
-  if (isClaudeCodeWorkingTitle(session.title)) return { unread: !viewed }
+  if (isClaudeCodeWorkingTitle(session.title) && session.programStatus === null) {
+    return { unread: !viewed }
+  }
   return {}
+}
+
+/**
+ * What changes about a session's state when what its program reports of its
+ * status changes to `status`, given whether the user is viewing the session.
+ * Once it works again, what it did before has been seen. Once it stops
+ * working, or waiting for the user, it is done unless the user is viewing
+ * it, as when it reports that it is done: a program that does not, such as
+ * Codex, reports that it is idle.
+ */
+export function afterProgramStatus(
+  session: StateSource,
+  status: ProgramState | null,
+  viewed: boolean,
+): StateChange {
+  const before = session.programStatus
+  if (status === before) return {}
+  if (status === 'working') return { programStatus: status, unread: false }
+  const stopped = before === 'working' || before === 'blocked'
+  if (status === 'done' || (status === 'idle' && stopped)) {
+    return { programStatus: status, unread: !viewed }
+  }
+  return { programStatus: status }
 }
 
 /**

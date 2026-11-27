@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { HookEvent, HookEventReport } from '../../shared/hoot-cli'
 import type { SessionExit } from '../../shared/session'
+import type { ProgramState } from '../terminal/program-status'
 import {
   afterHookEvent,
+  afterProgramStatus,
   afterTitle,
   sessionsSummary,
   sessionState,
@@ -19,6 +21,7 @@ const claude = (changes: Partial<StateSource> = {}): StateSource => ({
   attention: null,
   turns: [],
   failure: null,
+  programStatus: null,
   unread: false,
   ...changes,
 })
@@ -72,6 +75,21 @@ function play(
   return current
 }
 
+/**
+ * A session after what its program reports of its status changed to each of
+ * `statuses` in turn, while the user viewed the session or not.
+ */
+function reported(
+  session: StateSource,
+  ...statuses: Array<{ status: ProgramState | null; viewed?: boolean }>
+): StateSource {
+  let current = session
+  for (const { status, viewed } of statuses) {
+    current = { ...current, ...afterProgramStatus(current, status, viewed ?? false) }
+  }
+  return current
+}
+
 describe('sessionState', () => {
   it('is starting until the process runs, then running for any session but Claude Code', () => {
     for (const toolId of ['shell', 'codex', 'opencode', 'claude'] as const) {
@@ -109,6 +127,118 @@ describe('sessionState', () => {
     expect(sessionState(claude({ attention: 'subagent-waiting', failure }))).toBe('waiting')
     expect(sessionState(claude({ title: '◐ Fix', failure }))).toBe('working')
     expect(sessionState(claude({ failure, unread: true }))).toBe('error')
+  })
+
+  it("is, for every tool, what its program reports, over Claude Code's title and hooks", () => {
+    for (const toolId of ['shell', 'codex', 'opencode', 'antigravity', 'claude'] as const) {
+      const failure = { turn: 't1' }
+      const session = { ...claude({ title: '◐ Fix', attention: 'waiting', failure }), toolId }
+      expect(sessionState({ ...session, programStatus: 'working' })).toBe('working')
+      expect(sessionState({ ...session, programStatus: 'blocked' })).toBe('waiting')
+      expect(sessionState({ ...session, programStatus: 'error' })).toBe('error')
+      expect(sessionState({ ...session, programStatus: 'idle' })).toBe('idle')
+      expect(sessionState({ ...session, programStatus: 'done' })).toBe('idle')
+      expect(sessionState({ ...session, programStatus: 'done', unread: true })).toBe('done')
+      expect(sessionState({ ...session, programStatus: 'idle', unread: true })).toBe('done')
+      expect(sessionState({ ...session, programStatus: 'working', status: 'starting' })).toBe(
+        'starting',
+      )
+      expect(
+        sessionState({
+          ...session,
+          programStatus: 'blocked',
+          status: 'exited',
+          exit: exit({ code: 1 }),
+        }),
+      ).toBe('ended')
+    }
+  })
+})
+
+/** A Codex session. */
+const codex = (changes: Partial<StateSource> = {}) =>
+  claude({ toolId: 'codex', title: '', ...changes })
+
+describe('what a session whose program reports its status does', () => {
+  it('is idle when it starts, and works while it says so', () => {
+    const started = reported(codex(), { status: 'idle' })
+    expect(sessionState(started)).toBe('idle')
+    expect(sessionState(reported(started, { status: 'working' }))).toBe('working')
+  })
+
+  it('is idle after work the user saw end, and done after work they did not, until they view it', () => {
+    // Claude Code reports that it is done.
+    const working = reported(claude(), { status: 'idle' }, { status: 'working' })
+    expect(sessionState(reported(working, { status: 'done', viewed: true }))).toBe('idle')
+    const done = reported(working, { status: 'done' })
+    expect(sessionState(done)).toBe('done')
+    // Viewing it is up to the window, which marks it read.
+    expect(sessionState({ ...done, unread: false })).toBe('idle')
+    // Still done when it says that it is idle before the user saw what it did.
+    expect(sessionState(reported(done, { status: 'idle' }))).toBe('done')
+    // The next turn starts.
+    expect(reported(done, { status: 'working' })).toMatchObject({ unread: false })
+    // Codex reports that it is idle once it is done.
+    const coding = reported(codex(), { status: 'idle' }, { status: 'working' })
+    expect(sessionState(reported(coding, { status: 'idle' }))).toBe('done')
+    expect(sessionState(reported(coding, { status: 'idle', viewed: true }))).toBe('idle')
+  })
+
+  it('is done when the first it reports is that it is done, unless the user saw it', () => {
+    const command = codex({ toolId: 'shell' })
+    expect(sessionState(reported(command, { status: 'done' }))).toBe('done')
+    expect(sessionState(reported(command, { status: 'done', viewed: true }))).toBe('idle')
+  })
+
+  it('waits for the user while it is blocked, viewed or not, and is done once it stops unseen', () => {
+    for (const viewed of [true, false]) {
+      const blocked = reported(
+        codex(),
+        { status: 'idle' },
+        { status: 'working' },
+        { status: 'blocked', viewed },
+      )
+      expect(sessionState(blocked)).toBe('waiting')
+      const approved = reported(blocked, { status: 'working', viewed: true })
+      expect(sessionState(approved)).toBe('working')
+      expect(sessionState(reported(approved, { status: 'idle', viewed }))).toBe(
+        viewed ? 'idle' : 'done',
+      )
+      // Answered no, or no longer asked, it is idle at once.
+      expect(sessionState(reported(blocked, { status: 'idle', viewed }))).toBe(
+        viewed ? 'idle' : 'done',
+      )
+    }
+  })
+
+  it('has stopped by an error, viewed or not, until it works again', () => {
+    for (const viewed of [true, false]) {
+      const failed = reported(claude(), { status: 'working' }, { status: 'error', viewed })
+      expect(sessionState(failed)).toBe('error')
+      expect(sessionState({ ...failed, unread: false })).toBe('error')
+      const retried = reported(failed, { status: 'working', viewed: true })
+      expect(sessionState(retried)).toBe('working')
+      expect(sessionState(reported(retried, { status: 'done', viewed: true }))).toBe('idle')
+    }
+  })
+
+  it("is what Claude Code's title and hooks tell, or running, once it reports nothing again", () => {
+    const command = codex({ toolId: 'shell' })
+    expect(sessionState(reported(command, { status: 'working' }, { status: null }))).toBe('running')
+    const cleared = reported(claude({ title: '✳ Fix' }), { status: 'blocked' }, { status: null })
+    expect(sessionState(cleared)).toBe('idle')
+    expect(sessionState({ ...cleared, title: '◐ Fix' })).toBe('working')
+  })
+
+  it('leaves whether Claude Code is done to what it reports, not to its title', () => {
+    const done = reported(claude({ title: '◐ Fix' }), { status: 'working' }, { status: 'done' })
+    // Its title goes on working, as for a background agent.
+    expect(afterTitle(done, '◑ Fix', false, 9_000)).toEqual({ attention: null })
+    expect(afterTitle(done, '✳ Fix', false, 9_000)).toEqual({})
+    expect(afterTitle({ ...done, title: '✳ Fix' }, '◐ Fix', true, 9_000)).toEqual({
+      attention: null,
+      workingSince: 9_000,
+    })
   })
 })
 

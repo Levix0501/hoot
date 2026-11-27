@@ -96,11 +96,18 @@ import {
   type WorkflowProgress,
 } from '../../shared/workflows'
 import type { CreateIssueWorktreeResult, WorktreeInfo } from '../../shared/worktrees'
-import { afterHookEvent, afterTitle, type Attention, type Failure } from '../lib/session-state'
+import {
+  afterHookEvent,
+  afterProgramStatus,
+  afterTitle,
+  type Attention,
+  type Failure,
+} from '../lib/session-state'
 import { api } from '../lib/api'
 import { isOnList, type ProjectChoice } from '../lib/project-choices'
 import type { SessionShortcut } from '../lib/session-shortcuts'
 import { toast } from '../lib/toast'
+import type { ProgramState } from '../terminal/program-status'
 import {
   createSessionTerminal,
   setTerminalColorScheme,
@@ -210,9 +217,11 @@ export interface UiSession {
    * later one starts; see `sessionState`.
    */
   failure: Failure | null
+  /** What the program in its terminal reports of its status; see `sessionState`. */
+  programStatus: ProgramState | null
   /**
-   * For Claude Code, whether it stopped working while the session was not
-   * being viewed, and the session has not been viewed since.
+   * Whether its program stopped working while the session was not being
+   * viewed, and the session has not been viewed since; see `sessionState`.
    */
   unread: boolean
   /** The name the user gave the session, if any. */
@@ -1061,6 +1070,7 @@ function fromInfo(info: SessionInfo, record?: ChatInfo): UiSession {
     attention: null,
     turns: [],
     failure: null,
+    programStatus: null,
     unread: false,
     customName: record?.customName ?? null,
     createdAt: Date.now(),
@@ -1454,7 +1464,15 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   /** Creates a session's terminal, wired to the session's process. */
   const openTerminal = (id: string): SessionTerminal => {
-    const sessionTerminal = createSessionTerminal(systemColorScheme())
+    // What the session's program reports of its status is what its light
+    // shows, from when the report arrived.
+    const sessionTerminal = createSessionTerminal(systemColorScheme(), (status) => {
+      const session = findSession(id)
+      if (!session) return
+      const change = afterProgramStatus(session, status, viewedSessionId(get()) === id)
+      if (Object.keys(change).length === 0) return
+      set((state) => ({ sessions: updateSession(state.sessions, id, change) }))
+    })
     const { terminal } = sessionTerminal
     // Also while the session is not shown: programs expect answers to their
     // terminal queries, and the session's name follows its title.
@@ -2134,6 +2152,7 @@ export const useAppStore = create<AppState>()((set, get) => {
           attention: null,
           turns: [],
           failure: null,
+          programStatus: null,
           unread: false,
           customName: saved?.customName ?? chat?.customName ?? null,
           createdAt,
@@ -2557,7 +2576,16 @@ export const useAppStore = create<AppState>()((set, get) => {
         .getProviders()
         .then((providers) => set((state) => ({ providers: state.providers ?? providers })))
       api.onSessionUpdated((info) => {
-        if (!findSession(info.id)) return
+        const session = findSession(info.id)
+        if (!session) return
+        // Once the terminal has read what the session wrote before: a program
+        // that ended may have reported what it finished last.
+        const program = info.program
+        if (program !== null && program !== session.program) {
+          writeArrived(info.id, '', () =>
+            terminals.get(info.id)?.programStatus.foregroundChanged(program),
+          )
+        }
         set((state) => ({
           sessions: updateSession(state.sessions, info.id, {
             status: info.status,
@@ -2654,7 +2682,11 @@ export const useAppStore = create<AppState>()((set, get) => {
       // After a reload of the window, show the sessions that are still there.
       const known = new Set(get().sessions.map((session) => session.id))
       const reloaded = sessions.filter((session) => !known.has(session.id))
-      for (const session of reloaded) openTerminal(session.id)
+      for (const session of reloaded) {
+        // Most likely its shell, which has the foreground between commands.
+        const { programStatus } = openTerminal(session.id)
+        if (session.program !== null) programStatus.foregroundChanged(session.program)
+      }
       if (reloaded.length > 0) {
         const shown = get().currentPage
         set((state) => {
@@ -3822,8 +3854,8 @@ export const useAppStore = create<AppState>()((set, get) => {
   }
 })
 
-// A session Claude Code finished a turn in while it was not viewed is done
-// until the user views it: shown while the window is the active one.
+// A session whose program finished something while it was not viewed is
+// done until the user views it: shown while the window is the active one.
 useAppStore.subscribe((state) => {
   const id = viewedSessionId(state)
   if (id !== null && state.sessions.some((session) => session.id === id && session.unread)) {

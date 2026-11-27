@@ -1,6 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { api } from '../lib/api'
+import { watchProgramStatus, type ProgramState, type ProgramStatusWatch } from './program-status'
 import { connectClipboard } from './terminal-clipboard'
 import { TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from './terminal-font'
 import { terminalTheme, type ColorScheme } from './themes'
@@ -15,6 +16,8 @@ const SCROLLBAR_WIDTH = 6
 export interface SessionTerminal {
   terminal: Terminal
   fit: FitAddon
+  /** What the programs in the terminal report of their status. */
+  programStatus: ProgramStatusWatch
 }
 
 export function systemColorScheme(): ColorScheme {
@@ -24,8 +27,13 @@ export function systemColorScheme(): ColorScheme {
 /**
  * Creates the terminal for a session. It exists before it is shown so that
  * xterm.js keeps any output that arrives before the terminal is on screen.
+ * `programStatusChanged` is called with what the session's light shows of
+ * what the programs in it report of their status whenever that changes.
  */
-export function createSessionTerminal(scheme: ColorScheme): SessionTerminal {
+export function createSessionTerminal(
+  scheme: ColorScheme,
+  programStatusChanged: (status: ProgramState | null) => void,
+): SessionTerminal {
   const terminal = new Terminal({
     allowProposedApi: true,
     scrollback: SCROLLBACK_LINES,
@@ -53,7 +61,7 @@ export function createSessionTerminal(scheme: ColorScheme): SessionTerminal {
   terminal.loadAddon(fit)
   connectClipboard(terminal)
   applyCurrentUnicodeWidths(terminal)
-  return { terminal, fit }
+  return { terminal, fit, programStatus: watchProgramStatus(terminal, programStatusChanged) }
 }
 
 export function setTerminalColorScheme({ terminal }: SessionTerminal, scheme: ColorScheme): void {

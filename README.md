@@ -35,8 +35,8 @@ Linear-style issues, and hand an issue to a running agent by dragging it onto th
 - **Chats without a project.** Click **New chat** in the sidebar to talk to the default agent
   without adding a project. Hoot keeps the chat, and resumes its conversation after the agent exits
   or Hoot restarts.
-- **See which agent needs you.** A light beside each Claude Code session tells you whether it is
-  working, waiting for your answer, stopped by an error, or done.
+- **See which agent needs you.** A light beside each agent's session tells you whether it is
+  working, waiting for your answer, or done.
 - **Issues, Linear-style.** Note what to do as local issues with statuses, priorities, labels,
   sub-issues and dependencies, and work through them from the keyboard.
 - **Issues at hand.** The Issues window floats over every page: note an issue as you think of it,

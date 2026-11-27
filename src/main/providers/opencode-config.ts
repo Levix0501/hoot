@@ -362,12 +362,26 @@ export async function createOpenCodeSession(
 }
 
 /**
+ * Whether OpenCode charges for a model, by its prices as `model.list` gives
+ * them, one for each context size: whether any asks something for input, as
+ * OpenCode tells its free models from the others.
+ */
+function chargesForInput(cost: unknown): boolean {
+  return (Array.isArray(cost) ? cost : [cost]).some((price) => {
+    const input = objectOf(price)?.input
+    return typeof input === 'number' && input > 0
+  })
+}
+
+/**
  * The free models OpenCode comes with, which its own agents offer, each with
  * the effort levels it takes, its variants, as the background service of the
  * user's own OpenCode lists them, which needs no server of Hoot's to be
- * started for it. A service that has just started lists none until it has
- * read them, a moment later, so an empty list is asked for again a few
- * times.
+ * started for it. Only those OpenCode offers signed out are taken: signed in
+ * to the OpenCode Console, or given its key, OpenCode offers the Console's
+ * paid models under the same provider, which run on the user's account. A
+ * service that has just started lists none until it has read them, a moment
+ * later, so an empty list is asked for again a few times.
  */
 export async function readOpenCodeLaunchOptions(
   command: string,
@@ -383,7 +397,7 @@ export async function readOpenCodeLaunchOptions(
   }
   const models = (Array.isArray(data) ? data : []).flatMap((entry) => {
     const model = objectOf(entry)
-    if (model === null || model.providerID !== 'opencode') return []
+    if (model === null || model.providerID !== 'opencode' || chargesForInput(model.cost)) return []
     const id = textOf(model.modelID) ?? textOf(model.id)
     if (id === null) return []
     const variants = Array.isArray(model.variants) ? model.variants : []

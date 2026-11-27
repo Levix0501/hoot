@@ -206,6 +206,28 @@ console.log(JSON.stringify({ location: { directory: process.cwd() }, data }))
     expect(fs.readFileSync(calls, 'utf8')).toBe('api model.list\n'.repeat(3))
   })
 
+  it('takes only the free models OpenCode offers signed out, not the paid ones a sign-in adds', async () => {
+    const opencode = await writeNodeCommand(
+      path.join(home, 'bin', 'opencode'),
+      `const price = (input) => ({ input, output: input * 5, cache: { read: 0, write: 0 } })
+const data = [
+  { providerID: 'opencode', modelID: 'big-pickle', name: 'Big Pickle', variants: [], cost: [price(0)] },
+  { providerID: 'opencode', modelID: 'claude-opus-5', name: 'Claude Opus 5', variants: [{ id: 'high' }], cost: [price(5)] },
+  // Free up to a context size, charged beyond it.
+  { providerID: 'opencode', modelID: 'gpt-6-luna', name: 'GPT 6 Luna', variants: [], cost: [price(0), { tier: { type: 'context', size: 100000 }, ...price(0.5) }] },
+  { providerID: 'opencode', modelID: 'nemotron-free', name: 'Nemotron Free', variants: [], cost: [] },
+  // Go's, which a session on OpenCode's free models does not reach.
+  { providerID: 'opencode-go', modelID: 'beam-free', name: 'Beam Free', variants: [], cost: [price(0)] },
+]
+console.log(JSON.stringify({ location: { directory: process.cwd() }, data }))
+`,
+    )
+    expect((await readOpenCodeLaunchOptions(opencode, {}, home, 1)).models).toEqual([
+      { value: 'big-pickle', label: 'Big Pickle', efforts: [] },
+      { value: 'nemotron-free', label: 'Nemotron Free', efforts: [] },
+    ])
+  })
+
   it('asks an OpenCode without the API once', async () => {
     const calls = path.join(home, 'calls')
     const opencode = await writeNodeCommand(

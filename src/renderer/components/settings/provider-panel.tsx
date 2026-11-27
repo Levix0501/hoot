@@ -2,12 +2,8 @@ import { ChevronLeftIcon, Trash2Icon } from 'lucide-react'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '../../lib/toast'
-import type { AgentModelOption } from '../../../shared/agents'
 import {
   agentName,
-  CLAUDE_ROLE_NAMES,
-  CLAUDE_ROLES,
-  ownProvider,
   presetById,
   providerMark,
   type Provider,
@@ -31,7 +27,7 @@ import { AgentIcon, ProviderMarkIcon } from '../provider-icon'
 import { Button } from '../ui/button'
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { PresetPicker, useInstalled } from './provider-catalog'
+import { PresetPicker } from './provider-catalog'
 import { Field, ProviderFields } from './provider-fields'
 import { SIDE_PANEL, TitleName } from './side-panel'
 
@@ -278,82 +274,6 @@ function NewProvider({
 }
 
 /**
- * The name a harness's own model goes by: Claude Code's aliases as the
- * Agents page names its roles, any other by the name its harness gives it.
- */
-function ownModelName(harness: CodingToolId, model: AgentModelOption): string {
-  const role = CLAUDE_ROLES.find((candidate) => candidate === model.value)
-  return harness === 'claude' && role !== undefined && model.label === model.value
-    ? CLAUDE_ROLE_NAMES[role]
-    : model.label
-}
-
-/**
- * The models a harness's own configuration offers, to be seen, not picked:
- * each by its name, with the id its sessions are started with where that
- * differs.
- */
-function OwnModels({
-  harness,
-  models,
-}: {
-  harness: CodingToolId
-  models: readonly AgentModelOption[]
-}) {
-  return (
-    <Field label="Models">
-      <div
-        className="flex min-w-0 flex-col divide-y rounded-lg border"
-        data-testid="provider-own-models"
-      >
-        {models.map((model) => {
-          const name = ownModelName(harness, model)
-          return (
-            <div
-              key={model.value}
-              className="flex h-9 min-w-0 items-center justify-between gap-3 px-3"
-            >
-              <span className="truncate text-sm">{name}</span>
-              {name !== model.value && (
-                <span className="truncate font-mono text-xs text-muted-foreground select-text">
-                  {model.value}
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </Field>
-  )
-}
-
-/**
- * A harness's own models in the panel, which are not the user's to change:
- * those its configuration offers, as its detection read them, and the agents
- * that run on them.
- */
-function OwnProvider({ provider, harness }: { provider: Provider; harness: CodingToolId }) {
-  const models = useAppStore(
-    (state) => state.agents?.agents.find((entry) => entry.id === harness)?.launchOptions?.models,
-  )
-  return (
-    <div className="flex h-full flex-col" data-testid={`provider-panel-${provider.id}`}>
-      <Header mark={providerMark(provider)}>
-        <SheetTitle className="min-w-0 flex-1 truncate text-base leading-8 font-semibold">
-          {provider.name}
-        </SheetTitle>
-      </Header>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
-        {models !== undefined && models.length > 0 && (
-          <OwnModels harness={harness} models={models} />
-        )}
-        <UsedBy provider={provider} />
-      </div>
-    </div>
-  )
-}
-
-/**
  * What the Providers page's panel shows: a provider, by its id, or one being
  * added of a preset (`null` for one of the user's own).
  */
@@ -361,9 +281,9 @@ export type ProviderTarget = { id: string } | { presetId: string | null } | null
 
 /**
  * The panel at the window's right on the Providers page: a provider of the
- * user's, each change saved as it is made, with Delete; a harness's own
- * models, to be seen; one being added, which once added it shows as the
- * user's. It closes with Esc or a click beside it.
+ * user's, each change saved as it is made, with Delete; or one being added,
+ * which once added it shows as the user's. It closes with Esc or a click
+ * beside it.
  */
 export function ProviderPanel({
   target,
@@ -376,7 +296,6 @@ export function ProviderPanel({
   const [last, setLast] = useState(target)
   if (target !== null && target !== last) setLast(target)
   const shown = target ?? last
-  const installed = useInstalled()
   const providers = useAppStore((state) => state.providers?.providers)
   const close = () => onTargetChange(null)
   let content: ReactNode = null
@@ -390,10 +309,8 @@ export function ProviderPanel({
       />
     )
   } else if (shown !== null) {
-    const own = installed.find((harness) => ownProvider(harness).id === shown.id)
     const provider = providers?.find((candidate) => candidate.id === shown.id)
-    if (own !== undefined) content = <OwnProvider provider={ownProvider(own)} harness={own} />
-    else if (provider !== undefined) {
+    if (provider !== undefined) {
       content = <EditProvider key={provider.id} provider={provider} onClose={close} />
     }
   }

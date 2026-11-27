@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
+  canDeleteAgent,
   canRun,
   cleanModelMap,
   findProvider,
+  OWN_PROVIDER_IDS,
+  ownHarnessOf,
   withAgentChange,
   type Agent,
   type AgentChange,
@@ -15,6 +18,7 @@ import {
   type ProvidersState,
   type WireFormat,
 } from '../../shared/providers'
+import type { CodingToolId } from '../../shared/tools'
 import type { ProviderStore } from './provider-store'
 
 export interface ProviderServiceOptions {
@@ -51,8 +55,9 @@ function cleanCloud(cloud: ProviderCloud | null): ProviderCloud | null {
 
 /**
  * The user's providers and the agents made of them, which the user makes by
- * hand: Hoot reads no agent's own configuration for them and writes none,
- * each session being given its provider by itself.
+ * hand, and for each installed harness the one agent of its own models,
+ * which Hoot makes and keeps: Hoot reads no agent's own configuration for
+ * them and writes none, each session being given its provider by itself.
  */
 export class ProviderService extends EventEmitter<{
   changed: [ProvidersState]
@@ -133,44 +138,72 @@ export class ProviderService extends EventEmitter<{
     return { ok: true }
   }
 
+  /** Makes an agent on a provider of the user's; Hoot makes those of the harnesses' own models. */
   addAgent(input: NewAgent): ProviderResult<{ agent: Agent }> {
     const provider = this.provider(input.providerId)
     if (provider === undefined) return { ok: false, message: 'The provider no longer exists.' }
     if (!canRun(provider, input.harness)) {
       return { ok: false, message: 'The provider cannot run this agent.' }
     }
-    const agent = this.insertAgent(input)
+    if (provider.own !== null) {
+      return { ok: false, message: `Only Hoot makes an agent on ${provider.name}.` }
+    }
+    const agent = this.insertAgent(input, true)
     this.emitChanged()
     return { ok: true, agent: { ...agent } }
   }
 
+  /**
+   * Changes an agent. One on its harness's own models stays on them, and no
+   * other moves onto them.
+   */
   updateAgent(id: string, change: AgentChange): void {
     const current = this.agent(id)
     if (current === undefined) return
     const next = withAgentChange(current, change)
     const provider = this.provider(next.providerId)
     if (provider === undefined || !canRun(provider, next.harness)) return
+    const moved = next.providerId !== current.providerId
+    if (moved && (ownHarnessOf(current.providerId) !== null || provider.own !== null)) return
     if (JSON.stringify(next) === JSON.stringify(current)) return
     this.agents = this.agents.map((agent) => (agent.id === id ? next : agent))
     this.store.updateAgent(next)
     this.emitChanged()
   }
 
+  /** Deletes an agent, unless it is the last on its harness's own models (see `canDeleteAgent`). */
   removeAgent(id: string): void {
-    if (this.agent(id) === undefined) return
-    this.agents = this.agents.filter((agent) => agent.id !== id)
+    const agent = this.agent(id)
+    if (agent === undefined || !canDeleteAgent(agent, this.agents)) return
+    this.agents = this.agents.filter((other) => other.id !== id)
     this.store.deleteAgent(id)
     this.emit('removed', id)
     this.emitChanged()
   }
 
-  private insertAgent(input: NewAgent): Agent {
+  /**
+   * Makes the agent of each installed harness's own models that no agent
+   * runs on yet: turned off, under their name (see `agentName`). Kept once
+   * made, as the harness is uninstalled too.
+   */
+  ensureOwnAgents(installed: readonly CodingToolId[]): void {
+    const missing = installed.filter(
+      (harness) => !this.agents.some((agent) => agent.providerId === OWN_PROVIDER_IDS[harness]),
+    )
+    if (missing.length === 0) return
+    for (const harness of missing) {
+      this.insertAgent({ harness, providerId: OWN_PROVIDER_IDS[harness], model: null }, false)
+    }
+    this.emitChanged()
+  }
+
+  private insertAgent(input: NewAgent, enabled: boolean): Agent {
     const agent: Agent = {
       id: this.newId(),
       harness: input.harness,
       providerId: input.providerId,
       name: input.name?.trim() || null,
-      enabled: true,
+      enabled,
       model: input.model?.trim() || null,
       effort: input.effort?.trim() || null,
       extraArgs: input.extraArgs ?? [],

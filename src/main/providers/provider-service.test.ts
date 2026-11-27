@@ -40,7 +40,7 @@ const deepseek = {
 }
 
 describe('ProviderService', () => {
-  it('makes no agent by itself: each is made by hand, on a provider it can run', () => {
+  it('makes agents by hand on the user’s providers they can run, and none on a harness’s own models', () => {
     const providers = service()
     expect(providers.getState()).toEqual({ providers: [], agents: [] })
     const added = providers.addProvider({
@@ -52,20 +52,84 @@ describe('ProviderService', () => {
     for (const harness of ['claude', 'codex', 'opencode'] as const) {
       expect(
         providers.addAgent({ harness, providerId: added.provider.id, model: 'deepseek-pro' }),
-      ).toMatchObject({ ok: true, agent: { harness, model: 'deepseek-pro' } })
+      ).toMatchObject({ ok: true, agent: { harness, model: 'deepseek-pro', enabled: true } })
     }
-    expect(
-      providers.addAgent({
-        harness: 'opencode',
-        providerId: OWN_PROVIDER_IDS.opencode,
-        model: null,
-      }),
-    ).toMatchObject({ ok: true, agent: { harness: 'opencode', model: null } })
+    for (const harness of ['claude', 'codex', 'opencode', 'antigravity'] as const) {
+      expect(
+        providers.addAgent({ harness, providerId: OWN_PROVIDER_IDS[harness], model: null }),
+      ).toMatchObject({ ok: false })
+    }
     expect(
       service()
         .getState()
         .agents.map((agent) => agent.harness),
-    ).toEqual(['claude', 'codex', 'opencode', 'opencode'])
+    ).toEqual(['claude', 'codex', 'opencode'])
+  })
+
+  it('makes the agent of each installed harness’s own models once, turned off, and keeps it', () => {
+    const providers = service()
+    const changes: number[] = []
+    providers.on('changed', (state) => changes.push(state.agents.length))
+    providers.ensureOwnAgents(['claude', 'opencode'])
+    expect(providers.getState().agents).toMatchObject([
+      { harness: 'claude', providerId: OWN_PROVIDER_IDS.claude, name: null, enabled: false },
+      { harness: 'opencode', providerId: OWN_PROVIDER_IDS.opencode, name: null, enabled: false },
+    ])
+    expect(changes).toEqual([2])
+    // Once made, it is not made again, turned on or not, nor as Hoot opens again.
+    const claude = providers.getState().agents[0]
+    if (claude === undefined) throw new Error('No agent of Claude Code’s own models.')
+    providers.updateAgent(claude.id, { enabled: true, model: 'opus' })
+    providers.ensureOwnAgents(['claude', 'opencode'])
+    const reopened = service()
+    reopened.ensureOwnAgents(['claude', 'codex', 'opencode', 'antigravity'])
+    expect(reopened.getState().agents.map((agent) => [agent.providerId, agent.enabled])).toEqual([
+      [OWN_PROVIDER_IDS.claude, true],
+      [OWN_PROVIDER_IDS.opencode, false],
+      [OWN_PROVIDER_IDS.codex, false],
+      [OWN_PROVIDER_IDS.antigravity, false],
+    ])
+    expect(changes).toEqual([2, 2])
+    // Nor can it be deleted, as its harness is uninstalled too.
+    reopened.ensureOwnAgents([])
+    reopened.removeAgent(claude.id)
+    expect(service().agent(claude.id)).toMatchObject({ model: 'opus' })
+  })
+
+  it('makes no agent of a harness’s own models where one was made by hand before', () => {
+    const insert = db.prepare(
+      `INSERT INTO agents (id, harness, provider_id, name, enabled, model, effort, extra_args,
+       model_map, created_at) VALUES (?, 'claude', ?, NULL, 1, ?, NULL, '[]', '{}', ?)`,
+    )
+    insert.run('opus', OWN_PROVIDER_IDS.claude, 'opus', 1)
+    insert.run('sonnet', OWN_PROVIDER_IDS.claude, 'sonnet', 2)
+    const providers = service()
+    providers.ensureOwnAgents(['claude'])
+    expect(providers.getState().agents.map((agent) => agent.id)).toEqual(['opus', 'sonnet'])
+    // Either can be deleted, until one is left.
+    providers.removeAgent('opus')
+    providers.removeAgent('sonnet')
+    expect(service().getState().agents).toMatchObject([{ id: 'sonnet', enabled: true }])
+  })
+
+  it('keeps an agent on its harness’s own models there, and every other agent off them', () => {
+    const providers = service()
+    providers.ensureOwnAgents(['claude'])
+    const own = providers.getState().agents[0]
+    const added = providers.addProvider(deepseek)
+    if (!added.ok || own === undefined) throw new Error('No provider or agent to change.')
+    const made = providers.addAgent({
+      harness: 'claude',
+      providerId: added.provider.id,
+      model: null,
+    })
+    if (!made.ok) throw new Error(made.message)
+    providers.updateAgent(own.id, { providerId: added.provider.id, model: 'deepseek-pro' })
+    providers.updateAgent(made.agent.id, { providerId: OWN_PROVIDER_IDS.claude })
+    expect(service().getState().agents).toMatchObject([
+      { id: own.id, providerId: OWN_PROVIDER_IDS.claude, model: null },
+      { id: made.agent.id, providerId: added.provider.id },
+    ])
   })
 
   it('keeps a provider an agent runs on', () => {
@@ -105,16 +169,25 @@ describe('ProviderService', () => {
     expect(
       providers.addAgent({ harness: 'codex', providerId: OWN_PROVIDER_IDS.claude, model: null }),
     ).toMatchObject({ ok: false })
+    const added = providers.addProvider(deepseek)
+    if (!added.ok) throw new Error(added.message)
+    // DeepSeek here serves Claude Code alone.
+    expect(
+      providers.addAgent({ harness: 'codex', providerId: added.provider.id, model: null }),
+    ).toMatchObject({ ok: false })
     const made = providers.addAgent({
-      harness: 'codex',
-      providerId: OWN_PROVIDER_IDS.codex,
+      harness: 'claude',
+      providerId: added.provider.id,
       model: null,
     })
-    expect(made).toMatchObject({ ok: true, agent: { harness: 'codex', name: null, enabled: true } })
+    expect(made).toMatchObject({
+      ok: true,
+      agent: { harness: 'claude', name: null, enabled: true },
+    })
     if (!made.ok) return
     // Its provider changes only to one it can run.
-    providers.updateAgent(made.agent.id, { providerId: OWN_PROVIDER_IDS.claude })
-    expect(providers.agent(made.agent.id)?.providerId).toBe(OWN_PROVIDER_IDS.codex)
+    providers.updateAgent(made.agent.id, { providerId: 'gone' })
+    expect(providers.agent(made.agent.id)?.providerId).toBe(added.provider.id)
     providers.updateAgent(made.agent.id, { name: '  Plain  ', model: '  ' })
     expect(providers.agent(made.agent.id)).toMatchObject({ name: 'Plain', model: null })
   })

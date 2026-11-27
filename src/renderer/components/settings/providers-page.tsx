@@ -1,13 +1,7 @@
 import { ChevronRightIcon, PlusIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { useState } from 'react'
-import {
-  harnessesOf,
-  maskKey,
-  ownProvider,
-  providerMark,
-  type Provider,
-} from '../../../shared/providers'
+import { harnessesOf, maskKey, providerMark, type Provider } from '../../../shared/providers'
 import { getCodingTool } from '../../../shared/tools'
 import { useAppStore } from '../../store/app-store'
 import { ProviderMarkIcon } from '../provider-icon'
@@ -83,7 +77,7 @@ function ProviderRow({
       </span>
       <HarnessMarks provider={provider} />
       <span className="w-24 shrink-0 text-right font-mono text-xs text-muted-foreground">
-        {provider.own === null ? maskKey(provider.apiKey) : ''}
+        {maskKey(provider.apiKey)}
       </span>
       <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
     </div>
@@ -91,19 +85,16 @@ function ProviderRow({
 }
 
 /**
- * The settings' Providers page: the providers, the installed harnesses' own
- * models first, then every preset to
+ * The settings' Providers page: the user's providers, then every preset to
  * add one of, or one of the user's own, which Add provider goes to; each
- * provider, and each one being added, in the panel.
+ * provider, and each one being added, in the panel. The harnesses' own
+ * models are no provider here: each harness's agent of them is on the
+ * Agents page.
  */
 export function ProvidersPage() {
   const providers = useAppStore((state) => state.providers)
-  const installed = useInstalled()
   const [target, setTarget] = useState<ProviderTarget>(null)
-  const listed = [
-    ...installed.map((harness) => ownProvider(harness)),
-    ...(providers?.providers ?? []),
-  ]
+  const listed = providers?.providers ?? []
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-background" data-testid="providers-page">
       {/* The page's part of the window's top row, which drags the window. */}

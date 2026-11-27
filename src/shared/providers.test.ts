@@ -4,6 +4,7 @@ import {
   addedModels,
   agentModels,
   agentName,
+  canDeleteAgent,
   canRun,
   catalogModelOf,
   claudeAgentModels,
@@ -26,6 +27,7 @@ import {
   openCodeSessionEffort,
   firstPicks,
   OWN_PROVIDER_IDS,
+  ownHarnessOf,
   ownProvider,
   presetById,
   presetHarnesses,
@@ -138,11 +140,24 @@ describe('providers', () => {
     expect(providerMark({ presetId: null, own: null })).toBe('custom')
   })
 
-  it('names an agent after its provider, its harness on its own models, or as the user named it', () => {
+  it('names an agent after its provider, its harness’s own models included, or as the user named it', () => {
     const own = agent('own', { providerId: OWN_PROVIDER_IDS.claude })
     const pro = agent('pro', { model: 'deepseek-pro' })
     const two = { providers: [deepseek], agents: [own, pro] }
-    expect(agentName(own, two)).toBe('Claude Code')
+    expect(agentName(own, two)).toBe('Claude subscription')
+    expect(
+      agentName(agent('gpt', { harness: 'codex', providerId: OWN_PROVIDER_IDS.codex }), two),
+    ).toBe('ChatGPT subscription')
+    expect(
+      agentName(agent('oc', { harness: 'opencode', providerId: OWN_PROVIDER_IDS.opencode }), two),
+    ).toBe('OpenCode free models')
+    expect(
+      agentName(
+        agent('agy', { harness: 'antigravity', providerId: OWN_PROVIDER_IDS.antigravity }),
+        two,
+      ),
+    ).toBe('Google account')
+    expect(agentName(agent('gone', { providerId: 'p-gone' }), two)).toBe('Claude Code')
     expect(agentName(pro, two)).toBe('DeepSeek')
     const flash = agent('flash')
     const both = { providers: [deepseek], agents: [own, pro, flash] }
@@ -170,6 +185,19 @@ describe('providers', () => {
     expect(sessionAgent(usable, 'own', 'codex')?.id).toBe('codex')
     expect(sessionAgent(usable, 'off')?.id).toBe('kimi')
     expect(sessionAgent([], 'own')).toBeNull()
+  })
+
+  it('deletes any agent but the last on its harness’s own models', () => {
+    const own = agent('own', { providerId: OWN_PROVIDER_IDS.claude })
+    const pro = agent('pro')
+    expect(canDeleteAgent(pro, [own, pro])).toBe(true)
+    expect(canDeleteAgent(own, [own, pro])).toBe(false)
+    // Of two made by hand before Hoot made them, either, until one is left.
+    const sonnet = agent('sonnet', { providerId: OWN_PROVIDER_IDS.claude, model: 'sonnet' })
+    expect(canDeleteAgent(own, [own, pro, sonnet])).toBe(true)
+    expect(canDeleteAgent(sonnet, [own, pro, sonnet])).toBe(true)
+    expect(ownHarnessOf(OWN_PROVIDER_IDS.antigravity)).toBe('antigravity')
+    expect(ownHarnessOf(deepseek.id)).toBeNull()
   })
 
   it('shows a key by its first characters and its last four', () => {

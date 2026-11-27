@@ -12,11 +12,12 @@ import {
 } from '../../../shared/launch-command'
 import {
   agentName,
+  canDeleteAgent,
   canRun,
   CLAUDE_ROLE_DEFAULTS,
   CLAUDE_ROLE_NAMES,
   CLAUDE_ROLES,
-  ownProvider,
+  findProvider,
   providerMark,
   type Agent,
   type ClaudeRole,
@@ -76,17 +77,22 @@ export function useCopied(): [copied: boolean, markCopied: () => void] {
   return [copied, () => setCopied(true)]
 }
 
-/** The providers an agent of a harness can run on: its own models first, then the user's it can run. */
+/**
+ * The providers an agent of a harness can be given: the user's it can run.
+ * Its own models are none of them: Hoot gives them their one agent itself.
+ */
 function useProvidersFor(harness: CodingToolId): Provider[] {
   const providers = useAppStore((state) => state.providers?.providers)
-  return [ownProvider(harness), ...(providers ?? []).filter((p) => canRun(p, harness))]
+  return (providers ?? []).filter((provider) => canRun(provider, harness))
 }
 
-/** The provider an agent runs on, among those its harness can run. */
+/** The provider an agent runs on, while its harness can run it: one of the user's, or its own models. */
 export function useAgentProvider(
   agent: Pick<AgentDraft, 'harness' | 'providerId'>,
 ): Provider | undefined {
-  return useProvidersFor(agent.harness).find((candidate) => candidate.id === agent.providerId)
+  const providers = useAppStore((state) => state.providers?.providers)
+  const provider = findProvider(providers ?? [], agent.providerId)
+  return provider !== undefined && canRun(provider, agent.harness) ? provider : undefined
 }
 
 /** Whether an agent is the one a new chat starts with, which its row marks Default. */
@@ -149,7 +155,7 @@ function ProviderSelect({
   return (
     <>
       <Select
-        value={value}
+        value={provider === undefined ? null : value}
         onValueChange={(id) => {
           if (typeof id !== 'string') return
           if (id === ADD_PROVIDER) return setAdding(true)
@@ -163,26 +169,36 @@ function ProviderSelect({
           className={GHOST}
           data-testid="agent-panel-provider"
         >
-          {provider && <ProviderMarkIcon mark={providerMark(provider)} className="size-4" />}
-          <span className="truncate">{provider?.name ?? ''}</span>
+          {provider ? (
+            <>
+              <ProviderMarkIcon mark={providerMark(provider)} className="size-4" />
+              <span className="truncate">{provider.name}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
           <span className="flex-1" />
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-52">
-          <SelectGroup>
-            {providers.map((candidate) => (
-              <SelectItem
-                key={candidate.id}
-                value={candidate.id}
-                data-testid={`agent-provider-option-${candidate.id}`}
-              >
-                <span className="flex items-center gap-2">
-                  <ProviderMarkIcon mark={providerMark(candidate)} className="size-4" />
-                  {candidate.name}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-          <SelectSeparator />
+          {providers.length > 0 && (
+            <>
+              <SelectGroup>
+                {providers.map((candidate) => (
+                  <SelectItem
+                    key={candidate.id}
+                    value={candidate.id}
+                    data-testid={`agent-provider-option-${candidate.id}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <ProviderMarkIcon mark={providerMark(candidate)} className="size-4" />
+                      {candidate.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectSeparator />
+            </>
+          )}
           <SelectItem value={ADD_PROVIDER} data-testid="agent-provider-add">
             <span className="flex items-center gap-2 text-muted-foreground">
               <PlusIcon className="size-4" />
@@ -198,6 +214,22 @@ function ProviderSelect({
         onAdded={onChange}
       />
     </>
+  )
+}
+
+/**
+ * The provider of the agent of its harness's own models, which keeps it: a
+ * value in the place of a picker.
+ */
+function ProviderValue({ provider }: { provider: Provider }) {
+  return (
+    <div
+      className="flex h-8 min-w-0 items-center gap-1.5 border border-transparent px-2 text-sm"
+      data-testid="agent-panel-provider"
+    >
+      <ProviderMarkIcon mark={providerMark(provider)} className="size-4" />
+      <span className="truncate">{provider.name}</span>
+    </div>
   )
 }
 
@@ -612,13 +644,17 @@ function PanelFields({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-0.5">
         <Property label="Provider">
-          <ProviderSelect
-            harness={draft.harness}
-            value={draft.providerId}
-            onChange={(picked) =>
-              onChange(draftOnProvider(draft, picked, state, catalogs, provider))
-            }
-          />
+          {provider?.own != null ? (
+            <ProviderValue provider={provider} />
+          ) : (
+            <ProviderSelect
+              harness={draft.harness}
+              value={draft.providerId}
+              onChange={(picked) =>
+                onChange(draftOnProvider(draft, picked, state, catalogs, provider))
+              }
+            />
+          )}
         </Property>
         <Property label="Model">
           <ModelSelect
@@ -708,6 +744,7 @@ function EditPanel({
   const changeAgent = useAppStore((app) => app.changeAgent)
   const deleteAgent = useAppStore((app) => app.deleteAgent)
   const catalogs = useAppStore((app) => app.modelCatalogs)
+  const deletable = useAppStore((app) => canDeleteAgent(agent, app.providers?.agents ?? []))
   const provider = useAgentProvider(agent)
   const saved = draftOf(agent)
   // One made without a model shows the model it runs, and names none until
@@ -758,32 +795,33 @@ function EditPanel({
           }}
         />
       </div>
-      <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive"
-          onClick={() => {
-            latest.current = null
-            deleteAgent(agent.id)
-            onClose()
-          }}
-          data-testid="agent-panel-delete"
-        >
-          <Trash2Icon />
-          Delete
-        </Button>
-      </div>
+      {deletable && (
+        <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => {
+              latest.current = null
+              deleteAgent(agent.id)
+              onClose()
+            }}
+            data-testid="agent-panel-delete"
+          >
+            <Trash2Icon />
+            Delete
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
-/** A new agent of a harness: on its first provider of the user's, else its own models. */
+/** A new agent of a harness: on the first of the user's providers it can run, while there is one. */
 function newDraft(harness: CodingToolId, providers: Provider[]): AgentDraft {
-  const provider = providers.find((candidate) => candidate.own === null) ?? providers[0]
   return {
     harness,
-    providerId: provider?.id ?? '',
+    providerId: providers[0]?.id ?? '',
     name: null,
     enabled: true,
     model: null,
@@ -841,7 +879,7 @@ function NewPanel({
         <SheetTitle render={<div className="flex min-w-0 flex-1" />}>
           <TitleName
             value={nameText}
-            own={own || `New ${getCodingTool(harness).label} agent`}
+            own={(provider === undefined ? '' : own) || `New ${getCodingTool(harness).label} agent`}
             onChange={setNameText}
             autoFocus
           />

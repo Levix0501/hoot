@@ -1521,8 +1521,10 @@ export type ProviderChange = Partial<NewProvider>
 
 /**
  * The providers and agents, as the window shows them. Hoot reads no agent's
- * own configuration for them and makes no agent by itself: agents are made
- * by hand, and each session is given its provider by itself.
+ * own configuration for them, and makes one agent alone by itself: that of
+ * each harness's own models, as the harness is found installed (see
+ * `ProviderService.ensureOwnAgents`). Every other agent is made by hand, and
+ * each session is given its provider by itself.
  */
 export interface ProvidersState {
   /** The user's providers, in the order they were made; the agents' own are not among them. */
@@ -1531,19 +1533,37 @@ export interface ProvidersState {
   agents: Agent[]
 }
 
+/** The harness whose own models a provider id stands for; `null` for a provider of the user's. */
+export function ownHarnessOf(providerId: string): CodingToolId | null {
+  return CODING_TOOL_IDS.find((candidate) => OWN_PROVIDER_IDS[candidate] === providerId) ?? null
+}
+
 /** A provider by id: one of the user's, or an agent's own models. */
 export function findProvider(providers: readonly Provider[], id: string): Provider | undefined {
-  const harness = CODING_TOOL_IDS.find((candidate) => OWN_PROVIDER_IDS[candidate] === id)
-  return harness === undefined
-    ? providers.find((provider) => provider.id === id)
-    : ownProvider(harness)
+  const harness = ownHarnessOf(id)
+  return harness === null ? providers.find((provider) => provider.id === id) : ownProvider(harness)
 }
 
 /**
- * The name an agent shows: the one the user gave it; else, on the harness's
- * own models, the harness's name; else its provider's, with the model it
- * runs when another agent of the harness runs the same provider: its own, or
- * the provider's first, which an agent made without one runs.
+ * Whether an agent can be deleted: any but the last that runs on its
+ * harness's own models, which Hoot makes itself and keeps; there is one
+ * such agent, unless more were made by hand before Hoot made them.
+ */
+export function canDeleteAgent(
+  agent: Pick<Agent, 'id' | 'providerId'>,
+  agents: readonly Pick<Agent, 'id' | 'providerId'>[],
+): boolean {
+  return (
+    ownHarnessOf(agent.providerId) === null ||
+    agents.some((other) => other.id !== agent.id && other.providerId === agent.providerId)
+  )
+}
+
+/**
+ * The name an agent shows: the one the user gave it; else its provider's, as
+ * Claude subscription for Claude Code's own, with the model it runs when
+ * another agent of the harness runs the same provider: its own, or the
+ * provider's first, which an agent made without one runs.
  */
 export function agentName(
   agent: Agent,
@@ -1552,7 +1572,6 @@ export function agentName(
   if (agent.name !== null && agent.name.trim() !== '') return agent.name.trim()
   const provider = findProvider(state.providers, agent.providerId)
   if (provider === undefined) return getCodingTool(agent.harness).label
-  if (provider.own !== null) return getCodingTool(agent.harness).label
   const shared = state.agents.some(
     (other) =>
       other.id !== agent.id &&

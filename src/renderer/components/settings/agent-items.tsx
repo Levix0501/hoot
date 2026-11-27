@@ -3,7 +3,7 @@ import { cn } from 'cn'
 import { useState, type ReactNode } from 'react'
 import type { AgentState } from '../../../shared/agents'
 import { chatAgent, usableChatAgents } from '../../../shared/chats'
-import { agentName, type Agent } from '../../../shared/providers'
+import { agentName, canDeleteAgent, FORMATS_OF, type Agent } from '../../../shared/providers'
 import type { CodingToolId } from '../../../shared/tools'
 import { useAppStore } from '../../store/app-store'
 import { AgentIcon } from '../provider-icon'
@@ -30,11 +30,18 @@ function useAgentName(agent: Agent): string {
   return useAppStore((state) => (state.providers === null ? '' : agentName(agent, state.providers)))
 }
 
-/** The ⋯ of an agent's row: make it the default agent, delete it. */
+/**
+ * The ⋯ of an agent's row: make it the default agent, delete it, where it is
+ * not the agent of its harness's own models, which Hoot keeps (see
+ * `canDeleteAgent`). None for that agent while its harness is not
+ * installed, which leaves it nothing to do.
+ */
 function AgentMenu({ agent, dormant = false }: { agent: Agent; dormant?: boolean }) {
   const isDefault = useIsDefault(agent.id)
   const setDefaultAgent = useAppStore((state) => state.setDefaultAgent)
   const deleteAgent = useAppStore((state) => state.deleteAgent)
+  const deletable = useAppStore((state) => canDeleteAgent(agent, state.providers?.agents ?? []))
+  if (dormant && !deletable) return null
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -58,15 +65,19 @@ function AgentMenu({ agent, dormant = false }: { agent: Agent; dormant?: boolean
           <CheckIcon />
           Make default
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => deleteAgent(agent.id)}
-          data-testid={`agent-delete-${agent.id}`}
-        >
-          <Trash2Icon />
-          Delete
-        </DropdownMenuItem>
+        {deletable && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => deleteAgent(agent.id)}
+              data-testid={`agent-delete-${agent.id}`}
+            >
+              <Trash2Icon />
+              Delete
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -188,7 +199,8 @@ export function DormantAgentItem({ agent }: { agent: Agent }) {
 
 /**
  * A harness's agents, below its row, each opening in the panel, and New
- * agent, which makes one there.
+ * agent, which makes one there on a provider of the user's, for a harness
+ * that runs any.
  */
 export function HarnessAgents({
   harness,
@@ -200,8 +212,12 @@ export function HarnessAgents({
   const all = useAppStore((app) => app.providers?.agents)
   const agents = (all ?? []).filter((agent) => agent.harness === harness)
   const [target, setTarget] = useState<PanelTarget>(null)
+  const offersNew = FORMATS_OF[harness].length > 0
   return (
-    <div className="-mt-1 flex flex-col pb-1" data-testid={`harness-agents-${harness}`}>
+    <div
+      className={cn('flex flex-col', (agents.length > 0 || offersNew) && '-mt-1 pb-1')}
+      data-testid={`harness-agents-${harness}`}
+    >
       {agents.map((agent) => (
         <AgentItem
           key={agent.id}
@@ -211,15 +227,17 @@ export function HarnessAgents({
           onOpen={() => setTarget({ id: agent.id })}
         />
       ))}
-      <button
-        type="button"
-        onClick={() => setTarget({ id: null })}
-        className="flex h-10 items-center gap-3 pr-4 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground sm:pl-12"
-        data-testid={`new-agent-${harness}`}
-      >
-        <PlusIcon className="size-4" />
-        New agent
-      </button>
+      {offersNew && (
+        <button
+          type="button"
+          onClick={() => setTarget({ id: null })}
+          className="flex h-10 items-center gap-3 pr-4 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground sm:pl-12"
+          data-testid={`new-agent-${harness}`}
+        >
+          <PlusIcon className="size-4" />
+          New agent
+        </button>
+      )}
       <AgentPanel harness={harness} state={state} target={target} onTargetChange={setTarget} />
     </div>
   )

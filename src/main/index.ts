@@ -21,7 +21,7 @@ import {
 } from '../shared/providers'
 import { startBlockers } from '../shared/start-blockers'
 import { toolStatus } from '../shared/tool-status'
-import { getCodingTool, getTool, type CodingToolId } from '../shared/tools'
+import { CODING_TOOL_IDS, getCodingTool, getTool, type CodingToolId } from '../shared/tools'
 import {
   WINDOWS_LAYOUT_SWITCH,
   windowControlsArgument,
@@ -686,9 +686,18 @@ function startWithDatabase(database: DatabaseSync): void {
     trash: (folder) => desktop.trashItem(folder),
   })
   chatManager = chats
-  // Agents are made by hand: what an earlier Hoot kept for its coding tools,
-  // before agents, goes.
+  // What an earlier Hoot kept for its coding tools, before agents, goes.
   launchSettings.dropLegacy()
+  // Each harness a detection finds installed gets the agent of its own
+  // models, which Hoot makes turned off; the user makes every other agent.
+  const makeOwnAgents = (state: ToolsState) => {
+    if (state.detecting) return
+    providers.ensureOwnAgents(
+      CODING_TOOL_IDS.filter((id) => state.tools.some((tool) => tool.id === id && tool.available)),
+    )
+  }
+  tools.on('changed', makeOwnAgents)
+  makeOwnAgents(tools.getState())
   // OpenCode's own configuration loses the providers an earlier Hoot wrote
   // into it, once OpenCode is found installed.
   const tidyOpenCode = (state: ToolsState) => {

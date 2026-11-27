@@ -1,5 +1,13 @@
 # hoot
 
+## 0.1.0-alpha.37
+
+### Patch Changes
+
+- [`17665ca`](https://github.com/Levix0501/hoot/commit/17665cac27556225c9860733e5b7c0dd91c63fe8) - The panel of an agent on its own models says Not signed in where Antigravity CLI is signed in to no Google account, and reads the models again as it opens while none are offered, so they show once the agent is signed in.
+
+- [`28eef78`](https://github.com/Levix0501/hoot/commit/28eef78fe77d5d67eb489cf0999125e27725284b) - Antigravity CLI's agent on its own models is called Google AI, after Google's AI plans, instead of Google account.
+
 ## 0.1.0-alpha.36
 
 ### Patch Changes

@@ -9,6 +9,7 @@ import {
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  belowMinimumVersion,
   FOLDER_NOT_WRITABLE_MESSAGE,
   INSTALL_NEEDS_NODE_MESSAGE,
   INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
@@ -443,8 +444,9 @@ function AgentActions({
 
 /**
  * An installed harness's row: the program alone, what it is doing or can do,
- * and its version, which opens its version menu. Its agents follow it (see
- * `HarnessAgents`).
+ * and its version, which opens its version menu; below, that Hoot needs a
+ * newer version, where it does, and why Update cannot update it, where it
+ * cannot. Its agents follow it (see `HarnessAgents`).
  */
 function AgentRow({
   tool,
@@ -461,6 +463,18 @@ function AgentRow({
 }) {
   const status = agentRowStatus(agent, target)
   const id = tool.id
+  const version = agent.installation?.version ?? null
+  const notes = [
+    ...(version !== null && belowMinimumVersion(id, version)
+      ? [`Hoot needs ${tool.minimumVersion} or later`]
+      : []),
+    ...(status.kind === 'update-blocked'
+      ? [
+          ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
+          ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
+        ]
+      : []),
+  ]
   return (
     <div
       className="flex flex-col gap-2.5 px-4 py-3"
@@ -478,12 +492,9 @@ function AgentRow({
         <AgentActions agent={agent} status={status} onFailure={onFailure} />
         <VersionMenu agent={agent} onUninstall={onUninstall} />
       </div>
-      {status.kind === 'update-blocked' && (
-        <p className="text-xs text-muted-foreground sm:pl-8">
-          {joined([
-            ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
-            ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
-          ])}
+      {notes.length > 0 && (
+        <p className="text-xs text-muted-foreground sm:pl-8" data-testid={`agent-note-${id}`}>
+          {joined(notes)}
         </p>
       )}
     </div>

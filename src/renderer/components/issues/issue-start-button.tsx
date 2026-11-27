@@ -49,6 +49,7 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
     case 'checking':
       return <p>Hoot is still checking whether Claude Code is installed.</p>
     case 'not-installed':
+    case 'outdated':
       return <p>{startBlockerText(blocker)}</p>
     case 'no-project':
       return (

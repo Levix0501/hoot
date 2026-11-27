@@ -1,3 +1,4 @@
+import { minimumVersionText } from './agents'
 import type { ToolsState } from './ipc'
 import { issueIdentifier, type Issue } from './issues'
 import { toolStatus } from './tool-status'
@@ -7,13 +8,15 @@ import type { WorkflowProgress } from './workflows'
 /**
  * A reason work on an issue cannot be started now, by its start button, its
  * Start new session or `hoot session start`: Claude Code is still being
- * checked for, it is not installed, or it has no agent turned on; the issue
- * belongs to no project, in which its worktree would be; it waits on issues
- * neither done nor canceled; or its workflow is finished.
+ * checked for, it is not installed, it is older than the oldest version Hoot
+ * works with, or it has no agent turned on; the issue belongs to no project,
+ * in which its worktree would be; it waits on issues neither done nor
+ * canceled; or its workflow is finished.
  */
 export type StartBlocker =
   | { kind: 'checking' }
   | { kind: 'not-installed' }
+  | { kind: 'outdated' }
   | { kind: 'no-agent' }
   | { kind: 'no-project' }
   /** The issues it waits on, in the order it became blocked by them. */
@@ -55,6 +58,8 @@ export function startBlockerText(blocker: StartBlocker): string {
       return 'Hoot is still checking whether Claude Code is installed.'
     case 'not-installed':
       return 'Claude Code is not installed: install it in the Agents page.'
+    case 'outdated':
+      return `${minimumVersionText('claude')}: update it in the Agents page.`
     case 'no-agent':
       return 'Claude Code has no agent turned on: set one up in the Agents page.'
     case 'no-project':

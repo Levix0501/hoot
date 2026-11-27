@@ -23,6 +23,15 @@ describe('tools', () => {
     expect(() => getCodingTool('shell' as never)).toThrow(/Unknown coding tool/)
   })
 
+  it('works with each coding tool from the first version that reports its status', () => {
+    expect(CODING_TOOLS.map((tool) => [tool.id, tool.minimumVersion])).toEqual([
+      ['claude', '2.1.295'],
+      ['codex', '0.163.0'],
+      ['opencode', '2.1.0'],
+      ['antigravity', '1.4.0'],
+    ])
+  })
+
   it('lists every tool id once', () => {
     expect(TOOLS.map((tool) => tool.id)).toEqual([...TOOL_IDS])
   })

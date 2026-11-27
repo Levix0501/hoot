@@ -6,10 +6,9 @@ import { parse, type ParseError } from 'jsonc-parser'
 import { envVariable, type Env } from '../env/env'
 
 /**
- * The variable OpenCode 2, from 2.0.6 on, takes the settings of its terminal
- * interface from, over those of its cli.json: an object in it is merged with
- * the file's, and any other value, a list of plugins among them, replaces the
- * file's. OpenCode 1.x leaves it aside.
+ * The variable OpenCode takes the settings of its terminal interface from,
+ * over those of its cli.json: an object in it is merged with the file's, and
+ * any other value, a list of plugins among them, replaces the file's.
  */
 export const OPENCODE_CLI_CONFIG = 'OPENCODE_CLI_CONFIG_CONTENT'
 

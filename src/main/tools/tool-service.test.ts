@@ -3,6 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ToolsState } from '../../shared/ipc'
+import { toolStatus } from '../../shared/tool-status'
+import { getTool, type ToolId } from '../../shared/tools'
 import { samePath } from '../agents/agent-paths'
 import type { resolveLoginShellEnv } from '../env/login-shell-env'
 import { removeTestFolder } from '../test-support'
@@ -55,6 +57,56 @@ describe('ToolService', () => {
     expect(state.tools.find((tool) => tool.id === 'claude')?.path).toSatisfy(isCommand(claude))
     expect(state.error).toBeNull()
     expect((await service.getLoginEnvironment()).env.PATH).toBe(onPath(bin, '/usr/bin'))
+  })
+
+  it('reads the version each agent it finds reports, which tells one too old for Hoot', async () => {
+    const folder = path.join(bin, 'versions')
+    await writeNodeCommand(
+      path.join(folder, 'codex'),
+      "if (process.argv.includes('--version')) console.log('codex-cli 0.162.1')\n",
+    )
+    const service = new ToolService({
+      shell: '/bin/zsh',
+      baseEnv: {},
+      cwd: '/',
+      resolveEnv: async () => ({ PATH: onPath(folder, bin, '/usr/bin') }),
+      platform: 'darwin',
+    })
+    const { state, versions } = await service.detectWithEnvironment()
+    const versionOf = (id: ToolId) => state.tools.find((tool) => tool.id === id)?.version
+    expect(versionOf('codex')).toBe('0.162.1')
+    expect(versions.get('codex')).toMatchObject({ version: '0.162.1', exitCode: 0 })
+    expect(toolStatus(state, getTool('codex'))).toBe('outdated')
+    // The stand-in of Claude Code says none: it may run all the same.
+    expect(versionOf('claude')).toBeNull()
+    expect(toolStatus(state, getTool('claude'))).toBe('available')
+    expect(versionOf('opencode')).toBeNull()
+    expect(versionOf('shell')).toBeNull()
+  })
+
+  it("gives the login shell environment it reads without waiting for the agents' versions", async () => {
+    const folder = path.join(bin, 'slow')
+    const gate = path.join(folder, 'gate')
+    // A stand-in of OpenCode that says its version only once the test lets it.
+    await writeNodeCommand(
+      path.join(folder, 'opencode'),
+      `const fs = require('node:fs')
+const wait = () => (fs.existsSync(${JSON.stringify(gate)}) ? console.log('opencode v2.4.2') : setTimeout(wait, 20))
+wait()
+`,
+    )
+    const service = new ToolService({
+      shell: '/bin/zsh',
+      baseEnv: {},
+      cwd: '/',
+      resolveEnv: async () => ({ PATH: onPath(folder, '/usr/bin') }),
+      platform: 'darwin',
+    })
+    const detection = service.detectWithEnvironment()
+    expect((await service.getLoginEnvironment()).env.PATH).toBe(onPath(folder, '/usr/bin'))
+    fs.writeFileSync(gate, '')
+    const { state } = await detection
+    expect(state.tools.find((tool) => tool.id === 'opencode')?.version).toBe('2.4.2')
   })
 
   it('reads the login shell environment again on every detection', async () => {

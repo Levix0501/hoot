@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { ToolAvailability, ToolsState } from '../../shared/ipc'
-import { TOOLS } from '../../shared/tools'
+import { TOOLS, type CodingToolId } from '../../shared/tools'
 import { findAgentCommand } from '../agents/agent-command'
+import { readAgentVersion, type VersionReading } from '../agents/version'
 import type { Env } from '../env/env'
 import { resolveLoginShellEnv } from '../env/login-shell-env'
 
@@ -39,19 +40,24 @@ export interface LoginEnvironment {
 export interface Detection {
   state: ToolsState
   login: LoginEnvironment
+  /** What running each agent's command found with `--version` showed, by the agent. */
+  versions: Map<CodingToolId, VersionReading>
 }
 
 /**
  * Reads the login shell environment (on Windows, takes the one Hoot started
  * with) and checks which tools can be found on its PATH, or for an agent in
- * the folders its official installer puts it in (see `findAgentCommand`).
- * Detection runs at startup and again whenever the user asks for it, or an
- * agent has been installed or updated.
+ * the folders its official installer puts it in (see `findAgentCommand`),
+ * and which version each agent found reports, which decides whether it can
+ * start sessions (see `toolStatus`). Detection runs at startup and again
+ * whenever the user asks for it, or an agent has been installed or updated.
  */
 export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   private state: ToolsState = { detecting: false, tools: [], error: null }
   private login: LoginEnvironment | null = null
   private running: Promise<Detection> | null = null
+  /** The login shell environment the running detection reads first. */
+  private readingLogin: Promise<LoginEnvironment> | null = null
   /** The detection that starts once the running one ends. */
   private queued: Promise<Detection> | null = null
 
@@ -87,9 +93,13 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     return queued
   }
 
-  /** The most recently read login shell environment, detecting first if needed. */
+  /**
+   * The most recently read login shell environment, detecting first if
+   * needed: while a detection runs, the one it reads, without waiting for it
+   * to read the agents' versions.
+   */
   async getLoginEnvironment(): Promise<LoginEnvironment> {
-    if (this.running) await this.running
+    if (this.readingLogin) await this.readingLogin
     if (!this.login) await this.detect()
     return this.login ?? { env: this.options.baseEnv, error: 'Not detected.' }
   }
@@ -103,9 +113,17 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
 
   private start(): Promise<Detection> {
     this.setState({ ...this.state, detecting: true })
-    const running = this.runDetection().finally(() => {
-      if (this.running === running) this.running = null
+    const readingLogin = this.readLoginEnvironment().then((login) => {
+      this.login = login
+      return login
     })
+    const running = readingLogin
+      .then((login) => this.findTools(login))
+      .finally(() => {
+        if (this.running === running) this.running = null
+        if (this.readingLogin === readingLogin) this.readingLogin = null
+      })
+    this.readingLogin = readingLogin
     this.running = running
     return running
   }
@@ -140,25 +158,26 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     }
   }
 
-  private async runDetection(): Promise<Detection> {
-    const login = await this.readLoginEnvironment()
-    this.login = login
-
+  /** Looks for every tool in a login shell environment, and reads the versions of the agents found. */
+  private async findTools(login: LoginEnvironment): Promise<Detection> {
+    const home = this.options.home ?? this.options.cwd
+    const versions = new Map<CodingToolId, VersionReading>()
     const tools: ToolAvailability[] = await Promise.all(
       TOOLS.map(async (tool) => {
-        if (!tool.command) return { id: tool.id, available: true, path: this.options.shell }
-        const found = await findAgentCommand(
-          tool.id,
-          tool.command,
-          login.env,
-          this.options.home ?? this.options.cwd,
-        )
-        return { id: tool.id, available: found !== null, path: found }
+        if (!tool.command) {
+          return { id: tool.id, available: true, path: this.options.shell, version: null }
+        }
+        const found = await findAgentCommand(tool.id, tool.command, login.env, home)
+        if (found === null) return { id: tool.id, available: false, path: null, version: null }
+        // Run by the computer's own rules, as the command is the computer's.
+        const reading = await readAgentVersion(tool.id, found, login.env, home)
+        versions.set(tool.id, reading)
+        return { id: tool.id, available: true, path: found, version: reading.version }
       }),
     )
     const state: ToolsState = { detecting: false, tools, error: login.error }
     this.setState(state)
-    return { state, login }
+    return { state, login, versions }
   }
 
   private setState(state: ToolsState): void {

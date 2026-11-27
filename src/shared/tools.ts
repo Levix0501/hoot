@@ -22,6 +22,12 @@ export interface CodingToolDefinition {
    * so keep it on one.
    */
   versions: boolean
+  /**
+   * The oldest version Hoot works with: the first that reports its status
+   * over OSC 7501, which its sessions' lights follow (see `program-status.ts`
+   * in the renderer). An older one starts no session until it is updated.
+   */
+  minimumVersion: string
 }
 
 export interface ShellToolDefinition {
@@ -42,6 +48,7 @@ export const TOOLS: readonly ToolDefinition[] = [
     command: 'claude',
     npmPackage: '@anthropic-ai/claude-code',
     versions: true,
+    minimumVersion: '2.1.295',
   },
   {
     id: 'codex',
@@ -49,6 +56,7 @@ export const TOOLS: readonly ToolDefinition[] = [
     command: 'codex',
     npmPackage: '@openai/codex',
     versions: true,
+    minimumVersion: '0.163.0',
   },
   {
     id: 'opencode',
@@ -56,6 +64,7 @@ export const TOOLS: readonly ToolDefinition[] = [
     command: 'opencode',
     npmPackage: '@opencode/cli',
     versions: true,
+    minimumVersion: '2.1.0',
   },
   {
     // Only its latest version can be installed: its installer and its own
@@ -65,6 +74,7 @@ export const TOOLS: readonly ToolDefinition[] = [
     command: 'agy',
     npmPackage: null,
     versions: false,
+    minimumVersion: '1.4.0',
   },
   {
     id: 'shell',

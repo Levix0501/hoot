@@ -14,6 +14,7 @@ import {
   type Provider,
 } from '../../shared/providers'
 import { samePath } from '../agents/agent-paths'
+import { readAgentVersion } from '../agents/version'
 import type { CodexCatalogSupport } from '../providers/codex-catalog'
 import { removeTestFolder } from '../test-support'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
@@ -130,6 +131,8 @@ function context(
     follow: (tool) => follows[tool] ?? { kind: 'latest' },
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
+    agentVersion: async (tool, command, env) =>
+      (await readAgentVersion(tool, command, env, root)).version,
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
     provider: null,
     modelMap: {},
@@ -170,6 +173,12 @@ const hootVariables = {
  */
 const hookSettings = () => ['--settings', claudeSettingsFilePath(settingsFolder(), hoot.sessionId)]
 
+/** What every Codex session starts with before its own arguments: no shared background server. */
+const codexLeading = ['--no-daemon']
+
+/** The hook Hoot gives every Codex session, after its own arguments. */
+const codexHooks = ['-c', CODEX_HOOK_SETTING]
+
 describe('resolveLaunch', () => {
   it('runs the default shell as a login shell from the base environment', async () => {
     const launch = await resolveLaunch(context({ PATH: onPath(bin, '/usr/bin') }), 'shell', project)
@@ -194,7 +203,12 @@ describe('resolveLaunch', () => {
     const launch = await resolveLaunch(context(loginEnv), 'codex', project)
     const codex = program(bin, 'codex')
     expect(launch.file).toBe(codex.file)
-    expect(launch.args).toEqual([...codex.args, '--dangerously-bypass-approvals-and-sandbox'])
+    expect(launch.args).toEqual([
+      ...codex.args,
+      ...codexLeading,
+      '--dangerously-bypass-approvals-and-sandbox',
+      ...codexHooks,
+    ])
     expect(launch.env).toMatchObject({
       PATH: onPath(hoot.binDirectory, bin, '/usr/bin'),
       FROM_RC: 'yes',
@@ -228,6 +242,8 @@ describe('resolveLaunch', () => {
     ])
     expect((await resolveLaunch(context(loginEnv, {}, false), 'codex', project)).args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
+      ...codexHooks,
     ])
     await writeNodeCommand(path.join(bin, 'opencode'), '')
     expect((await resolveLaunch(context(loginEnv, {}, false), 'opencode', project)).args).toEqual([
@@ -263,12 +279,14 @@ describe('resolveLaunch', () => {
     )
     expect(codex.args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
       '--dangerously-bypass-approvals-and-sandbox',
       '--model',
       'deepseek-v4-pro',
       '-c',
       'model_reasoning_effort=high',
       '--foo',
+      ...codexHooks,
     ])
   })
 
@@ -308,11 +326,13 @@ describe('resolveLaunch', () => {
     )
     expect(codex.args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
       '--dangerously-bypass-approvals-and-sandbox',
       '-c',
       'model_reasoning_effort=low',
       '-m',
       'gpt-6',
+      ...codexHooks,
     ])
     // Another agent's extra arguments do not change this one's permission.
     expect(
@@ -323,7 +343,12 @@ describe('resolveLaunch', () => {
           project,
         )
       ).args,
-    ).toEqual([...program(bin, 'codex').args, '--dangerously-bypass-approvals-and-sandbox'])
+    ).toEqual([
+      ...program(bin, 'codex').args,
+      ...codexLeading,
+      '--dangerously-bypass-approvals-and-sandbox',
+      ...codexHooks,
+    ])
   })
 
   it('keeps the settings the session started with while the login environment is read', async () => {
@@ -389,7 +414,9 @@ describe('resolveLaunch', () => {
       ...program(bin, 'codex').args,
       'resume',
       'thread-id',
+      ...codexLeading,
       '--dangerously-bypass-approvals-and-sandbox',
+      ...codexHooks,
     ])
     // A new Codex conversation has no id yet, and starts as any session does.
     const codexNew = await resolveLaunch(context(loginEnv), 'codex', project, null, {
@@ -398,7 +425,9 @@ describe('resolveLaunch', () => {
     })
     expect(codexNew.args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
       '--dangerously-bypass-approvals-and-sandbox',
+      ...codexHooks,
     ])
 
     await writeNodeCommand(path.join(bin, 'opencode'), '')
@@ -407,8 +436,8 @@ describe('resolveLaunch', () => {
       resume: true,
     })
     expect(opencode.args).toEqual([...program(bin, 'opencode').args, '--auto', '-s', 'ses_one'])
-    // OpenCode picks the id of a new one too, which OpenCode 1.x needs: it
-    // takes `-s` for a conversation to continue alone.
+    // OpenCode picks the id of a new one too: it takes `-s` for a
+    // conversation to continue alone.
     const opencodeNew = await resolveLaunch(context(loginEnv), 'opencode', project, null, {
       conversationId: null,
       resume: false,
@@ -493,9 +522,11 @@ describe('resolveLaunch', () => {
     })
     expect(codex.args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
       '--dangerously-bypass-approvals-and-sandbox',
       '-c',
       'model=x',
+      ...codexHooks,
       '--',
       message,
     ])
@@ -701,6 +732,7 @@ describe('resolveLaunch', () => {
       ...program(bin, 'codex').args,
       'resume',
       'thread-1',
+      ...codexLeading,
       '-c',
       'model_provider="hoot"',
       '-c',
@@ -710,6 +742,7 @@ describe('resolveLaunch', () => {
       'kimi-k3',
       '-c',
       'model_reasoning_effort=high',
+      ...codexHooks,
     ])
     expect(codex.env.HOOT_CODEX_API_KEY).toBe('sk-kimi')
     // On its subscription, OpenAI's provider, whatever the user's configuration names.
@@ -720,9 +753,11 @@ describe('resolveLaunch', () => {
     )
     expect(own.args).toEqual([
       ...program(bin, 'codex').args,
+      ...codexLeading,
       '-c',
       'model_provider="openai"',
       '--dangerously-bypass-approvals-and-sandbox',
+      ...codexHooks,
     ])
     expect(own.env).not.toHaveProperty('HOOT_CODEX_API_KEY')
   })
@@ -953,42 +988,28 @@ describe('resolveLaunch', () => {
     expect(writtenSettings()).not.toHaveProperty('effortLevel')
   })
 
-  it('gives a Codex that runs hooks in the background, and only such a Codex, the hook that reports its conversations', async () => {
-    const folder = path.join(root, 'codex-versions')
+  it('runs every Codex session without its shared background server, with the hook that reports its conversations', async () => {
+    const folder = path.join(root, 'codex-sessions')
     const loginEnv = { PATH: onPath(folder, '/usr/bin') }
     const codex = program(folder, 'codex')
-    /** Makes the stand-in Codex say `text` when asked its version. */
-    const says = (text: string) =>
-      writeNodeCommand(
-        path.join(folder, 'codex'),
-        `if (process.argv.includes('--version')) console.log(${JSON.stringify(text)})\n`,
-      )
+    await writeNodeCommand(
+      path.join(folder, 'codex'),
+      `if (process.argv.includes('--version')) console.log('codex-cli 0.172.0')\n`,
+    )
     const hookArguments = ['-c', CODEX_HOOK_SETTING]
     const agents = { codex: { effort: 'high', extraArgs: ['--search'] } }
     const message = 'Merge the worktree feature-x.'
 
-    // Read again for each session, as Codex may change while Hoot runs. One
-    // that takes it runs without its shared background server, which the
-    // hook's setting keeps it from anyway.
-    const versions = [
-      ['codex-cli 0.163.0', ['--no-daemon']],
-      ['codex-cli 0.156.0', ['--no-daemon']],
-      ['codex-cli 0.155.0', []],
-      ['codex-cli 0.148.0', []],
-      ['codex-cli 0.149.0-alpha.1', []],
-    ] as const
-    for (const [version, daemon] of versions) {
-      await says(version)
-      expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
-        ...codex.args,
-        ...daemon,
-        '--dangerously-bypass-approvals-and-sandbox',
-        '-c',
-        'model_reasoning_effort=high',
-        '--search',
-        ...hookArguments,
-      ])
-    }
+    // The hook's setting keeps it from that server anyway.
+    expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
+      ...codex.args,
+      '--no-daemon',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '-c',
+      'model_reasoning_effort=high',
+      '--search',
+      ...hookArguments,
+    ])
     const resumed = await resolveLaunch(context(loginEnv), 'codex', project, null, {
       conversationId: 'thread-id',
       resume: true,
@@ -997,6 +1018,7 @@ describe('resolveLaunch', () => {
       ...codex.args,
       'resume',
       'thread-id',
+      '--no-daemon',
       '--dangerously-bypass-approvals-and-sandbox',
       ...hookArguments,
     ])
@@ -1005,20 +1027,7 @@ describe('resolveLaunch', () => {
       resume: false,
       firstMessage: message,
     })
-    expect(merging.args).toEqual([...codex.args, ...hookArguments, '--', message])
-    await says('codex-cli 0.172.0')
-    const resumedOnNewer = await resolveLaunch(context(loginEnv), 'codex', project, null, {
-      conversationId: 'thread-id',
-      resume: true,
-    })
-    expect(resumedOnNewer.args).toEqual([
-      ...codex.args,
-      'resume',
-      'thread-id',
-      '--no-daemon',
-      '--dangerously-bypass-approvals-and-sandbox',
-      ...hookArguments,
-    ])
+    expect(merging.args).toEqual([...codex.args, '--no-daemon', ...hookArguments, '--', message])
     // Not twice, where the agent's own arguments have it.
     const ownDaemon = { codex: { extraArgs: ['--no-daemon'] } }
     expect((await resolveLaunch(context(loginEnv, ownDaemon), 'codex', project)).args).toEqual([
@@ -1027,18 +1036,35 @@ describe('resolveLaunch', () => {
       '--no-daemon',
       ...hookArguments,
     ])
+  })
 
-    // An older Codex, or one whose version cannot be read, starts as it did.
-    for (const version of ['codex-cli 0.147.0', 'codex-cli 0.148.0-alpha.2', 'codex-cli']) {
-      await says(version)
-      expect((await resolveLaunch(context(loginEnv, agents), 'codex', project)).args).toEqual([
-        ...codex.args,
-        '--dangerously-bypass-approvals-and-sandbox',
-        '-c',
-        'model_reasoning_effort=high',
-        '--search',
-      ])
+  it('starts no session of an agent older than the oldest version Hoot works with', async () => {
+    const folder = path.join(root, 'agent-versions')
+    const loginEnv = { PATH: onPath(folder, '/usr/bin') }
+    /** Makes the stand-in of a command say `text` when asked its version. */
+    const says = (command: string, text: string) =>
+      writeNodeCommand(
+        path.join(folder, command),
+        `if (process.argv.includes('--version')) console.log(${JSON.stringify(text)})\n`,
+      )
+    const agents = [
+      ['claude', 'claude', '2.1.294 (Claude Code)', '2.1.295 (Claude Code)', 'Claude Code 2.1.295'],
+      ['codex', 'codex', 'codex-cli 0.162.1', 'codex-cli 0.163.0', 'Codex 0.163.0'],
+      ['opencode', 'opencode', 'opencode v2.0.32', 'opencode v2.1.0', 'OpenCode 2.1.0'],
+      ['antigravity', 'agy', '1.3.6', '1.4.0', 'Antigravity CLI 1.4.0'],
+    ] as const
+    for (const [tool, command, older, oldest, needed] of agents) {
+      await says(command, older)
+      await expect(resolveLaunch(context(loginEnv), tool, project)).rejects.toThrow(
+        new SessionError(`Hoot needs ${needed} or later. Update it on the Agents page.`),
+      )
+      await says(command, oldest)
+      const launch = await resolveLaunch(context(loginEnv), tool, project)
+      expect(launch.file).toBe(program(folder, command).file)
     }
+    // One whose version cannot be read starts all the same.
+    await says('codex', 'codex-cli')
+    await expect(resolveLaunch(context(loginEnv), 'codex', project)).resolves.toBeDefined()
   })
 
   it("gives a Codex session on a provider of the user's a catalog of the provider's models", async () => {
@@ -1176,15 +1202,10 @@ describe('resolveLaunch', () => {
     picked.cleanup?.()
     expect(asked).toHaveLength(3)
 
-    // None where Hoot read nothing of this Codex it takes, nor on a Codex before 0.163.
+    // None where Hoot read nothing of this Codex it takes.
     const unread = await on(deepseek, { support: null })
     expect(unread.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
     expect(unread.cleanup).toBeUndefined()
-    await says('codex-cli 0.162.0')
-    const older = await on(deepseek)
-    expect(older.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
-    const olderSubscription = await on(ownProvider('codex'), { namesCatalog: true })
-    expect(olderSubscription.args.some((arg) => arg.startsWith('model_catalog_json='))).toBe(false)
     expect(asked).toHaveLength(4)
   })
 
@@ -1369,9 +1390,11 @@ describe('resolveLaunch', () => {
       const codex = await resolveLaunch(context(loginEnv), 'codex', project)
       expect(codex.args).toEqual([
         ...program(bin, 'codex').args,
+        ...codexLeading,
         '-c',
         'check_for_update_on_startup=false',
         '--dangerously-bypass-approvals-and-sandbox',
+        ...codexHooks,
       ])
       follows.claude = { kind: 'stable' }
       const stable = await resolveLaunch(context(loginEnv), 'claude', project)

@@ -80,13 +80,13 @@ export type SessionState =
  * while it was not viewed, or reported that it is done then, it is done
  * until it is viewed, and idle otherwise.
  *
- * Without reports, as from a Claude Code older than 2.1.295, a running Claude
- * Code session waits for the user while one of its dialogs does, works while
- * its title says so, has stopped on an error otherwise once a turn of its
- * main agent did, until a later turn starts (while a background agent goes
- * on, its dialogs and its work show first), is done once it stopped working
- * while it was not viewed, until it is viewed, and is idle otherwise. Any
- * other session runs.
+ * Without reports, as before Claude Code's first or once it has cleared
+ * them, a running Claude Code session waits for the user while one of its
+ * dialogs does, works while its title says so, has stopped on an error
+ * otherwise once a turn of its main agent did, until a later turn starts
+ * (while a background agent goes on, its dialogs and its work show first),
+ * is done once it stopped working while it was not viewed, until it is
+ * viewed, and is idle otherwise. Any other session runs.
  */
 export function sessionState(session: StateSource): SessionState {
   if (session.status === 'starting') return 'starting'

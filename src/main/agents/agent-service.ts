@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { valid } from 'semver'
 import {
+  belowMinimumVersion,
   failedMessage,
   FOLDER_NOT_WRITABLE_MESSAGE,
   installedMessage,
@@ -40,7 +41,6 @@ import type { Detection, LoginEnvironment } from '../tools/tool-service'
 import { commandProgram } from '../tools/command-program'
 import { findAgentCopies } from './agent-command'
 import { canonicalPath, homeDisplayPath, samePath } from './agent-paths'
-import { withoutAntigravityUpdates } from './antigravity'
 import {
   detectInstallMethod,
   OFFICIAL_UPDATE_COMMANDS,
@@ -62,7 +62,7 @@ import { canInstallInto, findComputerNpm, npmGlobalFolderOf, type ComputerNpm } 
 import { startProcess, type CommandSpec, type ProcessEnd, type RunningProcess } from './processes'
 import type { Releases } from './releases'
 import { TerminalText } from './terminal-text'
-import { readVersion } from './version'
+import { readAgentVersion, type VersionReading } from './version'
 
 /** How many of the last lines of a failed operation's output its row shows. */
 const TAIL_LINES = 5
@@ -308,14 +308,6 @@ async function packageVersion(
   }
 }
 
-/**
- * The environment Hoot runs an agent in to read its version: for Antigravity
- * CLI, without its own updater, which any run of it can start.
- */
-function versionEnv(tool: CodingToolDefinition, env: Env): Env {
-  return tool.id === 'antigravity' ? withoutAntigravityUpdates(env) : env
-}
-
 async function exists(file: string): Promise<boolean> {
   return (await fs.lstat(file).catch(() => null)) !== null
 }
@@ -526,13 +518,15 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
    * on, unless it is installed; the latest version, or Stable's, when it is
    * newer than the one installed and Hoot can update it. Stable never
    * installs an older version: the installation waits for Stable to catch up.
-   * An agent Hoot can install no other version of follows its latest alone.
+   * An agent Hoot can install no other version of follows its latest alone,
+   * and none stays on a version older than the oldest Hoot works with.
    */
   setFollow(id: CodingToolId, follow: AgentFollow): void {
     const record = this.record(id)
     if (isPending(record.operation)) return
     if (follow.kind === 'stable' && id !== 'claude') return
     if (follow.kind !== 'latest' && !record.tool.versions) return
+    if (follow.kind === 'stay' && belowMinimumVersion(id, follow.version)) return
     this.follows.set(id, follow)
     const installed = record.installation?.version ?? null
     if (installed !== null) {
@@ -772,7 +766,13 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
             const [installation, copies] = await Promise.all([
               command === null
                 ? null
-                : this.describe(record.tool, command, env, npm).catch(() => null),
+                : this.describe(
+                    record.tool,
+                    command,
+                    env,
+                    npm,
+                    detection.versions.get(record.tool.id) ?? null,
+                  ).catch(() => null),
               command === null ? [] : this.readCopies(record.tool, command, env, npm),
             ])
             if (ids[index] === record.readingId) {
@@ -857,19 +857,20 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
 
   /**
    * An agent's installation as a detection found it: how it was installed,
-   * its version, and whether Hoot can update it, install another version in
-   * its place, and uninstall it.
+   * its version, as the detection read it where it did, and whether Hoot can
+   * update it, install another version in its place, and uninstall it.
    */
   private async describe(
     tool: CodingToolDefinition,
     command: string,
     env: Env,
     npm: ComputerNpm | null,
+    reading: VersionReading | null,
   ): Promise<Installation> {
     const { home } = this.options
     const [method, version, displayPath] = await Promise.all([
       detectInstallMethod(tool, command, this.methodContext(env, npm)),
-      readVersion(command, versionEnv(tool, env), home, this.platform),
+      reading ?? readAgentVersion(tool.id, command, env, home, this.platform),
       this.displayPath(command),
     ])
     const writable =
@@ -922,7 +923,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         try {
           const [method, version] = await Promise.all([
             detectInstallMethod(tool, file, this.methodContext(env, npm)),
-            readVersion(file, versionEnv(tool, env), home, this.platform),
+            readAgentVersion(tool.id, file, env, home, this.platform),
           ])
           const writable =
             method.kind === 'npm' ? await canInstallInto(method.prefix, this.platform) : true

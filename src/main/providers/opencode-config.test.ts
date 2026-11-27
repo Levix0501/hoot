@@ -16,7 +16,6 @@ import {
   readOpenCodeLaunchOptions,
   removeHootProviders,
   RESPONSES_COMPATIBLE,
-  takesProviders,
   writeHootOpenCodeConfig,
 } from './opencode-config'
 
@@ -175,15 +174,6 @@ describe("OpenCode's own configuration", () => {
     fs.rmSync(file)
     expect(await removeHootProviders({}, home)).toBe(false)
     expect(fs.existsSync(file)).toBe(false)
-  })
-
-  it('takes providers from OpenCode 2 on', () => {
-    expect(takesProviders('2.0.32')).toBe(true)
-    expect(takesProviders('2.4.1')).toBe(true)
-    expect(takesProviders('3.0.0')).toBe(true)
-    expect(takesProviders('1.19.6')).toBe(false)
-    expect(takesProviders('opencode')).toBe(false)
-    expect(takesProviders(null)).toBe(false)
   })
 
   it("asks OpenCode's service for its free models again while it lists none yet", async () => {

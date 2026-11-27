@@ -2,7 +2,6 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { findNodeAtLocation, parse, parseTree, type JSONPath, type ParseError } from 'jsonc-parser'
-import { major, valid } from 'semver'
 import type { AgentLaunchOptions } from '../../shared/agents'
 import {
   agentModels,
@@ -52,18 +51,6 @@ const MODEL_LIST_TRIES = 5
 
 /** How long Hoot waits before asking again. */
 const MODEL_LIST_INTERVAL_MS = 1500
-
-/**
- * Whether an OpenCode takes Hoot's providers, as the version it reports
- * says: OpenCode 2 does, with `providers` in its configuration and the
- * conversations `opencode api` makes. OpenCode 1 has neither, so Hoot runs
- * it as it did before it had providers and leaves its configuration alone;
- * so too one whose version Hoot cannot read.
- */
-export function takesProviders(version: string | null): boolean {
-  const parsed = version === null ? null : valid(version)
-  return parsed !== null && major(parsed) >= 2
-}
 
 function objectOf(value: unknown): JsonObject | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

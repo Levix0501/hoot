@@ -1,6 +1,8 @@
 import { parseVersion, shownCommand } from '../../shared/agents'
+import type { CodingToolId } from '../../shared/tools'
 import type { Env } from '../env/env'
 import { commandProgram, type CommandProgram } from '../tools/command-program'
+import { withoutAntigravityUpdates } from './antigravity'
 import { runCommand } from './processes'
 import { terminalText } from './terminal-text'
 
@@ -69,4 +71,21 @@ export async function readVersion(
     // Windows, where taskkill ends it, with 1 (see `runCommand`).
     exitCode: result.timedOut ? null : result.code,
   }
+}
+
+/**
+ * Reads the version an agent's command reports (see `readVersion`), with the
+ * login shell environment `env`, but for Antigravity CLI, which would
+ * otherwise update itself even on a run that only says its version.
+ */
+export function readAgentVersion(
+  tool: CodingToolId,
+  command: string,
+  env: Env,
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+  timeoutMs = VERSION_TIMEOUT_MS,
+): Promise<VersionReading> {
+  const runEnv = tool === 'antigravity' ? withoutAntigravityUpdates(env) : env
+  return readVersion(command, runEnv, cwd, platform, timeoutMs)
 }

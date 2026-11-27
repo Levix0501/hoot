@@ -1294,23 +1294,24 @@ process.exitCode = 28`,
 
 describe('AgentService versions', () => {
   it('stays on a version it installs with npm, and follows the latest again', async () => {
-    await installInto(prefix, 'claude', '2.0.0')
+    await installInto(prefix, 'claude', '2.1.330')
+    setLatest('claude', '2.1.332')
     const { service, agent, ended } = setup({
-      latest: { claude: '2.1.0' },
-      releases: { claude: { versions: ['2.1.0', '2.0.0', '1.9.0'] } },
+      latest: { claude: '2.1.332' },
+      releases: { claude: { versions: ['2.1.332', '2.1.330', '2.1.326'] } },
     })
     await service.detect()
     await vi.waitFor(() => expect(agent('claude').releases).toHaveLength(3))
-    service.setFollow('claude', { kind: 'stay', version: '1.9.0' })
+    service.setFollow('claude', { kind: 'stay', version: '2.1.326' })
     await ended('claude')
     expect(agent('claude').operation).toMatchObject({
       kind: 'switch',
-      version: '1.9.0',
+      version: '2.1.326',
       status: 'succeeded',
-      message: '✓ Switched to 1.9.0',
+      message: '✓ Switched to 2.1.326',
     })
-    expect(agent('claude').installation?.version).toBe('1.9.0')
-    expect(agent('claude').follow).toEqual({ kind: 'stay', version: '1.9.0' })
+    expect(agent('claude').installation?.version).toBe('2.1.326')
+    expect(agent('claude').follow).toEqual({ kind: 'stay', version: '2.1.326' })
     // Staying, it is left out of Update all, and Update does nothing.
     const runs = npmRuns().length
     service.updateAll()
@@ -1322,9 +1323,18 @@ describe('AgentService versions', () => {
     await ended('claude')
     expect(agent('claude').operation).toMatchObject({ kind: 'update', status: 'succeeded' })
     expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
-      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@1.9.0 --loglevel=http`,
+      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@2.1.326 --loglevel=http`,
       `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@latest --loglevel=http`,
     ])
+  })
+
+  it('never stays on a version older than the oldest Hoot works with', async () => {
+    await installInto(prefix, 'opencode', '2.0.32')
+    const { service, agent } = setup({ latest: { opencode: '2.4.2' } })
+    await service.detect()
+    service.setFollow('opencode', { kind: 'stay', version: '2.0.32' })
+    expect(agent('opencode').follow).toEqual({ kind: 'latest' })
+    expect(agent('opencode').operation).toBeNull()
   })
 
   it('stays on the installed version without installing anything', async () => {
@@ -1415,10 +1425,10 @@ describe('AgentService versions', () => {
   )
 
   it('goes back to the version it stays on where another has taken its place', async () => {
-    await installInto(prefix, 'opencode', '2.0.0')
+    await installInto(prefix, 'opencode', '2.1.0')
     const { service, agent, ended } = setup()
     await service.detect()
-    service.setFollow('opencode', { kind: 'stay', version: '2.0.0' })
+    service.setFollow('opencode', { kind: 'stay', version: '2.1.0' })
     // Something outside Hoot updates it.
     await installInto(prefix, 'opencode', '2.4.0')
     await service.detect()
@@ -1426,7 +1436,7 @@ describe('AgentService versions', () => {
     service.restore('opencode')
     await ended('opencode')
     expect(agent('opencode').operation).toMatchObject({ kind: 'switch', status: 'succeeded' })
-    expect(agent('opencode').installation?.version).toBe('2.0.0')
+    expect(agent('opencode').installation?.version).toBe('2.1.0')
   })
 })
 

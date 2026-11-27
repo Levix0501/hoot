@@ -10,13 +10,18 @@ import {
 } from './chats'
 import { OWN_PROVIDER_IDS, type Agent, type ProvidersState } from './providers'
 
-function tools(available: ReadonlyArray<'claude' | 'codex' | 'opencode'>): ToolsState {
+/** The tools state once a detection has found these harnesses, each new enough unless `versions` says otherwise. */
+function tools(
+  available: ReadonlyArray<'claude' | 'codex' | 'opencode'>,
+  versions: Partial<Record<'claude' | 'codex' | 'opencode', string>> = {},
+): ToolsState {
   return {
     detecting: false,
     tools: (['claude', 'codex', 'opencode'] as const).map((id) => ({
       id,
       available: available.includes(id),
       path: available.includes(id) ? `/bin/${id}` : null,
+      version: available.includes(id) ? (versions[id] ?? null) : null,
     })),
     error: null,
   }
@@ -74,6 +79,11 @@ describe('chats', () => {
       ),
     }
     expect(ids(tools(['claude', 'codex', 'opencode']), off)).toEqual(['claude', 'opencode'])
+    // Those of a harness older than the oldest version Hoot works with wait for it to be updated.
+    expect(ids(tools(['claude', 'codex', 'opencode'], { opencode: '2.0.32' }))).toEqual([
+      'claude',
+      'codex',
+    ])
     expect(ids({ detecting: true, tools: [], error: null })).toEqual([])
     expect(usableChatAgents(tools(['claude']), null)).toEqual([])
   })

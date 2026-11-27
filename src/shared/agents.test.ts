@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  belowMinimumVersion,
   CANCELLED_MESSAGE,
   failedMessage,
   installedMessage,
   installNeedsNodeVersionMessage,
   isNewerVersion,
+  minimumVersionText,
   nodeRequirementMessage,
   nodeVersionsText,
   parseVersion,
@@ -90,5 +92,24 @@ describe('the commands and the Node.js requirements the Agents page shows', () =
     expect(nodeRequirementMessage('1.3.0', requirement)).toBe(
       '1.3.0 needs Node.js 22.19.0 or later (yours is 20.19.6)',
     )
+  })
+})
+
+describe('belowMinimumVersion', () => {
+  it('tells versions older than the oldest Hoot works with', () => {
+    expect(belowMinimumVersion('claude', '2.1.294')).toBe(true)
+    expect(belowMinimumVersion('claude', '2.1.295')).toBe(false)
+    expect(belowMinimumVersion('opencode', '2.0.32')).toBe(true)
+    expect(belowMinimumVersion('opencode', '1.18.35')).toBe(true)
+    expect(belowMinimumVersion('opencode', '2.1.0')).toBe(false)
+    expect(belowMinimumVersion('codex', '0.162.1')).toBe(true)
+    expect(belowMinimumVersion('antigravity', '1.5.18')).toBe(false)
+    // A prerelease of the oldest comes before it.
+    expect(belowMinimumVersion('codex', '0.163.0-alpha.10.1')).toBe(true)
+    expect(belowMinimumVersion('claude', 'unknown')).toBe(false)
+  })
+
+  it('says which version Hoot needs', () => {
+    expect(minimumVersionText('opencode')).toBe('Hoot needs OpenCode 2.1.0 or later')
   })
 })

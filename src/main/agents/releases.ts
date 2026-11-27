@@ -1,7 +1,7 @@
 import { compare, gte, parse, valid } from 'semver'
 import { z } from 'zod'
 import type { AgentRelease } from '../../shared/agents'
-import type { CodingToolId } from '../../shared/tools'
+import { getCodingTool, type CodingToolId } from '../../shared/tools'
 import type { Fetch } from './latest-version'
 
 /**
@@ -12,16 +12,6 @@ const TIMEOUT_MS = 60_000
 
 /** How many of an agent's newest versions its version menu offers. */
 const OFFERED = 40
-
-/**
- * The oldest version of each agent its version menu offers, the first Hoot
- * works with in full: Codex from the first that takes a catalog of models
- * (see `CODEX_CATALOG_VERSION`), OpenCode from 2, which takes providers.
- */
-const OLDEST: Partial<Record<CodingToolId, string>> = {
-  codex: '0.163.0',
-  opencode: '2.0.0',
-}
 
 /** What Hoot reads of an agent's releases on registry.npmjs.org. */
 export interface Releases {
@@ -70,9 +60,9 @@ function dayOf(time: string | undefined): string | null {
 /**
  * The versions of an agent's npm package that its version menu offers, from
  * the package's full document on registry.npmjs.org, with the day each came
- * out: its newest releases of their own, from the oldest Hoot works with in
- * full; and the version its `stable` tag names. `null` when they cannot be
- * read within `timeoutMs`; the request is then aborted.
+ * out: its newest releases of their own, from the oldest Hoot works with
+ * (see `minimumVersion`); and the version its `stable` tag names. `null`
+ * when they cannot be read within `timeoutMs`; the request is then aborted.
  */
 export async function fetchReleases(
   tool: CodingToolId,
@@ -106,9 +96,9 @@ export function releasesOf(
   command: string,
   document: z.infer<typeof packument>,
 ): Releases {
-  const oldest = OLDEST[tool]
+  const oldest = getCodingTool(tool).minimumVersion
   const versions = Object.keys(document.versions)
-    .filter((version) => isPlainRelease(version) && (oldest === undefined || gte(version, oldest)))
+    .filter((version) => isPlainRelease(version) && gte(version, oldest))
     .toSorted((a, b) => compare(b, a))
     .slice(0, OFFERED)
   const node = new Map<string, string>()

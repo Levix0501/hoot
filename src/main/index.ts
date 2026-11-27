@@ -20,6 +20,8 @@ import {
   providerOfOpenCodeId,
 } from '../shared/providers'
 import { startBlockers } from '../shared/start-blockers'
+import { toolStatus } from '../shared/tool-status'
+import { getCodingTool, getTool, type CodingToolId } from '../shared/tools'
 import {
   WINDOWS_LAYOUT_SWITCH,
   windowControlsArgument,
@@ -32,7 +34,7 @@ import { readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
 import { readAntigravityLaunchOptions } from './agents/antigravity'
 import { fetchAgentRelease } from './agents/latest-version'
 import { fetchReleases } from './agents/releases'
-import { readVersion } from './agents/version'
+import { readAgentVersion } from './agents/version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
 import { ChatManager } from './chats/chat-manager'
@@ -59,7 +61,6 @@ import {
   openCodeModelRef,
   readOpenCodeLaunchOptions,
   removeHootProviders,
-  takesProviders,
   type OpenCodeServer,
 } from './providers/opencode-config'
 import { OpenCodeServers } from './providers/opencode-server'
@@ -68,7 +69,7 @@ import { ProviderService } from './providers/provider-service'
 import { ProviderStore } from './providers/provider-store'
 import { PtyHostClient } from './pty/pty-host-client'
 import { QuitGuard } from './quit-guard'
-import { resolveLaunch, type AgentLaunch, type ChatLaunch } from './session/launch'
+import { agentCommandOf, resolveLaunch, type AgentLaunch, type ChatLaunch } from './session/launch'
 import { antigravityHooksFolder } from './session/antigravity-hooks'
 import { openCodePluginFolder } from './session/opencode-plugin'
 import { SessionError, SessionManager } from './session/session-manager'
@@ -196,9 +197,10 @@ function writeOpenCodeConfig(): void {
 const sessions: SessionManager = new SessionManager({
   host: ptyHost,
   resolveLaunch: async (toolId, cwd, issue, givenChat, agent, sessionId) => {
+    const agentVersion = launchVersions()
     const { chat, server } =
       toolId === 'opencode'
-        ? await openCodeLaunch(cwd, givenChat, agent, sessionId)
+        ? await openCodeLaunch(cwd, givenChat, agent, sessionId, agentVersion)
         : { chat: givenChat, server: null }
     return resolveLaunch(
       {
@@ -212,6 +214,7 @@ const sessions: SessionManager = new SessionManager({
             fallbackLang: fallbackUtf8Locale(),
           }),
         getLoginEnvironment: () => tools.getLoginEnvironment(),
+        agentVersion,
         launchSettings: () => ({
           yoloMode: launchSettings.all().yoloMode,
           agent: agent?.settings ?? defaultAgentLaunchSettings(),
@@ -238,26 +241,36 @@ const sessions: SessionManager = new SessionManager({
   },
 })
 
-/**
- * The versions the OpenCode commands Hoot has run report, by the command
- * and the file it leads to, which an update replaces.
- */
-const openCodeVersions = new Map<string, Promise<string | null>>()
+/** How long Hoot waits for an agent to say its version before its session starts. */
+const LAUNCH_VERSION_TIMEOUT_MS = 10_000
 
-/** Whether the OpenCode at `command` takes Hoot's providers (see `takesProviders`). */
-async function openCodeTakesProviders(command: string, env: Env): Promise<boolean> {
-  const file = await fs.promises.stat(command).catch(() => null)
-  const key = `${command}\n${file?.mtimeMs ?? ''}\n${file?.size ?? ''}`
-  let version = openCodeVersions.get(key)
-  if (version === undefined) {
-    version = readVersion(command, env, os.homedir()).then((reading) => {
-      // One that did not say its version, too slow to start for one, is asked again.
-      if (reading.version === null) openCodeVersions.delete(key)
-      return reading.version
-    })
-    openCodeVersions.set(key, version)
+/** What reads the version an agent's command reports, as a session starts. */
+type AgentVersionReader = (tool: CodingToolId, command: string, env: Env) => Promise<string | null>
+
+/**
+ * What reads the versions of the agents' commands for one session as it
+ * starts (see `readAgentVersion`), once for each command: read again for
+ * each session, as an agent may change while Hoot runs, as by its own
+ * updater, also where its command is a file that stays the same, as a
+ * version manager's.
+ */
+function launchVersions(): AgentVersionReader {
+  const read = new Map<string, Promise<string | null>>()
+  return (tool, command, env) => {
+    let version = read.get(command)
+    if (version === undefined) {
+      version = readAgentVersion(
+        tool,
+        command,
+        env,
+        os.homedir(),
+        process.platform,
+        LAUNCH_VERSION_TIMEOUT_MS,
+      ).then((reading) => reading.version)
+      read.set(command, version)
+    }
+    return version
   }
-  return takesProviders(await version)
 }
 
 /**
@@ -285,14 +298,6 @@ async function codexCatalogSupport(command: string, env: Env): Promise<CodexCata
   return support
 }
 
-/** The installed OpenCode's command while it takes Hoot's providers, otherwise `null`. */
-async function openCodeOnProviders(env: Env): Promise<string | null> {
-  const command = tools
-    .getState()
-    .tools.find((tool) => tool.id === 'opencode' && tool.available)?.path
-  return command && (await openCodeTakesProviders(command, env)) ? command : null
-}
-
 /**
  * Takes out of OpenCode's own configuration the providers an earlier Hoot
  * wrote into it (see `removeHootProviders`), once a run of Hoot's, before its
@@ -308,34 +313,35 @@ function cleanOpenCodeConfig(env: Env): Promise<void> {
 }
 
 /**
- * What an OpenCode session opens, and where: on a provider, with OpenCode 2
- * and later, Hoot's server of OpenCode (see `OpenCodeServers`), with the
- * conversation its chat goes on with, or a new one, which Hoot makes first
- * on that server on the provider and model, with the effort level as the
- * variant (see `openCodeSessionEffort`), and records as its chat's; OpenCode
- * then opens it with `-s`, as one it continues. A chat made before providers
- * opens its conversation with OpenCode's background service, as before.
- * Where Hoot cannot start its server or make the conversation, as with
- * OpenCode 1, an agent on OpenCode's free models opens a new conversation of
- * OpenCode's with that service, as before Hoot had providers; one on a
- * provider of the user's does not start.
+ * What an OpenCode session opens, and where: on a provider, Hoot's server of
+ * OpenCode (see `OpenCodeServers`), with the conversation its chat goes on
+ * with, or a new one, which Hoot makes first on that server on the provider
+ * and model, with the effort level as the variant (see
+ * `openCodeSessionEffort`), and records as its chat's; OpenCode then opens it
+ * with `-s`, as one it continues. A chat made before providers opens its
+ * conversation with OpenCode's background service, as before. Where Hoot
+ * cannot start its server or make the conversation, an agent on OpenCode's
+ * free models opens a new conversation of OpenCode's with that service, as
+ * before Hoot had providers; one on a provider of the user's does not start,
+ * nor any where OpenCode is not installed or is older than Hoot works with
+ * (see `agentCommandOf`), which starts no server.
  */
 async function openCodeLaunch(
   cwd: string,
   chat: ChatLaunch | null,
   agent: AgentLaunch | null,
   sessionId: string,
+  agentVersion: AgentVersionReader,
 ): Promise<{ chat: ChatLaunch | null; server: OpenCodeServer | null }> {
   const provider = agent?.provider ?? null
   if (provider === null || agent === null) return { chat, server: null }
   const login = await tools.getLoginEnvironment()
-  const command = await openCodeOnProviders(login.env)
-  if (command === null) {
-    if (provider.own !== null) return { chat, server: null }
-    throw new SessionError(
-      'This agent runs on OpenCode 2 and later. Update OpenCode on the Agents page.',
-    )
-  }
+  const command = await agentCommandOf(
+    getCodingTool('opencode'),
+    login.env,
+    os.homedir(),
+    (found) => agentVersion('opencode', found, login.env),
+  )
   let server: OpenCodeServer
   try {
     await cleanOpenCodeConfig(login.env)
@@ -403,9 +409,9 @@ const agents = new AgentService({
   launchOptions: async (tool, detection) => {
     const { env } = detection.login
     if (tool === 'opencode') {
-      // OpenCode 1 has no `opencode api` to list its models with.
+      // One older than Hoot works with is not asked: it starts no session.
       const command = detection.state.tools.find((entry) => entry.id === 'opencode')?.path
-      return command && (await openCodeTakesProviders(command, env))
+      return command && toolStatus(detection.state, getTool('opencode')) === 'available'
         ? readOpenCodeLaunchOptions(command, env, os.homedir())
         : null
     }

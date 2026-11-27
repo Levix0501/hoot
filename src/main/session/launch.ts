@@ -1,7 +1,6 @@
 import { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { gte } from 'semver'
 import { quote } from 'shell-quote'
 import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
@@ -17,10 +16,14 @@ import {
   type ModelMap,
   type Provider,
 } from '../../shared/providers'
-import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
-import type { AgentFollow } from '../../shared/agents'
+import {
+  getTool,
+  type CodingToolDefinition,
+  type CodingToolId,
+  type ToolId,
+} from '../../shared/tools'
+import { belowMinimumVersion, minimumVersionText, type AgentFollow } from '../../shared/agents'
 import { findAgentCommand } from '../agents/agent-command'
-import { readVersion } from '../agents/version'
 import { setEnvVariable, type Env } from '../env/env'
 import {
   buildSessionEnv,
@@ -57,6 +60,12 @@ export interface LaunchContext {
   follow(tool: CodingToolId): AgentFollow
   terminal(): TerminalEnvOptions
   getLoginEnvironment(): Promise<LoginEnvironment>
+  /**
+   * The version the command of an agent at `command` reports (see
+   * `readAgentVersion`), with the environment `env`; `null` where it
+   * reports none.
+   */
+  agentVersion(tool: CodingToolId, command: string, env: Env): Promise<string | null>
   /** How the session's agent starts, as the Agents page has it. */
   launchSettings(tool: CodingToolId): {
     yoloMode: boolean
@@ -321,65 +330,22 @@ const NO_SELF_UPDATE_ENV: Partial<Record<CodingToolId, Record<string, string>>> 
 /** The arguments that keep Codex from offering to update itself when a session starts. */
 const CODEX_NO_UPDATE_CHECK = ['-c', 'check_for_update_on_startup=false']
 
-/** The first version of Codex that runs a hook in the background, rather than skipping it. */
-export const CODEX_BACKGROUND_HOOKS_VERSION = '0.148.0'
-
 /**
- * The first version of Codex that takes `--no-daemon`, which runs it without
- * its shared background server, as it runs anyway with the settings Hoot
- * gives it with `-c`: it then no longer warns, as each session starts, that
- * those settings keep it from that server.
- */
-export const CODEX_NO_DAEMON_VERSION = '0.156.0'
-
-/**
- * The first version of Codex that makes of a model it does not know what
- * Hoot's entries of such a model are made of (see `codexModelEntry`), which
- * its sessions on a provider of the user's get a catalog of.
- */
-export const CODEX_CATALOG_VERSION = '0.163.0'
-
-/** How long Hoot waits for Codex to say its version before a session starts. */
-const CODEX_VERSION_TIMEOUT_MS = 10_000
-
-/**
- * The setting Hoot adds to every Codex session it starts with
- * `CODEX_BACKGROUND_HOOKS_VERSION` or later, with `-c`, on top of the user's
- * own: a hook on each message the user submits, which runs hoot's `hook`
- * command, as the command `hoot` the session's PATH finds first, with the
- * hook's input, so that the session's hoot reports the conversation the
- * message went to, and the model it went to. It runs in the background, so
- * that it neither delays nor shows anything in Codex; it prints nothing and
- * always succeeds, so that it decides nothing. Codex runs it once the user
- * trusted it, which Codex asks about the first time, naming it by its status
- * message: a change to any of it, that message included, makes Codex ask
- * again. The user's own hooks run as well, and a user who turned off Codex's
- * hooks turns off this one too.
+ * The setting Hoot adds to every Codex session it starts, with `-c`, on top
+ * of the user's own: a hook on each message the user submits, which runs
+ * hoot's `hook` command, as the command `hoot` the session's PATH finds
+ * first, with the hook's input, so that the session's hoot reports the
+ * conversation the message went to, and the model it went to. It runs in the
+ * background, so that it neither delays nor shows anything in Codex; it
+ * prints nothing and always succeeds, so that it decides nothing. Codex runs
+ * it once the user trusted it, which Codex asks about the first time, naming
+ * it by its status message: a change to any of it, that message included,
+ * makes Codex ask again. The user's own hooks run as well, and a user who
+ * turned off Codex's hooks turns off this one too.
  */
 export const CODEX_HOOK_SETTING =
   'hooks.UserPromptSubmit=[{hooks=[{type="command",command="hoot hook",async=true,' +
   'statusMessage="Let Hoot know which conversation this is"}]}]'
-
-/**
- * The version of the Codex a session starts, as its command says it when run
- * with `--version`, read before each session, as the user may change Codex
- * while Hoot runs; `null` where it says none.
- */
-async function codexVersion(command: string, env: Env, cwd: string): Promise<string | null> {
-  const { version } = await readVersion(
-    command,
-    env,
-    cwd,
-    process.platform,
-    CODEX_VERSION_TIMEOUT_MS,
-  )
-  return version
-}
-
-/** Whether a version of Codex is `least` or later; never for one that could not be read. */
-function codexAtLeast(version: string | null, least: string): boolean {
-  return version !== null && gte(version, least)
-}
 
 /**
  * The file of a Codex session's catalog, named after the session in
@@ -567,31 +533,56 @@ export function antigravityArguments(
 }
 
 /**
+ * The command a session of a coding tool runs: the one found on the login
+ * shell PATH, or in a folder its official installer puts it in (see
+ * `findAgentCommand`), the installation the Agents page shows, once the
+ * version it reports, as `version` reads it, is one Hoot works with (see
+ * `minimumVersion`); one whose version cannot be read is taken to be. One
+ * that is not installed, or is older, fails as a `SessionError` that says to
+ * install or update it on the Agents page.
+ */
+export async function agentCommandOf(
+  tool: CodingToolDefinition,
+  env: Env,
+  home: string,
+  version: (command: string) => Promise<string | null>,
+): Promise<string> {
+  const found = await findAgentCommand(tool.id, tool.command, env, home)
+  if (!found) {
+    throw new SessionError(`${tool.label} is not installed. Install it on the Agents page.`)
+  }
+  const reported = await version(found)
+  if (reported !== null && belowMinimumVersion(tool.id, reported)) {
+    throw new SessionError(`${minimumVersionText(tool.id)}. Update it on the Agents page.`)
+  }
+  return found
+}
+
+/**
  * Decides what a session runs in its working directory (the project root, or
  * the root of one of the project's worktrees). A Terminal session runs the
  * default shell with its arguments, as a login shell outside Windows,
  * starting from the same environment a terminal opened from the Dock or the
- * Start menu would give it. A coding tool runs its command directly, the one
- * found on the login shell PATH: the installation the Agents page shows. On
- * Windows, where the command that npm or pnpm makes is a batch file, the tool
- * runs what that points to instead (see `commandProgram`). It runs with the
- * login shell environment and with the arguments the Agents page shows: the
- * YOLO arguments while YOLO mode is on, the chosen model and effort, and the
- * extra arguments; then the hooks Hoot adds, to Claude Code and to a Codex
- * that runs them, and, when Claude Code is sent an issue, the arguments that
- * send it, once the issue's files are written; the launch's cleanup removes
- * their folder. A Codex that takes it also runs without its shared
- * background server (see `CODEX_NO_DAEMON_VERSION`), and on a provider of
- * the user's, with a catalog of the provider's models (see
- * `CODEX_CATALOG_VERSION`). Antigravity CLI gets the folder of Hoot's hooks
- * (see `antigravityArguments`). OpenCode gets Hoot's plugin instead, in its
- * environment (see `openCodeCliConfig`), with no argument for it, and
- * connects to Hoot's server of OpenCode where it is given one, with its
- * password in its environment, unless its extra arguments pick a server of
- * their own; else to its background service. A chat's session also gets the
- * arguments that continue its conversation, and those that send the first
- * message of one it starts with one. Either environment also has what hoot
- * needs to run in the session.
+ * Start menu would give it. A coding tool runs its command directly (see
+ * `agentCommandOf`), the installation the Agents page shows, once it is new
+ * enough for Hoot. On Windows, where the command that npm or pnpm makes is a
+ * batch file, the tool runs what that points to instead (see
+ * `commandProgram`). It runs with the login shell environment and with the
+ * arguments the Agents page shows: the YOLO arguments while YOLO mode is on,
+ * the chosen model and effort, and the extra arguments; then the hooks Hoot
+ * adds, to Claude Code and to Codex, and, when Claude Code is sent an issue,
+ * the arguments that send it, once the issue's files are written; the
+ * launch's cleanup removes their folder. Codex also runs without its shared
+ * background server, and on a provider of the user's, with a catalog of the
+ * provider's models (see `codexSessionCatalog`). Antigravity CLI gets the
+ * folder of Hoot's hooks (see `antigravityArguments`). OpenCode gets Hoot's
+ * plugin instead, in its environment (see `openCodeCliConfig`), with no
+ * argument for it, and connects to Hoot's server of OpenCode where it is
+ * given one, with its password in its environment, unless its extra
+ * arguments pick a server of their own; else to its background service. A
+ * chat's session also gets the arguments that continue its conversation, and
+ * those that send the first message of one it starts with one. Either
+ * environment also has what hoot needs to run in the session.
  */
 export async function resolveLaunch(
   context: LaunchContext,
@@ -622,10 +613,9 @@ export async function resolveLaunch(
   const launch = context.launchSettings(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
-  const found = await findAgentCommand(tool.id, tool.command, login.env, context.home)
-  if (!found) {
-    throw new SessionError(`${tool.label} is not installed. Install it on the Agents page.`)
-  }
+  const found = await agentCommandOf(tool, login.env, context.home, (command) =>
+    context.agentVersion(tool.id, command, login.env),
+  )
   const program = await commandProgram(found, login.env).catch((error: unknown) => {
     throw new SessionError(
       `Could not start ${tool.label}: ${error instanceof Error ? error.message : String(error)}`,
@@ -672,7 +662,6 @@ export async function resolveLaunch(
     settingsFile = await writeClaudeSettings(context, cwd, agent)
     hookArguments = ['--settings', settingsFile]
   } else if (tool.id === 'codex') {
-    const version = await codexVersion(found, login.env, cwd)
     // Codex runs on the session's provider by its own arguments and a
     // variable that holds the key, with a model and an effort level too.
     // On a provider of the user's, with a catalog of its models; on Codex's
@@ -687,10 +676,7 @@ export async function resolveLaunch(
       providerArguments = codex.args
       for (const [name, value] of Object.entries(codex.env)) setEnvVariable(env, name, value)
       const replaces = provider.own === null || (await context.codexNamesCatalog(login.env))
-      const support =
-        replaces && codexAtLeast(version, CODEX_CATALOG_VERSION)
-          ? await context.codexCatalogSupport(found, login.env)
-          : null
+      const support = replaces ? await context.codexCatalogSupport(found, login.env) : null
       if (support !== null) {
         if (provider.own === null) {
           const catalog = codexSessionCatalog({
@@ -713,15 +699,11 @@ export async function resolveLaunch(
         }
       }
     }
-    if (
-      codexAtLeast(version, CODEX_NO_DAEMON_VERSION) &&
-      !agent.extraArgs.includes('--no-daemon')
-    ) {
-      leadingArguments = ['--no-daemon']
-    }
-    if (codexAtLeast(version, CODEX_BACKGROUND_HOOKS_VERSION)) {
-      hookArguments = ['-c', CODEX_HOOK_SETTING]
-    }
+    // Without its shared background server, which the settings Hoot gives it
+    // with `-c` keep it from anyway: it then does not warn of them as each
+    // session starts.
+    if (!agent.extraArgs.includes('--no-daemon')) leadingArguments = ['--no-daemon']
+    hookArguments = ['-c', CODEX_HOOK_SETTING]
     if (!ownUpdates) providerArguments = [...providerArguments, ...CODEX_NO_UPDATE_CHECK]
   } else if (tool.id === 'antigravity') {
     hookArguments = antigravityArguments(context.antigravityHooks, cwd, chat, agent.extraArgs)

@@ -23,8 +23,8 @@ import { HootServer, type StartedSession } from './hoot-server'
 export const CLAUDE_FOUND: ToolsState = {
   detecting: false,
   tools: [
-    { id: 'claude', available: true, path: '/bin/claude' },
-    { id: 'shell', available: true, path: '/bin/zsh' },
+    { id: 'claude', available: true, path: '/bin/claude', version: '2.1.331' },
+    { id: 'shell', available: true, path: '/bin/zsh', version: null },
   ],
   error: null,
 }

@@ -6,7 +6,7 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
 } from 'lucide-react'
-import type { AgentFollow, AgentState } from '../../../shared/agents'
+import { belowMinimumVersion, type AgentFollow, type AgentState } from '../../../shared/agents'
 import { getCodingTool } from '../../../shared/tools'
 import { useAppStore } from '../../store/app-store'
 import { Badge } from '../ui/badge'
@@ -53,7 +53,15 @@ function shortDate(day: string | null): string {
   })
 }
 
-/** The versions the menu lists: those the agent offers, with the installed one where they lack it. */
+/** Whether a version is one Hoot works with (see `minimumVersion`). */
+function usable(agent: AgentState, version: string): boolean {
+  return !belowMinimumVersion(agent.id, version)
+}
+
+/**
+ * The versions the menu lists: those the agent offers, with the installed
+ * one where they lack it, unless it is older than the oldest Hoot works with.
+ */
 function versionsOf(agent: AgentState): VersionChoice[] {
   const installed = agent.installation?.version ?? null
   const list = (agent.releases ?? []).map((release) => ({
@@ -61,7 +69,12 @@ function versionsOf(agent: AgentState): VersionChoice[] {
     date: shortDate(release.date),
     installed: release.version === installed,
   }))
-  if (installed !== null && list.length > 0 && !list.some((choice) => choice.installed)) {
+  if (
+    installed !== null &&
+    usable(agent, installed) &&
+    list.length > 0 &&
+    !list.some((choice) => choice.installed)
+  ) {
     list.unshift({ version: installed, date: '', installed: true })
   }
   return list
@@ -78,9 +91,14 @@ function followOf(value: string): AgentFollow {
   return { kind: 'stay', version: value }
 }
 
-/** The version Stay keeps: the one the agent stays on, or else the installed one. */
+/**
+ * The version Stay keeps: the one the agent stays on, or else the installed
+ * one, unless it is older than the oldest Hoot works with.
+ */
 function stayVersionOf(agent: AgentState): string | null {
-  return agent.follow.kind === 'stay' ? agent.follow.version : (agent.installation?.version ?? null)
+  if (agent.follow.kind === 'stay') return agent.follow.version
+  const installed = agent.installation?.version ?? null
+  return installed !== null && usable(agent, installed) ? installed : null
 }
 
 function isPending(agent: AgentState): boolean {
@@ -196,9 +214,9 @@ function revealChecked(list: HTMLDivElement | null) {
 /**
  * The version button of an installed agent's row, with a lock while it
  * stays on its version, and its menu: what it follows, its latest version,
- * Claude Code's Stable, or staying on the installed one; the other versions
- * it offers, newest first, picking one of which installs it and stays on
- * it; and Uninstall. Where Hoot cannot install versions in its place, only
+ * Claude Code's Stable, or staying on the installed one, unless Hoot needs a
+ * newer one; the other versions it offers, newest first, those Hoot works
+ * with, picking one of which installs it and stays on it; and Uninstall. Where Hoot cannot install versions in its place, only
  * Latest and Stay are offered; for an agent Hoot can install the latest
  * version of alone, as Antigravity CLI, only Uninstall, and where it cannot
  * uninstall it either, the version is no button.

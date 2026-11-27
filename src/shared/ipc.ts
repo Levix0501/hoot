@@ -97,6 +97,11 @@ export interface ToolAvailability {
   available: boolean
   /** Absolute path of the command found in the login shell PATH. */
   path: string | null
+  /**
+   * The version the command reports, read by each detection; `null` where
+   * it is not found or reports none, and for Terminal.
+   */
+  version: string | null
 }
 
 export interface ToolsState {

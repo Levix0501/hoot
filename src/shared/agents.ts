@@ -1,5 +1,5 @@
-import { gt, valid } from 'semver'
-import type { CodingToolId } from './tools'
+import { gt, lt, valid } from 'semver'
+import { getCodingTool, type CodingToolId } from './tools'
 
 /**
  * How an agent was installed, as Hoot tells from the file its command leads
@@ -297,6 +297,20 @@ export function parseVersion(output: string): string | null {
     if (valid(version)) return version
   }
   return null
+}
+
+/**
+ * Whether a version of an agent is older than the oldest Hoot works with
+ * (see `minimumVersion`); never for what is no version.
+ */
+export function belowMinimumVersion(tool: CodingToolId, version: string): boolean {
+  return valid(version) !== null && lt(version, getCodingTool(tool).minimumVersion)
+}
+
+/** That Hoot needs a newer version of an agent, as a clause: "Hoot needs OpenCode 2.1.0 or later". */
+export function minimumVersionText(tool: CodingToolId): string {
+  const { label, minimumVersion } = getCodingTool(tool)
+  return `Hoot needs ${label} ${minimumVersion} or later`
 }
 
 /** Whether `latest` is a newer version than `installed`, by the rules of semantic versioning. */

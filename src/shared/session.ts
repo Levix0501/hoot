@@ -146,7 +146,13 @@ export function describeAgentOperations(
   reason: QuitReason,
 ): string {
   const clauses = operations.map(({ label, kind, waiting }) => {
-    const done = kind === 'install' ? 'installed' : 'updated'
+    // A switch installs a version, which its label names.
+    const done =
+      kind === 'install' || kind === 'switch'
+        ? 'installed'
+        : kind === 'update'
+          ? 'updated'
+          : 'uninstalled'
     return waiting ? `${label} is waiting to be ${done}` : `${label} is being ${done}`
   })
   const list = new Intl.ListFormat('en', { type: 'conjunction' }).format(clauses)

@@ -3,7 +3,6 @@ import {
   CANCELLED_MESSAGE,
   failedMessage,
   installedMessage,
-  installMethodLabel,
   installNeedsNodeVersionMessage,
   isNewerVersion,
   nodeRequirementMessage,
@@ -43,13 +42,6 @@ describe('isNewerVersion', () => {
 })
 
 describe('the texts of the Agents page', () => {
-  it('names each install method, but none it cannot tell', () => {
-    expect(installMethodLabel('npm')).toBe('npm')
-    expect(installMethodLabel('homebrew')).toBe('Homebrew')
-    expect(installMethodLabel('official')).toBe('Official installer')
-    expect(installMethodLabel('unknown')).toBeNull()
-  })
-
   it('writes the results of operations', () => {
     expect(installedMessage('2.1.299')).toBe('✓ Installed 2.1.299')
     expect(updatedMessage('2.1.299', 0, '2.1.293')).toBe('✓ Updated to 2.1.299')

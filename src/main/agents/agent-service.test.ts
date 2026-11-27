@@ -27,7 +27,8 @@ const SHELL_QUOTE = createRequire(import.meta.url).resolve('shell-quote')
  * A stand-in npm, a Node.js script. `prefix -g` says its global folder;
  * `install -g <package>@latest` installs a stand-in of the package there,
  * laid out as npm lays out a global folder, whose command reports the version
- * in `latest-<command>`. A test can
+ * in `latest-<command>`, and `install -g <package>@<version>` one that
+ * reports that version; `uninstall -g <package>` removes it. A test can
  * add to what it does with `npmScript`, which it runs first; it logs how it
  * was run in `npm.log`: its path, that of the command that runs it (the
  * script without `.cjs`), and its arguments.
@@ -45,12 +46,18 @@ const args = process.argv.slice(2)
 fs.appendFileSync(path.join(root, 'npm.log'), [self, ...args].join(' ') + '\\n')
 const prefix = fs.realpathSync.native(windows ? path.dirname(self) : path.join(path.dirname(self), '..'))
 let spec = null
+let pinned = null
+const uninstall = args.includes('uninstall')
 for (const arg of args) {
   if (arg === 'prefix') {
     say(prefix)
     process.exit(0)
   }
-  if (arg.endsWith('@latest')) spec = arg.slice(0, -'@latest'.length)
+  const named = /^(@[^@/]+[/][^@]+)@(.+)$/.exec(arg)
+  if (named) {
+    spec = named[1]
+    if (named[2] !== 'latest') pinned = named[2]
+  } else if (uninstall && arg.startsWith('@')) spec = arg
 }
 
 async function install(npmPackage, command, script) {
@@ -89,7 +96,16 @@ async function main() {
     complain('npm error code E404')
     return 1
   }
-  const version = fs.readFileSync(path.join(root, 'latest-' + command), 'utf8')
+  if (uninstall) {
+    const packages = windows ? path.join(prefix, 'node_modules') : path.join(prefix, 'lib', 'node_modules')
+    fs.rmSync(path.join(packages, spec), { recursive: true, force: true })
+    for (const name of windows ? [command + '.cmd', command + '.ps1', command] : [path.join('bin', command)]) {
+      fs.rmSync(path.join(prefix, name), { force: true })
+    }
+    say('removed 1 package')
+    return 0
+  }
+  const version = pinned ?? fs.readFileSync(path.join(root, 'latest-' + command), 'utf8')
   const report = JSON.stringify(version + ' (stand-in)\\n')
   await install(spec, command, "require('node:fs').writeSync(1, " + report + ')\\n')
   say('added 1 package')
@@ -100,6 +116,14 @@ main().then((code) => {
   process.exitCode = code
 })
 `
+
+/** What an install with npm works on, as its operation has it. */
+const NPM_INSTALL = { kind: 'install', version: null, route: 'npm', path: null } as const
+
+/** What an update to a version works on, as its operation has it. */
+function updateTo(version: string) {
+  return { kind: 'update', version, route: null, path: null } as const
+}
 
 const PACKAGES: Record<CodingToolId, string> = {
   claude: '@anthropic-ai/claude-code',
@@ -220,12 +244,21 @@ function setup(
     platform?: NodeJS.Platform
     /** Runs each time the service has the login shell environment read again, before it is. */
     beforeLoginEnvironment?: () => Promise<void>
+    /** The versions each agent's version menu offers, and Stable's. */
+    releases?: Partial<Record<CodingToolId, { versions: string[]; stable?: string }>>
+    /** What the official installer of each agent runs instead: a script for node. */
+    installers?: Partial<Record<CodingToolId, string>>
+    /** Whether ~/.local/bin, where an official installer may put an agent, is left off PATH. */
+    offPath?: boolean
+    /** Folders on PATH after the computer's npm's. */
+    morePath?: string[]
   } = {},
 ) {
   // ~/.local/bin, where an official installer may put an agent, comes first.
   const loginPath = [
-    path.join(home, '.local', 'bin'),
+    ...(options.offPath ? [] : [path.join(home, '.local', 'bin')]),
     ...(options.withNpm === false ? [] : [npmCommandsFolder(prefix)]),
+    ...(options.morePath ?? []),
     // The system's folders, which a login shell's PATH has on macOS.
     ...(windows ? [] : ['/usr/bin', '/bin']),
   ].join(path.delimiter)
@@ -238,6 +271,8 @@ function setup(
     resolveEnv: async () => ({ ...loginEnv }),
   })
   const latestCalls: string[] = []
+  /** The agents whose sessions were closed, in order. */
+  const closed: CodingToolId[] = []
   const service = new AgentService({
     detectTools: async () => {
       await options.beforeLoginEnvironment?.()
@@ -255,6 +290,25 @@ function setup(
       return { version: latest ?? '2.0.0', node: (id && options.latestNode?.[id]) || null }
     },
     runningSessions: () => options.sessions?.() ?? [],
+    closeSessions: async (id) => {
+      closed.push(id)
+    },
+    releases: async (id) => {
+      const offered = options.releases?.[id]
+      if (offered === undefined) return null
+      return {
+        versions: offered.versions.map((version) => ({ version, date: '2026-11-20' })),
+        stable: offered.stable ?? null,
+        node: new Map(),
+      }
+    },
+    officialInstaller: (id) => {
+      const script = options.installers?.[id]
+      if (script === undefined) return null
+      const file = path.join(root, `install-${id}.cjs`)
+      write(file, script)
+      return { program: process.execPath, args: [file], shown: `install ${id}` }
+    },
     launchOptions: async () => ({
       models: [],
       defaultEfforts: [],
@@ -289,6 +343,7 @@ function setup(
     agent,
     ended,
     latestCalls,
+    closed,
     setNow: (value: number) => {
       now = value
     },
@@ -356,29 +411,36 @@ describe('AgentService detection', () => {
     expect(latestCalls.toSorted()).toEqual(Object.values(PACKAGES).toSorted())
   })
 
-  it('shows the commands Install and Update run with npm', async () => {
-    await installInto(prefix, 'codex', '1.0.0')
+  it('installs with each official installer, with npm where there is none for the platform', async () => {
     const { service, agent } = setup()
     await service.detect()
-    const npm = commandIn(npmCommandsFolder(prefix), 'npm')
-    expect(agent('opencode').installCommand).toBe(
-      `${npm} install -g @opencode/cli@latest --loglevel=http`,
-    )
-    expect(agent('codex').installation?.updateCommand).toBe(
-      `${npm} install -g @openai/codex@latest --loglevel=http`,
-    )
+    for (const id of ['claude', 'codex', 'opencode'] as const) {
+      expect(agent(id).installRoute).toBe('official')
+    }
+    const onWindows = setup({ platform: 'win32' })
+    await onWindows.service.detect()
+    expect(onWindows.agent('claude').installRoute).toBe('official')
+    // OpenCode 2 has no installer for Windows.
+    expect(onWindows.agent('opencode').installRoute).toBe('npm')
   })
 
   // On Windows the official installers install programs, which no script can stand in for.
   it.skipIf(windows)(
-    "shows the command of an official installer's update, with ~ for the home folder",
+    "can install other versions in place of an official installer's, and uninstall it",
     async () => {
       installOfficialClaude('1.0.0')
+      await installInto(prefix, 'codex', '1.0.0')
       const { service, agent } = setup()
       await service.detect()
       expect(agent('claude').installation).toMatchObject({
         method: 'official',
-        updateCommand: '~/.local/bin/claude update',
+        switchable: true,
+        removable: true,
+      })
+      expect(agent('codex').installation).toMatchObject({
+        method: 'npm',
+        switchable: true,
+        removable: true,
       })
     },
   )
@@ -435,7 +497,7 @@ describe('AgentService detection', () => {
   it.skipIf(windows)(
     "shows that Install needs write access to npm's global folder when the user cannot create files in it",
     async () => {
-      const { service, agent } = setup()
+      const { service } = setup()
       fs.chmodSync(npmPackagesFolder(prefix), 0o555)
       await service.detect()
       expect(service.getState().installTarget).toEqual({
@@ -443,15 +505,13 @@ describe('AgentService detection', () => {
         prefix,
         displayPrefix: prefix,
       })
-      expect(agent('codex').installCommand).toBeNull()
     },
   )
 
   it('shows that Install needs Node.js and npm when the login shell PATH has no npm', async () => {
-    const { service, agent } = setup({ withNpm: false })
+    const { service } = setup({ withNpm: false })
     await service.detect()
     expect(service.getState().installTarget).toEqual({ kind: 'node-required' })
-    expect(agent('codex').installCommand).toBeNull()
   })
 
   it('tells an installation that does not run, and keeps what it wrote', async () => {
@@ -531,10 +591,10 @@ describe('AgentService installs', () => {
     setLatest('claude', '2.1.0')
     const { service, tools, agent, ended } = setup()
     await service.detect()
-    service.install('claude')
+    service.install('claude', 'npm')
     await ended('claude')
     expect(agent('claude').operation).toEqual({
-      kind: 'install',
+      ...NPM_INSTALL,
       status: 'succeeded',
       message: '✓ Installed 2.1.0',
     })
@@ -553,7 +613,7 @@ describe('AgentService installs', () => {
   it('fails, saying Node.js and npm are needed, when the computer has no npm', async () => {
     const { service, agent, ended } = setup({ withNpm: false })
     await service.detect()
-    service.install('claude')
+    service.install('claude', 'npm')
     await ended('claude')
     expect(agent('claude').operation).toMatchObject({
       kind: 'install',
@@ -571,7 +631,7 @@ describe('AgentService installs', () => {
       const { service, agent, ended } = setup()
       fs.chmodSync(npmCommandsFolder(prefix), 0o555)
       await service.detect()
-      service.install('codex')
+      service.install('codex', 'npm')
       await ended('codex')
       expect(agent('codex').operation).toMatchObject({
         kind: 'install',
@@ -590,7 +650,7 @@ describe('AgentService installs', () => {
       fakeNode('20.19.6')
       const { service, agent, ended } = setup({ latestNode: { codex: '>=22.19.0' } })
       await service.detect()
-      service.install('codex')
+      service.install('codex', 'npm')
       await ended('codex')
       expect(agent('codex').operation).toMatchObject({
         kind: 'install',
@@ -608,7 +668,7 @@ describe('AgentService installs', () => {
       fakeNode('24.15.0')
       const { service, agent, ended } = setup({ latestNode: { codex: '>=22.19.0' } })
       await service.detect()
-      service.install('codex')
+      service.install('codex', 'npm')
       await ended('codex')
       expect(agent('codex').operation).toMatchObject({ status: 'succeeded' })
     },
@@ -624,10 +684,10 @@ describe('AgentService installs', () => {
     `)
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('opencode')
+    service.install('opencode', 'npm')
     await ended('opencode')
     expect(agent('opencode').operation).toEqual({
-      kind: 'install',
+      ...NPM_INSTALL,
       status: 'failed',
       message: '✕ Install failed: npm exited with code 1',
       reason: 'npm exited with code 1',
@@ -648,7 +708,7 @@ describe('AgentService installs', () => {
     `)
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('opencode')
+    service.install('opencode', 'npm')
     await ended('opencode')
     expect(agent('opencode').operation).toMatchObject({
       status: 'failed',
@@ -660,7 +720,7 @@ describe('AgentService installs', () => {
     npmScript('return 0')
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('codex')
+    service.install('codex', 'npm')
     await ended('codex')
     expect(agent('codex').operation).toMatchObject({
       status: 'failed',
@@ -675,9 +735,9 @@ describe('AgentService installs', () => {
     `)
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('claude')
+    service.install('claude', 'npm')
     await vi.waitFor(
-      () => expect(agent('claude').operation).toEqual({ kind: 'install', status: 'running' }),
+      () => expect(agent('claude').operation).toEqual({ ...NPM_INSTALL, status: 'running' }),
       { timeout: 5_000 },
     )
     await ended('claude')
@@ -853,29 +913,34 @@ describe('AgentService updates', () => {
   )
 
   // On Windows the official installers install programs, which no script can stand in for.
-  it.skipIf(windows)("runs the official installer's own update command", async () => {
-    const versions = path.join(home, '.local', 'share', 'claude', 'versions')
-    write(
-      path.join(versions, '1.0.0'),
-      `#!/bin/sh\nif [ "$1" = update ]; then echo "$0 $*" >> ${JSON.stringify(path.join(root, 'update.log'))}; ln -sf ${JSON.stringify(path.join(versions, '2.0.0'))} ${JSON.stringify(path.join(prefix, 'bin', 'claude'))}; exit 0; fi\necho "1.0.0 (Claude Code)"\n`,
-      0o755,
-    )
-    write(path.join(versions, '2.0.0'), '#!/bin/sh\necho "2.0.0 (Claude Code)"\n', 0o755)
-    fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true })
-    fs.symlinkSync(path.join(versions, '1.0.0'), path.join(prefix, 'bin', 'claude'))
-    const { service, agent, ended } = setup()
-    await service.detect()
-    expect(agent('claude').installation?.method).toBe('official')
-    service.update('claude')
-    await ended('claude')
-    expect(agent('claude').operation).toMatchObject({
-      status: 'succeeded',
-      message: '✓ Updated to 2.0.0',
-    })
-    expect(fs.readFileSync(path.join(root, 'update.log'), 'utf8')).toBe(
-      `${path.join(prefix, 'bin', 'claude')} update\n`,
-    )
-  })
+  // Claude Code's own `update` follows the channel its settings name, which
+  // need not be the one Hoot follows: its `install` takes the version.
+  it.skipIf(windows)(
+    "updates Claude Code's official installation with its own install, to the version",
+    async () => {
+      const versions = path.join(home, '.local', 'share', 'claude', 'versions')
+      write(
+        path.join(versions, '1.0.0'),
+        `#!/bin/sh\nif [ "$1" = install ]; then echo "$0 $*" >> ${JSON.stringify(path.join(root, 'update.log'))}; ln -sf ${JSON.stringify(versions)}/$2 ${JSON.stringify(path.join(prefix, 'bin', 'claude'))}; exit 0; fi\necho "1.0.0 (Claude Code)"\n`,
+        0o755,
+      )
+      write(path.join(versions, '2.0.0'), '#!/bin/sh\necho "2.0.0 (Claude Code)"\n', 0o755)
+      fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true })
+      fs.symlinkSync(path.join(versions, '1.0.0'), path.join(prefix, 'bin', 'claude'))
+      const { service, agent, ended } = setup()
+      await service.detect()
+      expect(agent('claude').installation?.method).toBe('official')
+      service.update('claude')
+      await ended('claude')
+      expect(agent('claude').operation).toMatchObject({
+        status: 'succeeded',
+        message: '✓ Updated to 2.0.0',
+      })
+      expect(fs.readFileSync(path.join(root, 'update.log'), 'utf8')).toBe(
+        `${path.join(prefix, 'bin', 'claude')} install 2.0.0\n`,
+      )
+    },
+  )
 
   // Windows has no permissions on folders that keep the user from creating files.
   it.skipIf(windows)(
@@ -960,9 +1025,9 @@ describe('AgentService Update all', () => {
     service.updateAll()
     await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
     expect(agent('claude').operation?.status).toBe('running')
-    expect(agent('codex').operation).toEqual({ kind: 'update', status: 'waiting' })
+    expect(agent('codex').operation).toEqual({ ...updateTo('2.0.0'), status: 'waiting' })
     service.cancel('codex')
-    expect(agent('codex').operation).toEqual({ kind: 'update', status: 'cancelled' })
+    expect(agent('codex').operation).toEqual({ ...updateTo('2.0.0'), status: 'cancelled' })
     fs.writeFileSync(path.join(root, 'go'), '')
     await ended('claude')
     expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
@@ -977,11 +1042,11 @@ describe('AgentService Update all', () => {
     )
     const { service, agent, ended } = setup({ latest: { claude: '2.0.0' } })
     await service.detect()
-    service.install('claude')
+    service.install('claude', 'npm')
     await ended('claude')
-    expect(agent('claude').operation).toMatchObject({ kind: 'install', status: 'failed' })
+    expect(agent('claude').operation).toMatchObject({ ...NPM_INSTALL, status: 'failed' })
     service.updateAll()
-    expect(agent('claude').operation).toMatchObject({ kind: 'install', status: 'failed' })
+    expect(agent('claude').operation).toMatchObject({ ...NPM_INSTALL, status: 'failed' })
   })
 
   it('leaves out agents with no newer version, no update command or a failed version read', async () => {
@@ -1013,19 +1078,19 @@ describe('AgentService queue and cancelling', () => {
     npmScript(SLOW_NPM)
     const { service, agent, ended, states } = setup()
     await service.detect()
-    service.install('claude')
-    service.install('codex')
+    service.install('claude', 'npm')
+    service.install('codex', 'npm')
     await vi.waitFor(() => expect(started()).toEqual(['started @anthropic-ai/claude-code']), {
       timeout: 10_000,
     })
     expect(agent('claude').operation?.status).toBe('running')
-    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'waiting' })
+    expect(agent('codex').operation).toEqual({ ...NPM_INSTALL, status: 'waiting' })
     expect(service.pendingOperations()).toEqual([
       { label: 'Claude Code', kind: 'install', waiting: false },
       { label: 'Codex', kind: 'install', waiting: true },
     ])
     // Asking again changes nothing.
-    service.install('claude')
+    service.install('claude', 'npm')
     fs.writeFileSync(path.join(root, 'go'), '')
     await ended('claude')
     await ended('codex')
@@ -1040,10 +1105,10 @@ describe('AgentService queue and cancelling', () => {
     npmScript(SLOW_NPM)
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('claude')
-    service.install('codex')
+    service.install('claude', 'npm')
+    service.install('codex', 'npm')
     service.cancel('codex')
-    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    expect(agent('codex').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     fs.writeFileSync(path.join(root, 'go'), '')
     await ended('claude')
     expect(agent('claude').operation?.status).toBe('succeeded')
@@ -1057,10 +1122,10 @@ describe('AgentService queue and cancelling', () => {
     const { service, agent, ended } = setup()
     await service.detect()
     service.update('claude')
-    service.install('codex')
+    service.install('codex', 'npm')
     await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
     service.cancel('claude')
-    expect(agent('claude').operation).toEqual({ kind: 'update', status: 'running' })
+    expect(agent('claude').operation).toEqual({ ...updateTo('2.0.0'), status: 'running' })
     fs.writeFileSync(path.join(root, 'go'), '')
     await ended('claude')
     expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
@@ -1086,7 +1151,7 @@ describe('AgentService queue and cancelling', () => {
       `)
       const { service, agent } = setup()
       await service.detect()
-      service.install('claude')
+      service.install('claude', 'npm')
       await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
       // Stopped by the quit confirmation, then again as Hoot quits.
       const stopped = Promise.all([service.stopAll(), service.stopAll()])
@@ -1096,7 +1161,7 @@ describe('AgentService queue and cancelling', () => {
       fs.writeFileSync(path.join(root, 'go'), '')
       await stopped
       expect(fs.readFileSync(path.join(root, 'signals.log'), 'utf8')).toBe('TERM\n')
-      expect(agent('claude').operation).toEqual({ kind: 'install', status: 'cancelled' })
+      expect(agent('claude').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     },
   )
 
@@ -1104,11 +1169,11 @@ describe('AgentService queue and cancelling', () => {
     npmScript(SLOW_NPM)
     const { service, agent } = setup()
     await service.detect()
-    service.install('claude')
-    service.install('codex')
+    service.install('claude', 'npm')
+    service.install('codex', 'npm')
     await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
     await service.stopAll()
-    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    expect(agent('codex').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     await vi.waitFor(() => expect(agent('claude').operation?.status).toBe('cancelled'))
     expect(npmRuns().filter((run) => run.includes('codex'))).toEqual([])
     expect(service.pendingOperations()).toEqual([])
@@ -1119,15 +1184,15 @@ describe('AgentService queue and cancelling', () => {
     npmScript(SLOW_NPM)
     const { service, agent, ended } = setup()
     await service.detect()
-    service.install('claude')
+    service.install('claude', 'npm')
     await vi.waitFor(() => expect(started()).toHaveLength(1), { timeout: 10_000 })
     const stopping = service.stopAll()
     // Asked for while Hoot waits for the running one to end, and after.
-    service.install('codex')
-    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    service.install('codex', 'npm')
+    expect(agent('codex').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     await stopping
-    service.install('opencode')
-    expect(agent('opencode').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    service.install('opencode', 'npm')
+    expect(agent('opencode').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(service.pendingOperations()).toEqual([])
     expect(started()).toEqual(['started @anthropic-ai/claude-code'])
@@ -1136,10 +1201,10 @@ describe('AgentService queue and cancelling', () => {
     // Hoot keeps running after all, as when restarting into an update fails.
     service.resume()
     fs.writeFileSync(path.join(root, 'go'), '')
-    service.install('codex')
+    service.install('codex', 'npm')
     await ended('codex')
     expect(agent('codex').operation).toEqual({
-      kind: 'install',
+      ...NPM_INSTALL,
       status: 'succeeded',
       message: '✓ Installed 2.0.0',
     })
@@ -1150,8 +1215,8 @@ describe('AgentService queue and cancelling', () => {
     await service.detect()
     hold()
     const before = reads()
-    service.install('claude')
-    service.install('codex')
+    service.install('claude', 'npm')
+    service.install('codex', 'npm')
     await vi.waitFor(() => expect(reads()).toBe(before + 1), { timeout: 10_000 })
     let stopped = false
     const stopping = service.stopAll().then(() => {
@@ -1162,8 +1227,203 @@ describe('AgentService queue and cancelling', () => {
     release()
     await stopping
     expect(agent('claude').operation).toMatchObject({ status: 'succeeded' })
-    expect(agent('codex').operation).toEqual({ kind: 'install', status: 'cancelled' })
+    expect(agent('codex').operation).toEqual({ ...NPM_INSTALL, status: 'cancelled' })
     expect(service.pendingOperations()).toEqual([])
     expect(npmRuns().filter((run) => run.includes('codex'))).toEqual([])
+  })
+})
+
+describe('AgentService official installers', () => {
+  it('installs with the official installer, and fails with its output where it fails', async () => {
+    const bin = path.join(home, '.local', 'bin')
+    const { service, agent, ended } = setup({
+      installers: {
+        // Puts a stand-in in ~/.local/bin, as Claude Code's installer does.
+        claude: `const fs = require('node:fs')
+fs.mkdirSync(${JSON.stringify(bin)}, { recursive: true })
+fs.writeFileSync(${JSON.stringify(path.join(bin, windows ? 'claude.cmd' : 'claude'))}, ${JSON.stringify(
+          windows ? '@echo 2.0.0 (Claude Code)\r\n' : '#!/bin/sh\necho "2.0.0 (Claude Code)"\n',
+        )}, { mode: 0o755 })
+console.log('Installed')`,
+        codex: `console.error("curl: (28) Failed to connect to chatgpt.com port 443")
+process.exitCode = 28`,
+      },
+    })
+    await service.detect()
+    service.install('claude')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      kind: 'install',
+      route: 'official',
+      status: 'succeeded',
+      message: '✓ Installed 2.0.0',
+    })
+    service.install('codex')
+    await ended('codex')
+    expect(agent('codex').operation).toMatchObject({
+      kind: 'install',
+      route: 'official',
+      status: 'failed',
+      command: 'install codex',
+      exitCode: 28,
+      output: 'curl: (28) Failed to connect to chatgpt.com port 443',
+    })
+    // npm, which the failure offers instead.
+    service.install('codex', 'npm')
+    await ended('codex')
+    expect(agent('codex').operation).toMatchObject({ route: 'npm', status: 'succeeded' })
+    expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
+      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @openai/codex@latest --loglevel=http`,
+    ])
+  })
+
+  it('finds an agent its official installer put in a folder the login shell PATH lacks', async () => {
+    installOfficialClaude('1.0.0')
+    const { service, agent } = setup({ withNpm: false, offPath: true })
+    await service.detect()
+    expect(agent('claude').installation).toMatchObject({ method: 'official', version: '1.0.0' })
+  })
+})
+
+describe('AgentService versions', () => {
+  it('stays on a version it installs with npm, and follows the latest again', async () => {
+    await installInto(prefix, 'claude', '2.0.0')
+    const { service, agent, ended } = setup({
+      latest: { claude: '2.1.0' },
+      releases: { claude: { versions: ['2.1.0', '2.0.0', '1.9.0'] } },
+    })
+    await service.detect()
+    await vi.waitFor(() => expect(agent('claude').releases).toHaveLength(3))
+    service.setFollow('claude', { kind: 'stay', version: '1.9.0' })
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      kind: 'switch',
+      version: '1.9.0',
+      status: 'succeeded',
+      message: '✓ Switched to 1.9.0',
+    })
+    expect(agent('claude').installation?.version).toBe('1.9.0')
+    expect(agent('claude').follow).toEqual({ kind: 'stay', version: '1.9.0' })
+    // Staying, it is left out of Update all, and Update does nothing.
+    const runs = npmRuns().length
+    service.updateAll()
+    service.update('claude')
+    expect(agent('claude').operation?.status).toBe('succeeded')
+    expect(npmRuns()).toHaveLength(runs)
+    // Following the latest again updates it.
+    service.setFollow('claude', { kind: 'latest' })
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({ kind: 'update', status: 'succeeded' })
+    expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
+      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@1.9.0 --loglevel=http`,
+      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@latest --loglevel=http`,
+    ])
+  })
+
+  it('stays on the installed version without installing anything', async () => {
+    await installInto(prefix, 'codex', '2.0.0')
+    const { service, agent } = setup({ latest: { codex: '2.1.0' } })
+    await service.detect()
+    service.setFollow('codex', { kind: 'stay', version: '2.0.0' })
+    expect(agent('codex').follow).toEqual({ kind: 'stay', version: '2.0.0' })
+    expect(agent('codex').operation).toBeNull()
+  })
+
+  it("follows Claude Code's Stable, never installing an older version", async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    const { service, agent, ended } = setup({
+      latest: { claude: '2.1.0' },
+      releases: { claude: { versions: ['2.1.0', '2.0.0', '1.0.0'], stable: '2.0.0' } },
+      // Codex has no Stable.
+    })
+    await service.detect()
+    await vi.waitFor(() => expect(agent('claude').stable).toBe('2.0.0'))
+    service.setFollow('codex', { kind: 'stable' })
+    expect(agent('codex').follow).toEqual({ kind: 'latest' })
+    service.setFollow('claude', { kind: 'stable' })
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      kind: 'update',
+      version: '2.0.0',
+      status: 'succeeded',
+    })
+    expect(agent('claude').installation?.version).toBe('2.0.0')
+    expect(npmRuns().filter((run) => run.includes(' install '))).toEqual([
+      `${path.join(npmCommandsFolder(prefix), 'npm')} install -g @anthropic-ai/claude-code@2.0.0 --loglevel=http`,
+    ])
+  })
+
+  it('goes back to the version it stays on where another has taken its place', async () => {
+    await installInto(prefix, 'opencode', '2.0.0')
+    const { service, agent, ended } = setup()
+    await service.detect()
+    service.setFollow('opencode', { kind: 'stay', version: '2.0.0' })
+    // Something outside Hoot updates it.
+    await installInto(prefix, 'opencode', '2.4.0')
+    await service.detect()
+    expect(agent('opencode').installation?.version).toBe('2.4.0')
+    service.restore('opencode')
+    await ended('opencode')
+    expect(agent('opencode').operation).toMatchObject({ kind: 'switch', status: 'succeeded' })
+    expect(agent('opencode').installation?.version).toBe('2.0.0')
+  })
+})
+
+describe('AgentService copies and uninstalling', () => {
+  it('finds the other copies on PATH, and uninstalls one, leaving the sessions of the one in use', async () => {
+    const other = path.join(root, 'other-global')
+    await writeNodeCommand(path.join(npmCommandsFolder(other), 'npm'), fakeNpm())
+    await installInto(prefix, 'claude', '2.0.0')
+    await installInto(other, 'claude', '1.0.0')
+    const { service, agent, ended, closed } = setup({ morePath: [npmCommandsFolder(other)] })
+    await service.detect()
+    const copy = commandIn(npmCommandsFolder(other), 'claude')
+    expect(agent('claude').copies).toEqual([
+      { path: copy, version: '1.0.0', runs: true, removable: true },
+    ])
+    service.uninstall('claude', copy)
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      kind: 'uninstall',
+      version: '1.0.0',
+      path: copy,
+      status: 'succeeded',
+    })
+    expect(closed).toEqual([])
+    expect(agent('claude').copies).toEqual([])
+    expect(agent('claude').installation?.version).toBe('2.0.0')
+  })
+
+  it('closes the sessions of the copy in use before uninstalling it, and the next copy takes over', async () => {
+    const other = path.join(root, 'other-global')
+    await writeNodeCommand(path.join(npmCommandsFolder(other), 'npm'), fakeNpm())
+    await installInto(prefix, 'codex', '2.0.0')
+    await installInto(other, 'codex', '1.0.0')
+    const { service, agent, ended, closed } = setup({ morePath: [npmCommandsFolder(other)] })
+    await service.detect()
+    service.setFollow('codex', { kind: 'stay', version: '2.0.0' })
+    const inUse = agent('codex').installation?.path ?? ''
+    service.uninstall('codex', inUse)
+    await ended('codex')
+    expect(agent('codex').operation).toMatchObject({ kind: 'uninstall', status: 'succeeded' })
+    expect(closed).toEqual(['codex'])
+    expect(agent('codex').installation?.version).toBe('1.0.0')
+    // It no longer stays on the version that is gone.
+    expect(agent('codex').follow).toEqual({ kind: 'latest' })
+  })
+
+  // On Windows the official installers install programs, which no script can stand in for.
+  it.skipIf(windows)("removes the files of Claude Code's official installer", async () => {
+    installOfficialClaude('1.0.0')
+    const { service, agent, ended } = setup()
+    await service.detect()
+    service.uninstall('claude', agent('claude').installation?.path ?? '')
+    await ended('claude')
+    expect(agent('claude').operation).toMatchObject({
+      status: 'succeeded',
+      message: '✓ Uninstalled',
+    })
+    expect(agent('claude').installation).toBeNull()
+    expect(fs.existsSync(path.join(home, '.local', 'share', 'claude'))).toBe(false)
   })
 })

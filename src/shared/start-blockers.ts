@@ -54,7 +54,7 @@ export function startBlockerText(blocker: StartBlocker): string {
     case 'checking':
       return 'Hoot is still checking whether Claude Code is installed.'
     case 'not-installed':
-      return `Claude Code is not installed. Install it with: ${getTool('claude').installCommand}`
+      return 'Claude Code is not installed: install it in the Agents page.'
     case 'no-agent':
       return 'Claude Code has no agent turned on: set one up in the Agents page.'
     case 'no-project':

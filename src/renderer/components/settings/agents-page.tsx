@@ -12,17 +12,28 @@ import {
   FOLDER_NOT_WRITABLE_MESSAGE,
   INSTALL_NEEDS_NODE_MESSAGE,
   INSTALL_NEEDS_WRITE_ACCESS_MESSAGE,
-  installMethodLabel,
   installNeedsNodeVersionMessage,
   nodeRequirementMessage,
+  operationName,
+  type AgentOperationKind,
   type AgentState,
   type InstallTarget,
 } from '../../../shared/agents'
-import { CODING_TOOLS, type CodingToolDefinition } from '../../../shared/tools'
+import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { agentRowStatus, updateAllIncludes, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
 import { ToolIcon } from '../tool-icon'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog'
 import { Button } from '../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 import {
@@ -37,7 +48,7 @@ import { DefaultAgentPicker, DormantAgentItem, HarnessAgents } from './agent-ite
 import { useCopied } from './agent-panel'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { VersionMenu, type UninstallAsk } from './version-menu'
 
 /** An agent before Hoot has looked for it. */
 function unknownAgent(id: CodingToolDefinition['id']): AgentState {
@@ -48,86 +59,20 @@ function unknownAgent(id: CodingToolDefinition['id']): AgentState {
     installation: null,
     latest: null,
     latestFailed: false,
-    installCommand: null,
+    stable: null,
+    releases: null,
+    follow: { kind: 'latest' },
+    installRoute: 'official',
+    copies: [],
     nodeRequirement: null,
     operation: null,
     launchOptions: null,
   }
 }
 
-/** Where a path is cut when it does not fit: before its last two segments, or its last. */
-function splitForTruncation(text: string): [head: string, tail: string] {
-  const slashes = [...text.matchAll(/[\\/]/g)].map((match) => match.index)
-  const cut = slashes.length >= 3 ? slashes.at(-2) : slashes.at(-1)
-  if (cut === undefined || cut <= 0) return ['', text]
-  return [text.slice(0, cut), text.slice(cut)]
-}
-
-/**
- * A path, with `~` for the home folder. When it does not fit, it is cut in
- * its middle, keeping its end; pointing at it shows it in full.
- */
-function PathText({ shown, full, testId }: { shown: string; full: string; testId: string }) {
-  const [head, tail] = splitForTruncation(shown)
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex max-w-full min-w-0 align-bottom" data-testid={testId} />
-        }
-      >
-        <span className="truncate">{head}</span>
-        <span className="shrink-0 whitespace-pre">{tail}</span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-[min(36rem,90vw)] break-all">
-        {full}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 /** Parts of a line, with a middle dot between each two. */
 function joined(parts: ReactNode[]): ReactNode[] {
   return parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))
-}
-
-/** Where a not-installed agent goes, or why it cannot be installed; `null` before detection. */
-function notInstalledDescription(
-  agent: AgentState,
-  target: InstallTarget | null,
-): ReactNode[] | null {
-  const id = agent.id
-  if (!agent.detected) return null
-  if (agent.installation !== null) return null
-  if (agent.nodeRequirement && target?.kind === 'npm') {
-    return [installNeedsNodeVersionMessage(agent.nodeRequirement)]
-  }
-  switch (target?.kind) {
-    case 'npm':
-      return [
-        'Install uses npm, into ',
-        <PathText
-          key="path"
-          shown={target.displayPrefix}
-          full={target.prefix}
-          testId={`agent-install-target-${id}`}
-        />,
-      ]
-    case 'npm-not-writable':
-      return [
-        "Install needs write access to npm's global folder, ",
-        <PathText
-          key="path"
-          shown={target.displayPrefix}
-          full={target.prefix}
-          testId={`agent-install-target-${id}`}
-        />,
-      ]
-    case 'node-required':
-      return [INSTALL_NEEDS_NODE_MESSAGE]
-    default:
-      return null
-  }
 }
 
 /** A chevron that points down while what it opens is open. */
@@ -152,19 +97,6 @@ function StatusText({ children, testId }: { children: ReactNode; testId: string 
   )
 }
 
-/** A button that runs a command, which pointing at it shows. */
-function RunsTooltip({ command, children }: { command: string | null; children: ReactNode }) {
-  if (command === null) return children
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex" />}>{children}</TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-[min(36rem,90vw)] font-mono break-all">
-        Runs {command}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 /** A failure of an operation, or a version that could not be read, which a dialog tells in full. */
 type AgentFailure =
   | { kind: 'operation'; agent: AgentState }
@@ -176,10 +108,44 @@ function asSentence(reason: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
-/** The details of a failed install or update, or of a version that could not be read. */
-function FailureDialog({ failure, onClose }: { failure: AgentFailure; onClose: () => void }) {
+/** What a failed operation's title says it could not do: install Claude Code, or install 2.1.330 of it… */
+function failureTitle(
+  kind: AgentOperationKind,
+  label: string,
+  version: string | null,
+  other: boolean,
+): string {
+  switch (kind) {
+    case 'install':
+      return `Couldn't install ${label}`
+    case 'update':
+      return `Couldn't update ${label}`
+    case 'switch':
+      return version === null ? `Couldn't install ${label}` : `Couldn't install ${label} ${version}`
+    case 'uninstall':
+      return other && version !== null
+        ? `Couldn't uninstall ${label} ${version}`
+        : `Couldn't uninstall ${label}`
+  }
+}
+
+/**
+ * The details of a failed operation, or of a version that could not be
+ * read. Where the official installer failed, npm can install the agent
+ * instead, when the computer has an npm the user can install with.
+ */
+function FailureDialog({
+  failure,
+  npmUsable,
+  onClose,
+}: {
+  failure: AgentFailure
+  /** Whether Install can use the computer's npm. */
+  npmUsable: boolean
+  onClose: () => void
+}) {
   const installAgent = useAppStore((state) => state.installAgent)
-  const updateAgent = useAppStore((state) => state.updateAgent)
+  const retry = useAppStore((state) => state.retryAgentOperation)
   const [copied, markCopied] = useCopied()
   const { agent } = failure
   const label = CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id
@@ -200,7 +166,12 @@ function FailureDialog({ failure, onClose }: { failure: AgentFailure; onClose: (
     output = installation?.versionOutput ?? ''
     details = []
   } else {
-    title = `Couldn't ${failed.kind} ${label}`
+    title = failureTitle(
+      failed.kind,
+      label,
+      failed.version,
+      failed.path !== null && failed.path !== installation?.path,
+    )
     const exited = failed.exitCode !== null && failed.exitCode !== 0
     description = exited
       ? `The command exited with code ${failed.exitCode}${
@@ -260,11 +231,25 @@ function FailureDialog({ failure, onClose }: { failure: AgentFailure; onClose: (
             {copied ? <CheckIcon /> : <CopyIcon />}
             {copied ? 'Copied' : 'Copy details'}
           </Button>
+          {failed?.kind === 'install' &&
+            failed.route === 'official' &&
+            npmUsable &&
+            agent.nodeRequirement === null && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  installAgent(agent.id, 'npm')
+                  onClose()
+                }}
+                data-testid="agent-failure-npm"
+              >
+                Install with npm
+              </Button>
+            )}
           {failed !== null && (
             <Button
               onClick={() => {
-                if (failed.kind === 'install') installAgent(agent.id)
-                else updateAgent(agent.id)
+                retry(agent.id)
                 onClose()
               }}
               data-testid="agent-failure-retry"
@@ -304,11 +289,28 @@ function FailureButton({
   )
 }
 
+/** What a row says while its operation runs: Installing…, Switching to 2.1.330… */
+function runningText(status: Extract<AgentRowStatus, { kind: 'running' }>): string {
+  switch (status.operation) {
+    case 'install':
+      return 'Installing…'
+    case 'update':
+      return status.version === null ? 'Updating…' : `Updating to ${status.version}…`
+    case 'switch':
+      return status.version === null ? 'Switching…' : `Switching to ${status.version}…`
+    case 'uninstall':
+      return status.other && status.version !== null
+        ? `Uninstalling ${status.version}…`
+        : 'Uninstalling…'
+  }
+}
+
 /**
  * What an agent's installation is doing, or what can be done with it: Cancel
  * while it waits its turn, a spinner while it runs, a red link to the details
- * once it has failed, Install or Update, or why there is neither; nothing
- * when it is up to date.
+ * once it has failed, Install or Update, Back to the version it stays on
+ * where another has taken its place, or why there is none of these; nothing
+ * when it is up to date, or stays on its version.
  */
 function AgentActions({
   agent,
@@ -321,6 +323,7 @@ function AgentActions({
 }) {
   const installAgent = useAppStore((state) => state.installAgent)
   const updateAgent = useAppStore((state) => state.updateAgent)
+  const restoreAgent = useAppStore((state) => state.restoreAgent)
   const cancel = useAppStore((state) => state.cancelAgentOperation)
   const id = agent.id
   const failed = agent.operation?.status === 'failed' ? agent.operation : null
@@ -330,7 +333,7 @@ function AgentActions({
         onClick={() => onFailure({ kind: 'operation', agent })}
         testId={`agent-failure-${id}`}
       >
-        {failed.kind === 'install' ? 'Install failed' : 'Update failed'}
+        {operationName(failed.kind)} failed
       </FailureButton>
     )
   }
@@ -362,7 +365,7 @@ function AgentActions({
             className="text-xs whitespace-nowrap text-muted-foreground"
             data-testid={`agent-status-${id}`}
           >
-            {status.operation === 'install' ? 'Installing…' : 'Updating…'}
+            {runningText(status)}
           </span>
         </span>
       )
@@ -379,16 +382,14 @@ function AgentActions({
       )
     case 'install':
       return (
-        <RunsTooltip command={agent.installCommand}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => installAgent(id)}
-            data-testid={`agent-install-${id}`}
-          >
-            Install
-          </Button>
-        </RunsTooltip>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => installAgent(id)}
+          data-testid={`agent-install-${id}`}
+        >
+          Install
+        </Button>
       )
     case 'needs-node':
       return <StatusText testId={`agent-status-${id}`}>{INSTALL_NEEDS_NODE_MESSAGE}</StatusText>
@@ -402,8 +403,20 @@ function AgentActions({
           {installNeedsNodeVersionMessage(status.requirement)}
         </StatusText>
       )
+    case 'restore':
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => restoreAgent(id)}
+          data-testid={`agent-restore-${id}`}
+        >
+          Back to {status.version}
+        </Button>
+      )
     case 'cannot-check':
       return <StatusText testId={`agent-status-${id}`}>Couldn't check for updates</StatusText>
+    case 'staying':
     case 'up-to-date':
       return null
     case 'update-elsewhere':
@@ -412,78 +425,42 @@ function AgentActions({
       )
     case 'update':
       return (
-        <RunsTooltip command={agent.installation?.updateCommand ?? null}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => updateAgent(id)}
-            data-testid={`agent-update-${id}`}
-          >
-            Update to {status.version}
-          </Button>
-        </RunsTooltip>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => updateAgent(id)}
+          data-testid={`agent-update-${id}`}
+        >
+          Update to {status.version}
+        </Button>
       )
     case 'update-blocked':
       return <StatusText testId={`agent-status-${id}`}>{status.version} is out</StatusText>
   }
 }
 
-/** An installed agent's version, how it was installed and where, and its latest version. */
-function InstallationDetails({ agent }: { agent: AgentState }) {
-  const installation = agent.installation
-  if (installation === null) return null
-  const method = installMethodLabel(installation.method)
-  const latest = [
-    ...(agent.latest === null ? [] : [`Latest ${agent.latest}`]),
-    ...(installation.updateCommand === null ? [] : [`updates with ${installation.updateCommand}`]),
-  ].join(' · ')
-  return (
-    <div
-      className="flex min-w-0 flex-col gap-1 rounded-lg bg-muted/60 px-3 py-2 sm:ml-8"
-      data-testid={`agent-details-${agent.id}`}
-    >
-      <span className="flex min-w-0 text-xs text-muted-foreground">
-        <span className="shrink-0 whitespace-pre">
-          {[installation.version ?? "Doesn't run", ...(method === null ? [] : [method])].join(
-            ' · ',
-          )}
-          {' · '}
-        </span>
-        <span className="truncate" title={installation.path} data-testid={`agent-path-${agent.id}`}>
-          {installation.displayPath}
-        </span>
-      </span>
-      {latest !== '' && (
-        <span className="truncate font-mono text-xs text-muted-foreground">{latest}</span>
-      )}
-    </div>
-  )
-}
-
-/** The mark beside the name of the default agent. */
 /**
- * An installed harness's row: the program alone, its installation and
- * updates. Its agents follow it (see `HarnessAgents`).
+ * An installed harness's row: the program alone, what it is doing or can do,
+ * and its version, which opens its version menu. Its agents follow it (see
+ * `HarnessAgents`).
  */
 function AgentRow({
   tool,
   agent,
   target,
   onFailure,
+  onUninstall,
 }: {
   tool: CodingToolDefinition
   agent: AgentState
   target: InstallTarget | null
   onFailure: (failure: AgentFailure) => void
+  onUninstall: (ask: UninstallAsk) => void
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const status = agentRowStatus(agent, target)
   const id = tool.id
-  const version = agent.installation?.version ?? null
   return (
-    <Collapsible
-      open={detailsOpen}
-      onOpenChange={setDetailsOpen}
+    <div
       className="flex flex-col gap-2.5 px-4 py-3"
       data-testid={`agent-row-${id}`}
       data-status={agent.operation?.status === 'failed' ? 'failed' : status.kind}
@@ -497,25 +474,8 @@ function AgentRow({
           </span>
         </span>
         <AgentActions agent={agent} status={status} onFailure={onFailure} />
-        {version !== null && (
-          <CollapsibleTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="xs"
-                className="shrink-0 font-normal text-muted-foreground"
-                data-testid={`agent-version-${id}`}
-              />
-            }
-          >
-            {version}
-            <Chevron open={detailsOpen} className="size-3" />
-          </CollapsibleTrigger>
-        )}
+        <VersionMenu agent={agent} onUninstall={onUninstall} />
       </div>
-      <CollapsibleContent>
-        <InstallationDetails agent={agent} />
-      </CollapsibleContent>
       {status.kind === 'update-blocked' && (
         <p className="text-xs text-muted-foreground sm:pl-8">
           {joined([
@@ -524,7 +484,91 @@ function AgentRow({
           ])}
         </p>
       )}
-    </Collapsible>
+    </div>
+  )
+}
+
+/** What the confirmation of an uninstall says: the sessions it closes, the copy used instead. */
+function uninstallText(
+  agent: AgentState,
+  ask: UninstallAsk,
+  openSessions: number,
+): { title: string; text: string } {
+  const label = CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id
+  const several = agent.copies.length > 0
+  const title =
+    several && ask.version !== null ? `Uninstall ${label} ${ask.version}?` : `Uninstall ${label}?`
+  const parts: string[] = []
+  if (ask.inUse) {
+    if (openSessions === 1) parts.push('Its open session will close.')
+    if (openSessions > 1) parts.push(`Its ${openSessions} open sessions will close.`)
+    const next = agent.copies[0]
+    if (next !== undefined) {
+      const version = next.version ?? 'Another copy'
+      parts.push(
+        next.runs
+          ? `${version} will be used instead.`
+          : `${version} will be used instead, but it doesn't run.`,
+      )
+    }
+  }
+  parts.push('Its settings and history stay.')
+  return { title, text: parts.join(' ') }
+}
+
+/** Asks before a copy of an agent is uninstalled, saying what follows from it. */
+function UninstallDialog({
+  ask,
+  onClose,
+}: {
+  ask: { id: CodingToolId; copy: UninstallAsk } | null
+  onClose: () => void
+}) {
+  const agents = useAppStore((state) => state.agents)
+  const sessions = useAppStore((state) => state.sessions)
+  const uninstall = useAppStore((state) => state.uninstallAgent)
+  // Kept while the dialog fades out after the answer.
+  const [shown, setShown] = useState({ title: '', text: '' })
+  const agent = ask === null ? undefined : agents?.agents.find((entry) => entry.id === ask.id)
+  const openSessions =
+    ask === null
+      ? 0
+      : sessions.filter((session) => session.toolId === ask.id && session.status !== 'exited')
+          .length
+  const current =
+    ask === null || agent === undefined ? null : uninstallText(agent, ask.copy, openSessions)
+  if (current !== null && (current.title !== shown.title || current.text !== shown.text)) {
+    setShown(current)
+  }
+  return (
+    <AlertDialog
+      open={ask !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <AlertDialogContent data-testid="agent-uninstall-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{shown.title}</AlertDialogTitle>
+          <AlertDialogDescription data-testid="agent-uninstall-text">
+            {shown.text}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="agent-uninstall-cancel">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              if (ask !== null) uninstall(ask.id, ask.copy.path)
+              onClose()
+            }}
+            data-testid="agent-uninstall-confirm"
+          >
+            Uninstall
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -559,7 +603,6 @@ function NotInstalledGroup({
         <div className="flex flex-col divide-y border-t" data-testid="not-installed-list">
           {tools.map((tool) => {
             const agent = states.get(tool.id) ?? unknownAgent(tool.id)
-            const description = notInstalledDescription(agent, target)
             const waiting = (agents ?? []).filter((made) => made.harness === tool.id)
             return (
               <div key={tool.id} data-testid={`agent-group-${tool.id}`}>
@@ -573,18 +616,12 @@ function NotInstalledGroup({
                   }
                 >
                   <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="flex items-center gap-2">
-                      <span className="text-sm font-medium" data-testid={`agent-name-${tool.id}`}>
-                        {tool.label}
-                      </span>
-                    </span>
-                    <span
-                      className="text-xs text-muted-foreground"
-                      data-testid={`agent-description-${tool.id}`}
-                    >
-                      {description ?? 'Not installed'}
-                    </span>
+                  {/* As tall as a button, so that rows line up whether they have one or not. */}
+                  <span
+                    className="flex min-h-7 min-w-0 flex-1 items-center text-sm font-medium"
+                    data-testid={`agent-name-${tool.id}`}
+                  >
+                    {tool.label}
                   </span>
                   <AgentActions
                     agent={agent}
@@ -618,6 +655,7 @@ export function AgentsPage() {
   const updateAllAgents = useAppStore((state) => state.updateAllAgents)
   const setYoloMode = useAppStore((state) => state.setYoloMode)
   const [failure, setFailure] = useState<AgentFailure | null>(null)
+  const [uninstall, setUninstall] = useState<{ id: CodingToolId; copy: UninstallAsk } | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
   // Whether the Update all run seen last has had an operation pending: it ends
   // once none is, so that a later operation of one agent is not taken for it.
@@ -678,24 +716,7 @@ export function AgentsPage() {
           <div className="flex items-center justify-between gap-4">
             <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
             <div className="flex items-center gap-2">
-              {showUpdateAll &&
-                (updating ? (
-                  updateAllButton
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="inline-flex" />}>
-                      {updateAllButton}
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {updateAllCandidates
-                        .map(
-                          (agent) =>
-                            `${CODING_TOOLS.find((tool) => tool.id === agent.id)?.label ?? agent.id} ${agent.latest ?? ''}`,
-                        )
-                        .join(', ')}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
+              {showUpdateAll && updateAllButton}
               <Button
                 variant="outline"
                 size="icon-sm"
@@ -754,7 +775,13 @@ export function AgentsPage() {
                       <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
                     </div>
                   ) : (
-                    <AgentRow tool={tool} agent={agent} target={target} onFailure={setFailure} />
+                    <AgentRow
+                      tool={tool}
+                      agent={agent}
+                      target={target}
+                      onFailure={setFailure}
+                      onUninstall={(copy) => setUninstall({ id: tool.id, copy })}
+                    />
                   )}
                   <HarnessAgents harness={tool.id} state={states.get(tool.id)} />
                 </div>
@@ -769,7 +796,14 @@ export function AgentsPage() {
           </div>
         </div>
       </div>
-      {failure !== null && <FailureDialog failure={failure} onClose={() => setFailure(null)} />}
+      {failure !== null && (
+        <FailureDialog
+          failure={failure}
+          npmUsable={target?.kind === 'npm'}
+          onClose={() => setFailure(null)}
+        />
+      )}
+      <UninstallDialog ask={uninstall} onClose={() => setUninstall(null)} />
     </div>
   )
 }

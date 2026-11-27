@@ -234,6 +234,15 @@ export class SessionManager extends EventEmitter<{
   }
 
   /**
+   * Closes the sessions of a tool that are starting or running, as before
+   * the program they run is uninstalled: settles once their processes have
+   * ended.
+   */
+  async closeAllOf(toolId: ToolId): Promise<void> {
+    await Promise.all(this.runningIdsOf(toolId).map((id) => this.close(id)))
+  }
+
+  /**
    * Closes the sessions of a chat or saved session, by its id, whether they
    * are starting, running or ended, as before it is archived or deleted:
    * settles once their processes have ended.

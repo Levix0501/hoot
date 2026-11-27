@@ -264,6 +264,12 @@ const sessionStartAnswer = z.union([
 ]) satisfies z.ZodType<SessionStartAnswer>
 /** A coding tool, whose program the Agents page installs and updates. */
 const toolId = z.enum(CODING_TOOL_IDS)
+const installRoute = z.enum(['official', 'npm'])
+const agentFollow = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('latest') }),
+  z.object({ kind: z.literal('stable') }),
+  z.object({ kind: z.literal('stay'), version: z.string().min(1) }),
+])
 const providerText = z.string().max(10_000)
 const providerUrls = z.strictObject({
   anthropic: providerText.optional(),
@@ -571,9 +577,9 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.enterAgentsPage, () => deps.agents.openPage())
   on(IpcChannel.detectAgents, () => void deps.agents.detect())
   deps.agents.on('changed', (state) => send(IpcChannel.agentsChanged, state))
-  on(IpcChannel.installAgent, (id) => {
-    const parsed = toolId.safeParse(id)
-    if (parsed.success) deps.agents.install(parsed.data)
+  on(IpcChannel.installAgent, (id, route) => {
+    const parsed = z.tuple([toolId, installRoute.optional()]).safeParse([id, route])
+    if (parsed.success) deps.agents.install(...parsed.data)
   })
   on(IpcChannel.updateAgent, (id) => {
     const parsed = toolId.safeParse(id)
@@ -583,6 +589,22 @@ export function registerIpc(deps: IpcDependencies): void {
   on(IpcChannel.cancelAgentOperation, (id) => {
     const parsed = toolId.safeParse(id)
     if (parsed.success) deps.agents.cancel(parsed.data)
+  })
+  on(IpcChannel.setAgentFollow, (id, follow) => {
+    const parsed = z.tuple([toolId, agentFollow]).safeParse([id, follow])
+    if (parsed.success) deps.agents.setFollow(...parsed.data)
+  })
+  on(IpcChannel.restoreAgent, (id) => {
+    const parsed = toolId.safeParse(id)
+    if (parsed.success) deps.agents.restore(parsed.data)
+  })
+  on(IpcChannel.uninstallAgent, (id, file) => {
+    const parsed = z.tuple([toolId, z.string().min(1)]).safeParse([id, file])
+    if (parsed.success) deps.agents.uninstall(...parsed.data)
+  })
+  on(IpcChannel.retryAgentOperation, (id) => {
+    const parsed = toolId.safeParse(id)
+    if (parsed.success) deps.agents.retry(parsed.data)
   })
 
   handle(IpcChannel.getLaunchSettings, () => deps.launchSettings.all())

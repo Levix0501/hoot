@@ -1,4 +1,4 @@
-import type { AgentOperationSummary, AgentsState } from './agents'
+import type { AgentFollow, AgentOperationSummary, AgentsState, InstallRoute } from './agents'
 import type { AppInfo } from './app-info'
 import type { Appearance } from './appearance'
 import type { ArchivedSessionInfo, ChatInfo, SavedSessionInfo } from './chats'
@@ -309,6 +309,10 @@ export const IpcChannel = {
   updateAgent: 'agents:update',
   updateAllAgents: 'agents:update-all',
   cancelAgentOperation: 'agents:cancel',
+  setAgentFollow: 'agents:set-follow',
+  restoreAgent: 'agents:restore',
+  uninstallAgent: 'agents:uninstall',
+  retryAgentOperation: 'agents:retry',
   getLaunchSettings: 'launch-settings:get',
   setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
@@ -515,14 +519,28 @@ export interface HootApi {
    */
   detectAgents(): void
   onAgentsChanged(listener: (state: AgentsState) => void): () => void
-  /** Installs an agent, now or after the operations before it. */
-  installAgent(id: CodingToolId): void
+  /**
+   * Installs an agent, now or after the operations before it: with its
+   * official installer, or with npm, which its failure offers.
+   */
+  installAgent(id: CodingToolId, route?: InstallRoute): void
   /** Updates an agent's installation, now or after the operations before it. */
   updateAgent(id: CodingToolId): void
   /** Updates every agent that can be updated, one after another. */
   updateAllAgents(): void
   /** Cancels an agent's operation while it waits; one that runs goes on to its end. */
   cancelAgentOperation(id: CodingToolId): void
+  /**
+   * Sets what an agent's installation follows, and installs what that asks
+   * for: the version it stays on, or the newer one it follows.
+   */
+  setAgentFollow(id: CodingToolId, follow: AgentFollow): void
+  /** Installs the version an agent stays on again, where another has taken its place. */
+  restoreAgent(id: CodingToolId): void
+  /** Uninstalls the copy of an agent whose command is at `path`, after its sessions close. */
+  uninstallAgent(id: CodingToolId, path: string): void
+  /** Runs an agent's operation that failed again. */
+  retryAgentOperation(id: CodingToolId): void
   /** The default agent and the YOLO mode switch. */
   getLaunchSettings(): Promise<LaunchSettings>
   /** Makes an agent the default agent, by its id, or none. */

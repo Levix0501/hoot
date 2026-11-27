@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CODING_TOOL_IDS, CODING_TOOLS, getCodingTool, getTool, TOOL_IDS, TOOLS } from './tools'
+import { CODING_TOOL_IDS, CODING_TOOLS, getCodingTool, TOOL_IDS, TOOLS } from './tools'
 
 describe('tools', () => {
   it('defines the four tools with their commands', () => {
@@ -9,16 +9,6 @@ describe('tools', () => {
       ['opencode', 'OpenCode', 'opencode'],
       ['shell', 'Terminal', null],
     ])
-  })
-
-  it('gives an install command for every tool that can be missing', () => {
-    const installable = TOOLS.filter((tool) => tool.command !== null)
-    expect(installable.map((tool) => tool.installCommand)).toEqual([
-      'npm install -g @anthropic-ai/claude-code',
-      'npm install -g @openai/codex',
-      'npm install -g @opencode/cli',
-    ])
-    expect(getTool('opencode').installCommand).toBe('npm install -g @opencode/cli')
   })
 
   it('names the npm package each coding tool comes in', () => {

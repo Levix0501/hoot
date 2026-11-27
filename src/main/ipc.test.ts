@@ -68,10 +68,14 @@ const agents = Object.assign(new EventEmitter(), {
   getState: vi.fn<() => AgentsState>(() => agentsState),
   detect: vi.fn<() => Promise<void>>(async () => {}),
   openPage: vi.fn<() => void>(),
-  install: vi.fn<(id: string) => void>(),
+  install: vi.fn<(id: string, route?: string) => void>(),
   update: vi.fn<(id: string) => void>(),
   updateAll: vi.fn<() => void>(),
   cancel: vi.fn<(id: string) => void>(),
+  setFollow: vi.fn<(id: string, follow: unknown) => void>(),
+  restore: vi.fn<(id: string) => void>(),
+  uninstall: vi.fn<(id: string, path: string) => void>(),
+  retry: vi.fn<(id: string) => void>(),
 })
 
 const appInfo: AppInfo = {
@@ -1405,7 +1409,7 @@ describe('the messages of the Agents page', () => {
     send(IpcChannel.updateAgent, 'claude')
     send(IpcChannel.updateAllAgents)
     send(IpcChannel.cancelAgentOperation, 'codex')
-    expect(agents.install.mock.calls).toEqual([['opencode']])
+    expect(agents.install.mock.calls).toEqual([['opencode', undefined]])
     expect(agents.update.mock.calls).toEqual([['claude']])
     expect(agents.updateAll).toHaveBeenCalledOnce()
     expect(agents.cancel.mock.calls).toEqual([['codex']])
@@ -1417,6 +1421,28 @@ describe('the messages of the Agents page', () => {
     expect(agents.install).toHaveBeenCalledOnce()
     expect(agents.update).toHaveBeenCalledOnce()
     expect(agents.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('install with npm, set what an agent follows, go back, uninstall a copy and try again', () => {
+    send(IpcChannel.installAgent, 'codex', 'npm')
+    send(IpcChannel.installAgent, 'codex', 'pip')
+    send(IpcChannel.setAgentFollow, 'claude', { kind: 'stay', version: '2.1.330' })
+    send(IpcChannel.setAgentFollow, 'claude', { kind: 'stable' })
+    send(IpcChannel.setAgentFollow, 'claude', { kind: 'stay' })
+    send(IpcChannel.setAgentFollow, 'claude', { kind: 'nightly' })
+    send(IpcChannel.restoreAgent, 'opencode')
+    send(IpcChannel.uninstallAgent, 'claude', '/usr/local/bin/claude')
+    send(IpcChannel.uninstallAgent, 'claude', '')
+    send(IpcChannel.retryAgentOperation, 'codex')
+    send(IpcChannel.retryAgentOperation, 'shell')
+    expect(agents.install.mock.calls).toEqual([['codex', 'npm']])
+    expect(agents.setFollow.mock.calls).toEqual([
+      ['claude', { kind: 'stay', version: '2.1.330' }],
+      ['claude', { kind: 'stable' }],
+    ])
+    expect(agents.restore.mock.calls).toEqual([['opencode']])
+    expect(agents.uninstall.mock.calls).toEqual([['claude', '/usr/local/bin/claude']])
+    expect(agents.retry.mock.calls).toEqual([['codex']])
   })
 
   it('come only from the window', () => {

@@ -4,7 +4,9 @@ import path from 'node:path'
 import { quote } from 'shell-quote'
 import { parse as parseToml } from 'smol-toml'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { AgentFollow } from '../../shared/agents'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
+import type { CodingToolId } from '../../shared/tools'
 import {
   ownProvider,
   type CatalogModel,
@@ -36,6 +38,8 @@ import { SessionError } from './session-manager'
 let root: string
 let project: string
 let bin: string
+/** What the agents' installations follow in the test: their latest versions unless it says. */
+const follows: Partial<Record<CodingToolId, AgentFollow>> = {}
 
 beforeAll(async () => {
   root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-launch-')))
@@ -110,6 +114,8 @@ function context(
   return {
     shell: { file: '/bin/zsh', args: ['-l'] },
     baseEnv: { HOME: '/home/me', PATH: onPath('/usr/bin', '/bin'), SHELL: '/bin/zsh' },
+    home: path.join(root, 'home'),
+    follow: (tool) => follows[tool] ?? { kind: 'latest' },
     terminal: () => ({ appVersion: '0.1.0', fallbackLang: 'C.UTF-8' }),
     getLoginEnvironment: async () => ({ env: loginEnv, error: null }),
     launchSettings: (tool) => ({ yoloMode, agent: settings(agents[tool]) }),
@@ -1242,7 +1248,7 @@ describe('resolveLaunch', () => {
     ).rejects.toBeInstanceOf(SessionError)
     await expect(
       resolveLaunch(context({ PATH: '/usr/bin' }), 'claude', project, issue),
-    ).rejects.toThrow('Claude Code is not available.')
+    ).rejects.toThrow('Claude Code is not installed.')
     await expect(
       resolveLaunch(context({ PATH: bin }), 'claude', path.join(root, 'gone'), issue),
     ).rejects.toBeInstanceOf(SessionError)
@@ -1266,8 +1272,44 @@ describe('resolveLaunch', () => {
 
   it('refuses a tool that is not on the login shell PATH', async () => {
     await expect(resolveLaunch(context({ PATH: '/usr/bin' }), 'opencode', project)).rejects.toThrow(
-      'OpenCode is not available. Install it with: npm install -g @opencode/cli',
+      'OpenCode is not installed. Install it on the Agents page.',
     )
+  })
+
+  it("turns an agent's own updater off in its sessions while it follows anything but its latest", async () => {
+    const loginEnv = { PATH: onPath(bin, '/usr/bin') }
+    try {
+      follows.claude = { kind: 'stay', version: '2.1.330' }
+      follows.codex = { kind: 'stay', version: '0.170.0' }
+      const claude = await resolveLaunch(context(loginEnv), 'claude', project)
+      expect(claude.env.DISABLE_AUTOUPDATER).toBe('1')
+      const codex = await resolveLaunch(context(loginEnv), 'codex', project)
+      expect(codex.args).toEqual([
+        ...program(bin, 'codex').args,
+        '-c',
+        'check_for_update_on_startup=false',
+        '--dangerously-bypass-approvals-and-sandbox',
+      ])
+      follows.claude = { kind: 'stable' }
+      const stable = await resolveLaunch(context(loginEnv), 'claude', project)
+      expect(stable.env.DISABLE_AUTOUPDATER).toBe('1')
+    } finally {
+      delete follows.claude
+      delete follows.codex
+    }
+    const latest = await resolveLaunch(context(loginEnv), 'claude', project)
+    expect(latest.env).not.toHaveProperty('DISABLE_AUTOUPDATER')
+  })
+
+  it('runs an agent that its official installer put in a folder the login shell PATH lacks', async () => {
+    const official = path.join(root, 'home', '.local', 'bin')
+    await writeNodeCommand(path.join(official, 'claude'), '')
+    try {
+      const claude = await resolveLaunch(context({ PATH: '/usr/bin' }), 'claude', project)
+      expect(claude.file).toBe(program(official, 'claude').file)
+    } finally {
+      fs.rmSync(path.join(root, 'home'), { recursive: true, force: true })
+    }
   })
 
   it('runs a tool found on the login shell PATH, and adds no folder after the ones it has', async () => {

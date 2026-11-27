@@ -78,7 +78,11 @@ function stateWith(options: Partial<AgentLaunchOptions>): AgentState {
     installation: null,
     latest: null,
     latestFailed: false,
-    installCommand: null,
+    stable: null,
+    releases: null,
+    follow: { kind: 'latest' },
+    installRoute: 'official',
+    copies: [],
     nodeRequirement: null,
     operation: null,
     launchOptions: {

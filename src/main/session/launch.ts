@@ -18,6 +18,8 @@ import {
   type Provider,
 } from '../../shared/providers'
 import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
+import type { AgentFollow } from '../../shared/agents'
+import { findAgentCommand } from '../agents/agent-command'
 import { readVersion } from '../agents/version'
 import { setEnvVariable, type Env } from '../env/env'
 import {
@@ -27,7 +29,6 @@ import {
 } from '../env/session-env'
 import { commandProgram } from '../tools/command-program'
 import type { SessionShell } from '../tools/default-shell'
-import { findCommand } from '../tools/find-command'
 import { claudeSessionEnv, claudeSessionModel } from '../providers/claude-config'
 import {
   codexDefaultModel,
@@ -47,6 +48,13 @@ export interface LaunchContext {
   shell: SessionShell
   /** The graphical login session environment Hoot started with. */
   baseEnv: Env
+  /** The home folder, where agents' official installers put their commands (see `findAgentCommand`). */
+  home: string
+  /**
+   * What the session's agent's installation follows: one that follows
+   * anything but its latest version starts with its own updater off.
+   */
+  follow(tool: CodingToolId): AgentFollow
   terminal(): TerminalEnvOptions
   getLoginEnvironment(): Promise<LoginEnvironment>
   /** How the session's agent starts, as the Agents page has it. */
@@ -287,6 +295,20 @@ async function writeClaudeSettings(
   }
   return file
 }
+
+/**
+ * What turns an agent's own updater off in a session whose installation
+ * follows anything but its latest version, so that the session does not
+ * update it: Claude Code's variable, which leaves `claude update` working;
+ * OpenCode's. Codex takes an argument instead (see `CODEX_NO_UPDATE_CHECK`).
+ */
+const NO_SELF_UPDATE_ENV: Partial<Record<CodingToolId, Record<string, string>>> = {
+  claude: { DISABLE_AUTOUPDATER: '1' },
+  opencode: { OPENCODE_DISABLE_AUTOUPDATE: '1' },
+}
+
+/** The arguments that keep Codex from offering to update itself when a session starts. */
+const CODEX_NO_UPDATE_CHECK = ['-c', 'check_for_update_on_startup=false']
 
 /** The first version of Codex that runs a hook in the background, rather than skipping it. */
 export const CODEX_BACKGROUND_HOOKS_VERSION = '0.148.0'
@@ -556,11 +578,9 @@ export async function resolveLaunch(
   const launch = context.launchSettings(tool.id)
   await checkFolder(cwd)
   const login = await context.getLoginEnvironment()
-  const found = await findCommand(tool.command, login.env)
+  const found = await findAgentCommand(tool.id, tool.command, login.env, context.home)
   if (!found) {
-    throw new SessionError(
-      `${tool.label} is not available. Install it with: ${tool.installCommand}`,
-    )
+    throw new SessionError(`${tool.label} is not installed. Install it on the Agents page.`)
   }
   const program = await commandProgram(found, login.env).catch((error: unknown) => {
     throw new SessionError(
@@ -572,6 +592,12 @@ export async function resolveLaunch(
     cwd,
     hoot: context.hoot,
   })
+  const ownUpdates = context.follow(tool.id).kind === 'latest'
+  for (const [name, value] of Object.entries(
+    ownUpdates ? {} : (NO_SELF_UPDATE_ENV[tool.id] ?? {}),
+  )) {
+    setEnvVariable(env, name, value)
+  }
   if (tool.id === 'opencode') {
     const settings = await openCodeCliConfig({
       env: login.env,
@@ -652,6 +678,7 @@ export async function resolveLaunch(
     if (codexAtLeast(version, CODEX_BACKGROUND_HOOKS_VERSION)) {
       hookArguments = ['-c', CODEX_HOOK_SETTING]
     }
+    if (!ownUpdates) providerArguments = [...providerArguments, ...CODEX_NO_UPDATE_CHECK]
   }
   const removeSettings = () => {
     if (settingsFile !== null) rmSync(settingsFile, { force: true })

@@ -25,10 +25,12 @@ import {
   windowControlsArgument,
   windowControlsFor,
 } from '../shared/window-controls'
+import { systemFolders } from './agents/agent-command'
 import { AgentService } from './agents/agent-service'
 import { readClaudeLaunchOptions } from './agents/claude-options'
 import { readCodexConfig, readCodexLaunchOptions } from './agents/codex-options'
 import { fetchLatestRelease } from './agents/latest-version'
+import { fetchReleases } from './agents/releases'
 import { readVersion } from './agents/version'
 import { readAppInfo } from './app-info'
 import { buildAppMenu, buildDatabaseErrorMenu } from './app-menu'
@@ -69,6 +71,7 @@ import { resolveLaunch, type AgentLaunch, type ChatLaunch } from './session/laun
 import { openCodePluginFolder } from './session/opencode-plugin'
 import { SessionError, SessionManager } from './session/session-manager'
 import { SessionStartRequests } from './session/session-starts'
+import { AgentFollowStore } from './settings/agent-follow-store'
 import { AppearanceStore } from './settings/appearance-store'
 import { FilePanelStore } from './settings/file-panel-store'
 import { IssueWindowStore } from './settings/issue-window-store'
@@ -125,6 +128,7 @@ const windowControls = windowControlsFor(
 
 const shell = defaultShell(baseEnv)
 const launchSettings = new LaunchSettingsStore(app.getPath('userData'))
+const agentFollows = new AgentFollowStore(app.getPath('userData'))
 const sidebar = new SidebarStateStore(app.getPath('userData'))
 const filePanel = new FilePanelStore(app.getPath('userData'))
 const issueWindow = new IssueWindowStore(app.getPath('userData'))
@@ -142,6 +146,7 @@ const tools = new ToolService({
   shell: shell.file,
   baseEnv,
   cwd: os.homedir(),
+  home: os.homedir(),
 })
 const ptyHost = new PtyHostClient(path.join(import.meta.dirname, '../pty-host/index.js'))
 
@@ -191,6 +196,8 @@ const sessions: SessionManager = new SessionManager({
       {
         shell,
         baseEnv,
+        home: os.homedir(),
+        follow: (tool) => agentFollows.get(tool),
         terminal: () =>
           (terminalOptions ??= {
             appVersion: app.getVersion(),
@@ -323,7 +330,13 @@ async function openCodeLaunch(
   let server: OpenCodeServer
   try {
     await cleanOpenCodeConfig(login.env)
-    server = await openCodeServers.ensure(command, login.env)
+    // Its own updater is off while OpenCode follows anything but its latest version.
+    server = await openCodeServers.ensure(
+      command,
+      agentFollows.get('opencode').kind === 'latest'
+        ? login.env
+        : { ...login.env, OPENCODE_DISABLE_AUTOUPDATE: '1' },
+    )
   } catch (error) {
     if (provider.own !== null) {
       console.error("Could not start Hoot's server of OpenCode; it uses its own:", error)
@@ -369,7 +382,16 @@ const agents = new AgentService({
   // Through Electron's network stack, which takes the system's proxy settings.
   latestRelease: (npmPackage, command) =>
     fetchLatestRelease(npmPackage, command, (url, init) => net.fetch(url, init)),
+  releases: (tool, npmPackage, command) =>
+    fetchReleases(tool, npmPackage, command, (url, init) => net.fetch(url, init)),
+  follows: agentFollows,
+  systemFolders: systemFolders(),
   runningSessions: (id) => sessions.runningIdsOf(id),
+  // Hoot's servers of OpenCode run its program too.
+  closeSessions: async (id) => {
+    await sessions.closeAllOf(id)
+    if (id === 'opencode') await openCodeServers.stopAll()
+  },
   launchOptions: async (tool, detection) => {
     const { env } = detection.login
     if (tool === 'opencode') {

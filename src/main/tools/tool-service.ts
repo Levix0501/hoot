@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events'
 import type { ToolAvailability, ToolsState } from '../../shared/ipc'
 import { TOOLS } from '../../shared/tools'
+import { findAgentCommand } from '../agents/agent-command'
 import type { Env } from '../env/env'
 import { resolveLoginShellEnv } from '../env/login-shell-env'
-import { findCommand } from './find-command'
 
 export interface ToolServiceOptions {
   /**
@@ -13,6 +13,11 @@ export interface ToolServiceOptions {
   shell: string
   baseEnv: Env
   cwd: string
+  /**
+   * The home folder, where agents' official installers put their commands
+   * (see `findAgentCommand`); `cwd` by default.
+   */
+  home?: string
   /** Replaceable for tests. */
   resolveEnv?: typeof resolveLoginShellEnv
   platform?: NodeJS.Platform
@@ -32,9 +37,10 @@ export interface Detection {
 
 /**
  * Reads the login shell environment (on Windows, takes the one Hoot started
- * with) and checks which tools can be found on its PATH. Detection runs at
- * startup and again whenever the user asks for it, or an agent has been
- * installed or updated.
+ * with) and checks which tools can be found on its PATH, or for an agent in
+ * the folders its official installer puts it in (see `findAgentCommand`).
+ * Detection runs at startup and again whenever the user asks for it, or an
+ * agent has been installed or updated.
  */
 export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
   private state: ToolsState = { detecting: false, tools: [], error: null }
@@ -135,7 +141,13 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
     const tools: ToolAvailability[] = await Promise.all(
       TOOLS.map(async (tool) => {
         if (!tool.command) return { id: tool.id, available: true, path: this.options.shell }
-        const found = await findCommand(tool.command, login.env)
+        const found = await findAgentCommand(
+          tool.id,
+          tool.command,
+          login.env,
+          this.options.home ?? this.options.cwd,
+          this.options.platform,
+        )
         return { id: tool.id, available: found !== null, path: found }
       }),
     )

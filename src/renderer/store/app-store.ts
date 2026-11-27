@@ -1,7 +1,12 @@
 import { ArchiveIcon } from 'lucide-react'
 import { createElement, type ReactNode } from 'react'
 import { create } from 'zustand'
-import { type AgentOperationSummary, type AgentsState } from '../../shared/agents'
+import {
+  type AgentFollow,
+  type AgentOperationSummary,
+  type AgentsState,
+  type InstallRoute,
+} from '../../shared/agents'
 import type { AppInfo } from '../../shared/app-info'
 import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance'
 import { ISSUE_WORKFLOW } from '../../shared/built-in-workflow'
@@ -504,11 +509,15 @@ export interface AppState {
    * installation and version, and reads every agent's latest version.
    */
   detectAgents(): void
-  installAgent(id: CodingToolId): void
+  installAgent(id: CodingToolId, route?: InstallRoute): void
   updateAgent(id: CodingToolId): void
   /** Updates every agent that can be updated, one after another. */
   updateAllAgents(): void
   cancelAgentOperation(id: CodingToolId): void
+  setAgentFollow(id: CodingToolId, follow: AgentFollow): void
+  restoreAgent(id: CodingToolId): void
+  uninstallAgent(id: CodingToolId, path: string): void
+  retryAgentOperation(id: CodingToolId): void
   /** Makes an agent the default agent, by its id, or none. */
   setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
@@ -2712,8 +2721,8 @@ export const useAppStore = create<AppState>()((set, get) => {
       api.detectAgents()
     },
 
-    installAgent(id) {
-      api.installAgent(id)
+    installAgent(id, route) {
+      api.installAgent(id, route)
     },
 
     updateAgent(id) {
@@ -2722,6 +2731,22 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     updateAllAgents() {
       api.updateAllAgents()
+    },
+
+    setAgentFollow(id, follow) {
+      api.setAgentFollow(id, follow)
+    },
+
+    restoreAgent(id) {
+      api.restoreAgent(id)
+    },
+
+    uninstallAgent(id, path) {
+      api.uninstallAgent(id, path)
+    },
+
+    retryAgentOperation(id) {
+      api.retryAgentOperation(id)
     },
 
     cancelAgentOperation(id) {

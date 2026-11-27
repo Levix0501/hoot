@@ -12,10 +12,8 @@ export interface CodingToolDefinition {
   label: string
   /** Command looked up in the login shell PATH. */
   command: string
-  /** The npm package the tool comes in, which Hoot installs and updates. */
+  /** The npm package the tool comes in, which Hoot installs and updates with npm. */
   npmPackage: string
-  /** Shown next to the tool when it is not available, where Hoot does not install it. */
-  installCommand: string
 }
 
 export interface ShellToolDefinition {
@@ -24,7 +22,6 @@ export interface ShellToolDefinition {
   /** The user's default shell runs instead of a command. */
   command: null
   npmPackage: null
-  installCommand: null
 }
 
 export type ToolDefinition = CodingToolDefinition | ShellToolDefinition
@@ -35,28 +32,24 @@ export const TOOLS: readonly ToolDefinition[] = [
     label: 'Claude Code',
     command: 'claude',
     npmPackage: '@anthropic-ai/claude-code',
-    installCommand: 'npm install -g @anthropic-ai/claude-code',
   },
   {
     id: 'codex',
     label: 'Codex',
     command: 'codex',
     npmPackage: '@openai/codex',
-    installCommand: 'npm install -g @openai/codex',
   },
   {
     id: 'opencode',
     label: 'OpenCode',
     command: 'opencode',
     npmPackage: '@opencode/cli',
-    installCommand: 'npm install -g @opencode/cli',
   },
   {
     id: 'shell',
     label: 'Terminal',
     command: null,
     npmPackage: null,
-    installCommand: null,
   },
 ]
 

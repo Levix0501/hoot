@@ -4,7 +4,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { ISSUE_WORKFLOW } from '../../../shared/built-in-workflow'
 import { issueIdentifier, type Issue } from '../../../shared/issues'
 import { startBlockerText, type StartBlocker } from '../../../shared/start-blockers'
-import { getTool } from '../../../shared/tools'
 import type { WorkflowDefinition } from '../../../shared/workflows'
 import { startHint, startState } from '../../lib/issue-start'
 import { cn } from '../../lib/utils'
@@ -50,12 +49,7 @@ function BlockerNote({ blocker }: { blocker: StartBlocker }) {
     case 'checking':
       return <p>Hoot is still checking whether Claude Code is installed.</p>
     case 'not-installed':
-      return (
-        <p>
-          Claude Code is not installed. Install it with{' '}
-          <code className="font-mono break-all">{getTool('claude').installCommand}</code>
-        </p>
-      )
+      return <p>{startBlockerText(blocker)}</p>
     case 'no-project':
       return (
         <p>Set a Project for this issue first: its worktree is created in the issue's project.</p>

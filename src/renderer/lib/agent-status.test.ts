@@ -9,9 +9,14 @@ const installation: AgentInstallation = {
   version: '2.1.293',
   versionOutput: '',
   versionCommand: '/usr/local/bin/claude --version',
-  updateCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
   writable: true,
+  switchable: true,
+  removable: true,
 }
+
+/** What an operation works on, for an update or an install. */
+const UPDATE = { kind: 'update', version: '2.1.299', route: null, path: null } as const
+const INSTALL = { kind: 'install', version: null, route: 'official', path: null } as const
 
 /** A Node.js requirement that the node on the login shell PATH does not meet. */
 const nodeRequirement = { range: '>=22.19.0', found: '20.19.6' }
@@ -30,7 +35,11 @@ const agent = (overrides: Partial<AgentState>): AgentState => ({
   installation,
   latest: '2.1.299',
   latestFailed: false,
-  installCommand: '/usr/local/bin/npm install -g @anthropic-ai/claude-code@latest --loglevel=http',
+  stable: null,
+  releases: null,
+  follow: { kind: 'latest' },
+  installRoute: 'npm',
+  copies: [],
   nodeRequirement: null,
   operation: null,
   launchOptions: null,
@@ -41,18 +50,18 @@ describe('agentRowStatus', () => {
   it('shows an operation that waits or runs, also while the agent is checked', () => {
     expect(
       agentRowStatus(
-        agent({ checking: true, operation: { kind: 'update', status: 'waiting' } }),
+        agent({ checking: true, operation: { ...UPDATE, status: 'waiting' } }),
         target,
       ),
     ).toEqual({ kind: 'waiting' })
     expect(
       agentRowStatus(
         agent({
-          operation: { kind: 'install', status: 'running' },
+          operation: { ...INSTALL, status: 'running' },
         }),
         target,
       ),
-    ).toEqual({ kind: 'running', operation: 'install' })
+    ).toEqual({ kind: 'running', operation: 'install', version: null, other: false })
   })
 
   it('says it is checking before the first detection, and keeps the last results while it checks again', () => {
@@ -174,7 +183,7 @@ describe('updateAllIncludes', () => {
         agent({
           latest: '2.1.293',
           operation: {
-            kind: 'update',
+            ...UPDATE,
             status: 'failed',
             message: '✕ Update failed',
             tail: [],
@@ -194,7 +203,7 @@ describe('updateAllIncludes', () => {
         agent({
           latest: '2.1.299',
           operation: {
-            kind: 'install',
+            ...INSTALL,
             status: 'failed',
             message: '✕ Install failed',
             tail: [],
@@ -213,7 +222,7 @@ describe('updateAllIncludes', () => {
         agent({
           latest: '2.1.293',
           operation: {
-            kind: 'install',
+            ...INSTALL,
             status: 'failed',
             message: '✕ Install failed',
             tail: [],
@@ -230,5 +239,84 @@ describe('updateAllIncludes', () => {
     expect(
       updateAllIncludes(agent({ installation: { ...installation, version: null } }), target),
     ).toBe(false)
+  })
+})
+
+describe('what an agent follows', () => {
+  it('offers Install with the official installer whatever npm can do', () => {
+    for (const kind of ['node-required', 'npm-not-writable'] as const) {
+      const npm: InstallTarget =
+        kind === 'node-required'
+          ? { kind }
+          : { kind, prefix: '/usr/local', displayPrefix: '/usr/local' }
+      expect(
+        agentRowStatus(
+          agent({ installation: null, installRoute: 'official', nodeRequirement }),
+          npm,
+        ),
+      ).toEqual({ kind: 'install' })
+    }
+  })
+
+  it('offers nothing while it stays on its version, and Back to it where another took its place', () => {
+    const staying = agent({ follow: { kind: 'stay', version: '2.1.293' } })
+    expect(agentRowStatus(staying, target)).toEqual({ kind: 'staying' })
+    expect(updateAllIncludes(staying, target)).toBe(false)
+    const drifted = agent({
+      follow: { kind: 'stay', version: '2.1.290' },
+      installation: { ...installation, version: '2.1.299' },
+    })
+    expect(agentRowStatus(drifted, target)).toEqual({ kind: 'restore', version: '2.1.290' })
+    // Where Hoot cannot install versions in its place, it cannot go back either.
+    expect(
+      agentRowStatus(
+        { ...drifted, installation: { ...installation, version: '2.1.299', switchable: false } },
+        target,
+      ),
+    ).toEqual({ kind: 'staying' })
+  })
+
+  it("updates to Stable's version on Stable, never to an older one", () => {
+    expect(
+      agentRowStatus(agent({ follow: { kind: 'stable' }, stable: '2.1.296' }), target),
+    ).toEqual({ kind: 'update', version: '2.1.296' })
+    expect(
+      agentRowStatus(agent({ follow: { kind: 'stable' }, stable: '2.1.290' }), target),
+    ).toEqual({ kind: 'up-to-date' })
+    // Until Stable's version is read.
+    expect(agentRowStatus(agent({ follow: { kind: 'stable' }, stable: null }), target)).toEqual({
+      kind: 'up-to-date',
+    })
+  })
+
+  it('names what a running operation installs or uninstalls', () => {
+    expect(
+      agentRowStatus(
+        agent({
+          operation: {
+            kind: 'switch',
+            version: '2.1.290',
+            route: null,
+            path: null,
+            status: 'running',
+          },
+        }),
+        target,
+      ),
+    ).toEqual({ kind: 'running', operation: 'switch', version: '2.1.290', other: false })
+    expect(
+      agentRowStatus(
+        agent({
+          operation: {
+            kind: 'uninstall',
+            version: '2.1.209',
+            route: null,
+            path: '/opt/old/bin/claude',
+            status: 'running',
+          },
+        }),
+        target,
+      ),
+    ).toEqual({ kind: 'running', operation: 'uninstall', version: '2.1.209', other: true })
   })
 })

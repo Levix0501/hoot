@@ -19,11 +19,6 @@ export interface AgentInstallation {
   version: string | null
   /** What the command wrote when it was run with `--version`, kept when it does not run. */
   versionOutput: string
-  /**
-   * The command Update runs, as the Agents page shows it (see
-   * `shownCommand`); `null` where Hoot cannot tell how it was installed.
-   */
-  updateCommand: string | null
   /** The command that read its version, as the Agents page shows it. */
   versionCommand: string
   /**
@@ -33,7 +28,50 @@ export interface AgentInstallation {
    * check.
    */
   writable: boolean
+  /** Whether Hoot can install another version of it in its place. */
+  switchable: boolean
+  /** Whether Hoot can uninstall it: it knows how it was installed, and can write there. */
+  removable: boolean
 }
+
+/**
+ * Another copy of an agent on the computer, which a terminal would run were
+ * the ones before it gone: further on the login shell PATH, or in a folder
+ * an installer or a version manager of Node.js puts it in.
+ */
+export interface AgentCopy {
+  /** The command's absolute path. */
+  path: string
+  /**
+   * The version the command reports, or, where it does not run, the one its
+   * npm package names; `null` when neither is known.
+   */
+  version: string | null
+  /** Whether the command runs, reporting its version. */
+  runs: boolean
+  /** Whether Hoot can uninstall it. */
+  removable: boolean
+}
+
+/**
+ * What an agent's installation follows: its latest version, which Update
+ * installs; Claude Code's Stable channel, which lags the latest by a week or
+ * so; or one version it stays on, which nothing updates in Hoot's sessions.
+ */
+export type AgentFollow =
+  | { kind: 'latest' }
+  | { kind: 'stable' }
+  | { kind: 'stay'; version: string }
+
+/** A version of an agent that its version menu offers. */
+export interface AgentRelease {
+  version: string
+  /** The day it came out, as `YYYY-MM-DD`; `null` where the registry does not say. */
+  date: string | null
+}
+
+/** How Install puts an agent on the computer: with its official installer, or with npm. */
+export type InstallRoute = 'official' | 'npm'
 
 /**
  * A Node.js requirement that the computer does not meet: the versions an
@@ -46,20 +84,37 @@ export interface UnmetNodeRequirement {
   found: string
 }
 
-/** An install or an update of an agent, started from the Agents page. */
-export type AgentOperationKind = 'install' | 'update'
+/**
+ * What an operation started from the Agents page does to an agent: installs
+ * it, updates it, installs another version in its place, or uninstalls a
+ * copy of it.
+ */
+export type AgentOperationKind = 'install' | 'update' | 'switch' | 'uninstall'
+
+/** What an operation works on, which its row and its failure name. */
+export interface AgentOperationTarget {
+  kind: AgentOperationKind
+  /**
+   * The version an update or a switch installs, or that of the copy an
+   * uninstall removes; `null` for an install, which installs the latest.
+   */
+  version: string | null
+  /** How an install puts the agent on the computer; `null` for the others. */
+  route: InstallRoute | null
+  /** The command of the copy an uninstall removes; `null` for the others. */
+  path: string | null
+}
 
 /**
- * Where an install or an update is: waiting for the one before it, which
- * Cancel can take it out of; running, which goes on to its end; or ended. An
- * ended operation's message is the result as the Agents page writes it.
+ * Where an operation is: waiting for the one before it, which Cancel can
+ * take it out of; running, which goes on to its end; or ended. An ended
+ * operation's message is the result as the Agents page writes it.
  */
 export type AgentOperation =
-  | { kind: AgentOperationKind; status: 'waiting' }
-  | { kind: AgentOperationKind; status: 'running' }
-  | { kind: AgentOperationKind; status: 'succeeded'; message: string }
-  | {
-      kind: AgentOperationKind
+  | (AgentOperationTarget & { status: 'waiting' })
+  | (AgentOperationTarget & { status: 'running' })
+  | (AgentOperationTarget & { status: 'succeeded'; message: string })
+  | (AgentOperationTarget & {
       status: 'failed'
       message: string
       /** The last lines of what its command wrote. */
@@ -74,8 +129,8 @@ export type AgentOperation =
       exitCode: number | null
       /** How many seconds its command ran, rounded; `null` when none ran. */
       seconds: number | null
-    }
-  | { kind: AgentOperationKind; status: 'cancelled' }
+    })
+  | (AgentOperationTarget & { status: 'cancelled' })
 
 /** A model a session can start with, and the effort levels it supports. */
 export interface AgentModelOption {
@@ -117,12 +172,23 @@ export interface AgentState {
   latest: string | null
   /** Whether the last attempt to read the latest version failed. */
   latestFailed: boolean
+  /** The version Claude Code's Stable channel is on, once read; `null` for the others. */
+  stable: string | null
   /**
-   * The command Install runs, as the Agents page shows it (see
-   * `shownCommand`); `null` where Install cannot run, the computer having no
-   * npm that the user can install with.
+   * The versions its version menu offers, newest first, once read: the
+   * recent ones Hoot works with in full; `null` before they are read, or when
+   * they could not be.
    */
-  installCommand: string | null
+  releases: AgentRelease[] | null
+  /** What its installation follows, which the user picks in its version menu. */
+  follow: AgentFollow
+  /**
+   * How Install puts it on the computer: with its official installer, or
+   * with npm where it has none for this platform.
+   */
+  installRoute: InstallRoute
+  /** Its other copies, in the order a terminal would find them, after the one in use. */
+  copies: AgentCopy[]
   /**
    * The Node.js its latest version needs, where npm would install it, when
    * its command runs on Node.js and the node its sessions would run it with
@@ -238,20 +304,6 @@ export function isNewerVersion(latest: string, installed: string): boolean {
   return valid(latest) !== null && valid(installed) !== null && gt(latest, installed)
 }
 
-/** How the Agents page writes an install method; `null` where it writes none. */
-export function installMethodLabel(method: InstallMethod): string | null {
-  switch (method) {
-    case 'npm':
-      return 'npm'
-    case 'homebrew':
-      return 'Homebrew'
-    case 'official':
-      return 'Official installer'
-    case 'unknown':
-      return null
-  }
-}
-
 /** The result of an install that succeeded. */
 export function installedMessage(version: string): string {
   return `✓ Installed ${version}`
@@ -268,9 +320,60 @@ export function updatedMessage(version: string, stillRunning: number, previous: 
     : `✓ Updated to ${version}. ${stillRunning} running sessions still use ${previous}.`
 }
 
+/** The result of a switch that succeeded. */
+export function switchedMessage(version: string): string {
+  return `✓ Switched to ${version}`
+}
+
+/** The result of an uninstall that succeeded. */
+export const UNINSTALLED_MESSAGE = '✓ Uninstalled'
+
+/** What an operation is called where its row and its failure name it: Install, Update… */
+export function operationName(kind: AgentOperationKind): string {
+  switch (kind) {
+    case 'install':
+      return 'Install'
+    case 'update':
+      return 'Update'
+    case 'switch':
+      return 'Switch'
+    case 'uninstall':
+      return 'Uninstall'
+  }
+}
+
 /** The result of an operation that failed, for a reason. */
 export function failedMessage(kind: AgentOperationKind, reason: string): string {
-  return `✕ ${kind === 'install' ? 'Install' : 'Update'} failed: ${reason}`
+  return `✕ ${operationName(kind)} failed: ${reason}`
+}
+
+/**
+ * The version an installation's Update installs under what it follows: the
+ * latest version, or Stable's; `null` while it stays on a version, or before
+ * the version it would install is known.
+ */
+export function updateTargetOf(
+  agent: Pick<AgentState, 'follow' | 'latest' | 'stable'>,
+): string | null {
+  switch (agent.follow.kind) {
+    case 'latest':
+      return agent.latest
+    case 'stable':
+      return agent.stable
+    case 'stay':
+      return null
+  }
+}
+
+/**
+ * The version an installation that stays on one should go back to, when
+ * something outside Hoot, such as the agent's own updater in a terminal,
+ * has installed another one in its place; `null` otherwise.
+ */
+export function driftedFrom(agent: Pick<AgentState, 'follow' | 'installation'>): string | null {
+  const version = agent.installation?.version ?? null
+  if (agent.follow.kind !== 'stay' || version === null) return null
+  return version === agent.follow.version ? null : agent.follow.version
 }
 
 /** The result of an operation that was cancelled. */

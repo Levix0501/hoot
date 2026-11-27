@@ -411,14 +411,13 @@ describe('AgentService detection', () => {
     expect(latestCalls.toSorted()).toEqual([...CODING_TOOL_IDS].toSorted())
   })
 
-  it('installs with each official installer, with npm where there is none for the platform', async () => {
-    const { service, agent } = setup()
-    await service.detect()
+  // The route depends on the platform alone, which each half sets, whatever the tests run on.
+  it('installs with each official installer, with npm where there is none for the platform', () => {
+    const onMac = setup({ platform: 'darwin' })
     for (const id of ['claude', 'codex', 'opencode'] as const) {
-      expect(agent(id).installRoute).toBe('official')
+      expect(onMac.agent(id).installRoute).toBe('official')
     }
     const onWindows = setup({ platform: 'win32' })
-    await onWindows.service.detect()
     expect(onWindows.agent('claude').installRoute).toBe('official')
     // OpenCode 2 has no installer for Windows.
     expect(onWindows.agent('opencode').installRoute).toBe('npm')
@@ -1235,16 +1234,21 @@ describe('AgentService queue and cancelling', () => {
 
 describe('AgentService official installers', () => {
   it('installs with the official installer, and fails with its output where it fails', async () => {
-    const bin = path.join(home, '.local', 'bin')
+    // The stand-in installer puts a stand-in in ~/.local/bin, as Claude Code's
+    // installer does. On Windows, where that is a program, the batch file npm
+    // makes for a script stands in for it, as Hoot runs no other batch file.
+    const claude = path.join(home, '.local', 'bin', 'claude')
+    const putClaude = windows
+      ? `const script = ${JSON.stringify(`${claude}.cjs`)}
+fs.writeFileSync(script, "#!/usr/bin/env node\\nconsole.log('2.0.0 (Claude Code)')\\n")
+require(${JSON.stringify(CMD_SHIM)})(script, ${JSON.stringify(claude)}).then(() => console.log('Installed'))`
+      : `fs.writeFileSync(${JSON.stringify(claude)}, '#!/bin/sh\\necho "2.0.0 (Claude Code)"\\n', { mode: 0o755 })
+console.log('Installed')`
     const { service, agent, ended } = setup({
       installers: {
-        // Puts a stand-in in ~/.local/bin, as Claude Code's installer does.
         claude: `const fs = require('node:fs')
-fs.mkdirSync(${JSON.stringify(bin)}, { recursive: true })
-fs.writeFileSync(${JSON.stringify(path.join(bin, windows ? 'claude.cmd' : 'claude'))}, ${JSON.stringify(
-          windows ? '@echo 2.0.0 (Claude Code)\r\n' : '#!/bin/sh\necho "2.0.0 (Claude Code)"\n',
-        )}, { mode: 0o755 })
-console.log('Installed')`,
+fs.mkdirSync(${JSON.stringify(path.dirname(claude))}, { recursive: true })
+${putClaude}`,
         codex: `console.error("curl: (28) Failed to connect to chatgpt.com port 443")
 process.exitCode = 28`,
       },
@@ -1277,12 +1281,17 @@ process.exitCode = 28`,
     ])
   })
 
-  it('finds an agent its official installer put in a folder the login shell PATH lacks', async () => {
-    installOfficialClaude('1.0.0')
-    const { service, agent } = setup({ withNpm: false, offPath: true })
-    await service.detect()
-    expect(agent('claude').installation).toMatchObject({ method: 'official', version: '1.0.0' })
-  })
+  // On Windows Hoot tells Claude Code's official installation by its program,
+  // claude.exe, which no script can stand in for.
+  it.skipIf(windows)(
+    'finds an agent its official installer put in a folder the login shell PATH lacks',
+    async () => {
+      installOfficialClaude('1.0.0')
+      const { service, agent } = setup({ withNpm: false, offPath: true })
+      await service.detect()
+      expect(agent('claude').installation).toMatchObject({ method: 'official', version: '1.0.0' })
+    },
+  )
 })
 
 describe('AgentService versions', () => {

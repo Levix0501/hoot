@@ -20,6 +20,12 @@ export interface ToolServiceOptions {
   home?: string
   /** Replaceable for tests. */
   resolveEnv?: typeof resolveLoginShellEnv
+  /**
+   * The platform, which decides how the login shell environment is read
+   * (see `readLoginEnvironment`); the computer's by default, and replaceable
+   * for tests. Commands are looked up by the computer's own rules whatever
+   * it says, as the files looked at are the computer's.
+   */
   platform?: NodeJS.Platform
 }
 
@@ -146,7 +152,6 @@ export class ToolService extends EventEmitter<{ changed: [ToolsState] }> {
           tool.command,
           login.env,
           this.options.home ?? this.options.cwd,
-          this.options.platform,
         )
         return { id: tool.id, available: found !== null, path: found }
       }),

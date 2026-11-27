@@ -13,6 +13,7 @@ import {
   type ModelCatalogs,
   type Provider,
 } from '../../shared/providers'
+import { samePath } from '../agents/agent-paths'
 import type { CodexCatalogSupport } from '../providers/codex-catalog'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
@@ -1104,7 +1105,7 @@ describe('resolveLaunch', () => {
       )
     const file = codexCatalogFilePath(settingsFolder(), hoot.sessionId)
 
-    await says('codex-cli 0.163.0')
+    const command = await says('codex-cli 0.163.0')
     const launch = await on(deepseek)
     expect(launch.args).toEqual([
       ...codex.args,
@@ -1123,7 +1124,10 @@ describe('resolveLaunch', () => {
       '-c',
       CODEX_HOOK_SETTING,
     ])
-    expect(asked).toEqual([path.join(folder, 'codex')])
+    // The command as a PATH lookup finds it, which spells its extension on
+    // Windows as PATHEXT does.
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toSatisfy((found: string) => samePath(found, command))
     const written = JSON.parse(fs.readFileSync(file, 'utf8')) as {
       models: Array<Record<string, unknown>>
     }

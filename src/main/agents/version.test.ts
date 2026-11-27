@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { shownCommand } from '../../shared/agents'
+import { removeTestFolder } from '../test-support'
 import { nodeCommandProgram, writeNodeCommand } from '../tools/test-support'
 import { readVersion } from './version'
 
@@ -23,7 +24,7 @@ beforeAll(() => {
   root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-version-')))
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('readVersion', () => {
   it('reads the version an agent reports for --version', async () => {

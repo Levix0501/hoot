@@ -12,6 +12,7 @@ import plugin, {
   type PluginContext,
 } from '../../../resources/opencode-plugin/tui'
 import { HOOT_ENV } from '../../shared/hoot-cli'
+import { removeTestFolder } from '../test-support'
 import {
   OPENCODE_CLI_CONFIG,
   openCodeCliConfig,
@@ -21,7 +22,7 @@ import {
 
 const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-opencode-')))
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('openCodePluginFolder', () => {
   it('is in the packaged app’s resources, or in the repository', () => {

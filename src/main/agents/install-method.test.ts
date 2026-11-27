@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getCodingTool } from '../../shared/tools'
+import { removeTestFolder } from '../test-support'
 import { detectInstallMethod, npmPrefixOf, type InstallMethodContext } from './install-method'
 import { linkCommand, npmCommandsFolder, npmPackagesFolder } from './test-support'
 
@@ -40,7 +41,7 @@ beforeAll(() => {
   fs.mkdirSync(home)
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 function context(overrides: Partial<InstallMethodContext> = {}): InstallMethodContext {
   return {

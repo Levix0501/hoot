@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ToolsState } from '../../shared/ipc'
 import { samePath } from '../agents/agent-paths'
 import type { resolveLoginShellEnv } from '../env/login-shell-env'
+import { removeTestFolder } from '../test-support'
 import { onPath, writeNodeCommand } from './test-support'
 import { ToolService } from './tool-service'
 
@@ -17,8 +18,8 @@ beforeAll(async () => {
   claude = await writeNodeCommand(path.join(bin, 'claude'), '')
 })
 
-afterAll(() => {
-  fs.rmSync(bin, { recursive: true, force: true })
+afterAll(async () => {
+  await removeTestFolder(bin)
 })
 
 const availability = (state: ToolsState) =>

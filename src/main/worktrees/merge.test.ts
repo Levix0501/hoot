@@ -1,6 +1,6 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { checkedOutBranch, mergeInstruction, type MergePlan } from './merge'
 import type { GitContext } from './repositories'
 import { git, makeRepository, makeSandbox } from './test-support'
@@ -57,7 +57,7 @@ describe('the branches of a repository', () => {
   })
 
   afterEach(async () => {
-    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    await removeTestFolder(root)
   })
 
   it('tells the branch checked out, or none on a detached HEAD', async () => {

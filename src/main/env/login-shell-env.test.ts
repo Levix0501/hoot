@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { parseEnvOutput, resolveLoginShellEnv } from './login-shell-env'
 
 const temporaryDirectories: string[] = []
@@ -12,9 +13,9 @@ function temporaryDirectory(): string {
   return directory
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    await removeTestFolder(directory)
   }
 })
 

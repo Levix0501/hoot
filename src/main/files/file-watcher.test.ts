@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { FileWatcher } from './file-watcher'
 
 describe('FileWatcher', () => {
@@ -22,7 +23,7 @@ describe('FileWatcher', () => {
 
   afterEach(async () => {
     watcher.dispose()
-    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    await removeTestFolder(root)
   })
 
   /** Waits until `changed` reported `entry`, failing after a while. */

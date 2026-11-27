@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { gitEnvironment } from '../git/git'
+import { removeTestFolder } from '../test-support'
 import { addProjectWithFirstCommit, inspectAddProject } from './add-project'
 
 describe('adding a project', () => {
@@ -49,8 +50,8 @@ describe('adding a project', () => {
     makeHome(true)
   })
 
-  afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true })
+  afterEach(async () => {
+    await removeTestFolder(root)
   })
 
   const folder = (name: string) => path.join(root, name)

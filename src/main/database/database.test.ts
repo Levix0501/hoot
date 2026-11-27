@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import {
   databaseFile,
   migrate,
@@ -21,12 +22,12 @@ beforeEach(() => {
   file = databaseFile(directory)
 })
 
-afterEach(() => {
+afterEach(async () => {
   // A test that made a folder unreadable gives it back first.
   for (const entry of [directory, path.dirname(file)]) {
     if (fs.existsSync(entry)) fs.chmodSync(entry, 0o755)
   }
-  fs.rmSync(directory, { recursive: true, force: true })
+  await removeTestFolder(directory)
 })
 
 /** The tables and indexes of a database file, with their SQL. */

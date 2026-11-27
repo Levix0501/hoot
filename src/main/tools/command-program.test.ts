@@ -4,6 +4,7 @@ import path from 'node:path'
 import { cmdShim as pnpmCmdShim } from '@zkochan/cmd-shim'
 import cmdShim from 'cmd-shim'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { commandProgram, commandTarget } from './command-program'
 
 let root: string
@@ -54,7 +55,7 @@ beforeAll(async () => {
   ownBatchFile = write(path.join(root, 'bin', 'claude.cmd'), '@echo off\r\nnpx claude %*\r\n')
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('commandProgram', () => {
   it('runs a command as it is outside Windows', async () => {

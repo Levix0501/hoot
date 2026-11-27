@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { onPath, writeNodeCommand } from '../tools/test-support'
 import { samePath } from './agent-paths'
 import { canCreateFilesIn, findComputerNpm, npmGlobalFolder, npmGlobalFolderOf } from './npm'
@@ -25,12 +26,12 @@ beforeEach(() => {
   root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-npm-')))
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const folder of ['global/lib/node_modules', 'global/bin', 'locked']) {
     const target = path.join(root, folder)
     if (fs.existsSync(target)) fs.chmodSync(target, 0o755)
   }
-  fs.rmSync(root, { recursive: true, force: true })
+  await removeTestFolder(root)
 })
 
 describe('npmGlobalFolder', () => {

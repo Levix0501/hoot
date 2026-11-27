@@ -3,6 +3,7 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ProjectFolderInfo } from '../../shared/project-folders'
+import { removeTestFolder } from '../test-support'
 import type { GitContext } from '../worktrees/repositories'
 import { addBranch, git, makeRepository, makeSandbox } from '../worktrees/test-support'
 import { ProjectFolders } from './project-folders'
@@ -33,9 +34,9 @@ describe('ProjectFolders', () => {
     folders.on('changed', (projectRoot, folder) => reported.push([projectRoot, folder]))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     folders.dispose()
-    fs.rmSync(root, { recursive: true, force: true })
+    await removeTestFolder(root)
   })
 
   /** Waits until `changed` last reported what `expected` says, failing after a while. */

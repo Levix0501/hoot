@@ -8,6 +8,7 @@ import { OWN_PROVIDER_IDS } from '../../shared/providers'
 import type { SessionInfo } from '../../shared/session'
 import type { CodingToolId } from '../../shared/tools'
 import { openDatabase } from '../database/database'
+import { removeTestFolder } from '../test-support'
 import { ChatManager, ownConversations, visibleInput, type ChatAgent } from './chat-manager'
 import { ChatStore } from './chat-store'
 import type { AgentConversation, ChatConversations } from './conversations'
@@ -138,9 +139,9 @@ describe('ChatManager', () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     db.close()
-    fs.rmSync(root, { recursive: true, force: true })
+    await removeTestFolder(root)
   })
 
   const chatsRoot = () => path.join(root, 'home', '.hoot', 'chats')

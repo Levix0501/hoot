@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import {
   DEPENDENCY_DIRECTORIES,
   findInnerRepositories,
@@ -60,7 +61,7 @@ beforeAll(() => {
   git(outside, 'worktree', 'add', '-q', '-b', 'b', path.join(project, 'external', 'b'))
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('findInnerRepositories', () => {
   it('finds ignored and untracked repositories at any depth, and leaves out the rest', async () => {

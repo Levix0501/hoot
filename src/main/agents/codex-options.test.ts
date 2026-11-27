@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { writeNodeCommand } from '../tools/test-support'
 import { readCodexLaunchOptions } from './codex-options'
 
@@ -73,7 +74,7 @@ beforeEach(async () => {
   )
 })
 
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTestFolder(root))
 
 function writeConfig(text: string): void {
   fs.writeFileSync(path.join(codexHome, 'config.toml'), text)

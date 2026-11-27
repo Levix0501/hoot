@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { canonicalPath, homeDisplayPath, isInside, samePath } from './agent-paths'
 
 describe('paths as they are on disk and as Hoot shows them', () => {
@@ -15,7 +16,7 @@ describe('paths as they are on disk and as Hoot shows them', () => {
         path.join(root, 'real', 'not', 'yet'),
       )
     } finally {
-      fs.rmSync(root, { recursive: true, force: true })
+      await removeTestFolder(root)
     }
   })
 

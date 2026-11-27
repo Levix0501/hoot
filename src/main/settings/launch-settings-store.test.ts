@@ -7,6 +7,7 @@ import {
   defaultLaunchSettings,
   type LaunchSettings,
 } from '../../shared/launch-settings'
+import { removeTestFolder } from '../test-support'
 import { LaunchSettingsStore } from './launch-settings-store'
 
 let directory: string
@@ -17,7 +18,7 @@ beforeEach(() => {
   file = path.join(directory, 'settings.json')
 })
 
-afterEach(() => fs.rmSync(path.dirname(directory), { recursive: true, force: true }))
+afterEach(() => removeTestFolder(path.dirname(directory)))
 
 function writeSettings(content: unknown): void {
   fs.mkdirSync(directory, { recursive: true })

@@ -11,6 +11,7 @@ import { databaseFile, transaction } from '../database/database'
 import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { ProjectStore } from '../projects/project-store'
+import { removeTestFolder } from '../test-support'
 import { LabelError, LabelStore } from './label-store'
 
 let directory: string
@@ -22,9 +23,9 @@ beforeEach(() => {
   clock = 1_000
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of databases.splice(0)) db.close()
-  fs.rmSync(directory, { recursive: true, force: true })
+  await removeTestFolder(directory)
 })
 
 /**

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { onPath, writeNodeCommand } from '../tools/test-support'
 import { localChatConversations } from './conversations'
 
@@ -31,7 +32,7 @@ describe('localChatConversations', () => {
     fs.mkdirSync(folder, { recursive: true })
   })
 
-  afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
+  afterEach(() => removeTestFolder(home))
 
   const conversations = (env: Record<string, string> = {}) =>
     localChatConversations({

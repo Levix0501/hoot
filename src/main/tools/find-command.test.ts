@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { samePath } from '../agents/agent-paths'
+import { removeTestFolder } from '../test-support'
 import { findCommand, pathFolders } from './find-command'
 import { onPath, writeNodeCommand } from './test-support'
 
@@ -19,7 +20,7 @@ beforeAll(async () => {
   tool = await writeNodeCommand(path.join(root, 'c', 'tool'), '')
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 /** Whether a lookup found `tool`, whose extension it spells on Windows as PATHEXT does. */
 const isTool = (found: string | null) => found !== null && samePath(found, tool)

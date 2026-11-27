@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { writeNodeCommand } from '../tools/test-support'
 import { OpenCodeServers } from './opencode-server'
 
@@ -57,7 +58,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await servers?.stopAll()
   for (const child of others) child.kill('SIGKILL')
-  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  await removeTestFolder(root)
 })
 
 function make(config: () => unknown = () => ({ providers: {} })): OpenCodeServers {

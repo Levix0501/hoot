@@ -11,6 +11,7 @@ import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
+import { removeTestFolder } from '../test-support'
 import { WorkflowExecutor } from './workflow-executor'
 
 let directory: string
@@ -22,9 +23,9 @@ beforeEach(() => {
   clock = 1_000
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of databases.splice(0)) db.close()
-  fs.rmSync(directory, { recursive: true, force: true })
+  await removeTestFolder(directory)
 })
 
 /** A workflow of two steps: Look, which goes on to Make, and Make. */

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { resolveProjectRoot } from './project-root'
 
 let root: string
@@ -89,7 +90,7 @@ beforeAll(() => {
   git(separate, 'worktree', 'add', '-q', '-b', 'feature', path.join(root, 'separate-linked'))
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('resolveProjectRoot', () => {
   it('uses the main worktree top level for the repository and any subdirectory', async () => {

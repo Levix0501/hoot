@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { LaunchSettingsStore } from './launch-settings-store'
 import { SidebarStateStore } from './sidebar-state-store'
 
@@ -13,7 +14,7 @@ beforeEach(() => {
   file = path.join(directory, 'settings.json')
 })
 
-afterEach(() => fs.rmSync(path.dirname(directory), { recursive: true, force: true }))
+afterEach(() => removeTestFolder(path.dirname(directory)))
 
 function writeSettings(content: unknown): void {
   fs.mkdirSync(directory, { recursive: true })

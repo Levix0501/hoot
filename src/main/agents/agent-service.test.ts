@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import which from 'which'
 import { shownCommand, type AgentsState } from '../../shared/agents'
 import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
+import { removeTestFolder } from '../test-support'
 import { nodeCommandProgram, writeNodeCommand, writeNodeScript } from '../tools/test-support'
 import { ToolService } from '../tools/tool-service'
 import { AgentService } from './agent-service'
@@ -229,10 +230,7 @@ beforeEach(async () => {
 afterEach(async () => {
   fs.chmodSync(npmPackagesFolder(prefix), 0o755)
   fs.chmodSync(npmCommandsFolder(prefix), 0o755)
-  // On Windows the folder can stay in use for a moment after the commands a
-  // test ran have ended, and removing it fails with Permission denied. fs.rm
-  // tries again then, while rmSync gives up on that error at once.
-  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  await removeTestFolder(root)
 })
 
 function setup(

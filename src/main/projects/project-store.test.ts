@@ -5,6 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { databaseFile } from '../database/database'
 import { openTestDatabase } from '../database/test-support'
+import { removeTestFolder } from '../test-support'
 import { ProjectStore } from './project-store'
 
 let directory: string
@@ -23,9 +24,9 @@ beforeEach(() => {
   file = databaseFile(directory)
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of databases.splice(0)) db.close()
-  fs.rmSync(directory, { recursive: true, force: true })
+  await removeTestFolder(directory)
 })
 
 describe('ProjectStore', () => {

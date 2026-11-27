@@ -15,6 +15,7 @@ import { openTestDatabase } from '../database/test-support'
 import { IssueStore } from '../issues/issue-store'
 import { LabelStore } from '../labels/label-store'
 import { ProjectStore } from '../projects/project-store'
+import { removeTestFolder } from '../test-support'
 import { WorkflowExecutor } from '../workflows/workflow-executor'
 import { HootServer, type StartedSession } from './hoot-server'
 
@@ -129,7 +130,7 @@ export async function startTestHoot() {
     async stop() {
       await server.stop()
       db.close()
-      fs.rmSync(directory, { recursive: true, force: true })
+      await removeTestFolder(directory)
     },
   }
 }

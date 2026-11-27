@@ -3,6 +3,7 @@ import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { WorktreeInfo } from '../../shared/worktrees'
+import { removeTestFolder } from '../test-support'
 import { WorktreeLayout } from './layout'
 import type { GitContext } from './repositories'
 import {
@@ -97,11 +98,7 @@ describe('WorktreeService', () => {
   afterEach(async () => {
     service.dispose()
     db.close()
-    // On Windows a test's folders can stay in use for a moment after the git
-    // commands it ran have ended, and removing them fails with Permission
-    // denied. fs.rm tries again then, while rmSync gives up on that error at
-    // once.
-    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    await removeTestFolder(root)
   })
 
   /** Starts on the project and waits until its inner repositories have been found. */

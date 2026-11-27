@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { runCommand, startProcess, type CommandSpec } from './processes'
 
 let directory: string
@@ -10,7 +11,7 @@ beforeAll(() => {
   directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-processes-')))
 })
 
-afterAll(() => fs.rmSync(directory, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(directory))
 
 /** A script run by the Node.js that runs the tests: a command on every platform. */
 const node = (script: string): CommandSpec => ({

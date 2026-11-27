@@ -15,6 +15,7 @@ import {
 } from '../../shared/providers'
 import { samePath } from '../agents/agent-paths'
 import type { CodexCatalogSupport } from '../providers/codex-catalog'
+import { removeTestFolder } from '../test-support'
 import { nodeCommandProgram, onPath, writeNodeCommand } from '../tools/test-support'
 import type { LoginEnvironment } from '../tools/tool-service'
 import { git } from '../worktrees/test-support'
@@ -50,7 +51,7 @@ beforeAll(async () => {
   for (const command of ['claude', 'codex']) await writeNodeCommand(path.join(bin, command), '')
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 /**
  * What a session runs for the stand-in command of a folder, and the arguments
@@ -1390,7 +1391,7 @@ describe('resolveLaunch', () => {
       const claude = await resolveLaunch(context({ PATH: '/usr/bin' }), 'claude', project)
       expect(claude.file).toBe(program(official, 'claude').file)
     } finally {
-      fs.rmSync(path.join(root, 'home'), { recursive: true, force: true })
+      await removeTestFolder(path.join(root, 'home'))
     }
   })
 

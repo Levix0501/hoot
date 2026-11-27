@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { defaultShell } from './default-shell'
 
 let root: string
@@ -20,7 +21,7 @@ beforeAll(() => {
   }
 })
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(root))
 
 describe('defaultShell', () => {
   it('runs the shell SHELL names, as a login shell, outside Windows', () => {

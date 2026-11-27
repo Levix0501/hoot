@@ -9,6 +9,7 @@ import type { SubIssues } from '../../shared/sub-issues'
 import { databaseFile } from '../database/database'
 import { openTestDatabase } from '../database/test-support'
 import { ProjectStore } from '../projects/project-store'
+import { removeTestFolder } from '../test-support'
 import { DependencyError, IssueStore, SubIssueError, type IssueReference } from './issue-store'
 
 let directory: string
@@ -38,9 +39,9 @@ beforeEach(() => {
   clock = 1_000_000
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of databases.splice(0)) db.close()
-  fs.rmSync(directory, { recursive: true, force: true })
+  await removeTestFolder(directory)
 })
 
 describe('IssueStore', () => {

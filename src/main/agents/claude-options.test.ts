@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { readClaudeLaunchOptions } from './claude-options'
 
 let root: string
@@ -17,7 +18,7 @@ beforeEach(() => {
   fs.mkdirSync(home)
 })
 
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTestFolder(root))
 
 function write(file: string, value: unknown): void {
   fs.writeFileSync(file, JSON.stringify(value))

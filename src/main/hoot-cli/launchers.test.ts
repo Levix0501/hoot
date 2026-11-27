@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 
 /** The folder of hoot's launchers, which Hoot puts first on the PATH of its sessions. */
 const bin = path.join(import.meta.dirname, '../../../resources/bin')
@@ -30,7 +31,7 @@ beforeAll(() => {
   )
 })
 
-afterAll(() => fs.rmSync(directory, { recursive: true, force: true }))
+afterAll(() => removeTestFolder(directory))
 
 /**
  * Runs the POSIX launcher, and returns its output and exit code. On Windows

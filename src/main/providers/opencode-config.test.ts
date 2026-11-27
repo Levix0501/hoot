@@ -4,6 +4,7 @@ import path from 'node:path'
 import { parse, type ParseError } from 'jsonc-parser'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProvider, type ModelCatalogs, type Provider } from '../../shared/providers'
+import { removeTestFolder } from '../test-support'
 import { writeNodeCommand } from '../tools/test-support'
 import {
   ANTHROPIC_COMPATIBLE,
@@ -25,7 +26,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-opencode-config-'))
 })
 
-afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
+afterEach(() => removeTestFolder(home))
 
 const folder = () => path.join(home, '.config', 'opencode')
 

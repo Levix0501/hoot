@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import { PROJECT_MARKER, WorktreeLayout, safeName } from './layout'
 import { makeSandbox } from './test-support'
 
@@ -29,7 +30,7 @@ describe('WorktreeLayout', () => {
     layout = new WorktreeLayout(directory, home)
   })
 
-  afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+  afterEach(() => removeTestFolder(root))
 
   it('shows the home directory as ~', () => {
     expect(layout.displayPath(path.join(directory, 'G', 'feat-login'))).toBe(

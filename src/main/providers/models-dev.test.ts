@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTestFolder } from '../test-support'
 import {
   CATALOG_IDS,
   catalogsOf,
@@ -22,7 +23,7 @@ beforeEach(() => {
   folder = fs.mkdtempSync(path.join(os.tmpdir(), 'hoot-models-dev-'))
 })
 
-afterEach(() => fs.rmSync(folder, { recursive: true, force: true }))
+afterEach(() => removeTestFolder(folder))
 
 const savedFile = () => path.join(folder, 'models-dev.json')
 

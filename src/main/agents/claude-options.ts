@@ -306,5 +306,6 @@ export async function readClaudeLaunchOptions(options: {
     defaultEfforts,
     defaultModel: configuredSetting(managed, null, 'model'),
     defaultEffort: configuredSetting(managed, user, 'effortLevel'),
+    signedOut: false,
   }
 }

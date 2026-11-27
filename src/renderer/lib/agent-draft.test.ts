@@ -94,8 +94,10 @@ function stateWith(options: Partial<AgentLaunchOptions>): AgentState {
       defaultEfforts: [],
       defaultModel: null,
       defaultEffort: null,
+      signedOut: false,
       ...options,
     },
+    readingLaunchOptions: false,
   }
 }
 

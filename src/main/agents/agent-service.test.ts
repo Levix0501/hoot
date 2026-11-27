@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import which from 'which'
-import { shownCommand, type AgentsState } from '../../shared/agents'
+import { shownCommand, type AgentLaunchOptions, type AgentsState } from '../../shared/agents'
 import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
 import { removeTestFolder } from '../test-support'
 import { nodeCommandProgram, writeNodeCommand, writeNodeScript } from '../tools/test-support'
@@ -253,6 +253,8 @@ function setup(
     offPath?: boolean
     /** Folders on PATH after the computer's npm's. */
     morePath?: string[]
+    /** What reading each agent's launch options gives; launch options offering no model by default. */
+    launchOptions?: (id: CodingToolId) => Promise<AgentLaunchOptions | null>
   } = {},
 ) {
   // ~/.local/bin, where an official installer may put an agent, comes first.
@@ -307,12 +309,7 @@ function setup(
       write(file, script)
       return { program: process.execPath, args: [file], shown: `install ${id}` }
     },
-    launchOptions: async () => ({
-      models: [],
-      defaultEfforts: [],
-      defaultModel: null,
-      defaultEffort: null,
-    }),
+    launchOptions: async (id) => (options.launchOptions ? options.launchOptions(id) : offering()),
     now: () => now,
     platform: options.platform,
   })
@@ -345,6 +342,17 @@ function setup(
     setNow: (value: number) => {
       now = value
     },
+  }
+}
+
+/** Launch options offering these models, in no effort level. */
+function offering(...models: string[]): AgentLaunchOptions {
+  return {
+    models: models.map((value) => ({ value, label: value, efforts: [] })),
+    defaultEfforts: [],
+    defaultModel: null,
+    defaultEffort: null,
+    signedOut: false,
   }
 }
 
@@ -580,6 +588,93 @@ describe('AgentService detection times', () => {
     service.openPage()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(service.getState().detectedAt).toBe(start + 1_000)
+  })
+})
+
+/** The values of the models launch options offer. */
+const modelsOf = (options: AgentLaunchOptions | null) =>
+  options?.models.map((model) => model.value) ?? null
+
+/** How the service reads an agent's launch options. */
+type ReadLaunchOptions = (id: CodingToolId) => Promise<AgentLaunchOptions | null>
+
+describe('AgentService launch options', () => {
+  it("reads an installed agent's launch options again where they offer no model, as for one signed in since", async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    let signedIn = false
+    const read = vi.fn<ReadLaunchOptions>(async (id) =>
+      id === 'claude' && signedIn ? offering('opus') : { ...offering(), signedOut: true },
+    )
+    const { service, agent, states } = setup({ launchOptions: read })
+    await service.detect()
+    expect(agent('claude').launchOptions).toMatchObject({ models: [], signedOut: true })
+    expect(agent('claude').readingLaunchOptions).toBe(false)
+    // The detection read them, saying so meanwhile.
+    expect(
+      states.some(
+        (state) => state.agents.find((entry) => entry.id === 'claude')?.readingLaunchOptions,
+      ),
+    ).toBe(true)
+    const reads = read.mock.calls.length
+
+    signedIn = true
+    service.readModels('claude')
+    expect(agent('claude').readingLaunchOptions).toBe(true)
+    await vi.waitFor(() => expect(agent('claude').readingLaunchOptions).toBe(false))
+    expect(agent('claude').launchOptions).toMatchObject({ signedOut: false })
+    expect(modelsOf(agent('claude').launchOptions)).toEqual(['opus'])
+    expect(read.mock.calls.slice(reads).map(([id]) => id)).toEqual(['claude'])
+
+    // Nothing is read for one that offers models, nor for one not installed.
+    service.readModels('claude')
+    service.readModels('codex')
+    expect(read).toHaveBeenCalledTimes(reads + 1)
+  })
+
+  it('reads nothing before the first detection, nor while they are being read', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    const gate = Promise.withResolvers<void>()
+    let held = false
+    const read = vi.fn<ReadLaunchOptions>(async () => {
+      if (held) await gate.promise
+      return offering()
+    })
+    const { service, agent } = setup({ launchOptions: read })
+    service.readModels('claude')
+    expect(read).not.toHaveBeenCalled()
+    await service.detect()
+    const reads = read.mock.calls.length
+
+    held = true
+    service.readModels('claude')
+    service.readModels('claude')
+    expect(read).toHaveBeenCalledTimes(reads + 1)
+    gate.resolve()
+    await vi.waitFor(() => expect(agent('claude').readingLaunchOptions).toBe(false))
+  })
+
+  it('keeps what a detection read over what a reading again started before it gives', async () => {
+    await installInto(prefix, 'claude', '1.0.0')
+    const held = Promise.withResolvers<void>()
+    let claudeReads = 0
+    const read = vi.fn<ReadLaunchOptions>(async (id) => {
+      if (id !== 'claude') return offering()
+      claudeReads += 1
+      if (claudeReads === 1) return offering()
+      if (claudeReads === 2) {
+        await held.promise
+        return offering('older')
+      }
+      return offering('newer')
+    })
+    const { service, agent } = setup({ launchOptions: read })
+    await service.detect()
+    service.readModels('claude')
+    await service.detect()
+    expect(modelsOf(agent('claude').launchOptions)).toEqual(['newer'])
+    held.resolve()
+    await vi.waitFor(() => expect(agent('claude').readingLaunchOptions).toBe(false))
+    expect(modelsOf(agent('claude').launchOptions)).toEqual(['newer'])
   })
 })
 

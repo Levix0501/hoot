@@ -309,6 +309,7 @@ export const IpcChannel = {
   getAgents: 'agents:get',
   enterAgentsPage: 'agents:enter-page',
   detectAgents: 'agents:detect',
+  readAgentModels: 'agents:read-models',
   agentsChanged: 'agents:changed',
   installAgent: 'agents:install',
   updateAgent: 'agents:update',
@@ -523,6 +524,11 @@ export interface HootApi {
    * installation and version, and reads every agent's latest version.
    */
   detectAgents(): void
+  /**
+   * The panel of an agent on its own models opened: reads the models its
+   * harness offers again where it offers none, as for one signed in since.
+   */
+  readAgentModels(id: CodingToolId): void
   onAgentsChanged(listener: (state: AgentsState) => void): () => void
   /**
    * Installs an agent, now or after the operations before it: with its

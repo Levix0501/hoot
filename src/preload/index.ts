@@ -42,6 +42,7 @@ const api: HootApi = {
   getAgents: () => ipcRenderer.invoke(IpcChannel.getAgents),
   enterAgentsPage: () => ipcRenderer.send(IpcChannel.enterAgentsPage),
   detectAgents: () => ipcRenderer.send(IpcChannel.detectAgents),
+  readAgentModels: (id) => ipcRenderer.send(IpcChannel.readAgentModels, id),
   onAgentsChanged: (listener) => subscribe(IpcChannel.agentsChanged, listener),
   installAgent: (id, route) => ipcRenderer.send(IpcChannel.installAgent, id, route),
   updateAgent: (id) => ipcRenderer.send(IpcChannel.updateAgent, id),

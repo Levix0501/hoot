@@ -10,6 +10,12 @@ const MODELS_TIMEOUT_MS = 30_000
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 /**
+ * What `agy models` ends with, failing, when Antigravity CLI is signed in to
+ * no Google account: "Error: Please sign in to view available models."
+ */
+const SIGNED_OUT = /please sign in/i
+
+/**
  * An environment in which Antigravity CLI does not update itself: it can
  * start its updater on any run, even one that only says its version, and
  * this is the one setting that turns it off.
@@ -51,9 +57,9 @@ export function antigravityModelsOf(output: string): AgentModelOption[] {
 /**
  * The models Antigravity CLI offers the Google account it is signed in
  * with, as `agy models` lists them (see `antigravityModelsOf`); none when it
- * is signed in with none, or cannot reach its server. It names no model or
- * effort level of its own that Hoot reads: a session that names none takes
- * the one Antigravity CLI picks.
+ * is signed in with none, which it says, or cannot reach its server. It
+ * names no model or effort level of its own that Hoot reads: a session that
+ * names none takes the one Antigravity CLI picks.
  */
 export async function readAntigravityLaunchOptions(options: {
   command: string
@@ -70,6 +76,7 @@ export async function readAntigravityLaunchOptions(options: {
     defaultEfforts: [],
     defaultModel: null,
     defaultEffort: null,
+    signedOut: false,
   }
   const platform = options.platform ?? process.platform
   const env = withoutAntigravityUpdates(options.env)
@@ -80,6 +87,7 @@ export async function readAntigravityLaunchOptions(options: {
     { file: program.file, args: [...program.args, 'models'], env, cwd: options.home },
     MODELS_TIMEOUT_MS,
   ).catch(() => null)
-  if (result === null || result.code !== 0) return none
+  if (result === null) return none
+  if (result.code !== 0) return { ...none, signedOut: SIGNED_OUT.test(result.output) }
   return { ...none, models: antigravityModelsOf(result.stdout) }
 }

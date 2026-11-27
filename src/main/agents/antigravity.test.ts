@@ -26,16 +26,30 @@ const MODELS = [
   '',
 ].join('\n')
 
-function result(code: number, stdout: string): CommandResult {
-  return { code, signal: null, error: null, stdout, output: stdout, timedOut: false }
+function result(code: number, stdout: string, output = stdout): CommandResult {
+  return { code, signal: null, error: null, stdout, output, timedOut: false }
 }
 
-/** How `agy models` ends for a computer signed in with no Google account. */
+/**
+ * How `agy models` 1.5.18 ends for a computer signed in to no Google
+ * account: on its standard error, over the line that said it was fetching.
+ */
 const signedOut = async () =>
   result(
     1,
-    'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n',
+    '',
+    '\x1b[KError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n',
   )
+
+/** What reading the launch options gives where `agy models` runs as `run` says. */
+const readWith = (run: () => Promise<CommandResult>) =>
+  readAntigravityLaunchOptions({
+    command: '/home/me/.local/bin/agy',
+    env: {},
+    home: '/home/me',
+    platform: 'darwin',
+    run,
+  })
 
 describe('antigravityModelsOf', () => {
   it('makes one model of the variants of each effort level, with its levels in their order', () => {
@@ -71,7 +85,12 @@ describe('readAntigravityLaunchOptions', () => {
       run,
     })
     expect(options.models.map((model) => model.value)).toContain('gemini-4-neon')
-    expect(options).toMatchObject({ defaultEfforts: [], defaultModel: null, defaultEffort: null })
+    expect(options).toMatchObject({
+      defaultEfforts: [],
+      defaultModel: null,
+      defaultEffort: null,
+      signedOut: false,
+    })
     expect(run).toHaveBeenCalledWith(
       {
         file: '/home/me/.local/bin/agy',
@@ -83,16 +102,27 @@ describe('readAntigravityLaunchOptions', () => {
     )
   })
 
-  it('offers no model when it is signed in with no Google account', async () => {
-    expect(
-      await readAntigravityLaunchOptions({
-        command: '/home/me/.local/bin/agy',
-        env: {},
-        home: '/home/me',
-        platform: 'darwin',
-        run: signedOut,
-      }),
-    ).toEqual({ models: [], defaultEfforts: [], defaultModel: null, defaultEffort: null })
+  it('offers no model, and says so, when it is signed in to no Google account', async () => {
+    expect(await readWith(signedOut)).toEqual({
+      models: [],
+      defaultEfforts: [],
+      defaultModel: null,
+      defaultEffort: null,
+      signedOut: true,
+    })
+  })
+
+  it('offers no model, without saying it is signed out, when it fails otherwise', async () => {
+    const failures: Array<() => Promise<CommandResult>> = [
+      async () => result(1, '', 'Error: failed to fetch models: context deadline exceeded\n'),
+      async () => ({ ...result(1, ''), code: null, signal: 'SIGTERM', timedOut: true }),
+      async () => {
+        throw new Error('spawn agy ENOENT')
+      },
+    ]
+    for (const run of failures) {
+      expect(await readWith(run)).toMatchObject({ models: [], signedOut: false })
+    }
   })
 })
 

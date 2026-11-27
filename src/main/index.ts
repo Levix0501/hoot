@@ -419,7 +419,15 @@ const agents = new AgentService({
       return readClaudeLaunchOptions({ home: os.homedir(), env })
     }
     const command = detection.state.tools.find((entry) => entry.id === tool)?.path
-    if (!command) return { models: [], defaultEfforts: [], defaultModel: null, defaultEffort: null }
+    if (!command) {
+      return {
+        models: [],
+        defaultEfforts: [],
+        defaultModel: null,
+        defaultEffort: null,
+        signedOut: false,
+      }
+    }
     if (tool === 'antigravity') {
       return readAntigravityLaunchOptions({ command, env, home: os.homedir() })
     }

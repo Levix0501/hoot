@@ -68,6 +68,7 @@ function unknownAgent(id: CodingToolDefinition['id']): AgentState {
     nodeRequirement: null,
     operation: null,
     launchOptions: null,
+    readingLaunchOptions: false,
   }
 }
 

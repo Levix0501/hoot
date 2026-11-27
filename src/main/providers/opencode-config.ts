@@ -404,5 +404,6 @@ export async function readOpenCodeLaunchOptions(
     defaultEfforts: [],
     defaultModel: { value: OPENCODE_DEFAULT_FREE_MODEL, source: 'OpenCode' },
     defaultEffort: null,
+    signedOut: false,
   }
 }

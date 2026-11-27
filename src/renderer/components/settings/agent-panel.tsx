@@ -54,6 +54,7 @@ import {
   SelectTrigger,
 } from '../ui/select'
 import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
+import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { AddProviderPanel } from './provider-panel'
@@ -280,7 +281,12 @@ function ModelItems({
   )
 }
 
-/** The model picker: the models of the agent's provider, one of which it runs. */
+/**
+ * The model picker: the models of the agent's provider, one of which it
+ * runs. On its harness's own models, while the harness offers none, it says
+ * so where the harness is signed in to no account, and turns while they are
+ * being read.
+ */
 function ModelSelect({
   draft,
   provider,
@@ -296,7 +302,11 @@ function ModelSelect({
   const groups = modelGroups(draft.harness, provider, state, catalogs)
   const models = groups.flat()
   const current = draft.model
-  const known = provider?.own === null || state?.launchOptions != null
+  const offersNone = provider?.own != null && models.length === 0
+  const reading = offersNone && state?.readingLaunchOptions === true
+  const signedOut = offersNone && !reading && state?.launchOptions?.signedOut === true
+  // Signed out, or being read, the harness does not say which models it offers.
+  const known = provider?.own === null || (state?.launchOptions != null && !reading && !signedOut)
   const missing = current !== null && known && !models.some((model) => model.value === current)
   return (
     <Select
@@ -312,9 +322,17 @@ function ModelSelect({
         className={cn(GHOST, missing && 'text-destructive')}
         data-testid="agent-panel-model"
       >
-        {missing && <CircleAlertIcon className="size-3.5" />}
-        {current !== null ? (
-          <span className="truncate font-mono text-xs">{current}</span>
+        {reading ? (
+          <Spinner className="size-3.5 text-muted-foreground" />
+        ) : signedOut ? (
+          // Not the placeholder's muted color: the disabled picker alone dims
+          // it, as far as the property's name is.
+          <span className="text-foreground">Not signed in</span>
+        ) : current !== null ? (
+          <>
+            {missing && <CircleAlertIcon className="size-3.5" />}
+            <span className="truncate font-mono text-xs">{current}</span>
+          </>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
@@ -765,6 +783,13 @@ function EditPanel({
     latest.current = { commit: commitName }
   })
   useEffect(() => () => latest.current?.commit(), [])
+  // On its harness's own models, which the harness may have offered none of
+  // when they were read, as signed in to no account then: they are read
+  // again as it opens, where there are none.
+  const onOwnModels = provider?.own != null
+  useEffect(() => {
+    if (onOwnModels) api.readAgentModels(agent.harness)
+  }, [onOwnModels, agent.harness])
   return (
     <div className="flex h-full flex-col" data-testid={`agent-panel-${agent.id}`}>
       <div className="flex items-center gap-3 border-b px-5 pt-5 pb-4">

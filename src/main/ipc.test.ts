@@ -68,6 +68,7 @@ const agents = Object.assign(new EventEmitter(), {
   getState: vi.fn<() => AgentsState>(() => agentsState),
   detect: vi.fn<() => Promise<void>>(async () => {}),
   openPage: vi.fn<() => void>(),
+  readModels: vi.fn<(id: string) => void>(),
   install: vi.fn<(id: string, route?: string) => void>(),
   update: vi.fn<(id: string) => void>(),
   updateAll: vi.fn<() => void>(),
@@ -1402,6 +1403,12 @@ describe('the messages of the Agents page', () => {
     expect(agents.openPage).toHaveBeenCalledOnce()
     send(IpcChannel.detectAgents)
     expect(agents.detect).toHaveBeenCalledOnce()
+  })
+
+  it("read the models of the agent named again as its agent's panel opens, and only an agent", () => {
+    send(IpcChannel.readAgentModels, 'antigravity')
+    for (const id of ['shell', '', 3, null]) send(IpcChannel.readAgentModels, id)
+    expect(agents.readModels.mock.calls).toEqual([['antigravity']])
   })
 
   it('install, update and cancel the agent named, update all, and only an agent', () => {

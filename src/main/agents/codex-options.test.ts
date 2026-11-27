@@ -132,6 +132,7 @@ describe('readCodexLaunchOptions', () => {
       defaultEfforts: ['low', 'ultra'],
       defaultModel: null,
       defaultEffort: { value: 'high', source: 'config.toml' },
+      signedOut: false,
     })
     expect(lastRun()).toEqual(['debug', 'models', '--bundled'])
   })
@@ -157,6 +158,7 @@ describe('readCodexLaunchOptions', () => {
       defaultEfforts: [],
       defaultModel: { value: 'x', source: 'config.toml' },
       defaultEffort: null,
+      signedOut: false,
     })
   })
 })

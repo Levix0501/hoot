@@ -150,7 +150,7 @@ export async function readCodexLaunchOptions(options: {
     MODELS_TIMEOUT_MS,
   ).catch(() => null)
   const catalog = result === null || result.code !== 0 ? null : catalogOf(result.stdout)
-  if (catalog === null) return { models: [], defaultEfforts: [], ...defaults }
+  if (catalog === null) return { models: [], defaultEfforts: [], ...defaults, signedOut: false }
 
   const listed = catalog.models.filter((model) => model.visibility === 'list')
   const models: AgentModelOption[] = listed.map((model) => ({
@@ -165,5 +165,6 @@ export async function readCodexLaunchOptions(options: {
     models,
     defaultEfforts: starts === undefined ? [] : [...starts.levels],
     ...defaults,
+    signedOut: false,
   }
 }

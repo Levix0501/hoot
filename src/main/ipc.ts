@@ -576,6 +576,10 @@ export function registerIpc(deps: IpcDependencies): void {
   handle(IpcChannel.getAgents, () => deps.agents.getState())
   on(IpcChannel.enterAgentsPage, () => deps.agents.openPage())
   on(IpcChannel.detectAgents, () => void deps.agents.detect())
+  on(IpcChannel.readAgentModels, (id) => {
+    const parsed = toolId.safeParse(id)
+    if (parsed.success) deps.agents.readModels(parsed.data)
+  })
   deps.agents.on('changed', (state) => send(IpcChannel.agentsChanged, state))
   on(IpcChannel.installAgent, (id, route) => {
     const parsed = z.tuple([toolId, installRoute.optional()]).safeParse([id, route])

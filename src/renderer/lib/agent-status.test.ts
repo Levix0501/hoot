@@ -43,6 +43,7 @@ const agent = (overrides: Partial<AgentState>): AgentState => ({
   nodeRequirement: null,
   operation: null,
   launchOptions: null,
+  readingLaunchOptions: false,
   ...overrides,
 })
 

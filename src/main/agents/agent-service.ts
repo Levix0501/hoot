@@ -211,6 +211,10 @@ interface AgentRecord {
   operation: Operation | null
   /** The models its configuration offers, and Default's effort levels, from the last detection. */
   launchOptions: AgentLaunchOptions | null
+  /** Its readings of its launch options under way. */
+  launchOptionsReadings: number
+  /** The latest of those readings, which alone sets its launch options. */
+  launchOptionsId: number
 }
 
 /** The arguments npm installs a version of an npm package with, in a global folder. */
@@ -358,6 +362,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     releasesId: 0,
     operation: null,
     launchOptions: null,
+    launchOptionsReadings: 0,
+    launchOptionsId: 0,
   }))
   private installTarget: InstallTarget | null = null
   /** The version of the node that sessions run agents' JavaScript commands with. */
@@ -367,6 +373,8 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   private queuedDetection: Promise<void> | null = null
   /** When the last detection started, on Hoot's clock; `null` before the first. */
   private lastDetectionStartedAt: number | null = null
+  /** What the last detection to read launch options found; `null` before the first. */
+  private lastDetection: Detection | null = null
   /** The operations waiting, in the order they were asked for. */
   private queue: AgentRecord[] = []
   private running: AgentRecord | null = null
@@ -420,6 +428,7 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
         nodeRequirement: this.nodeRequirementOf(record),
         operation: record.operation?.state ?? null,
         launchOptions: record.launchOptions,
+        readingLaunchOptions: record.launchOptionsReadings > 0,
       })),
       installTarget: this.installTarget,
       detecting: this.detecting !== null,
@@ -470,6 +479,21 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
     ) {
       void this.detect()
     }
+  }
+
+  /**
+   * Reads an installed agent's launch options again where they offer no
+   * model, as the panel of an agent on its own models opens: one signed in
+   * since they were read, as Antigravity CLI must be to list any, or that
+   * can reach its server since, offers its models then. It reads from what
+   * the last detection found, and not while they are being read already.
+   */
+  readModels(id: CodingToolId): void {
+    const record = this.record(id)
+    const detection = this.lastDetection
+    if (detection === null || record.installation === null) return
+    if (record.launchOptionsReadings > 0 || (record.launchOptions?.models.length ?? 0) > 0) return
+    void this.readLaunchOptions([record], detection)
   }
 
   /**
@@ -699,7 +723,9 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
       ...this.records.map((record) => this.readLatest(record)),
     ])
       .then(async ([reading]) => {
-        if (reading !== null) await this.readLaunchOptions(reading.detection)
+        if (reading === null) return
+        this.lastDetection = reading.detection
+        await this.readLaunchOptions(this.records, reading.detection)
       })
       .finally(() => {
         if (this.detecting === detecting) this.detecting = null
@@ -711,19 +737,30 @@ export class AgentService extends EventEmitter<{ changed: [AgentsState] }> {
   }
 
   /**
-   * Reads every agent's launch options from the configuration the detection
-   * found, replacing those of the last detection once all are read.
+   * Reads these agents' launch options from the configuration the detection
+   * found, replacing theirs once all are read, except an agent's whose
+   * launch options a later reading has started to read since, which sets
+   * them instead.
    */
-  private async readLaunchOptions(detection: Detection): Promise<void> {
+  private async readLaunchOptions(records: AgentRecord[], detection: Detection): Promise<void> {
+    const ids = records.map((record) => {
+      record.launchOptionsReadings += 1
+      record.launchOptionsId += 1
+      return record.launchOptionsId
+    })
+    this.changed()
     const options = await Promise.all(
-      this.records.map((record) =>
+      records.map((record) =>
         this.options.launchOptions(record.tool.id, detection).catch(() => record.launchOptions),
       ),
     )
     for (const [index, value] of options.entries()) {
-      const record = this.records[index]
-      if (record) record.launchOptions = value
+      const record = records[index]
+      if (!record) continue
+      record.launchOptionsReadings -= 1
+      if (record.launchOptionsId === ids[index]) record.launchOptions = value
     }
+    this.changed()
   }
 
   /**

@@ -158,11 +158,16 @@ export interface AgentLaunchOptions {
   defaultModel: ConfiguredDefault | null
   /** The effort level the agent's own configuration starts sessions with, when it names one. */
   defaultEffort: ConfiguredDefault | null
+  /**
+   * Whether the agent said it is signed in to no account, without which it
+   * lists no model, as Antigravity CLI says it; `false` where it did not.
+   */
+  signedOut: boolean
 }
 
 export interface AgentState {
   id: CodingToolId
-  /** Whether its installation, version, latest version or launch options are being read. */
+  /** Whether its installation, version or latest version are being read. */
   checking: boolean
   /** Whether its installation has been looked for at least once. */
   detected: boolean
@@ -204,6 +209,11 @@ export interface AgentState {
    * choice, as for OpenCode.
    */
   launchOptions: AgentLaunchOptions | null
+  /**
+   * Whether its launch options are being read: by a detection, or again as
+   * the panel of an agent on its own models opens while they offer none.
+   */
+  readingLaunchOptions: boolean
 }
 
 /**

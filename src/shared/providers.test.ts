@@ -156,7 +156,7 @@ describe('providers', () => {
         agent('agy', { harness: 'antigravity', providerId: OWN_PROVIDER_IDS.antigravity }),
         two,
       ),
-    ).toBe('Google account')
+    ).toBe('Google AI')
     expect(agentName(agent('gone', { providerId: 'p-gone' }), two)).toBe('Claude Code')
     expect(agentName(pro, two)).toBe('DeepSeek')
     const flash = agent('flash')

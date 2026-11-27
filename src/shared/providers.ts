@@ -1118,7 +1118,9 @@ const OWN_PROVIDER_NAMES: Readonly<Record<CodingToolId, string>> = {
   claude: 'Claude subscription',
   codex: 'ChatGPT subscription',
   opencode: 'OpenCode free models',
-  antigravity: 'Google account',
+  // After Google's AI plans, such as Google AI Pro, which the account it is
+  // signed in with may be on, or on none.
+  antigravity: 'Google AI',
 }
 
 /**

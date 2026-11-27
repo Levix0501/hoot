@@ -1,5 +1,23 @@
 # hoot
 
+## 0.1.0-alpha.35
+
+### Patch Changes
+
+- [`9575b45`](https://github.com/Levix0501/hoot/commit/9575b45f6734458686ed0eb1077c05b870f66cff) - Antigravity CLI joins the agents: Hoot installs, updates and uninstalls it, offers the models of the Google account it is signed in with, and keeps its chats in their conversations.
+
+- [`fbb1705`](https://github.com/Levix0501/hoot/commit/fbb1705b903e07c1ad9fc7b15864b43e4fce7abb) - Codex agents now work as Claude Code's do: Hoot no longer changes Codex's own configuration or makes agents of it, each session tells Codex its model's context and effort levels as models.dev lists them, without Codex's warnings about an unknown model or its background server, the ChatGPT subscription offers OpenAI's models even where Codex's configuration names another tool's catalog, a Custom provider offers OpenAI's models, and a model picked with `/model` stays when the chat is opened again.
+
+- [`4027cb7`](https://github.com/Levix0501/hoot/commit/4027cb7560b0eab6a2719e6ba9f5d6dbaeafb503) - The Agents page installs agents with their official installers, offering npm when one fails, and each agent's version menu picks Latest, Claude Code's Stable, staying on a version or another version, and uninstalls any copy found on the computer.
+
+- [`09c9005`](https://github.com/Levix0501/hoot/commit/09c900500cefd86f7ca83e692bce0050057b2c11) - Hoot now needs Claude Code 2.1.295, Codex 0.163.0, OpenCode 2.1.0 and Antigravity CLI 1.4.0 or later, the first versions that report their status: older ones start no sessions until they are updated on the Agents page, whose version menus offer no older versions.
+
+- [`199c824`](https://github.com/Levix0501/hoot/commit/199c8243a25a5fef881d47620bc6e4bc75d3dddf) - OpenCode's free models are now only those OpenCode offers signed out, without the paid models it adds to them once signed in to the OpenCode Console.
+
+- [`0908fae`](https://github.com/Levix0501/hoot/commit/0908fae26efb20bc8fd03991f7bfe76333d52c99) - OpenCode agents now work as Claude Code's and Codex's do: Hoot no longer makes agents of OpenCode's own configuration or writes providers into it, and takes out those it wrote, its OpenCode sessions run on a server of its own that takes the providers from a file of Hoot's, each model with its context, answer limit and effort levels as models.dev lists them and its key in the header its provider asks for, providers at a Responses address alone, such as OpenAI's API, run on OpenCode too, and a Custom provider without models offers Claude's or OpenAI's models by its address.
+
+- [`0e9a11a`](https://github.com/Levix0501/hoot/commit/0e9a11a2a34cf817824a06e1a45f0611a978570f) - Session lights now follow the status agents report over OSC 7501: Codex, OpenCode 2.1 or later and Antigravity CLI sessions show when they are working, waiting for you or done, as Claude Code sessions do, and so do Terminal sessions running a program that reports its status.
+
 ## 0.1.0-alpha.34
 
 ### Patch Changes

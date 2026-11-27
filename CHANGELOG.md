@@ -1,5 +1,11 @@
 # hoot
 
+## 0.1.0-alpha.36
+
+### Patch Changes
+
+- [`c378803`](https://github.com/Levix0501/hoot/commit/c378803c77a431a44d769ca64295590bfe8c850e) - Claude subscription, ChatGPT subscription, OpenCode free models and Google account move from the Providers page to the Agents page: Hoot adds each as an agent, turned off, once Claude Code, Codex, OpenCode or Antigravity CLI is installed, and it can neither be deleted nor made a second time.
+
 ## 0.1.0-alpha.35
 
 ### Patch Changes

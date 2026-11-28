@@ -55,6 +55,7 @@ const api: HootApi = {
   getLaunchSettings: () => ipcRenderer.invoke(IpcChannel.getLaunchSettings),
   setDefaultAgent: (id) => ipcRenderer.send(IpcChannel.setDefaultAgent, id),
   setYoloMode: (on) => ipcRenderer.send(IpcChannel.setYoloMode, on),
+  setHarnessOrder: (order) => ipcRenderer.send(IpcChannel.setHarnessOrder, order),
   onLaunchSettingsChanged: (listener) => subscribe(IpcChannel.launchSettingsChanged, listener),
   getProviders: () => ipcRenderer.invoke(IpcChannel.getProviders),
   onProvidersChanged: (listener) => subscribe(IpcChannel.providersChanged, listener),

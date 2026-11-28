@@ -181,6 +181,13 @@ describe('providers', () => {
     ]
     const usable = usableAgents({ providers: [deepseek, kimi], agents }, (h) => h !== 'opencode')
     expect(usable.map((entry) => entry.id)).toEqual(['kimi', 'own', 'codex'])
+    expect(
+      usableAgents({ providers: [deepseek, kimi], agents }, () => true, [
+        'opencode',
+        'codex',
+        'claude',
+      ]).map((entry) => entry.id),
+    ).toEqual(['oc', 'codex', 'kimi', 'own'])
     expect(sessionAgent(usable, 'own')?.id).toBe('own')
     expect(sessionAgent(usable, 'own', 'codex')?.id).toBe('codex')
     expect(sessionAgent(usable, 'off')?.id).toBe('kimi')

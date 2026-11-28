@@ -104,3 +104,50 @@ export function getCodingTool(id: CodingToolId): CodingToolDefinition {
   if (!tool) throw new Error(`Unknown coding tool: ${id}`)
   return tool
 }
+
+/**
+ * Every coding tool id once: first the valid ones in `order`, in its order,
+ * then any remaining coding tools in the default order of `CODING_TOOL_IDS`.
+ */
+export function normalizeHarnessOrder(order?: readonly unknown[] | null): CodingToolId[] {
+  const result: CodingToolId[] = []
+  if (Array.isArray(order)) {
+    for (const entry of order) {
+      if (
+        typeof entry === 'string' &&
+        (CODING_TOOL_IDS as readonly string[]).includes(entry) &&
+        !result.includes(entry as CodingToolId)
+      ) {
+        result.push(entry as CodingToolId)
+      }
+    }
+  }
+  for (const id of CODING_TOOL_IDS) {
+    if (!result.includes(id)) result.push(id)
+  }
+  return result
+}
+
+/** The coding tools in `order` (see `normalizeHarnessOrder`). */
+export function orderedCodingTools(order?: readonly CodingToolId[] | null): CodingToolDefinition[] {
+  return normalizeHarnessOrder(order).map(getCodingTool)
+}
+
+/**
+ * Updates `current` with a reordered subset `reordered`, placing the reordered
+ * harnesses into the slots they previously occupied so that harnesses outside
+ * `reordered` keep their relative positions.
+ */
+export function reorderHarnesses(
+  current: readonly CodingToolId[],
+  reordered: readonly CodingToolId[],
+): CodingToolId[] {
+  const base = normalizeHarnessOrder(current)
+  const next: CodingToolId[] = []
+  for (const id of reordered) {
+    if (CODING_TOOL_IDS.includes(id) && !next.includes(id)) next.push(id)
+  }
+  const moved = new Set(next)
+  let cursor = 0
+  return base.map((id) => (moved.has(id) ? next[cursor++]! : id))
+}

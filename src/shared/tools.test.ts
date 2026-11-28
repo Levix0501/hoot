@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { CODING_TOOL_IDS, CODING_TOOLS, getCodingTool, TOOL_IDS, TOOLS } from './tools'
+import {
+  CODING_TOOL_IDS,
+  CODING_TOOLS,
+  getCodingTool,
+  normalizeHarnessOrder,
+  orderedCodingTools,
+  reorderHarnesses,
+  TOOL_IDS,
+  TOOLS,
+} from './tools'
 
 describe('tools', () => {
   it('defines the five tools with their commands', () => {
@@ -41,5 +50,45 @@ describe('tools', () => {
     expect(TOOLS.filter((tool) => tool.command !== null).map((tool) => tool.id)).toEqual([
       ...CODING_TOOL_IDS,
     ])
+  })
+
+  it('normalizes any harness order to every coding tool once', () => {
+    expect(normalizeHarnessOrder()).toEqual(['claude', 'codex', 'opencode', 'antigravity'])
+    expect(normalizeHarnessOrder(null)).toEqual(['claude', 'codex', 'opencode', 'antigravity'])
+    expect(normalizeHarnessOrder(['codex', 'antigravity'])).toEqual([
+      'codex',
+      'antigravity',
+      'claude',
+      'opencode',
+    ])
+    expect(normalizeHarnessOrder(['opencode', 'unknown', 42, 'opencode', 'claude'])).toEqual([
+      'opencode',
+      'claude',
+      'codex',
+      'antigravity',
+    ])
+    expect(orderedCodingTools(['antigravity', 'codex']).map((tool) => tool.id)).toEqual([
+      'antigravity',
+      'codex',
+      'claude',
+      'opencode',
+    ])
+  })
+
+  it('reorders a subset of harnesses while keeping other harnesses in place', () => {
+    // Only claude, opencode and antigravity are installed; codex stays at index 1.
+    expect(
+      reorderHarnesses(
+        ['claude', 'codex', 'opencode', 'antigravity'],
+        ['antigravity', 'claude', 'opencode'],
+      ),
+    ).toEqual(['antigravity', 'codex', 'claude', 'opencode'])
+    // Reordering all harnesses replaces the full order.
+    expect(
+      reorderHarnesses(
+        ['claude', 'codex', 'opencode', 'antigravity'],
+        ['codex', 'opencode', 'antigravity', 'claude'],
+      ),
+    ).toEqual(['codex', 'opencode', 'antigravity', 'claude'])
   })
 })

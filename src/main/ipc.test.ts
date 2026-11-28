@@ -128,6 +128,7 @@ const launchSettings = Object.assign(new EventEmitter(), {
   all: vi.fn<() => unknown>(() => launchSettingsState),
   setDefaultAgent: vi.fn<(id: string) => void>(),
   setYoloMode: vi.fn<(on: boolean) => void>(),
+  setHarnessOrder: vi.fn<(order: string[]) => void>(),
   change: vi.fn<(id: string, change: unknown) => void>(),
 })
 
@@ -1471,6 +1472,10 @@ describe('the messages of the Agents page', () => {
     send(IpcChannel.setYoloMode, false)
     send(IpcChannel.setYoloMode, 'yes')
     expect(launchSettings.setYoloMode.mock.calls).toEqual([[false]])
+    send(IpcChannel.setHarnessOrder, ['codex', 'claude'])
+    send(IpcChannel.setHarnessOrder, ['codex', 'shell'])
+    send(IpcChannel.setHarnessOrder, 'codex')
+    expect(launchSettings.setHarnessOrder.mock.calls).toEqual([[['codex', 'claude']]])
 
     launchSettings.emit('changed', launchSettingsState)
     expect(webContents.send).toHaveBeenCalledWith(

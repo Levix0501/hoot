@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Switch } from '../ui/switch'
 import {
   AgentPanel,
   AgentSwitch,
@@ -105,6 +106,7 @@ export function AgentItem({
   agent,
   state,
   selected,
+  indented = false,
   onOpen,
 }: {
   agent: Agent
@@ -112,6 +114,8 @@ export function AgentItem({
   state: AgentState | undefined
   /** Whether the panel shows it. */
   selected: boolean
+  /** Whether the harness row above it shows a drag handle, shifting the label's left edge. */
+  indented?: boolean
   onOpen: () => void
 }) {
   const isDefault = useIsDefault(agent.id)
@@ -130,7 +134,8 @@ export function AgentItem({
         }
       }}
       className={cn(
-        'flex min-h-11 cursor-default items-center gap-3 py-2 pr-4 pl-4 outline-none hover:bg-muted/40 focus-visible:bg-muted/40 sm:pl-12',
+        'flex min-h-11 cursor-default items-center gap-3 py-2 pr-4 pl-4 outline-none hover:bg-muted/40 focus-visible:bg-muted/40',
+        indented ? 'sm:pl-16' : 'sm:pl-12',
         selected && 'bg-muted/60 hover:bg-muted/60',
       )}
       data-testid={`agent-item-${agent.id}`}
@@ -205,9 +210,12 @@ export function DormantAgentItem({ agent }: { agent: Agent }) {
 export function HarnessAgents({
   harness,
   state,
+  indented = false,
 }: {
   harness: CodingToolId
   state: AgentState | undefined
+  /** Whether the harness row above it shows a drag handle, shifting the label's left edge. */
+  indented?: boolean
 }) {
   const all = useAppStore((app) => app.providers?.agents)
   const agents = (all ?? []).filter((agent) => agent.harness === harness)
@@ -224,6 +232,7 @@ export function HarnessAgents({
           agent={agent}
           state={state}
           selected={target?.id === agent.id}
+          indented={indented}
           onOpen={() => setTarget({ id: agent.id })}
         />
       ))}
@@ -231,7 +240,10 @@ export function HarnessAgents({
         <button
           type="button"
           onClick={() => setTarget({ id: null })}
-          className="flex h-10 items-center gap-3 pr-4 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground sm:pl-12"
+          className={cn(
+            'flex h-10 items-center gap-3 pr-4 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground',
+            indented ? 'sm:pl-16' : 'sm:pl-12',
+          )}
           data-testid={`new-agent-${harness}`}
         >
           <PlusIcon className="size-4" />
@@ -243,13 +255,78 @@ export function HarnessAgents({
   )
 }
 
+/** A read-only agent row shown inside the floating drag overlay while its harness is dragged. */
+function DraggedAgentItem({ agent, state }: { agent: Agent; state: AgentState | undefined }) {
+  const isDefault = useIsDefault(agent.id)
+  const name = useAgentName(agent)
+  const summary = useAgentSummary(agent, state, name)
+  return (
+    <div className="flex min-h-11 items-center gap-3 py-2 pr-4 pl-4 sm:pl-16">
+      <AgentIcon
+        toolId={agent.harness}
+        providerId={agent.providerId}
+        className={cn('size-4 shrink-0', !agent.enabled && 'opacity-50')}
+      />
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span
+          className={cn('truncate text-sm font-medium', !agent.enabled && 'text-muted-foreground')}
+        >
+          {name}
+        </span>
+        {isDefault && <Badge variant="secondary">Default</Badge>}
+      </span>
+      {summary !== '' && (
+        <span
+          className={cn(
+            'max-w-[45%] shrink truncate font-mono text-xs text-muted-foreground',
+            !agent.enabled && 'opacity-60',
+          )}
+        >
+          {summary}
+        </span>
+      )}
+      <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+        <MoreHorizontalIcon className="size-3" />
+      </span>
+      <Switch checked={agent.enabled} tabIndex={-1} aria-hidden />
+    </div>
+  )
+}
+
+/** A read-only copy of a harness's agents for the floating drag overlay. */
+export function DraggedHarnessAgents({
+  harness,
+  state,
+}: {
+  harness: CodingToolId
+  state: AgentState | undefined
+}) {
+  const all = useAppStore((app) => app.providers?.agents)
+  const agents = (all ?? []).filter((agent) => agent.harness === harness)
+  const offersNew = FORMATS_OF[harness].length > 0
+  if (agents.length === 0 && !offersNew) return null
+  return (
+    <div className="-mt-1 flex flex-col pb-1">
+      {agents.map((agent) => (
+        <DraggedAgentItem key={agent.id} agent={agent} state={state} />
+      ))}
+      {offersNew && (
+        <div className="flex h-10 items-center gap-3 pr-4 pl-4 text-sm text-muted-foreground sm:pl-16">
+          <PlusIcon className="size-4" />
+          New agent
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The picker of the default agent: the usable agents, the one new chats start with picked. */
 export function DefaultAgentPicker() {
   const tools = useAppStore((state) => state.tools)
   const providers = useAppStore((state) => state.providers)
   const launchSettings = useAppStore((state) => state.launchSettings)
   const setDefaultAgent = useAppStore((state) => state.setDefaultAgent)
-  const usable = usableChatAgents(tools, providers)
+  const usable = usableChatAgents(tools, providers, launchSettings)
   const current = chatAgent(tools, providers, launchSettings)
   const choices = usable.map((agent) => ({
     value: agent.id,

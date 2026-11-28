@@ -3,17 +3,18 @@ import { cn } from 'cn'
 import { useState, type ReactNode } from 'react'
 import { presetHarnesses, PROVIDER_PRESETS, type ProviderPreset } from '../../../shared/providers'
 import { toolStatus } from '../../../shared/tool-status'
-import { CODING_TOOL_IDS, getTool, type CodingToolId } from '../../../shared/tools'
+import { getTool, normalizeHarnessOrder, type CodingToolId } from '../../../shared/tools'
 import { customMatches, presetMatches } from '../../lib/provider-draft'
 import { useAppStore } from '../../store/app-store'
 import { ProviderMarkIcon } from '../provider-icon'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '../ui/input-group'
 import { SheetTitle } from '../ui/sheet'
 
-/** The harnesses installed, as the last detection found them, in their order. */
+/** The harnesses installed, as the last detection found them, in the user's order. */
 export function useInstalled(): CodingToolId[] {
   const tools = useAppStore((state) => state.tools)
-  return CODING_TOOL_IDS.filter((id) => toolStatus(tools, getTool(id)) === 'available')
+  const order = useAppStore((state) => state.launchSettings?.harnessOrder)
+  return normalizeHarnessOrder(order).filter((id) => toolStatus(tools, getTool(id)) === 'available')
 }
 
 interface Section {

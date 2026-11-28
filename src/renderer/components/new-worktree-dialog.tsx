@@ -158,7 +158,7 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agentId: s
   const tools = useAppStore((state) => state.tools)
   const providers = useAppStore((state) => state.providers)
   const launchSettings = useAppStore((state) => state.launchSettings)
-  const usable = usableChatAgents(tools, providers)
+  const usable = usableChatAgents(tools, providers, launchSettings)
   const marked = chatAgent(tools, providers, launchSettings)
   const selected = usable.find((agent) => agent.id === value) ?? usable[0]
   const nameOf = (agent: Agent) => (providers === null ? '' : agentName(agent, providers))
@@ -898,7 +898,8 @@ function NewWorktreeContent({
           onNameChange={setName}
           agent={
             // The agent picked while it can be used, else the one the picker shows.
-            usableChatAgents(tools, providers).find((usable) => usable.id === agent)?.id ??
+            usableChatAgents(tools, providers, launchSettings).find((usable) => usable.id === agent)
+              ?.id ??
             chatAgent(tools, providers, launchSettings)?.id ??
             ''
           }

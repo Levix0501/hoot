@@ -7,6 +7,7 @@ import {
   defaultLaunchSettings,
   type LaunchSettings,
 } from '../../shared/launch-settings'
+import { CODING_TOOL_IDS } from '../../shared/tools'
 import { removeTestFolder } from '../test-support'
 import { LaunchSettingsStore } from './launch-settings-store'
 
@@ -36,13 +37,22 @@ describe('LaunchSettingsStore', () => {
     expect(fs.existsSync(file)).toBe(false)
   })
 
-  it('saves the default agent and YOLO mode for later instances', () => {
+  it('saves the default agent, YOLO mode, and harness order for later instances', () => {
     const store = new LaunchSettingsStore(directory)
     store.setDefaultAgent('agent-1')
     store.setYoloMode(false)
-    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: false })
+    store.setHarnessOrder(['codex', 'antigravity', 'claude', 'opencode'])
+    expect(store.all()).toEqual({
+      defaultAgent: 'agent-1',
+      yoloMode: false,
+      harnessOrder: ['codex', 'antigravity', 'claude', 'opencode'],
+    })
     expect(saved()).toMatchObject({
-      launchSettings: { defaultAgentId: 'agent-1', yoloMode: false },
+      launchSettings: {
+        defaultAgentId: 'agent-1',
+        yoloMode: false,
+        harnessOrder: ['codex', 'antigravity', 'claude', 'opencode'],
+      },
     })
     const reopened = new LaunchSettingsStore(directory)
     expect(reopened.all()).toEqual(store.all())
@@ -63,7 +73,11 @@ describe('LaunchSettingsStore', () => {
     })
     const store = new LaunchSettingsStore(directory)
     // A tool id was the default agent then; agents have ids of their own now.
-    expect(store.all()).toEqual({ defaultAgent: null, yoloMode: false })
+    expect(store.all()).toEqual({
+      defaultAgent: null,
+      yoloMode: false,
+      harnessOrder: [...CODING_TOOL_IDS],
+    })
     expect(store.legacyDefaultTool()).toBe('codex')
     expect(store.legacyAgent('claude')).toEqual(defaultAgentLaunchSettings())
     expect(store.legacyAgent('codex')).toEqual({
@@ -82,7 +96,11 @@ describe('LaunchSettingsStore', () => {
     expect(store.legacyDefaultTool()).toBeNull()
     const reopened = new LaunchSettingsStore(directory)
     expect(reopened.legacyAgent('codex')).toBeNull()
-    expect(reopened.all()).toEqual({ defaultAgent: null, yoloMode: true })
+    expect(reopened.all()).toEqual({
+      defaultAgent: null,
+      yoloMode: true,
+      harnessOrder: [...CODING_TOOL_IDS],
+    })
   })
 
   it('ignores the permission levels earlier versions saved, and keeps them in the file', () => {
@@ -97,16 +115,27 @@ describe('LaunchSettingsStore', () => {
   })
 
   it('replaces saved values that are not what a setting can be with the defaults', () => {
-    writeSettings({ launchSettings: { defaultAgentId: 4, yoloMode: 'yes' } })
+    writeSettings({
+      launchSettings: {
+        defaultAgentId: 4,
+        yoloMode: 'yes',
+        harnessOrder: ['opencode', 'gone', 3, 'opencode'],
+      },
+    })
     const settings: LaunchSettings = new LaunchSettingsStore(directory).all()
     expect(settings.defaultAgent).toBeNull()
     expect(settings.yoloMode).toBe(true)
+    expect(settings.harnessOrder).toEqual(['opencode', 'claude', 'codex', 'antigravity'])
   })
 
   it('ignores the switch for asking before closing that earlier versions saved', () => {
     writeSettings({ launchSettings: { defaultAgentId: 'agent-1', confirmClose: false } })
     const store = new LaunchSettingsStore(directory)
-    expect(store.all()).toEqual({ defaultAgent: 'agent-1', yoloMode: true })
+    expect(store.all()).toEqual({
+      defaultAgent: 'agent-1',
+      yoloMode: true,
+      harnessOrder: [...CODING_TOOL_IDS],
+    })
     store.setYoloMode(false)
     expect(saved()).toMatchObject({
       launchSettings: { defaultAgentId: 'agent-1', yoloMode: false },
@@ -119,11 +148,15 @@ describe('LaunchSettingsStore', () => {
     store.on('changed', (settings) => changes.push(settings))
     store.setYoloMode(true)
     store.setDefaultAgent(null)
+    store.setHarnessOrder([...CODING_TOOL_IDS])
     store.setYoloMode(false)
     store.setDefaultAgent('agent-2')
     store.setDefaultAgent('agent-2')
-    expect(changes).toHaveLength(2)
+    store.setHarnessOrder(['codex', 'claude'])
+    store.setHarnessOrder(['codex', 'claude', 'opencode', 'antigravity'])
+    expect(changes).toHaveLength(3)
     expect(changes[0]?.yoloMode).toBe(false)
     expect(changes[1]?.defaultAgent).toBe('agent-2')
+    expect(changes[2]?.harnessOrder).toEqual(['codex', 'claude', 'opencode', 'antigravity'])
   })
 })

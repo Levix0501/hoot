@@ -1,13 +1,37 @@
 import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DraggableAttributes,
+  type DragEndEvent,
+  type Modifier,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   ArrowDownToLineIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CopyIcon,
+  GripVerticalIcon,
+  LockIcon,
   RefreshCwIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   belowMinimumVersion,
   FOLDER_NOT_WRITABLE_MESSAGE,
@@ -20,7 +44,15 @@ import {
   type AgentState,
   type InstallTarget,
 } from '../../../shared/agents'
-import { CODING_TOOLS, type CodingToolDefinition, type CodingToolId } from '../../../shared/tools'
+import {
+  CODING_TOOLS,
+  getCodingTool,
+  normalizeHarnessOrder,
+  orderedCodingTools,
+  reorderHarnesses,
+  type CodingToolDefinition,
+  type CodingToolId,
+} from '../../../shared/tools'
 import { api } from '../../lib/api'
 import { agentRowStatus, updateAllIncludes, type AgentRowStatus } from '../../lib/agent-status'
 import { useAppStore } from '../../store/app-store'
@@ -45,7 +77,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog'
-import { DefaultAgentPicker, DormantAgentItem, HarnessAgents } from './agent-items'
+import {
+  DefaultAgentPicker,
+  DormantAgentItem,
+  DraggedHarnessAgents,
+  HarnessAgents,
+} from './agent-items'
 import { useCopied } from './agent-panel'
 import { Spinner } from '../ui/spinner'
 import { Switch } from '../ui/switch'
@@ -443,6 +480,38 @@ function AgentActions({
   }
 }
 
+/** Keeps a dragged harness moving vertically along the list. */
+const restrictToVerticalAxis: Modifier = ({ transform }) => ({ ...transform, x: 0 })
+
+/** Drag activator props attached to a harness row's leading handle and header area. */
+interface HarnessDragHandle {
+  ref: (node: HTMLElement | null) => void
+  attributes: DraggableAttributes
+  listeners: ReturnType<typeof useSortable>['listeners']
+  /** Whether the harness can currently be dragged to reorder. */
+  draggable: boolean
+}
+
+/** The notes shown below an installed harness's header row when applicable. */
+function harnessNotes(
+  tool: CodingToolDefinition,
+  agent: AgentState,
+  status: AgentRowStatus,
+): string[] {
+  const version = agent.installation?.version ?? null
+  return [
+    ...(version !== null && belowMinimumVersion(tool.id, version)
+      ? [`Hoot needs ${tool.minimumVersion} or later`]
+      : []),
+    ...(status.kind === 'update-blocked'
+      ? [
+          ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
+          ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
+        ]
+      : []),
+  ]
+}
+
 /**
  * An installed harness's row: the program alone, what it is doing or can do,
  * and its version, which opens its version menu; below, that Hoot needs a
@@ -453,51 +522,189 @@ function AgentRow({
   tool,
   agent,
   target,
+  showHandle,
+  drag,
   onFailure,
   onUninstall,
 }: {
   tool: CodingToolDefinition
   agent: AgentState
   target: InstallTarget | null
+  /** Whether to show a drag handle at the start of the row. */
+  showHandle: boolean
+  drag: HarnessDragHandle | null
   onFailure: (failure: AgentFailure) => void
   onUninstall: (ask: UninstallAsk) => void
 }) {
   const status = agentRowStatus(agent, target)
   const id = tool.id
-  const version = agent.installation?.version ?? null
-  const notes = [
-    ...(version !== null && belowMinimumVersion(id, version)
-      ? [`Hoot needs ${tool.minimumVersion} or later`]
-      : []),
-    ...(status.kind === 'update-blocked'
-      ? [
-          ...(status.node ? [nodeRequirementMessage(status.version, status.node)] : []),
-          ...(status.writable ? [] : [FOLDER_NOT_WRITABLE_MESSAGE]),
-        ]
-      : []),
-  ]
+  const notes = harnessNotes(tool, agent, status)
+  const draggable = drag?.draggable ?? false
   return (
     <div
-      className="flex flex-col gap-2.5 px-4 py-3"
+      className={cn('flex flex-col gap-2.5 py-3 pr-4', showHandle ? 'pl-3' : 'pl-4')}
       data-testid={`agent-row-${id}`}
       data-status={agent.operation?.status === 'failed' ? 'failed' : status.kind}
     >
       {/* As tall as a button, so that rows line up whether they have one or not. */}
       <div className="flex min-h-7 items-center gap-3">
-        <ToolIcon toolId={id} className="size-5 shrink-0" />
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="text-sm font-medium" data-testid={`agent-name-${id}`}>
+        <div
+          ref={draggable ? drag?.ref : undefined}
+          {...(draggable ? drag?.attributes : undefined)}
+          {...(draggable ? drag?.listeners : undefined)}
+          aria-label={draggable ? `Reorder ${tool.label}` : undefined}
+          className={cn(
+            'group/drag -my-3 flex min-h-7 min-w-0 flex-1 items-center py-3 outline-none focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/50',
+            draggable && 'cursor-grab touch-none select-none',
+          )}
+          data-testid={showHandle ? `agent-drag-${id}` : undefined}
+        >
+          {showHandle && (
+            <GripVerticalIcon
+              aria-hidden
+              className={cn(
+                'mr-1 size-4 shrink-0 text-muted-foreground/45 transition-colors',
+                draggable && 'group-hover/drag:text-muted-foreground',
+              )}
+            />
+          )}
+          <ToolIcon toolId={id} className="mr-3 size-5 shrink-0" />
+          <span className="truncate text-sm font-medium" data-testid={`agent-name-${id}`}>
             {tool.label}
           </span>
-        </span>
+        </div>
         <AgentActions agent={agent} status={status} onFailure={onFailure} />
         <VersionMenu agent={agent} onUninstall={onUninstall} />
       </div>
       {notes.length > 0 && (
-        <p className="text-xs text-muted-foreground sm:pl-8" data-testid={`agent-note-${id}`}>
+        <p
+          className={cn('text-xs text-muted-foreground', showHandle ? 'sm:pl-13' : 'sm:pl-8')}
+          data-testid={`agent-note-${id}`}
+        >
           {joined(notes)}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * One installed harness and its agents, draggable by the harness's header
+ * row to change the order of harnesses.
+ */
+function SortableHarnessGroup({
+  tool,
+  agent,
+  state,
+  loading,
+  target,
+  showHandle,
+  draggable,
+  onFailure,
+  onUninstall,
+}: {
+  tool: CodingToolDefinition
+  agent: AgentState
+  state: AgentState | undefined
+  /** Whether the agent state has not loaded yet. */
+  loading: boolean
+  target: InstallTarget | null
+  showHandle: boolean
+  draggable: boolean
+  onFailure: (failure: AgentFailure) => void
+  onUninstall: (ask: UninstallAsk) => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tool.id, disabled: !draggable })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn('bg-background', isDragging && 'opacity-0')}
+      data-testid={`agent-group-${tool.id}`}
+    >
+      {loading ? (
+        <div
+          className={cn('flex items-center py-3 pr-4', showHandle ? 'pl-3' : 'pl-4')}
+          data-testid={`agent-row-${tool.id}`}
+          data-status="checking"
+        >
+          {showHandle && (
+            <GripVerticalIcon
+              aria-hidden
+              className="mr-1 size-4 shrink-0 text-muted-foreground/45"
+            />
+          )}
+          <ToolIcon toolId={tool.id} className="mr-3 size-5 shrink-0" />
+          <span className="min-w-0 flex-1 text-sm font-medium">{tool.label}</span>
+          <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
+        </div>
+      ) : (
+        <AgentRow
+          tool={tool}
+          agent={agent}
+          target={target}
+          showHandle={showHandle}
+          drag={{ ref: setActivatorNodeRef, attributes, listeners, draggable }}
+          onFailure={onFailure}
+          onUninstall={onUninstall}
+        />
+      )}
+      <HarnessAgents harness={tool.id} state={state} indented={showHandle} />
+    </div>
+  )
+}
+
+/** The floating copy of a harness and its agents shown while the harness is dragged. */
+function DraggedHarness({
+  tool,
+  agent,
+  target,
+}: {
+  tool: CodingToolDefinition
+  agent: AgentState
+  target: InstallTarget | null
+}) {
+  const status = agentRowStatus(agent, target)
+  const notes = harnessNotes(tool, agent, status)
+  const version = agent.installation?.version ?? null
+  const follows = getCodingTool(tool.id).versions
+  const uninstallable =
+    agent.installation !== null &&
+    (agent.installation.removable || agent.copies.some((copy) => copy.removable))
+  return (
+    <div
+      className="pointer-events-none cursor-grabbing overflow-hidden rounded-xl border bg-background shadow-md ring-1 ring-foreground/5"
+      data-testid="agent-group-dragged"
+    >
+      <div className="flex flex-col gap-2.5 py-3 pr-4 pl-3">
+        <div className="flex min-h-7 items-center gap-3">
+          <div className="flex min-h-7 min-w-0 flex-1 items-center">
+            <GripVerticalIcon aria-hidden className="mr-1 size-4 shrink-0 text-muted-foreground" />
+            <ToolIcon toolId={tool.id} className="mr-3 size-5 shrink-0" />
+            <span className="truncate text-sm font-medium">{tool.label}</span>
+          </div>
+          {version !== null && (
+            <span className="inline-flex h-6 shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground tabular-nums">
+              {agent.follow.kind === 'stay' && <LockIcon className="size-3" />}
+              {version}
+              {(follows || uninstallable) && <ChevronDownIcon className="size-3" />}
+            </span>
+          )}
+        </div>
+        {notes.length > 0 && (
+          <p className="text-xs text-muted-foreground sm:pl-13">{joined(notes)}</p>
+        )}
+      </div>
+      <DraggedHarnessAgents harness={tool.id} state={agent} />
     </div>
   )
 }
@@ -668,9 +875,16 @@ export function AgentsPage() {
   const detectAgents = useAppStore((state) => state.detectAgents)
   const updateAllAgents = useAppStore((state) => state.updateAllAgents)
   const setYoloMode = useAppStore((state) => state.setYoloMode)
+  const setHarnessOrder = useAppStore((state) => state.setHarnessOrder)
   const [failure, setFailure] = useState<AgentFailure | null>(null)
   const [uninstall, setUninstall] = useState<{ id: CodingToolId; copy: UninstallAsk } | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
+  const [dragged, setDragged] = useState<CodingToolId | null>(null)
+  // A press that moves the pointer less than 6px is a click.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
   // Whether the Update all run seen last has had an operation pending: it ends
   // once none is, so that a later operation of one agent is not taken for it.
   const updateAllRan = useRef(false)
@@ -678,15 +892,31 @@ export function AgentsPage() {
     enterAgentsPage()
   }, [enterAgentsPage])
 
+  const harnessOrder = normalizeHarnessOrder(launchSettings?.harnessOrder)
+  const orderedTools = orderedCodingTools(harnessOrder)
   const states = new Map(agents?.agents.map((agent) => [agent.id, agent]))
-  const installed = CODING_TOOLS.filter((tool) => {
+  const installed = orderedTools.filter((tool) => {
     const agent = states.get(tool.id)
     return agent === undefined || !agent.detected || agent.installation !== null
   })
-  const notInstalled = CODING_TOOLS.filter((tool) => {
+  const notInstalled = orderedTools.filter((tool) => {
     const agent = states.get(tool.id)
     return agent !== undefined && agent.detected && agent.installation === null
   })
+  const installedIds = installed.map((tool) => tool.id)
+  const showHandles = installed.length > 1
+  const canReorder = showHandles && agents !== null && launchSettings !== null
+  const draggedTool =
+    dragged === null ? null : (installed.find((tool) => tool.id === dragged) ?? null)
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragged(null)
+    if (over === null || active.id === over.id) return
+    const from = installedIds.indexOf(active.id as CodingToolId)
+    const to = installedIds.indexOf(over.id as CodingToolId)
+    if (from === -1 || to === -1) return
+    setHarnessOrder(reorderHarnesses(harnessOrder, arrayMove(installedIds, from, to)))
+  }
   const target = agents?.installTarget ?? null
   const updateAllCandidates = (agents?.agents ?? []).filter((agent) =>
     updateAllIncludes(agent, target),
@@ -772,35 +1002,63 @@ export function AgentsPage() {
             </label>
           </div>
 
-          <div className="flex flex-col divide-y rounded-xl border" data-testid="agents-list">
-            {installed.map((tool) => {
-              const agent = states.get(tool.id) ?? unknownAgent(tool.id)
-              return (
-                // The harness's row, the program alone, and its agents below it.
-                <div key={tool.id} data-testid={`agent-group-${tool.id}`}>
-                  {agents === null ? (
-                    <div
-                      className="flex items-center gap-3 px-4 py-3"
-                      data-testid={`agent-row-${tool.id}`}
-                      data-status="checking"
-                    >
-                      <ToolIcon toolId={tool.id} className="size-5 shrink-0" />
-                      <span className="min-w-0 flex-1 text-sm font-medium">{tool.label}</span>
-                      <StatusText testId={`agent-status-${tool.id}`}>Checking…</StatusText>
-                    </div>
-                  ) : (
-                    <AgentRow
-                      tool={tool}
-                      agent={agent}
-                      target={target}
-                      onFailure={setFailure}
-                      onUninstall={(copy) => setUninstall({ id: tool.id, copy })}
-                    />
-                  )}
-                  <HarnessAgents harness={tool.id} state={states.get(tool.id)} />
-                </div>
-              )
-            })}
+          <div
+            className="flex flex-col divide-y overflow-hidden rounded-xl border"
+            data-testid="agents-list"
+          >
+            {installed.length > 0 && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis]}
+                onDragStart={({ active }) => setDragged(active.id as CodingToolId)}
+                onDragEnd={onDragEnd}
+                onDragCancel={() => setDragged(null)}
+              >
+                <SortableContext items={installedIds} strategy={verticalListSortingStrategy}>
+                  <div className="flex flex-col divide-y">
+                    {installed.map((tool) => {
+                      const agent = states.get(tool.id) ?? unknownAgent(tool.id)
+                      return (
+                        <SortableHarnessGroup
+                          key={tool.id}
+                          tool={tool}
+                          agent={agent}
+                          state={states.get(tool.id)}
+                          loading={agents === null}
+                          target={target}
+                          showHandle={showHandles}
+                          draggable={canReorder}
+                          onFailure={setFailure}
+                          onUninstall={(copy) => setUninstall({ id: tool.id, copy })}
+                        />
+                      )
+                    })}
+                  </div>
+                </SortableContext>
+                {createPortal(
+                  <>
+                    {/*
+                      While a harness is dragged, the pointer shows a grab
+                      wherever it is, and no part of the window drags the window.
+                    */}
+                    {dragged !== null && (
+                      <div className="fixed inset-0 z-[998] cursor-grabbing [app-region:no-drag]" />
+                    )}
+                    <DragOverlay zIndex={999}>
+                      {draggedTool === null ? null : (
+                        <DraggedHarness
+                          tool={draggedTool}
+                          agent={states.get(draggedTool.id) ?? unknownAgent(draggedTool.id)}
+                          target={target}
+                        />
+                      )}
+                    </DragOverlay>
+                  </>,
+                  document.body,
+                )}
+              </DndContext>
+            )}
             <NotInstalledGroup
               tools={notInstalled}
               states={states}

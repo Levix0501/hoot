@@ -1,3 +1,5 @@
+import { CODING_TOOL_IDS, normalizeHarnessOrder, type CodingToolId } from './tools'
+
 /** How an agent starts the sessions Hoot opens with it. */
 export interface AgentLaunchSettings {
   /** Whether the agent appears in the new session menu. */
@@ -12,7 +14,7 @@ export interface AgentLaunchSettings {
 
 /**
  * What the Agents page keeps besides the agents themselves: the default
- * agent and the YOLO mode switch.
+ * agent, the YOLO mode switch, and the order of the harnesses.
  */
 export interface LaunchSettings {
   /**
@@ -23,6 +25,8 @@ export interface LaunchSettings {
   defaultAgent: string | null
   /** Whether each agent gets the arguments that make it act without asking. */
   yoloMode: boolean
+  /** The harnesses in the user's order, every coding tool once. */
+  harnessOrder: CodingToolId[]
 }
 
 /** The settings an agent starts with until the user changes one. */
@@ -30,9 +34,9 @@ export function defaultAgentLaunchSettings(): AgentLaunchSettings {
   return { enabled: true, model: null, effort: null, extraArgs: [] }
 }
 
-/** The settings Hoot starts with: no default agent, YOLO mode on. */
+/** The settings Hoot starts with: no default agent, YOLO mode on, and the default harness order. */
 export function defaultLaunchSettings(): LaunchSettings {
-  return { defaultAgent: null, yoloMode: true }
+  return { defaultAgent: null, yoloMode: true, harnessOrder: [...CODING_TOOL_IDS] }
 }
 
 /** The settings with another default agent, or `null` while the settings are not known. */
@@ -46,4 +50,12 @@ export function withDefaultAgent(
 /** The settings with YOLO mode on or off, or `null` while the settings are not known. */
 export function withYoloMode(settings: LaunchSettings | null, on: boolean): LaunchSettings | null {
   return settings === null ? null : { ...settings, yoloMode: on }
+}
+
+/** The settings with another harness order, or `null` while the settings are not known. */
+export function withHarnessOrder(
+  settings: LaunchSettings | null,
+  order: readonly CodingToolId[],
+): LaunchSettings | null {
+  return settings === null ? null : { ...settings, harnessOrder: normalizeHarnessOrder(order) }
 }

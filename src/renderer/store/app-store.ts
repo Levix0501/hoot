@@ -64,7 +64,12 @@ import {
   type Labels,
   type NamedLabel,
 } from '../../shared/labels'
-import { withDefaultAgent, withYoloMode, type LaunchSettings } from '../../shared/launch-settings'
+import {
+  withDefaultAgent,
+  withHarnessOrder,
+  withYoloMode,
+  type LaunchSettings,
+} from '../../shared/launch-settings'
 import {
   issueAgent,
   withAgentChange,
@@ -88,7 +93,7 @@ import type { SidebarGroupId } from '../../shared/sidebar-groups'
 import { SIDEBAR_WIDTH, sidebarWidthWithin } from '../../shared/sidebar-width'
 import { startBlockers, startBlockerText, type StartBlocker } from '../../shared/start-blockers'
 import { parentOf, subIssueIdsOf, type ParentChange, type SubIssues } from '../../shared/sub-issues'
-import { getTool, type CodingToolId, type ToolId } from '../../shared/tools'
+import { getTool, normalizeHarnessOrder, type CodingToolId, type ToolId } from '../../shared/tools'
 import type { UpdateCheck, UpdateState } from '../../shared/updates'
 import {
   workflowProgress,
@@ -531,6 +536,8 @@ export interface AppState {
   setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
+  /** Sets the order of the harnesses, for the Agents page and the new session menus. */
+  setHarnessOrder(order: CodingToolId[]): void
   addProvider(provider: NewProvider): Promise<ProviderResult>
   updateProvider(id: string, change: ProviderChange): Promise<ProviderResult>
   removeProvider(id: string): Promise<ProviderChangeResult>
@@ -2795,6 +2802,13 @@ export const useAppStore = create<AppState>()((set, get) => {
       const launchSettings = withYoloMode(get().launchSettings, on)
       if (launchSettings !== null) set({ launchSettings })
       api.setYoloMode(on)
+    },
+
+    setHarnessOrder(order) {
+      const next = normalizeHarnessOrder(order)
+      const launchSettings = withHarnessOrder(get().launchSettings, next)
+      if (launchSettings !== null) set({ launchSettings })
+      api.setHarnessOrder(next)
     },
 
     addProvider(provider) {

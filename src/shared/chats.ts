@@ -98,12 +98,21 @@ export function chatName(chat: {
 
 /**
  * The agents a new chat can use (see `usableAgents`): those of the coding
- * tools the last detection found installed. Until the first detection has
- * finished, and until the agents are known, none is.
+ * tools the last detection found installed, grouped in the user's harness
+ * order when given. Until the first detection has finished, and until the
+ * agents are known, none is.
  */
-export function usableChatAgents(tools: ToolsState, providers: ProvidersState | null): Agent[] {
+export function usableChatAgents(
+  tools: ToolsState,
+  providers: ProvidersState | null,
+  launchSettings: LaunchSettings | null = null,
+): Agent[] {
   if (providers === null) return []
-  return usableAgents(providers, (harness) => toolStatus(tools, getTool(harness)) === 'available')
+  return usableAgents(
+    providers,
+    (harness) => toolStatus(tools, getTool(harness)) === 'available',
+    launchSettings?.harnessOrder,
+  )
 }
 
 /**
@@ -127,8 +136,9 @@ export function agentsChecking(tools: ToolsState, providers: ProvidersState | nu
 /**
  * The agent a new chat uses: the one asked for, by id, when it is among the
  * usable ones, else the default agent while it is usable, else the first
- * usable agent in the order of `usableChatAgents`; `null` when no agent is
- * usable. Without one asked for, the agent the menus mark Default.
+ * usable agent in the default harness order (so reordering harnesses never
+ * changes the default agent); `null` when no agent is usable. Without one
+ * asked for, the agent the menus mark Default.
  */
 export function chatAgent(
   tools: ToolsState,

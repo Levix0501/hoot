@@ -620,6 +620,10 @@ export function registerIpc(deps: IpcDependencies): void {
     const parsed = z.boolean().safeParse(value)
     if (parsed.success) deps.launchSettings.setYoloMode(parsed.data)
   })
+  on(IpcChannel.setHarnessOrder, (order) => {
+    const parsed = z.array(toolId).safeParse(order)
+    if (parsed.success) deps.launchSettings.setHarnessOrder(parsed.data)
+  })
   deps.launchSettings.on('changed', (settings) => send(IpcChannel.launchSettingsChanged, settings))
 
   handle(IpcChannel.getProviders, () => deps.providers.getState())

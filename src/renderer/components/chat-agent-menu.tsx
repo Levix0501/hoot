@@ -55,7 +55,7 @@ export function ChatAgentMenuEntries({
     )
   }
 
-  const usable = usableChatAgents(tools, providers)
+  const usable = usableChatAgents(tools, providers, launchSettings)
   if (usable.length === 0) {
     return (
       <Item

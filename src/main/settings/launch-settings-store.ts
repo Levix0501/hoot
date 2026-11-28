@@ -6,7 +6,7 @@ import {
   type AgentLaunchSettings,
   type LaunchSettings,
 } from '../../shared/launch-settings'
-import { CODING_TOOL_IDS, type CodingToolId } from '../../shared/tools'
+import { CODING_TOOL_IDS, normalizeHarnessOrder, type CodingToolId } from '../../shared/tools'
 
 interface StoredSettings {
   /** What the Agents page keeps; absent until a setting is changed. */
@@ -65,6 +65,9 @@ function readSettings(value: unknown): LaunchSettings {
   return {
     defaultAgent: textOf(stored.defaultAgentId, fallback.defaultAgent),
     yoloMode: booleanOf(stored.yoloMode, fallback.yoloMode),
+    harnessOrder: Array.isArray(stored.harnessOrder)
+      ? normalizeHarnessOrder(stored.harnessOrder)
+      : fallback.harnessOrder,
   }
 }
 
@@ -129,6 +132,19 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
     this.save()
   }
 
+  /** Sets the order of the harnesses, for the Agents page and the new session menus. */
+  setHarnessOrder(order: readonly CodingToolId[]): void {
+    const next = normalizeHarnessOrder(order)
+    if (
+      next.length === this.settings.harnessOrder.length &&
+      next.every((id, index) => id === this.settings.harnessOrder[index])
+    ) {
+      return
+    }
+    this.settings = { ...this.settings, harnessOrder: next }
+    this.save()
+  }
+
   /**
    * The launch settings an earlier Hoot kept for a coding tool, which the
    * first agent made of it takes; `null` when there are none.
@@ -157,6 +173,7 @@ export class LaunchSettingsStore extends EventEmitter<{ changed: [LaunchSettings
           : { agents: this.legacy.agents, defaultAgent: this.legacy.defaultTool }),
         defaultAgentId: this.settings.defaultAgent,
         yoloMode: this.settings.yoloMode,
+        harnessOrder: this.settings.harnessOrder,
       })
     } catch (error) {
       // The change still applies until Hoot quits.

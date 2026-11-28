@@ -1,7 +1,7 @@
 import { ChevronRightIcon, PlusIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { useState } from 'react'
-import { harnessesOf, maskKey, providerMark, type Provider } from '../../../shared/providers'
+import { canRun, maskKey, providerMark, type Provider } from '../../../shared/providers'
 import { getCodingTool } from '../../../shared/tools'
 import { useAppStore } from '../../store/app-store'
 import { ProviderMarkIcon } from '../provider-icon'
@@ -14,7 +14,7 @@ import { ProviderPanel, type ProviderTarget } from './provider-panel'
 /** The installed harnesses that can run a provider, as small marks. */
 function HarnessMarks({ provider }: { provider: Provider }) {
   const installed = useInstalled()
-  const harnesses = harnessesOf(provider).filter((harness) => installed.includes(harness))
+  const harnesses = installed.filter((harness) => canRun(provider, harness))
   return (
     <span className="flex shrink-0 items-center gap-1" data-testid="provider-harness-marks">
       {harnesses.map((harness) => (

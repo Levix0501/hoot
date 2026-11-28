@@ -322,6 +322,7 @@ export const IpcChannel = {
   getLaunchSettings: 'launch-settings:get',
   setDefaultAgent: 'launch-settings:set-default-agent',
   setYoloMode: 'launch-settings:set-yolo-mode',
+  setHarnessOrder: 'launch-settings:set-harness-order',
   launchSettingsChanged: 'launch-settings:changed',
   getProviders: 'providers:get',
   providersChanged: 'providers:changed',
@@ -552,12 +553,14 @@ export interface HootApi {
   uninstallAgent(id: CodingToolId, path: string): void
   /** Runs an agent's operation that failed again. */
   retryAgentOperation(id: CodingToolId): void
-  /** The default agent and the YOLO mode switch. */
+  /** The default agent, the YOLO mode switch, and the order of the harnesses. */
   getLaunchSettings(): Promise<LaunchSettings>
   /** Makes an agent the default agent, by its id, or none. */
   setDefaultAgent(id: string | null): void
   /** Turns YOLO mode on or off for the sessions that start from now on. */
   setYoloMode(on: boolean): void
+  /** Sets the order of the harnesses, for the Agents page and the new session menus. */
+  setHarnessOrder(order: CodingToolId[]): void
   onLaunchSettingsChanged(listener: (settings: LaunchSettings) => void): () => void
   /** The user's providers, the agents, and each installed agent's global. */
   getProviders(): Promise<ProvidersState>

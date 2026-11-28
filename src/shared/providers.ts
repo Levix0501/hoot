@@ -1,4 +1,4 @@
-import { CODING_TOOL_IDS, getCodingTool, type CodingToolId } from './tools'
+import { CODING_TOOL_IDS, getCodingTool, normalizeHarnessOrder, type CodingToolId } from './tools'
 
 /**
  * The ways an agent talks to a model provider: Anthropic's Messages API,
@@ -1588,13 +1588,15 @@ export function agentName(
 /**
  * The agents a new session can start with: those turned on whose harness is
  * installed and whose provider is there and runs on it, grouped by harness in
- * the order of `CODING_TOOL_IDS`, each harness's in the order they were made.
+ * `order` (defaulting to `CODING_TOOL_IDS`), each harness's in the order they
+ * were made.
  */
 export function usableAgents(
   state: Pick<ProvidersState, 'providers' | 'agents'>,
   installed: (harness: CodingToolId) => boolean,
+  order: readonly CodingToolId[] = CODING_TOOL_IDS,
 ): Agent[] {
-  return CODING_TOOL_IDS.flatMap((harness) =>
+  return normalizeHarnessOrder(order).flatMap((harness) =>
     installed(harness)
       ? state.agents.filter((agent) => {
           if (agent.harness !== harness || !agent.enabled) return false

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolsState } from './ipc'
-import { defaultLaunchSettings, withDefaultAgent } from './launch-settings'
+import { defaultLaunchSettings, withDefaultAgent, withHarnessOrder } from './launch-settings'
 import {
   agentsChecking,
   chatAgent,
@@ -86,11 +86,26 @@ describe('chats', () => {
     ])
     expect(ids({ detecting: true, tools: [], error: null })).toEqual([])
     expect(usableChatAgents(tools(['claude']), null)).toEqual([])
+    // Follows the user's harness order when launch settings provide one.
+    const reordered = withHarnessOrder(defaultLaunchSettings(), ['opencode', 'codex', 'claude'])
+    expect(
+      usableChatAgents(tools(['claude', 'codex', 'opencode']), providers, reordered).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['opencode', 'codex', 'claude'])
   })
 
   it('uses the default agent, else the first one that can be used', () => {
     const settings = defaultLaunchSettings()
     expect(chatAgentId(tools(['claude', 'codex']), providers, settings)).toBe('claude')
+    // Reordering harnesses does not change the fallback default agent.
+    expect(
+      chatAgentId(
+        tools(['claude', 'codex']),
+        providers,
+        withHarnessOrder(settings, ['codex', 'claude']),
+      ),
+    ).toBe('claude')
     expect(
       chatAgentId(tools(['claude', 'codex']), providers, withDefaultAgent(settings, 'codex')),
     ).toBe('codex')

@@ -154,7 +154,7 @@ function sentence(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-/** A way an issue waits for another, in words: "ISS-1 is blocked by ISS-2, which is blocked by ISS-3". */
+/** A way an issue waits for another, in words: "#1 is blocked by #2, which is blocked by #3". */
 function pathText(path: readonly WaitStep[], name: (issueId: number) => string): string {
   return path
     .map((step, index) =>

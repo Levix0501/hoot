@@ -46,7 +46,7 @@ export function startBlockers(
   return blockers
 }
 
-/** A list in words: "ISS-1", "ISS-1 and ISS-2", "ISS-1, ISS-2 and ISS-3". */
+/** A list in words: "#1", "#1 and #2", "#1, #2 and #3". */
 export function listText(items: readonly string[]): string {
   return new Intl.ListFormat('en', { type: 'conjunction' }).format(items)
 }

@@ -42,11 +42,11 @@ export interface CliIo {
 
 /**
  * The number of an issue as given on the command line, in decimal digits as
- * given, from an identifier, such as "ISS-12", or a number, such as "12";
+ * given, from an identifier, such as "#12", or a number, such as "12";
  * `null` for anything else.
  */
 export function issueNumberDigits(text: string): string | null {
-  return /^(?:ISS-)?(\d+)$/.exec(text)?.[1] ?? null
+  return /^#?(\d+)$/.exec(text)?.[1] ?? null
 }
 
 /** The number of an issue given on the command line, or a `CliError` when it is not one. */
@@ -54,7 +54,7 @@ function givenIssue(text: string): string {
   const digits = issueNumberDigits(text)
   if (digits === null) {
     throw new CliError(
-      `"${text}" is neither an issue's identifier, such as ISS-12, nor its number, such as 12.`,
+      `"${text}" is neither an issue's identifier, such as #12, nor its number, such as 12.`,
     )
   }
   return digits
@@ -190,12 +190,12 @@ export function batchIssues(text: string, source: string): BatchIssue[] {
         if (typeof given === 'number' && Number.isInteger(given) && given >= 1 && given <= count) {
           return { item: given }
         }
-        const digits = typeof given === 'string' ? /^ISS-(\d+)$/.exec(given)?.[1] : undefined
+        const digits = typeof given === 'string' ? /^#(\d+)$/.exec(given)?.[1] : undefined
         if (digits !== undefined) return { issue: digits }
         throw new CliError(
           `The ${quoted(field)} of ${item} in ${source} has ${quoted(given)}, which is neither ` +
             `the place of an item, from 1 to ${count}, nor the identifier of an issue, such as ` +
-            '"ISS-12".',
+            '"#12".',
         )
       })
     }
@@ -429,7 +429,7 @@ export function hootProgram(io: CliIo): Command {
         'labels; the issue it is a sub-issue of; its description; its sub-issues; and the issues ' +
         'it is blocked by and those it blocks',
     )
-    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .argument('<issue>', "the issue's identifier, such as #12, or its number, such as 12")
     .option('--json', 'print the issue as a JSON object')
     .action(async (text: string, options: { json?: boolean }) => {
       const digits = givenIssue(text)
@@ -437,7 +437,7 @@ export function hootProgram(io: CliIo): Command {
       const { project, issue: found } = answered(await connect().issue(digits))
       if (found === null) {
         throw new CliError(
-          `There is no issue ISS-${digits} in this session's project, ${project.name}.`,
+          `There is no issue #${digits} in this session's project, ${project.name}.`,
         )
       }
       io.write(options.json ? jsonText(issueJson(found)) : issueText(found, project))
@@ -514,7 +514,7 @@ export function hootProgram(io: CliIo): Command {
     .option(
       '--parent <issue>',
       'create it as a sub-issue of this issue of the project, after its other sub-issues: the ' +
-        "parent's identifier, such as ISS-12, or its number",
+        "parent's identifier, such as #12, or its number",
     )
     .option(
       '--blocked-by <issues>',
@@ -590,7 +590,7 @@ export function hootProgram(io: CliIo): Command {
         'blocked by an issue above or below it, or block one. An issue has at most one label ' +
         'of a group: given another, it no longer has the one it had',
     )
-    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .argument('<issue>', "the issue's identifier, such as #12, or its number, such as 12")
     .addOption(
       new Option(
         '--parent <issue>',
@@ -691,7 +691,7 @@ export function hootProgram(io: CliIo): Command {
         'in order. Each is created as "hoot issue create --parent <issue>" creates one, with ' +
         'the same rules',
     )
-    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .argument('<issue>', "the issue's identifier, such as #12, or its number, such as 12")
     .requiredOption(
       '--file <file>',
       'read the issues from a UTF-8 file, or from standard input with -: a JSON array with an ' +
@@ -699,7 +699,7 @@ export function hootProgram(io: CliIo): Command {
         '"priority" (by their names), "labels", an array of the names of its labels, ' +
         '"blockedBy", the issues it is blocked by, and "blocking", those it blocks: arrays of ' +
         'the places of other issues in the array, from 1, and the identifiers of issues of the ' +
-        'project, such as "ISS-12"',
+        'project, such as "#12"',
     )
     .option(
       '--json',
@@ -817,7 +817,7 @@ export function hootProgram(io: CliIo): Command {
         'on the issue cannot start, such as while it waits on issues neither done nor ' +
         'canceled: hoot then says why',
     )
-    .argument('<issue>', "the issue's identifier, such as ISS-12, or its number, such as 12")
+    .argument('<issue>', "the issue's identifier, such as #12, or its number, such as 12")
     .option(
       '--prompt-file <file>',
       "the session's first message, from a UTF-8 file, or from standard input with -; without " +

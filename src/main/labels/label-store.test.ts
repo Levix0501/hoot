@@ -119,7 +119,7 @@ describe('LabelStore', () => {
         { add: [labels.findByName('ui')!.id], remove: [labels.findByName('ui')!.id] },
         'user',
       ),
-    ).toThrow(/cannot both be given to ISS-1 and taken off it/)
+    ).toThrow(/cannot both be given to #1 and taken off it/)
   })
 
   it('moves a label into a group, another group or none, unless an issue would have two of a group', () => {
@@ -135,13 +135,13 @@ describe('LabelStore', () => {
     const ui = labels.findByName('ui')!
     expect(() => labels.editLabel(ui.id, { groupId: kind.id })).toThrow(
       new LabelError(
-        'ui cannot be moved into Kind: ISS-1 carries it and Kind › Chore, and an issue carries at most one label of a group.',
+        'ui cannot be moved into Kind: #1 carries it and Kind › Chore, and an issue carries at most one label of a group.',
       ),
     )
     labels.editLabel(labels.findByName('misc')!.id, { groupId: kind.id })
     expect(carried(b)).toEqual(['docs', 'Kind › misc'])
     expect(() => labels.editLabel(labels.findByName('docs')!.id, { groupId: kind.id })).toThrow(
-      /docs cannot be moved into Kind: ISS-2 carries it and Kind › misc/,
+      /docs cannot be moved into Kind: #2 carries it and Kind › misc/,
     )
     const area = labels.createGroup('Area')
     const feature = labels.findByName('Feature')!

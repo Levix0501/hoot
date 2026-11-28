@@ -77,9 +77,9 @@ function issueFolders(cwd: string): string[] {
 
 const [triage] = BUILT_IN_WORKFLOW.steps as [WorkflowStep]
 
-/** The first message of ISS-1 at a step, as the executor writes it, given the files. */
+/** The first message of #1 at a step, as the executor writes it, given the files. */
 const messageAt = (step: WorkflowStep) => (files: SessionFiles) =>
-  firstMessage({ workflow: BUILT_IN_WORKFLOW, identifier: 'ISS-1', step, ...files })
+  firstMessage({ workflow: BUILT_IN_WORKFLOW, identifier: '#1', step, ...files })
 
 /** An issue sent to a session that starts at the first step, which needs no file of the workflow. */
 function sentIssue(title: string, description: string, branch: string): SentIssue {
@@ -1309,13 +1309,13 @@ describe('resolveLaunch', () => {
   it("writes the file of the workflow beside the issue's when the session has one", async () => {
     const issue: SentIssue = {
       ...sentIssue('Continue', '', 'iss-4-continue'),
-      workflowFile: workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
+      workflowFile: workflowFileText(BUILT_IN_WORKFLOW, '#1'),
     }
     const launch = await resolveLaunch(context({ PATH: bin }), 'claude', project, issue)
     const [folder] = issueFolders(project)
     expect(fs.readdirSync(folder).toSorted()).toEqual(['issue.md', 'workflow.md'])
     expect(fs.readFileSync(path.join(folder, 'workflow.md'), 'utf8')).toBe(
-      workflowFileText(BUILT_IN_WORKFLOW, 'ISS-1'),
+      workflowFileText(BUILT_IN_WORKFLOW, '#1'),
     )
     launch.cleanup?.()
     expect(issueFolders(project)).toEqual([])

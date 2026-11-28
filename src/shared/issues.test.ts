@@ -124,39 +124,38 @@ describe('issueGroups', () => {
 })
 
 describe('issueIdentifier', () => {
-  it('is ISS- and the number, in decimal digits without leading zeros', () => {
-    expect(issueIdentifier(1)).toBe('ISS-1')
-    expect(issueIdentifier(12)).toBe('ISS-12')
-    expect(issueIdentifier(1_000_000)).toBe('ISS-1000000')
+  it('is # and the number, in decimal digits without leading zeros', () => {
+    expect(issueIdentifier(1)).toBe('#1')
+    expect(issueIdentifier(12)).toBe('#12')
+    expect(issueIdentifier(1_000_000)).toBe('#1000000')
   })
 })
 
 describe('issuePasteParts', () => {
-  it('pastes the identifier and title, then the description', () => {
+  it('pastes the title as a Markdown heading, then the description after a blank line', () => {
     expect(
       issuePasteParts({
-        id: 12,
         title: 'Fix the login button',
         description: 'It is cut off.\n\n- On Windows',
       }),
-    ).toEqual(['ISS-12 Fix the login button\n', 'It is cut off.\n\n- On Windows'])
+    ).toEqual(['# Fix the login button\n\n', 'It is cut off.\n\n- On Windows'])
   })
 
-  it('pastes only the identifier and title without a description', () => {
-    expect(issuePasteParts({ id: 3, title: 'Tidy up', description: '' })).toEqual(['ISS-3 Tidy up'])
+  it('pastes only the heading without a description', () => {
+    expect(issuePasteParts({ title: 'Tidy up', description: '' })).toEqual(['# Tidy up'])
   })
 
   it('leaves out the whitespace around the description, and a description of only that', () => {
-    expect(issuePasteParts({ id: 4, title: 'A', description: '\n  Text\n\n' })).toEqual([
-      'ISS-4 A\n',
+    expect(issuePasteParts({ title: 'A', description: '\n  Text\n\n' })).toEqual([
+      '# A\n\n',
       'Text',
     ])
-    expect(issuePasteParts({ id: 5, title: 'B', description: ' \n\t' })).toEqual(['ISS-5 B'])
+    expect(issuePasteParts({ title: 'B', description: ' \n\t' })).toEqual(['# B'])
   })
 
-  it('starts with the identifier, whatever the title starts with', () => {
-    expect(issuePasteParts({ id: 6, title: '/compact the logs', description: '' })).toEqual([
-      'ISS-6 /compact the logs',
+  it('starts with # , whatever the title starts with', () => {
+    expect(issuePasteParts({ title: '/compact the logs', description: '' })).toEqual([
+      '# /compact the logs',
     ])
   })
 })

@@ -152,7 +152,7 @@ export class WorkflowExecutor extends EventEmitter<{ 'issues-completed': [issues
    * How a new session started from the issue starts: at the step the issue
    * is ready for or at, or at the first step when it has not started;
    * refused once its workflow is finished. `identifier` is the issue's, such
-   * as `ISS-12`.
+   * as `#12`.
    */
   sessionStart(issueId: number, identifier: string): SessionStart {
     const progress = this.progress(issueId)

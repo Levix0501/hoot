@@ -63,8 +63,8 @@ export function IssueListPage() {
   const groups = useMemo(() => issueGroups(issues, view), [issues, view])
   const identifierWidth = useMemo(() => {
     const longest = Math.max(0, ...issues.map((issue) => issueIdentifier(issue.id).length))
-    // Capitals are wider than digits, which `ch` measures.
-    return Math.ceil(longest * 1.2)
+    // `#` is slightly wider than a digit, which `ch` measures.
+    return longest === 0 ? 0 : longest + 0.5
   }, [issues])
   const newIssue = (status?: IssueStatus) =>
     openNewIssue(listProject(checked), status === undefined ? {} : { status })

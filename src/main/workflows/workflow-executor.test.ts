@@ -206,23 +206,23 @@ describe('sessionStart', () => {
   it('starts at the first step for an issue not started, and at the step of its label otherwise', () => {
     const { executor, add, give } = start(TWO_STEPS)
     const issue = add('A')
-    const first = executor.sessionStart(issue.id, 'ISS-1')
+    const first = executor.sessionStart(issue.id, '#1')
     expect(first.ok && first.step.name).toBe('Look')
     give(issue, 'Making')
-    const make = executor.sessionStart(issue.id, 'ISS-1')
+    const make = executor.sessionStart(issue.id, '#1')
     expect(make.ok && make.step.name).toBe('Make')
     if (!make.ok) return
     const message = make.firstMessage(files)
     expect(message).toContain('`/w/.hoot/tmp/issue-1/issue.md`')
     expect(message).toContain('the branch `iss-1-a`')
     expect(message).toContain('Make it.')
-    expect(message).toContain('`hoot issue edit ISS-1 --add-label Made`')
+    expect(message).toContain('`hoot issue edit "#1" --add-label Made`')
   })
 
   it('has the file of the workflow, and points to it, only for a step that may go on to another', () => {
     const { executor, add, give } = start(TWO_STEPS)
     const issue = add('A')
-    const look = executor.sessionStart(issue.id, 'ISS-1')
+    const look = executor.sessionStart(issue.id, '#1')
     expect(look.ok).toBe(true)
     if (!look.ok) return
     expect(look.workflowFile?.startsWith('# Sample\n')).toBe(true)
@@ -230,7 +230,7 @@ describe('sessionStart', () => {
       'the workflow it goes through in `/w/.hoot/tmp/issue-1/workflow.md`',
     )
     give(issue, 'Making')
-    const make = executor.sessionStart(issue.id, 'ISS-1')
+    const make = executor.sessionStart(issue.id, '#1')
     expect(make.ok).toBe(true)
     if (!make.ok) return
     expect(make.workflowFile).toBeNull()
@@ -240,7 +240,7 @@ describe('sessionStart', () => {
   it('starts the built-in workflow at Triage, which stops either way and has no file of the workflow', () => {
     const { executor, add } = start()
     const issue = add('A')
-    const triage = executor.sessionStart(issue.id, 'ISS-1')
+    const triage = executor.sessionStart(issue.id, '#1')
     expect(triage.ok && triage.step.name).toBe('Triage')
     if (!triage.ok) return
     expect(triage.workflowFile).toBeNull()
@@ -249,10 +249,10 @@ describe('sessionStart', () => {
     expect(message).not.toContain('workflow.md')
     expect(message).toContain('Judge the issue against this project.')
     expect(message).toContain(
-      "Run `hoot issue edit ISS-1 --add-label 'ready to design'`, then stop.",
+      `Run \`hoot issue edit "#1" --add-label 'ready to design'\`, then stop.`,
     )
     expect(message).toContain(
-      "Run `hoot issue edit ISS-1 --add-label 'waiting on sub-issues'`, then stop.",
+      `Run \`hoot issue edit "#1" --add-label 'waiting on sub-issues'\`, then stop.`,
     )
   })
 
@@ -261,7 +261,7 @@ describe('sessionStart', () => {
     for (const label of ['ready to design', 'designing']) {
       const issue = add(label)
       give(issue, label)
-      const design = executor.sessionStart(issue.id, 'ISS-1')
+      const design = executor.sessionStart(issue.id, '#1')
       expect(design.ok && design.step.name).toBe('Design')
       if (!design.ok) return
       expect(design.workflowFile).toBeNull()
@@ -283,9 +283,9 @@ describe('sessionStart', () => {
     const { executor, add, give } = start()
     const issue = add('A')
     give(issue, 'waiting on sub-issues')
-    expect(executor.sessionStart(issue.id, 'ISS-1')).toEqual({
+    expect(executor.sessionStart(issue.id, '#1')).toEqual({
       ok: false,
-      message: 'The workflow of ISS-1 is finished: it has the label "waiting on sub-issues".',
+      message: 'The workflow of #1 is finished: it has the label "waiting on sub-issues".',
     })
   })
 })

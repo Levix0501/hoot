@@ -57,7 +57,7 @@ function Candidate({ issue, parent }: { issue: Issue; parent: string | null }) {
       data-issue-id={issue.id}
     >
       <StatusIcon status={issue.status} />
-      <span className="w-16 shrink-0 text-muted-foreground tabular-nums">
+      <span className="w-10 shrink-0 text-muted-foreground tabular-nums">
         {issueIdentifier(issue.id)}
       </span>
       <span className="min-w-0 flex-1 truncate" data-user-text="">
@@ -213,7 +213,8 @@ function DependencyPicker({ picker, issue }: { picker: IssuePicker; issue: Issue
     const left = unpickableForDependency(dependencies, issue.id, kind)
     // The issue whose identifier is typed comes first, so that Enter picks it.
     const typed = query.trim().toLowerCase()
-    const exact = (candidate: Issue) => issueIdentifier(candidate.id).toLowerCase() === typed
+    const exact = (candidate: Issue) =>
+      issueIdentifier(candidate.id).toLowerCase() === typed || String(candidate.id) === typed
     const candidates = issues
       .filter((candidate) => !left.has(candidate.id))
       .toSorted((a, b) => Number(exact(b)) - Number(exact(a)) || b.id - a.id)

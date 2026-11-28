@@ -29,7 +29,7 @@ const dependencies = blocked([5, 6], [6, 7])
 const [X, Y, Z, W] = [5, 6, 7, 9]
 
 /** Names issues as a caller does that does not show Y. */
-const unshownY = (id: number) => (id === Y ? 'an issue Hoot does not show' : `ISS-${id}`)
+const unshownY = (id: number) => (id === Y ? 'an issue Hoot does not show' : `#${id}`)
 
 /** Why a dependency cannot be made, given the dependencies above. */
 const added = (issueId: number, blockedById: number) =>
@@ -68,13 +68,13 @@ describe('dependencyProblem', () => {
   })
 
   it('refuses an issue blocked by itself', () => {
-    expect(added(X, X)).toBe('ISS-5 cannot be blocked by itself.')
+    expect(added(X, X)).toBe('#5 cannot be blocked by itself.')
   })
 
   it('refuses an issue that would wait for itself, naming how', () => {
     expect(added(Z, X)).toBe(
-      'ISS-7 cannot be blocked by ISS-5, which waits for it already: ISS-5 is blocked by ISS-6, ' +
-        'which is blocked by ISS-7.',
+      '#7 cannot be blocked by #5, which waits for it already: #5 is blocked by #6, ' +
+        'which is blocked by #7.',
     )
   })
 
@@ -86,8 +86,8 @@ describe('dependencyProblem', () => {
         unshownY,
       ),
     ).toBe(
-      'ISS-7 cannot be blocked by ISS-5, which waits for it already: ISS-5 is blocked by an ' +
-        'issue Hoot does not show, which is blocked by ISS-7.',
+      '#7 cannot be blocked by #5, which waits for it already: #5 is blocked by an ' +
+        'issue Hoot does not show, which is blocked by #7.',
     )
     expect(dependencyProblem(blocked([-1, -1]), blocked([-1, -1]), () => 'item 1')).toBe(
       'Item 1 cannot be blocked by itself.',
@@ -99,11 +99,11 @@ describe('dependencyProblem', () => {
     const blocking = blocked(...many.map((id): [number, number] => [1, id]))
     expect(
       dependencyProblem(withDependencies(blocking, { add: blocked([1, 99]) }), blocked([1, 99])),
-    ).toBe('ISS-1 would be blocked by 51 issues, and an issue can be blocked by at most 50.')
+    ).toBe('#1 would be blocked by 51 issues, and an issue can be blocked by at most 50.')
     const waiting = blocked(...many.map((id): [number, number] => [id, 2]))
     expect(
       dependencyProblem(withDependencies(waiting, { add: blocked([99, 2]) }), blocked([99, 2])),
-    ).toBe('ISS-2 would block 51 issues, and an issue can block at most 50.')
+    ).toBe('#2 would block 51 issues, and an issue can block at most 50.')
     expect(dependencyProblem(blocking, blocked([1, 100]))).toBeNull()
   })
 })

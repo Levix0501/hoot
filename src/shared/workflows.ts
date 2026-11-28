@@ -26,7 +26,7 @@ export interface WorkflowLabel {
  * the agent changes the issue's to, what it means and what to do before, and
  * whether the agent then goes on with the step of that label in the same
  * session or stops. `{issue}` in the instruction stands for the issue's
- * identifier, such as `ISS-12`.
+ * identifier, such as `#12`.
  */
 export interface WorkflowOutcome {
   /** The name of a step's label, of a step's ready label or of an end label of the workflow. */

@@ -94,14 +94,14 @@ describe('hoot issue view', () => {
   })
 
   it('shows an issue by its identifier or its number: identifier and title, then its properties, then its description', async () => {
-    const byIdentifier = await run(['issue', 'view', 'ISS-1'])
+    const byIdentifier = await run(['issue', 'view', '#1'])
     const byNumber = await run(['issue', 'view', '1'])
     expect(byIdentifier).toEqual(byNumber)
     expect(byIdentifier.code).toBe(0)
     expect(byIdentifier.stderr).toBe('')
     const created = hoot.issues.get(1)!.createdAt
     expect(byIdentifier.stdout).toBe(
-      `ISS-1 Alpha\nTodo · High · Created ${localMinute(created)}\n\n${STEPS}\n`,
+      `#1 Alpha\nTodo · High · Created ${localMinute(created)}\n\n${STEPS}\n`,
     )
   })
 
@@ -109,7 +109,7 @@ describe('hoot issue view', () => {
     const { code, stdout } = await run(['issue', 'view', '2'])
     expect(code).toBe(0)
     const lines = stdout.split('\n')
-    expect(lines[0]).toBe('ISS-2 Beta')
+    expect(lines[0]).toBe('#2 Beta')
     expect(lines[1]).toContain('Done')
     expect(lines[1]).toContain('No priority')
     expect(lines.slice(2)).toEqual([''])
@@ -117,10 +117,10 @@ describe('hoot issue view', () => {
 
   it('prints the issue as a JSON object with --json', async () => {
     const alpha = hoot.issues.get(1)!
-    const { code, stdout } = await run(['issue', 'view', 'ISS-1', '--json'])
+    const { code, stdout } = await run(['issue', 'view', '#1', '--json'])
     expect(code).toBe(0)
     expect(JSON.parse(stdout)).toStrictEqual({
-      identifier: 'ISS-1',
+      identifier: '#1',
       number: 1,
       title: 'Alpha',
       description: STEPS,
@@ -160,21 +160,19 @@ describe('hoot issue view', () => {
       status: 'todo',
       priority: 0,
     })!
-    for (const reference of [`ISS-${other.id}`, `${loose.id}`, '99', 'ISS-99', '0']) {
+    for (const reference of [`#${other.id}`, `${loose.id}`, '99', '#99', '0']) {
       const { code, stdout, stderr } = await run(['issue', 'view', reference])
       expect(code).toBe(1)
       expect(stdout).toBe('')
-      expect(stderr).toMatch(
-        /^error: There is no issue ISS-\d+ in this session's project, gamma\.\n$/,
-      )
+      expect(stderr).toMatch(/^error: There is no issue #\d+ in this session's project, gamma\.\n$/)
     }
-    expect((await run(['issue', 'view', `${other.id}`])).stderr).toContain(`ISS-${other.id} `)
-    expect((await run(['issue', 'view', '99'])).stderr).toContain('ISS-99')
+    expect((await run(['issue', 'view', `${other.id}`])).stderr).toContain(`#${other.id} `)
+    expect((await run(['issue', 'view', '99'])).stderr).toContain('#99')
     expect((await run(['issue', 'view', '123456789012345678901234567890'])).code).toBe(1)
   })
 
   it('refuses what is neither an identifier nor a number', async () => {
-    for (const reference of ['abc', 'ISS-', '1.5', 'ISS-1-2', 'ISS 1', 'iss-1', 'GAM-1', '']) {
+    for (const reference of ['abc', '#', '1.5', '#1-2', '# 1', 'ISS-1', 'iss-1', 'GAM-1', '']) {
       const { code, stdout, stderr } = await run(['issue', 'view', reference])
       expect(code).toBe(1)
       expect(stdout).toBe('')
@@ -190,20 +188,20 @@ describe('hoot issue view', () => {
       status: 'todo',
       priority: 0,
     })
-    expect((await run(['issue', 'view', 'ISS-3'], { session: 'hotel-session' })).stdout).toMatch(
-      /^ISS-3 Hotel issue\n/,
+    expect((await run(['issue', 'view', '#3'], { session: 'hotel-session' })).stdout).toMatch(
+      /^#3 Hotel issue\n/,
     )
     expect((await run(['issue', 'view', '3'], { session: 'hotel-session' })).stdout).toMatch(
-      /^ISS-3 Hotel issue\n/,
+      /^#3 Hotel issue\n/,
     )
     expect((await run(['issue', 'view', '1'], { session: 'hotel-session' })).code).toBe(1)
-    expect((await run(['issue', 'view', '1'])).stdout).toMatch(/^ISS-1 Alpha\n/)
+    expect((await run(['issue', 'view', '1'])).stdout).toMatch(/^#1 Alpha\n/)
     // An issue that moves to another project is read in that project's sessions.
     hoot.issues.update(1, { projectId: hoot.hotel.id })
-    expect((await run(['issue', 'view', 'ISS-1'], { session: 'hotel-session' })).stdout).toMatch(
-      /^ISS-1 Alpha\n/,
+    expect((await run(['issue', 'view', '#1'], { session: 'hotel-session' })).stdout).toMatch(
+      /^#1 Alpha\n/,
     )
-    expect((await run(['issue', 'view', 'ISS-1'])).code).toBe(1)
+    expect((await run(['issue', 'view', '#1'])).code).toBe(1)
   })
 })
 
@@ -237,10 +235,10 @@ describe('hoot issue list', () => {
     expect(stderr).toBe('')
     expect(stdout).toBe(
       [
-        'ISS-3  In Progress  Urgent       Three',
-        'ISS-1  Todo         High         One',
-        'ISS-6  Todo         No priority  Six',
-        'ISS-4  Backlog      No priority  Four',
+        '#3  In Progress  Urgent       Three',
+        '#1  Todo         High         One',
+        '#6  Todo         No priority  Six',
+        '#4  Backlog      No priority  Four',
         '',
       ].join('\n'),
     )
@@ -249,30 +247,28 @@ describe('hoot issue list', () => {
   it('lists every issue with --all', async () => {
     const { code, stdout } = await run(['issue', 'list', '--all'])
     expect(code).toBe(0)
-    expect(identifiers(stdout)).toEqual(['ISS-3', 'ISS-1', 'ISS-6', 'ISS-4', 'ISS-2', 'ISS-5'])
+    expect(identifiers(stdout)).toEqual(['#3', '#1', '#6', '#4', '#2', '#5'])
   })
 
   it('lists the issues of the statuses given, done or not, whatever --all says', async () => {
-    expect(identifiers((await run(['issue', 'list', '--status', 'done'])).stdout)).toEqual([
-      'ISS-2',
-    ])
+    expect(identifiers((await run(['issue', 'list', '--status', 'done'])).stdout)).toEqual(['#2'])
     expect(
       identifiers(
         (await run(['issue', 'list', '--status', 'done', '--status', 'canceled'])).stdout,
       ),
-    ).toEqual(['ISS-2', 'ISS-5'])
+    ).toEqual(['#2', '#5'])
     expect(identifiers((await run(['issue', 'list', '--status', 'todo', '--all'])).stdout)).toEqual(
-      ['ISS-1', 'ISS-6'],
+      ['#1', '#6'],
     )
   })
 
   it('prints a JSON array of the issues with --json', async () => {
     const all = JSON.parse((await run(['issue', 'list', '--json'])).stdout) as unknown[]
     expect(all.map((issue) => (issue as { identifier: string }).identifier)).toEqual([
-      'ISS-3',
-      'ISS-1',
-      'ISS-6',
-      'ISS-4',
+      '#3',
+      '#1',
+      '#6',
+      '#4',
     ])
     expect(all.map((issue) => (issue as { number: number }).number)).toEqual([3, 1, 6, 4])
     for (const issue of all) {
@@ -296,9 +292,7 @@ describe('hoot issue list', () => {
     const started = JSON.parse(
       (await run(['issue', 'list', '--status', 'in-progress', '--json'])).stdout,
     )
-    expect(started).toEqual([
-      expect.objectContaining({ identifier: 'ISS-3', status: 'in-progress' }),
-    ])
+    expect(started).toEqual([expect.objectContaining({ identifier: '#3', status: 'in-progress' })])
   })
 
   it('prints an empty array when no issue is listed', async () => {
@@ -319,7 +313,7 @@ describe('hoot issue list', () => {
     expect(gamma).not.toContain('Hotel issue')
     expect(gamma).not.toContain('Loose issue')
     expect((await run(['issue', 'list'], { session: 'hotel-session' })).stdout).toBe(
-      'ISS-7  Todo  No priority  Hotel issue\n',
+      '#7  Todo  No priority  Hotel issue\n',
     )
   })
 
@@ -338,7 +332,7 @@ describe('hoot issue create', () => {
     const now = Date.UTC(2026, 9, 14, 9, 30)
     hoot.setClock(now)
     const { code, stdout, stderr } = await run(['issue', 'create', '--title', '  Gamma  '])
-    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: 'ISS-2\n', stderr: '' })
+    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: '#2\n', stderr: '' })
     const created = saved().at(-1)!
     expect(created).toEqual({
       id: 2,
@@ -356,16 +350,14 @@ describe('hoot issue create', () => {
 
   it('saves the title on one line, as the title field of the new issue dialog takes it', async () => {
     const { code, stdout } = await run(['issue', 'create', '--title', ' Fix\r\nthe\nlogin\rbug\n'])
-    expect({ code, stdout }).toEqual({ code: 0, stdout: 'ISS-1\n' })
+    expect({ code, stdout }).toEqual({ code: 0, stdout: '#1\n' })
     expect(saved().map((issue) => issue.title)).toEqual(['Fix the login bug'])
     expect(hoot.created.map((issue) => issue.title)).toEqual(['Fix the login bug'])
     // So that each issue stays on a line of its own.
     expect((await run(['issue', 'list'])).stdout).toBe(
-      'ISS-1  Backlog  No priority  Fix the login bug\n',
+      '#1  Backlog  No priority  Fix the login bug\n',
     )
-    expect((await run(['issue', 'view', '1'])).stdout.split('\n')[0]).toBe(
-      'ISS-1 Fix the login bug',
-    )
+    expect((await run(['issue', 'view', '1'])).stdout.split('\n')[0]).toBe('#1 Fix the login bug')
     const json = JSON.parse(
       (await run(['issue', 'create', '--title', 'Two\nlines', '--json'])).stdout,
     ) as { title: string }
@@ -382,7 +374,7 @@ describe('hoot issue create', () => {
       status: 'todo',
       priority: 0,
     })
-    expect((await run(['issue', 'create', '--title', 'After'])).stdout).toBe('ISS-3\n')
+    expect((await run(['issue', 'create', '--title', 'After'])).stdout).toBe('#3\n')
   })
 
   it('takes the description, status and priority given', async () => {
@@ -432,7 +424,7 @@ describe('hoot issue create', () => {
     ])
     expect(code).toBe(0)
     expect(JSON.parse(stdout)).toStrictEqual({
-      identifier: 'ISS-1',
+      identifier: '#1',
       number: 1,
       title: 'Eta',
       description: '',
@@ -504,7 +496,7 @@ describe('hoot issue create', () => {
     const { stdout } = await run(['issue', 'create', '--title', 'Third'], {
       session: 'hotel-session',
     })
-    expect(stdout).toBe('ISS-1\n')
+    expect(stdout).toBe('#1\n')
     expect(hoot.issues.listInProject(hoot.hotel.id).map((issue) => issue.title)).toEqual(['Third'])
     expect(saved()).toEqual([])
   })
@@ -545,8 +537,8 @@ function chain(): Issue[] {
 describe('hoot issue create --parent', () => {
   it("creates the issue as the parent's last sub-issue, with the parent's priority unless one is given", async () => {
     const p = addIssue('P', 'todo', 2)
-    const first = await run(['issue', 'create', '--title', 'S1', '--parent', 'ISS-1'])
-    expect(first).toEqual({ code: 0, stdout: 'ISS-2\n', stderr: '' })
+    const first = await run(['issue', 'create', '--title', 'S1', '--parent', '#1'])
+    expect(first).toEqual({ code: 0, stdout: '#2\n', stderr: '' })
     expect(hoot.issues.get(2)).toMatchObject({
       title: 'S1',
       priority: 2,
@@ -582,14 +574,14 @@ describe('hoot issue create --parent', () => {
       '--title',
       'S3',
       '--parent',
-      'ISS-1',
+      '#1',
       '--json',
     ])
     expect(code).toBe(0)
     const json = JSON.parse(stdout)
-    expect(json).toMatchObject({ identifier: 'ISS-2', title: 'S3', priority: 'high' })
+    expect(json).toMatchObject({ identifier: '#2', title: 'S3', priority: 'high' })
     expect(json.parent).toStrictEqual({
-      identifier: 'ISS-1',
+      identifier: '#1',
       number: 1,
       title: 'P',
       status: 'todo',
@@ -608,15 +600,12 @@ describe('hoot issue create --parent', () => {
     for (let index = 0; index < 100; index++) attach(full, addIssue(`M${index}`))
     const before = { issues: hoot.issues.list(), links: hoot.issues.subIssues() }
     const refused: Array<[string, string]> = [
-      [`ISS-${other.id}`, `There is no issue ISS-${other.id} in this session's project, gamma.`],
-      [`ISS-${loose.id}`, `There is no issue ISS-${loose.id} in this session's project, gamma.`],
-      ['999', "There is no issue ISS-999 in this session's project, gamma."],
-      [
-        'foo',
-        `"foo" is neither an issue's identifier, such as ISS-12, nor its number, such as 12.`,
-      ],
-      [`ISS-${levels[8]!.id}`, 'the deepest an issue can be'],
-      [`ISS-${full.id}`, `ISS-${full.id} has 100 sub-issues, the most an issue can have.`],
+      [`#${other.id}`, `There is no issue #${other.id} in this session's project, gamma.`],
+      [`#${loose.id}`, `There is no issue #${loose.id} in this session's project, gamma.`],
+      ['999', "There is no issue #999 in this session's project, gamma."],
+      ['foo', `"foo" is neither an issue's identifier, such as #12, nor its number, such as 12.`],
+      [`#${levels[8]!.id}`, 'the deepest an issue can be'],
+      [`#${full.id}`, `#${full.id} has 100 sub-issues, the most an issue can have.`],
     ]
     for (const [parent, message] of refused) {
       const { code, stdout, stderr } = await run([
@@ -653,9 +642,9 @@ describe('hoot issue edit', () => {
   })
 
   it('adds sub-issues in the order given, taking them from their parents', async () => {
-    expect(await run(['issue', 'edit', 'ISS-1', '--add-sub-issue', 'ISS-4,ISS-3'])).toEqual({
+    expect(await run(['issue', 'edit', '#1', '--add-sub-issue', '#4,#3'])).toEqual({
       code: 0,
-      stdout: 'ISS-1\n',
+      stdout: '#1\n',
       stderr: '',
     })
     expect(subIssueTitles(p)).toEqual(['B', 'A'])
@@ -663,15 +652,15 @@ describe('hoot issue edit', () => {
   })
 
   it('sets, changes and removes the parent, and removes sub-issues', async () => {
-    await run(['issue', 'edit', 'ISS-1', '--add-sub-issue', '4, 3'])
-    expect((await run(['issue', 'edit', 'ISS-5', '--parent', 'ISS-1'])).code).toBe(0)
+    await run(['issue', 'edit', '#1', '--add-sub-issue', '4, 3'])
+    expect((await run(['issue', 'edit', '#5', '--parent', '#1'])).code).toBe(0)
     expect(subIssueTitles(p)).toEqual(['B', 'A', 'W'])
     expect((await run(['issue', 'edit', '5', '--parent', '2'])).code).toBe(0)
     expect(subIssueTitles(p)).toEqual(['B', 'A'])
     expect(subIssueTitles(q)).toEqual(['W'])
-    expect((await run(['issue', 'edit', 'ISS-5', '--remove-parent'])).code).toBe(0)
+    expect((await run(['issue', 'edit', '#5', '--remove-parent'])).code).toBe(0)
     expect(subIssueTitles(q)).toEqual([])
-    expect((await run(['issue', 'edit', 'ISS-1', '--remove-sub-issue', 'ISS-4'])).code).toBe(0)
+    expect((await run(['issue', 'edit', '#1', '--remove-sub-issue', '#4'])).code).toBe(0)
     expect(subIssueTitles(p)).toEqual(['A'])
     expect(pairs()).toEqual([[a.id, p.id]])
   })
@@ -681,13 +670,13 @@ describe('hoot issue edit', () => {
     const { code } = await run([
       'issue',
       'edit',
-      'ISS-1',
+      '#1',
       '--parent',
-      'ISS-5',
+      '#5',
       '--remove-sub-issue',
-      'ISS-4',
+      '#4',
       '--add-sub-issue',
-      'ISS-3',
+      '#3',
     ])
     expect(code).toBe(0)
     expect(pairs()).toEqual([
@@ -697,35 +686,32 @@ describe('hoot issue edit', () => {
   })
 
   it('refuses what it cannot do, changing nothing', async () => {
-    await run(['issue', 'edit', 'ISS-1', '--add-sub-issue', 'ISS-4,ISS-3'])
+    await run(['issue', 'edit', '#1', '--add-sub-issue', '#4,#3'])
     const before = pairs()
     const refused: Array<[string[], string]> = [
-      [['ISS-1'], 'Nothing to change'],
-      [['ISS-1', '--parent', 'ISS-3'], 'ISS-1 cannot be a sub-issue of ISS-3, which is below it.'],
+      [['#1'], 'Nothing to change'],
+      [['#1', '--parent', '#3'], '#1 cannot be a sub-issue of #3, which is below it.'],
+      [['#3', '--add-sub-issue', '#1'], '#1 cannot be a sub-issue of #3, which is below it.'],
+      [['#1', '--add-sub-issue', '#1'], '#1 cannot be a sub-issue of itself.'],
+      [['#1', '--parent', '#1'], '#1 cannot be a sub-issue of itself.'],
+      [['#5', '--remove-parent', '--add-sub-issue', '#2'], '#5 has no parent issue.'],
+      [['#2', '--remove-parent'], '#2 has no parent issue.'],
+      [['#1', '--remove-sub-issue', '#5'], '#5 is not a sub-issue of #1.'],
+      [['#5', '--parent', '#1', '--remove-parent'], 'cannot be used with'],
       [
-        ['ISS-3', '--add-sub-issue', 'ISS-1'],
-        'ISS-1 cannot be a sub-issue of ISS-3, which is below it.',
-      ],
-      [['ISS-1', '--add-sub-issue', 'ISS-1'], 'ISS-1 cannot be a sub-issue of itself.'],
-      [['ISS-1', '--parent', 'ISS-1'], 'ISS-1 cannot be a sub-issue of itself.'],
-      [['ISS-5', '--remove-parent', '--add-sub-issue', 'ISS-2'], 'ISS-5 has no parent issue.'],
-      [['ISS-2', '--remove-parent'], 'ISS-2 has no parent issue.'],
-      [['ISS-1', '--remove-sub-issue', 'ISS-5'], 'ISS-5 is not a sub-issue of ISS-1.'],
-      [['ISS-5', '--parent', 'ISS-1', '--remove-parent'], 'cannot be used with'],
-      [
-        ['ISS-1', '--add-sub-issue', `ISS-5,ISS-${hx.id}`],
-        `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+        ['#1', '--add-sub-issue', `#5,#${hx.id}`],
+        `There is no issue #${hx.id} in this session's project, gamma.`,
       ],
       [
-        [`ISS-${hx.id}`, '--parent', 'ISS-1'],
-        `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+        [`#${hx.id}`, '--parent', '#1'],
+        `There is no issue #${hx.id} in this session's project, gamma.`,
       ],
-      [['foo', '--parent', 'ISS-1'], `"foo" is neither an issue's identifier`],
-      [['ISS-1', '--add-sub-issue', 'ISS-5,'], `"" is neither an issue's identifier`],
-      [['ISS-1', '--add-sub-issue', 'ISS-5', '--remove-sub-issue', 'ISS-5'], 'is not a sub-issue'],
+      [['foo', '--parent', '#1'], `"foo" is neither an issue's identifier`],
+      [['#1', '--add-sub-issue', '#5,'], `"" is neither an issue's identifier`],
+      [['#1', '--add-sub-issue', '#5', '--remove-sub-issue', '#5'], 'is not a sub-issue'],
       [
-        ['ISS-1', '--add-sub-issue', 'ISS-3', '--remove-sub-issue', 'ISS-3'],
-        'cannot both become and stop being a sub-issue of ISS-1',
+        ['#1', '--add-sub-issue', '#3', '--remove-sub-issue', '#3'],
+        'cannot both become and stop being a sub-issue of #1',
       ],
     ]
     for (const [args, message] of refused) {
@@ -743,8 +729,8 @@ describe('hoot issue edit', () => {
     const [l0, , , l3] = levels
     const before = pairs()
     for (const args of [
-      [`ISS-${l0!.id}`, '--parent', `ISS-${l3!.id}`],
-      [`ISS-${l3!.id}`, '--add-sub-issue', `ISS-${l0!.id}`],
+      [`#${l0!.id}`, '--parent', `#${l3!.id}`],
+      [`#${l3!.id}`, '--add-sub-issue', `#${l0!.id}`],
     ]) {
       const { code, stderr } = await run(['issue', 'edit', ...args])
       expect(code).toBe(1)
@@ -753,8 +739,8 @@ describe('hoot issue edit', () => {
     // P, with a sub-issue, under L7 would put that sub-issue at level 9.
     attach(p, b)
     expect(
-      (await run(['issue', 'edit', `ISS-${p.id}`, '--parent', `ISS-${levels[7]!.id}`])).stderr,
-    ).toContain(`ISS-${b.id} would then be 9 levels below a top-level issue`)
+      (await run(['issue', 'edit', `#${p.id}`, '--parent', `#${levels[7]!.id}`])).stderr,
+    ).toContain(`#${b.id} would then be 9 levels below a top-level issue`)
     expect(pairs()).toEqual([...before, [b.id, p.id]])
     const s = addIssue('S', 'todo')
     for (let index = 0; index < 99; index++) attach(s, addIssue(`S${index}`))
@@ -766,14 +752,14 @@ describe('hoot issue edit', () => {
     const k1 = addElsewhere(hoot.hotel.id, 'K1')
     attach(k, k1)
     hoot.projects.remove(hoot.hotel.root)
-    const deep = await run(['issue', 'edit', `ISS-${k.id}`, '--parent', `ISS-${levels[7]!.id}`])
+    const deep = await run(['issue', 'edit', `#${k.id}`, '--parent', `#${levels[7]!.id}`])
     expect(deep.code).toBe(1)
     expect(deep.stderr).toContain('an issue below it would then be 9 levels below')
-    expect(deep.stderr).not.toContain(`ISS-${k1.id}`)
+    expect(deep.stderr).not.toContain(`#${k1.id}`)
     const t = addIssue('T', 'todo')
-    const refused = await run(['issue', 'edit', `ISS-${s.id}`, '--add-sub-issue', `ISS-${t.id}`])
+    const refused = await run(['issue', 'edit', `#${s.id}`, '--add-sub-issue', `#${t.id}`])
     expect(refused.code).toBe(1)
-    expect(refused.stderr).toContain(`ISS-${s.id} would have 101 sub-issues`)
+    expect(refused.stderr).toContain(`#${s.id} would have 101 sub-issues`)
   })
 })
 
@@ -795,35 +781,33 @@ describe('hoot issue view with sub-issues', () => {
   })
 
   it("names the parent and lists the sub-issues, with the projects other than the session's", async () => {
-    const { code, stdout } = await run(['issue', 'view', `ISS-${p.id}`])
+    const { code, stdout } = await run(['issue', 'view', `#${p.id}`])
     expect(code).toBe(0)
     const created = localMinute(p.createdAt)
     expect(stdout).toBe(
       [
-        `ISS-${p.id} P`,
+        `#${p.id} P`,
         `Todo · No priority · Created ${created}`,
-        `Sub-issue of ISS-${q.id} Q (Todo · No project)`,
+        `Sub-issue of #${q.id} Q (Todo · No project)`,
         '',
         'About P',
         '',
         'Sub-issues · 1/3 (33%)',
-        `Done         ISS-${c[0]!.id}  C1`,
-        `In Progress  ISS-${c[1]!.id}  C2 (hotel)`,
-        `Canceled     ISS-${c[2]!.id}  C3`,
-        `Backlog      ISS-${c[3]!.id}  C4 (No project)`,
+        `Done         #${c[0]!.id}  C1`,
+        `In Progress  #${c[1]!.id}  C2 (hotel)`,
+        `Canceled     #${c[2]!.id}  C3`,
+        `Backlog      #${c[3]!.id}  C4 (No project)`,
         '',
       ].join('\n'),
     )
     hoot.issues.update(c[1]!.id, { status: 'done' })
-    expect((await run(['issue', 'view', `ISS-${p.id}`])).stdout).toContain(
-      'Sub-issues · 2/3 (66%)\n',
-    )
+    expect((await run(['issue', 'view', `#${p.id}`])).stdout).toContain('Sub-issues · 2/3 (66%)\n')
   })
 
   it('prints the parent, the sub-issues and their progress as JSON, in view and list alike', async () => {
-    const json = JSON.parse((await run(['issue', 'view', `ISS-${p.id}`, '--json'])).stdout)
+    const json = JSON.parse((await run(['issue', 'view', `#${p.id}`, '--json'])).stdout)
     expect(json.parent).toStrictEqual({
-      identifier: `ISS-${q.id}`,
+      identifier: `#${q.id}`,
       number: q.id,
       title: 'Q',
       status: 'todo',
@@ -854,11 +838,11 @@ describe('hoot issue view with sub-issues', () => {
   })
 
   it('prints an issue without a parent or sub-issues as before', async () => {
-    expect((await run(['issue', 'view', `ISS-${z.id}`])).stdout).toBe(
-      `ISS-${z.id} Z\nTodo · No priority · Created ${localMinute(z.createdAt)}\n`,
+    expect((await run(['issue', 'view', `#${z.id}`])).stdout).toBe(
+      `#${z.id} Z\nTodo · No priority · Created ${localMinute(z.createdAt)}\n`,
     )
     expect((await run(['issue', 'list'])).stdout).toBe(
-      `ISS-${z.id}  Todo  No priority  Z\nISS-${p.id}  Todo  No priority  P\n`,
+      `#${z.id}  Todo  No priority  Z\n#${p.id}  Todo  No priority  P\n`,
     )
   })
 
@@ -867,7 +851,7 @@ describe('hoot issue view with sub-issues', () => {
     const hq = addElsewhere(hoot.hotel.id, 'HQ')
     attach(hq, r)
     hoot.projects.remove(hoot.hotel.root)
-    const json = JSON.parse((await run(['issue', 'view', `ISS-${p.id}`, '--json'])).stdout)
+    const json = JSON.parse((await run(['issue', 'view', `#${p.id}`, '--json'])).stdout)
     expect(json.subIssues.map((issue: { title: string }) => issue.title)).toEqual([
       'C1',
       'C3',
@@ -875,26 +859,26 @@ describe('hoot issue view with sub-issues', () => {
     ])
     expect(json.subIssuesSummary).toStrictEqual({ total: 2, completed: 1, percentCompleted: 50 })
     expect(
-      JSON.parse((await run(['issue', 'view', `ISS-${r.id}`, '--json'])).stdout).parent,
+      JSON.parse((await run(['issue', 'view', `#${r.id}`, '--json'])).stdout).parent,
     ).toBeNull()
-    expect((await run(['issue', 'view', `ISS-${p.id}`])).stdout).not.toContain('C2')
-    expect((await run(['issue', 'view', `ISS-${r.id}`])).stdout).not.toContain('Sub-issue of')
+    expect((await run(['issue', 'view', `#${p.id}`])).stdout).not.toContain('C2')
+    expect((await run(['issue', 'view', `#${r.id}`])).stdout).not.toContain('Sub-issue of')
     // Nor can it remove a parent it does not show.
-    expect((await run(['issue', 'edit', `ISS-${r.id}`, '--remove-parent'])).stderr).toContain(
-      `ISS-${r.id} has no parent issue.`,
+    expect((await run(['issue', 'edit', `#${r.id}`, '--remove-parent'])).stderr).toContain(
+      `#${r.id} has no parent issue.`,
     )
     hoot.projects.add(hoot.hotel.root)
     expect(
-      JSON.parse((await run(['issue', 'view', `ISS-${r.id}`, '--json'])).stdout).parent,
+      JSON.parse((await run(['issue', 'view', `#${r.id}`, '--json'])).stdout).parent,
     ).toMatchObject({
-      identifier: `ISS-${hq.id}`,
+      identifier: `#${hq.id}`,
       project: 'hotel',
     })
   })
 })
 
-/** An issue's identifier, such as "ISS-12". */
-const id = (issue: Issue) => `ISS-${issue.id}`
+/** An issue's identifier, such as "#12". */
+const id = (issue: Issue) => `#${issue.id}`
 
 /** An issue object's summary, as the objects of its relations have it, for an issue of gamma. */
 const summaryOf = ({ identifier, number, title, status }: Record<string, unknown>) => ({
@@ -1013,9 +997,9 @@ describe('the rules of dependencies in hoot', () => {
   })
 
   it('makes a dependency within the rules', async () => {
-    expect(await run(['issue', 'edit', `ISS-${x.id}`, '--add-blocked-by', `ISS-${w.id}`])).toEqual({
+    expect(await run(['issue', 'edit', `#${x.id}`, '--add-blocked-by', `#${w.id}`])).toEqual({
       code: 0,
-      stdout: `ISS-${x.id}\n`,
+      stdout: `#${x.id}\n`,
       stderr: '',
     })
     expect(dependencyTitles()).toEqual([
@@ -1033,10 +1017,10 @@ describe('the rules of dependencies in hoot', () => {
     block(b, e)
     hoot.projects.remove(hoot.hotel.root)
     const stderr = await expectRefused(
-      ['issue', 'edit', `ISS-${e.id}`, '--add-blocked-by', `ISS-${a.id}`],
+      ['issue', 'edit', `#${e.id}`, '--add-blocked-by', `#${a.id}`],
       'an issue Hoot does not show',
     )
-    expect(stderr).not.toContain(`ISS-${b.id}`)
+    expect(stderr).not.toContain(`#${b.id}`)
   })
 })
 
@@ -1050,9 +1034,9 @@ describe('the limits of dependencies in hoot', () => {
     const created = await run([
       'issue',
       'edit',
-      `ISS-${m.id}`,
+      `#${m.id}`,
       '--add-blocked-by',
-      blockers.map((issue) => `ISS-${issue.id}`).join(','),
+      blockers.map((issue) => `#${issue.id}`).join(','),
     ])
     expect(created.code).toBe(0)
     for (let index = 1; index <= 50; index++) {
@@ -1062,26 +1046,26 @@ describe('the limits of dependencies in hoot', () => {
         '--title',
         `N${index}`,
         '--blocked-by',
-        `ISS-${n.id}`,
+        `#${n.id}`,
       ])
       expect(code).toBe(0)
     }
     await expectRefused(
-      ['issue', 'edit', `ISS-${m.id}`, '--add-blocked-by', `ISS-${f.id}`],
-      `ISS-${m.id} would be blocked by 51 issues, and an issue can be blocked by at most 50.`,
+      ['issue', 'edit', `#${m.id}`, '--add-blocked-by', `#${f.id}`],
+      `#${m.id} would be blocked by 51 issues, and an issue can be blocked by at most 50.`,
     )
     await expectRefused(
-      ['issue', 'edit', `ISS-${n.id}`, '--add-blocking', `ISS-${f.id}`],
-      `ISS-${n.id} would block 51 issues, and an issue can block at most 50.`,
+      ['issue', 'edit', `#${n.id}`, '--add-blocking', `#${f.id}`],
+      `#${n.id} would block 51 issues, and an issue can block at most 50.`,
     )
     await expectRefused(
-      ['issue', 'create', '--title', 'G1', '--blocked-by', `ISS-${n.id}`],
-      `ISS-${n.id} would block 51 issues`,
+      ['issue', 'create', '--title', 'G1', '--blocked-by', `#${n.id}`],
+      `#${n.id} would block 51 issues`,
     )
     await expectRefused(
-      ['issue', 'create-batch', `ISS-${e.id}`, '--file', '-'],
-      `ISS-${n.id} would block 51 issues`,
-      JSON.stringify([{ title: 'S1', blockedBy: [`ISS-${n.id}`] }]),
+      ['issue', 'create-batch', `#${e.id}`, '--file', '-'],
+      `#${n.id} would block 51 issues`,
+      JSON.stringify([{ title: 'S1', blockedBy: [`#${n.id}`] }]),
     )
   })
 })
@@ -1108,13 +1092,13 @@ describe('hoot issue create with dependencies', () => {
       '--title',
       'N1',
       '--blocked-by',
-      `ISS-${b1.id},ISS-${b2.id}`,
+      `#${b1.id},#${b2.id}`,
       '--blocking',
-      `ISS-${k.id}`,
+      `#${k.id}`,
     ])
     expect(code).toBe(0)
     const n1 = saved().at(-1)!
-    expect(stdout).toBe(`ISS-${n1.id}\n`)
+    expect(stdout).toBe(`#${n1.id}\n`)
     expect(dependencyTitles()).toEqual([
       ['N1', 'B1'],
       ['N1', 'B2'],
@@ -1129,7 +1113,7 @@ describe('hoot issue create with dependencies', () => {
       '--title',
       'N2',
       '--parent',
-      `ISS-${p.id}`,
+      `#${p.id}`,
       '--blocked-by',
       `${q.id}`,
       '--json',
@@ -1137,21 +1121,18 @@ describe('hoot issue create with dependencies', () => {
     expect(code).toBe(0)
     const json = JSON.parse(stdout)
     expect(json.blockedBy).toStrictEqual([
-      { identifier: `ISS-${q.id}`, number: q.id, title: 'Q', status: 'todo', project: 'gamma' },
+      { identifier: `#${q.id}`, number: q.id, title: 'Q', status: 'todo', project: 'gamma' },
     ])
     expect(json.blocking).toStrictEqual([])
-    expect(json.parent).toMatchObject({ identifier: `ISS-${p.id}` })
+    expect(json.parent).toMatchObject({ identifier: `#${p.id}` })
     expect(json.priority).toBe('high')
   })
 
   it('refuses an issue not of the project, what is not an issue, and what breaks the rules, creating nothing', async () => {
     for (const [options, message] of [
-      [
-        ['--blocked-by', `ISS-${hx.id}`],
-        `There is no issue ISS-${hx.id} in this session's project`,
-      ],
+      [['--blocked-by', `#${hx.id}`], `There is no issue #${hx.id} in this session's project`],
       [['--blocked-by', 'foo'], `"foo" is neither an issue's identifier`],
-      [['--blocked-by', `ISS-${k.id}`, '--blocking', `ISS-${k.id}`], 'waits for it already'],
+      [['--blocked-by', `#${k.id}`, '--blocking', `#${k.id}`], 'waits for it already'],
     ] as const) {
       await expectRefused(['issue', 'create', '--title', 'N3', ...options], message)
     }
@@ -1255,41 +1236,41 @@ describe('hoot issue view with dependencies', () => {
   })
 
   it("lists the issues it is blocked by and those it blocks, with the projects other than the session's", async () => {
-    const { code, stdout } = await run(['issue', 'view', `ISS-${x.id}`])
+    const { code, stdout } = await run(['issue', 'view', `#${x.id}`])
     expect(code).toBe(0)
     expect(stdout).toBe(
       [
-        `ISS-${x.id} X`,
+        `#${x.id} X`,
         `Todo · No priority · Created ${localMinute(x.createdAt)}`,
         '',
         'Blocked by',
-        `Done         ISS-${b1.id}  B1`,
-        `In Progress  ISS-${b2.id}  B2 (hotel)`,
-        `Todo         ISS-${b3.id}  B3 (No project)`,
+        `Done         #${b1.id}  B1`,
+        `In Progress  #${b2.id}  B2 (hotel)`,
+        `Todo         #${b3.id}  B3 (No project)`,
         '',
         'Blocking',
-        `Backlog  ISS-${k1.id}  K1`,
+        `Backlog  #${k1.id}  K1`,
         '',
       ].join('\n'),
     )
   })
 
   it('prints them as JSON, in view and list alike', async () => {
-    const json = JSON.parse((await run(['issue', 'view', `ISS-${x.id}`, '--json'])).stdout)
+    const json = JSON.parse((await run(['issue', 'view', `#${x.id}`, '--json'])).stdout)
     expect(json.blockedBy).toStrictEqual([
-      { identifier: `ISS-${b1.id}`, number: b1.id, title: 'B1', status: 'done', project: 'gamma' },
+      { identifier: `#${b1.id}`, number: b1.id, title: 'B1', status: 'done', project: 'gamma' },
       {
-        identifier: `ISS-${b2.id}`,
+        identifier: `#${b2.id}`,
         number: b2.id,
         title: 'B2',
         status: 'in-progress',
         project: 'hotel',
       },
-      { identifier: `ISS-${b3.id}`, number: b3.id, title: 'B3', status: 'todo', project: null },
+      { identifier: `#${b3.id}`, number: b3.id, title: 'B3', status: 'todo', project: null },
     ])
     expect(json.blocking).toStrictEqual([
       {
-        identifier: `ISS-${k1.id}`,
+        identifier: `#${k1.id}`,
         number: k1.id,
         title: 'K1',
         status: 'backlog',
@@ -1302,16 +1283,16 @@ describe('hoot issue view with dependencies', () => {
       blockedBy: [],
       blocking: [],
     })
-    expect((await run(['issue', 'view', `ISS-${z.id}`])).stdout).toBe(
-      `ISS-${z.id} Z\nTodo · No priority · Created ${localMinute(z.createdAt)}\n`,
+    expect((await run(['issue', 'view', `#${z.id}`])).stdout).toBe(
+      `#${z.id} Z\nTodo · No priority · Created ${localMinute(z.createdAt)}\n`,
     )
   })
 
   it('leaves out the issues of a project removed from the list', async () => {
     hoot.projects.remove(hoot.hotel.root)
-    const json = JSON.parse((await run(['issue', 'view', `ISS-${x.id}`, '--json'])).stdout)
+    const json = JSON.parse((await run(['issue', 'view', `#${x.id}`, '--json'])).stdout)
     expect(json.blockedBy.map((issue: { title: string }) => issue.title)).toEqual(['B1', 'B3'])
-    expect((await run(['issue', 'view', `ISS-${x.id}`])).stdout).not.toContain(`ISS-${b2.id}`)
+    expect((await run(['issue', 'view', `#${x.id}`])).stdout).not.toContain(`#${b2.id}`)
   })
 })
 
@@ -1321,7 +1302,7 @@ describe('hoot issue create-batch', () => {
   const plan = () => [
     { title: 'S1' },
     { title: 'S2', description: 'Two', status: 'todo', priority: 'low', blockedBy: [1] },
-    { title: 'S3', blockedBy: [1, 2, `ISS-${e.id}`] },
+    { title: 'S3', blockedBy: [1, 2, `#${e.id}`] },
   ]
 
   beforeEach(() => {
@@ -1338,14 +1319,14 @@ describe('hoot issue create-batch', () => {
     const { code, stdout, stderr } = await run([
       'issue',
       'create-batch',
-      `ISS-${p.id}`,
+      `#${p.id}`,
       '--file',
       file,
     ])
     expect(stderr).toBe('')
     expect(code).toBe(0)
     const [s1, s2, s3] = saved().slice(-3)
-    expect(stdout).toBe(`ISS-${s1!.id}\nISS-${s2!.id}\nISS-${s3!.id}\n`)
+    expect(stdout).toBe(`#${s1!.id}\n#${s2!.id}\n#${s3!.id}\n`)
     expect(subIssueTitles(p)).toEqual(['C0', 'S1', 'S2', 'S3'])
     expect(s1).toMatchObject({ status: 'backlog', priority: 2, description: '' })
     expect(s2).toMatchObject({ status: 'todo', priority: 4, description: 'Two' })
@@ -1373,9 +1354,9 @@ describe('hoot issue create-batch', () => {
     expect(json[2].blockedBy).toStrictEqual([
       summaryOf(json[0]),
       summaryOf(json[1]),
-      { identifier: `ISS-${e.id}`, number: e.id, title: 'E', status: 'todo', project: 'gamma' },
+      { identifier: `#${e.id}`, number: e.id, title: 'E', status: 'todo', project: 'gamma' },
     ])
-    expect(json[0].parent).toMatchObject({ identifier: `ISS-${p.id}` })
+    expect(json[0].parent).toMatchObject({ identifier: `#${p.id}` })
   })
 
   it('refuses what is wrong with the issue or the file, or would break a rule, creating none', async () => {
@@ -1391,8 +1372,8 @@ describe('hoot issue create-batch', () => {
       ],
       [withItem(2, { blockedBy: [4] }), 'which is neither the place of an item, from 1 to 3'],
       [
-        withItem(2, { blockedBy: [`ISS-${hx.id}`] }),
-        `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+        withItem(2, { blockedBy: [`#${hx.id}`] }),
+        `There is no issue #${hx.id} in this session's project, gamma.`,
       ],
       [withItem(2, { labels: ['nope'] }), 'There is no label named "nope".'],
       [withItem(2, { labels: 'x' }), 'The "labels" of item 3 in '],
@@ -1409,28 +1390,28 @@ describe('hoot issue create-batch', () => {
     ]
     for (const [content, message] of cases) {
       fs.writeFileSync(file, JSON.stringify(content))
-      await expectRefused(['issue', 'create-batch', `ISS-${p.id}`, '--file', file], message)
+      await expectRefused(['issue', 'create-batch', `#${p.id}`, '--file', file], message)
     }
     fs.writeFileSync(file, 'not JSON')
-    await expectRefused(['issue', 'create-batch', `ISS-${p.id}`, '--file', file], 'are not JSON')
+    await expectRefused(['issue', 'create-batch', `#${p.id}`, '--file', file], 'are not JSON')
     fs.writeFileSync(file, JSON.stringify(plan()))
     await expectRefused(
-      ['issue', 'create-batch', `ISS-${hx.id}`, '--file', file],
-      `There is no issue ISS-${hx.id} in this session's project, gamma.`,
+      ['issue', 'create-batch', `#${hx.id}`, '--file', file],
+      `There is no issue #${hx.id} in this session's project, gamma.`,
     )
     await expectRefused(
-      ['issue', 'create-batch', `ISS-${p.id}`, '--file', path.join(hoot.directory, 'missing.json')],
+      ['issue', 'create-batch', `#${p.id}`, '--file', path.join(hoot.directory, 'missing.json')],
       'Could not read the issues from',
     )
-    await expectRefused(['issue', 'create-batch', `ISS-${p.id}`], "required option '--file <file>'")
+    await expectRefused(['issue', 'create-batch', `#${p.id}`], "required option '--file <file>'")
     expect(hoot.created).toEqual([])
   })
 
   it('refuses more sub-issues than the parent can have', async () => {
     for (let index = 0; index < 98; index++) attach(p, addIssue(`C${index + 1}`))
     await expectRefused(
-      ['issue', 'create-batch', `ISS-${p.id}`, '--file', file],
-      `ISS-${p.id} has 99 sub-issues, and 3 more would make 102: an issue can have at most 100.`,
+      ['issue', 'create-batch', `#${p.id}`, '--file', file],
+      `#${p.id} has 99 sub-issues, and 3 more would make 102: an issue can have at most 100.`,
     )
     expect(subIssueTitles(p)).toHaveLength(99)
   })
@@ -2075,7 +2056,7 @@ describe('hoot --help and hoot issue --help', () => {
       'list',
       'create',
       '<issue>',
-      'ISS-12',
+      '#12',
       '--all',
       '--status <name>',
       '--title <title>',

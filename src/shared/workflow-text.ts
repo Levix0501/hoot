@@ -21,9 +21,14 @@ export function filledIn(text: string, identifier: string): string {
   return text.replaceAll(ISSUE_PLACEHOLDER, identifier)
 }
 
+/** Quotes an issue identifier for a shell when it starts with `#`, so it is not read as a comment. */
+function shellIssue(identifier: string): string {
+  return identifier.startsWith('#') ? `"${identifier}"` : identifier
+}
+
 /** The command that changes an issue's label of the workflow's group to another. */
 export function labelCommand(identifier: string, label: string): string {
-  return `hoot issue edit ${identifier} --add-label ${quote([label])}`
+  return `hoot issue edit ${shellIssue(identifier)} --add-label ${quote([label])}`
 }
 
 /** A label's name in the text, set apart from the words around it, as `ready to design`. */
@@ -98,7 +103,7 @@ export function outcomeInstructions(
 
 export interface FirstMessage {
   workflow: WorkflowDefinition
-  /** The issue's identifier, such as `ISS-12`. */
+  /** The issue's identifier, such as `#12`. */
   identifier: string
   /** The absolute path of the session's issue file. */
   issueFile: string
@@ -205,7 +210,7 @@ export function workflowFileText(workflow: WorkflowDefinition, identifier: strin
     `The workflow ${identifier} goes through. How far the issue has come is the label of the group ` +
       `${workflow.group} it carries: none before it starts, ${ready}the label of the step it is at, ` +
       'or an end label once it is finished. An issue carries one label of the group at most: adding ' +
-      `one with \`hoot issue edit ${identifier} --add-label <label>\` takes the other off.`,
+      `one with \`hoot issue edit ${shellIssue(identifier)} --add-label <label>\` takes the other off.`,
     ...steps,
     '## End labels',
     ends,

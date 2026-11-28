@@ -1296,13 +1296,13 @@ describe('the messages of sub-issues', () => {
     expect(await invoke(IpcChannel.setIssueParents, changes)).toEqual({ ok: true })
     expect(issues.setParents.mock.calls).toEqual([[changes]])
     issues.setParents.mockImplementationOnce(() => {
-      throw new Error('ISS-2 cannot be a sub-issue of itself.')
+      throw new Error('#2 cannot be a sub-issue of itself.')
     })
     expect(await invoke(IpcChannel.setIssueParents, [{ issueId: 2, parentId: 2 }])).toEqual({
       ok: false,
-      message: 'ISS-2 cannot be a sub-issue of itself.',
+      message: '#2 cannot be a sub-issue of itself.',
     })
-    for (const value of [[], [{ issueId: 2 }], [{ issueId: '2', parentId: 1 }], 'ISS-2']) {
+    for (const value of [[], [{ issueId: 2 }], [{ issueId: '2', parentId: 1 }], '#2']) {
       expect(await invoke(IpcChannel.setIssueParents, value)).toEqual({
         ok: false,
         message: 'Invalid change.',
@@ -1322,11 +1322,11 @@ describe('the messages of sub-issues', () => {
     expect(await invoke(IpcChannel.createSubIssue, 1, issue)).toEqual({ ok: true, issue: created })
     expect(issues.create.mock.calls).toEqual([[issue, 1]])
     issues.create.mockImplementationOnce(() => {
-      throw new Error('ISS-1 has 100 sub-issues, the most an issue can have.')
+      throw new Error('#1 has 100 sub-issues, the most an issue can have.')
     })
     expect(await invoke(IpcChannel.createSubIssue, 1, issue)).toEqual({
       ok: false,
-      message: 'ISS-1 has 100 sub-issues, the most an issue can have.',
+      message: '#1 has 100 sub-issues, the most an issue can have.',
     })
     expect(await invoke(IpcChannel.createSubIssue, '1', issue)).toEqual({
       ok: false,
@@ -1356,14 +1356,14 @@ describe('the messages of dependencies', () => {
     ])
     issues.changeRelations.mockImplementationOnce(() => {
       throw new Error(
-        'ISS-3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
+        '#3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
       )
     })
     expect(await invoke(IpcChannel.changeDependencies, change)).toEqual({
       ok: false,
-      message: 'ISS-3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
+      message: '#3 would be blocked by 51 issues, and an issue can be blocked by at most 50.',
     })
-    for (const value of [{ add: [] }, { add: [{ issueId: 1 }], remove: [] }, 'ISS-1']) {
+    for (const value of [{ add: [] }, { add: [{ issueId: 1 }], remove: [] }, '#1']) {
       expect(await invoke(IpcChannel.changeDependencies, value)).toEqual({
         ok: false,
         message: 'Invalid change.',
@@ -1563,8 +1563,8 @@ describe('the messages of the Agents page', () => {
   })
 
   it('put the text the window copies on the clipboard', () => {
-    send(IpcChannel.writeClipboardText, 'ISS-1')
-    expect(electron.clipboard.writeText).toHaveBeenCalledWith('ISS-1')
+    send(IpcChannel.writeClipboardText, '#1')
+    expect(electron.clipboard.writeText).toHaveBeenCalledWith('#1')
   })
 })
 

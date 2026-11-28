@@ -228,7 +228,7 @@ async function readJson(request: http.IncomingMessage): Promise<unknown> {
 
 /** What hoot says when the session's project has no issue with this number. */
 function noSuchIssue(digits: string, project: HootProject): string {
-  return `There is no issue ISS-${digits} in this session's project, ${project.name}.`
+  return `There is no issue #${digits} in this session's project, ${project.name}.`
 }
 
 /** What hoot says when no label has this name. */

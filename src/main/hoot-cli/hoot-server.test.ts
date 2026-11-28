@@ -244,7 +244,7 @@ describe('HootServer', () => {
     })
     expect(answer).toEqual({
       status: 409,
-      answer: { ok: false, message: `x cannot both be given to ISS-${beta.id} and taken off it.` },
+      answer: { ok: false, message: `x cannot both be given to #${beta.id} and taken off it.` },
     })
     expect(told).toEqual([])
     expect(hoot.issues.subIssues().links).toEqual([])
@@ -270,10 +270,10 @@ describe('HootServer', () => {
     })
     expect(refused.status).toBe(409)
     expect(refused.answer.message).toBe(
-      `Work on ISS-${beta.id} cannot be started now:\n` +
-        `- It waits on ISS-${alpha.id}, which is neither done nor canceled.`,
+      `Work on #${beta.id} cannot be started now:\n` +
+        `- It waits on #${alpha.id}, which is neither done nor canceled.`,
     )
-    for (const body of ['not JSON', JSON.stringify({ issue: 'ISS-1' }), JSON.stringify({})]) {
+    for (const body of ['not JSON', JSON.stringify({ issue: '#1' }), JSON.stringify({})]) {
       expect((await request('POST', '/sessions', { body })).status).toBe(400)
     }
     expect(hoot.startedSessions).toHaveLength(1)
@@ -496,7 +496,7 @@ describe('HootServer', () => {
     const refused: Array<[string, string, number, string]> = [
       [`/issues/${alpha.id}`, 'not JSON', 400, 'The request is not JSON.'],
       [`/issues/${alpha.id}`, JSON.stringify({ parent: 1 }), 400, 'Invalid change.'],
-      [`/issues/${alpha.id}`, JSON.stringify({ parent: 'ISS-1' }), 400, 'Invalid change.'],
+      [`/issues/${alpha.id}`, JSON.stringify({ parent: '#1' }), 400, 'Invalid change.'],
       [`/issues/${alpha.id}`, JSON.stringify({ extra: true }), 400, 'Invalid change.'],
       [`/issues/${alpha.id}`, JSON.stringify({}), 400, 'Nothing to change.'],
       [
@@ -509,7 +509,7 @@ describe('HootServer', () => {
         `/issues/${'9'.repeat(40)}`,
         JSON.stringify({ removeParent: true }),
         404,
-        `There is no issue ISS-${'9'.repeat(40)} in this session's project, gamma.`,
+        `There is no issue #${'9'.repeat(40)} in this session's project, gamma.`,
       ],
     ]
     for (const [url, body, status, message] of refused) {
@@ -537,8 +537,8 @@ describe('HootServer', () => {
       answer: {
         ok: false,
         message:
-          `The new issue cannot be blocked by ISS-${alpha.id}, which waits for it already: ` +
-          `ISS-${alpha.id} is blocked by the new issue.`,
+          `The new issue cannot be blocked by #${alpha.id}, which waits for it already: ` +
+          `#${alpha.id} is blocked by the new issue.`,
       },
     })
     for (const [body, status, message] of [

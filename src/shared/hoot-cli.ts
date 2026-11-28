@@ -4,7 +4,7 @@
  * domain socket (a named pipe on Windows) that only that Hoot listens on:
  *
  * - `GET /issues`: every issue of the session's project.
- * - `GET /issues/<number>`: the issue with this number, as in `ISS-12`, if it is in the
+ * - `GET /issues/<number>`: the issue with this number, as in `#12`, if it is in the
  *   project; `null` when it is not.
  * - `POST /issues`: creates an issue in the project, from a `NewHootIssue`.
  * - `PATCH /issues/<number>`: changes the parent, the sub-issues, the
@@ -64,7 +64,7 @@ export interface HootProject {
  * or to none.
  */
 export interface RelatedIssue {
-  /** Its number, as in `ISS-12`. */
+  /** Its number, as in `#12`. */
   id: number
   title: string
   status: IssueStatus

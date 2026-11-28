@@ -34,7 +34,7 @@ export type IssueView = (typeof ISSUE_VIEWS)[number]
 /** A note of what to do, or of what went wrong, in a project or in none yet. */
 export interface Issue {
   /**
-   * Also its number, as in `ISS-12`: from 1 in the order the issues were
+   * Also its number, as in `#12`: from 1 in the order the issues were
    * created. Never given again, not even once the issue is deleted, and the
    * same whichever project the issue is in.
    */
@@ -170,22 +170,22 @@ export function listOrder<T extends Issue>(issues: readonly T[], view: IssueView
   )
 }
 
-/** How an issue is referred to: `ISS-` and its number, such as `ISS-12`. */
+/** How an issue is referred to: `#` and its number, such as `#12`. */
 export function issueIdentifier(id: number): string {
-  return `ISS-${id}`
+  return `#${id}`
 }
 
 /**
  * What an issue dropped on an agent's terminal pastes into the agent's
- * input, as separate pastes: its identifier and title, on a line of their
- * own, then its description, if any. Agents take a short paste as it is and
- * fold a long one into a placeholder, such as Claude Code's `[Pasted text #1
- * +6 lines]`, so the issue shows by its title above the folded description.
- * Starting with the identifier, the text never starts as a command or a
+ * input, as separate pastes: its title as a Markdown heading, then its
+ * description, if any, after a blank line. Agents take a short paste as it is
+ * and fold a long one into a placeholder, such as Claude Code's `[Pasted text
+ * #1 +6 lines]`, so the issue shows by its title above the folded
+ * description. Starting with `# `, the text never starts as a command or a
  * mode of the agent's input would, such as `/` or `!`.
  */
-export function issuePasteParts(issue: Pick<Issue, 'id' | 'title' | 'description'>): string[] {
-  const head = `${issueIdentifier(issue.id)} ${issue.title}`
+export function issuePasteParts(issue: Pick<Issue, 'title' | 'description'>): string[] {
+  const head = `# ${issue.title}`
   const description = issue.description.trim()
-  return description === '' ? [head] : [`${head}\n`, description]
+  return description === '' ? [head] : [`${head}\n\n`, description]
 }

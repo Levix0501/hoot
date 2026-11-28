@@ -115,7 +115,7 @@ describe('the built-in workflow', () => {
     expect(instruction).toContain('"status": "todo"')
     expect(instruction).toContain('"blocking": ["{issue}"]')
     expect(instruction).toContain('In `"blockedBy"`, list the issues it waits on')
-    expect(instruction).toMatch(/\nRun `hoot issue create-batch \{issue\} --file <file>`\.$/)
+    expect(instruction).toMatch(/\nRun `hoot issue create-batch "\{issue\}" --file <file>`\.$/)
   })
 
   it('is paused: no workflow runs for now', () => {

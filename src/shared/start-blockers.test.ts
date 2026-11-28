@@ -112,10 +112,10 @@ describe('startBlockerText', () => {
     )
     expect(startBlockerText({ kind: 'no-project' })).toMatch(/^It has no project/)
     expect(startBlockerText({ kind: 'waiting', issueIds: [3] })).toBe(
-      'It waits on ISS-3, which is neither done nor canceled.',
+      'It waits on #3, which is neither done nor canceled.',
     )
     expect(startBlockerText({ kind: 'waiting', issueIds: [3, 4, 5] })).toBe(
-      'It waits on ISS-3, ISS-4, and ISS-5, which are neither done nor canceled.',
+      'It waits on #3, #4, and #5, which are neither done nor canceled.',
     )
     expect(startBlockerText({ kind: 'finished', label: 'waiting on sub-issues' })).toBe(
       'Its workflow is finished: it has the label "waiting on sub-issues".',

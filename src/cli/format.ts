@@ -9,7 +9,7 @@ import { PRIORITY_NAMES, STATUS_NAMES } from './names'
  * blocked by or blocks, as hoot prints it with `--json`.
  */
 export interface RelatedIssueJson {
-  /** Such as "ISS-12". */
+  /** Such as "#12". */
   identifier: string
   number: number
   title: string
@@ -21,9 +21,9 @@ export interface RelatedIssueJson {
 
 /** An issue as hoot prints it with `--json`. */
 export interface IssueJson {
-  /** Such as "ISS-12". */
+  /** Such as "#12". */
   identifier: string
-  /** Its number, as in its identifier: 12 for ISS-12. */
+  /** Its number, as in its identifier: 12 for #12. */
   number: number
   title: string
   /** Markdown; empty when it has none. */
@@ -142,7 +142,7 @@ function projectNote(issue: RelatedIssue, project: HootProject): string | null {
  * An issue as `hoot issue view` prints it: its identifier and title; its
  * status, priority and creation time; its labels, if any, such as
  * `Labels: bug, Kind › Feature`; the issue it is a sub-issue of, if
- * any, such as `Sub-issue of ISS-4 Ship it (Todo)`; its description as it is
+ * any, such as `Sub-issue of #4 Ship it (Todo)`; its description as it is
  * saved, after a blank line, when it has one; after a blank line, its
  * sub-issues when it has any: their progress, such as `Sub-issues · 1/3
  * (33%)`, then the status, identifier and title of each, in the order its

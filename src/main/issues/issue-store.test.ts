@@ -388,7 +388,7 @@ describe('IssueStore sub-issues', () => {
     issues.setParents(chain.slice(1).map((id, index) => ({ issueId: id, parentId: chain[index]! })))
     expect(() => issues.create(newIssue(g.id, 'L9'), chain[8]!)).toThrow(
       new SubIssueError(
-        'ISS-9 is 8 levels below a top-level issue, the deepest an issue can be, so it cannot have sub-issues.',
+        '#9 is 8 levels below a top-level issue, the deepest an issue can be, so it cannot have sub-issues.',
       ),
     )
     expect(issues.create(newIssue(g.id, 'At level 8'), chain[7]!)?.id).toBe(10)
@@ -405,7 +405,7 @@ describe('IssueStore sub-issues', () => {
     projects.remove('/work/h')
     const before = issues.subIssues()
     expect(() => issues.create(newIssue(g.id, 'One more'), full!)).toThrow(
-      `ISS-${full} has 100 sub-issues, the most an issue can have.`,
+      `#${full} has 100 sub-issues, the most an issue can have.`,
     )
     expect(() => issues.create(newIssue(g.id, 'Lost'), hidden!)).toThrow(
       'The parent issue no longer exists.',
@@ -427,10 +427,10 @@ describe('IssueStore sub-issues', () => {
     ])
     const before = issues.subIssues()
     expect(() => issues.setParents([{ issueId: a!, parentId: a! }])).toThrow(
-      new SubIssueError('ISS-1 cannot be a sub-issue of itself.'),
+      new SubIssueError('#1 cannot be a sub-issue of itself.'),
     )
     expect(() => issues.setParents([{ issueId: a!, parentId: c! }])).toThrow(
-      new SubIssueError('ISS-1 cannot be a sub-issue of ISS-3, which is below it.'),
+      new SubIssueError('#1 cannot be a sub-issue of #3, which is below it.'),
     )
     expect(() => issues.setParents([{ issueId: a!, parentId: b! }])).toThrow(SubIssueError)
     expect(issues.subIssues()).toEqual(before)
@@ -455,9 +455,7 @@ describe('IssueStore sub-issues', () => {
         { issueId: f1!, parentId: n! },
         { issueId: f2!, parentId: n! },
       ]),
-    ).toThrow(
-      new SubIssueError('ISS-1 would have 101 sub-issues, and an issue can have at most 100.'),
-    )
+    ).toThrow(new SubIssueError('#1 would have 101 sub-issues, and an issue can have at most 100.'))
     expect(issues.subIssues()).toEqual(before)
     // Taking one away first makes room.
     issues.setParents([
@@ -472,7 +470,7 @@ describe('IssueStore sub-issues', () => {
     const chained = issues.subIssues()
     expect(() => issues.setParents([{ issueId: k!, parentId: chain[7]! }])).toThrow(
       new SubIssueError(
-        `ISS-${k} cannot be a sub-issue of ISS-${chain[7]}: ISS-${k1} would then be 9 levels ` +
+        `#${k} cannot be a sub-issue of #${chain[7]}: #${k1} would then be 9 levels ` +
           'below a top-level issue, and an issue can be at most 8 levels below one.',
       ),
     )
@@ -515,7 +513,7 @@ describe('IssueStore sub-issues', () => {
     const before = issues.subIssues()
     expect(() => issues.setParents([{ issueId: k!, parentId: chain[7]! }])).toThrow(
       new SubIssueError(
-        `ISS-${k} cannot be a sub-issue of ISS-${chain[7]}: an issue below it would then be 9 ` +
+        `#${k} cannot be a sub-issue of #${chain[7]}: an issue below it would then be 9 ` +
           'levels below a top-level issue, and an issue can be at most 8 levels below one.',
       ),
     )
@@ -641,10 +639,10 @@ describe('IssueStore dependencies', () => {
           { issueId: a!, blockedById: b! },
         ],
       }),
-    ).toThrow(new DependencyError('ISS-1 is blocked by ISS-2 already.'))
+    ).toThrow(new DependencyError('#1 is blocked by #2 already.'))
     expect(() =>
       issues.changeRelations({ removeDependencies: [{ issueId: b!, blockedById: a! }] }),
-    ).toThrow(new DependencyError('ISS-2 is not blocked by ISS-1.'))
+    ).toThrow(new DependencyError('#2 is not blocked by #1.'))
     expect(() =>
       issues.changeRelations({ addDependencies: [{ issueId: a!, blockedById: 99 }] }),
     ).toThrow('The issue no longer exists.')
@@ -669,8 +667,8 @@ describe('IssueStore dependencies', () => {
       issues.changeRelations({ addDependencies: [{ issueId: e!, blockedById: a! }] }),
     ).toThrow(
       new DependencyError(
-        'ISS-2 cannot be blocked by ISS-1, which waits for it already: ISS-1 is blocked by an ' +
-          'issue Hoot does not show, which is blocked by ISS-2.',
+        '#2 cannot be blocked by #1, which waits for it already: #1 is blocked by an ' +
+          'issue Hoot does not show, which is blocked by #2.',
       ),
     )
     expect(issues.dependencies()).toEqual(before)
@@ -703,9 +701,7 @@ describe('IssueStore dependencies', () => {
         parents: [{ issueId: d!, parentId: c! }],
         addDependencies: [{ issueId: d!, blockedById: a! }],
       }),
-    ).toThrow(
-      'ISS-4 cannot be blocked by ISS-1, which waits for it already: ISS-1 is blocked by ISS-4.',
-    )
+    ).toThrow('#4 cannot be blocked by #1, which waits for it already: #1 is blocked by #4.')
     expect(pairs(issues)).toEqual([[c, a]])
     expect(dependencyPairs(issues)).toEqual([[a, d]])
     // An issue can be blocked by an issue above or below it, and block one.

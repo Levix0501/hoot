@@ -13,7 +13,7 @@ function splitInstruction(confirmed: string, label: string): string {
     'Write the issues of the split, in order, to a JSON file next to the issue file:',
     `\`[{"title": "…", "description": "…", "labels": ["${label}"], "status": "todo", "blocking": ["{issue}"], "blockedBy": […]}, …]\``,
     'In `"blockedBy"`, list the issues it waits on: those of the split by their place in the array, from 1, others by their identifiers.',
-    'Run `hoot issue create-batch {issue} --file <file>`.',
+    'Run `hoot issue create-batch "{issue}" --file <file>`.',
   ].join('\n')
 }
 

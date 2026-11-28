@@ -90,20 +90,20 @@ describe('the built-in prompts', () => {
 
 describe('filledIn', () => {
   it("puts the issue's identifier in place of {issue}", () => {
-    expect(filledIn('hoot issue create-batch {issue} --file x, blocking {issue}', 'ISS-12')).toBe(
-      'hoot issue create-batch ISS-12 --file x, blocking ISS-12',
+    expect(filledIn('hoot issue create-batch "{issue}" --file x, blocking {issue}', '#12')).toBe(
+      'hoot issue create-batch "#12" --file x, blocking #12',
     )
-    expect(filledIn('{"title": "A"}', 'ISS-12')).toBe('{"title": "A"}')
+    expect(filledIn('{"title": "A"}', '#12')).toBe('{"title": "A"}')
   })
 })
 
 describe('labelCommand', () => {
-  it("quotes a label's name that a shell would take for more than one word", () => {
-    expect(labelCommand('ISS-7', 'split')).toBe('hoot issue edit ISS-7 --add-label split')
-    expect(labelCommand('ISS-7', 'ready to design')).toBe(
-      "hoot issue edit ISS-7 --add-label 'ready to design'",
+  it("quotes a hash identifier and a label's name that a shell would take for more than one word", () => {
+    expect(labelCommand('#7', 'split')).toBe('hoot issue edit "#7" --add-label split')
+    expect(labelCommand('#7', 'ready to design')).toBe(
+      `hoot issue edit "#7" --add-label 'ready to design'`,
     )
-    expect(labelCommand('ISS-7', "won't do")).toBe(`hoot issue edit ISS-7 --add-label "won't do"`)
+    expect(labelCommand('#7', "won't do")).toBe(`hoot issue edit "#7" --add-label "won't do"`)
   })
 })
 
@@ -118,14 +118,14 @@ describe('goesOn', () => {
 
 describe('outcomeInstructions', () => {
   it('lists each outcome: its instruction, the command that changes the label, and whether to go on', () => {
-    expect(outcomeInstructions(SAMPLE, look, 'ISS-7')).toBe(
+    expect(outcomeInstructions(SAMPLE, look, '#7')).toBe(
       [
         'When this step is done, end it with the one of these outcomes that applies:',
         '',
         '- It is worth making.',
-        '  Run `hoot issue edit ISS-7 --add-label Making`, then go on with the step Make in workflow.md.',
-        '- Drop ISS-7.',
-        '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
+        '  Run `hoot issue edit "#7" --add-label Making`, then go on with the step Make in workflow.md.',
+        '- Drop #7.',
+        '  Run `hoot issue edit "#7" --add-label Dropped`, then stop.',
       ].join('\n'),
     )
   })
@@ -134,37 +134,37 @@ describe('outcomeInstructions', () => {
     const step = {
       outcomes: [{ label: 'Dropped', instruction: 'Check it.\n\nTidy up.', goOn: false }],
     }
-    expect(outcomeInstructions(SAMPLE, step, 'ISS-7').split('\n').slice(2)).toEqual([
+    expect(outcomeInstructions(SAMPLE, step, '#7').split('\n').slice(2)).toEqual([
       '- Check it.',
       '',
       '  Tidy up.',
-      '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
+      '  Run `hoot issue edit "#7" --add-label Dropped`, then stop.',
     ])
   })
 
   it('says to stop once a step without outcomes is done, changing no label', () => {
-    expect(outcomeInstructions(SAMPLE, { outcomes: [] }, 'ISS-7')).toBe(
+    expect(outcomeInstructions(SAMPLE, { outcomes: [] }, '#7')).toBe(
       'When this step is done, stop.',
     )
-    expect(outcomeInstructions(BUILT_IN_WORKFLOW, design, 'ISS-7')).toBe(
+    expect(outcomeInstructions(BUILT_IN_WORKFLOW, design, '#7')).toBe(
       'When this step is done, stop.',
     )
   })
 
   it('ends Triage at ready to design or waiting on sub-issues, stopping either way', () => {
-    const text = outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7')
+    const text = outcomeInstructions(BUILT_IN_WORKFLOW, triage, '#7')
     expect(text).toBe(
       [
         'When this step is done, end it with the one of these outcomes that applies:',
         '',
         '- The issue is one piece of work.',
-        "  Run `hoot issue edit ISS-7 --add-label 'ready to design'`, then stop.",
+        `  Run \`hoot issue edit "#7" --add-label 'ready to design'\`, then stop.`,
         '- I confirmed the split.',
         '  Write the issues of the split, in order, to a JSON file next to the issue file:',
-        '  `[{"title": "…", "description": "…", "labels": ["ready to design"], "status": "todo", "blocking": ["ISS-7"], "blockedBy": […]}, …]`',
+        '  `[{"title": "…", "description": "…", "labels": ["ready to design"], "status": "todo", "blocking": ["#7"], "blockedBy": […]}, …]`',
         '  In `"blockedBy"`, list the issues it waits on: those of the split by their place in the array, from 1, others by their identifiers.',
-        '  Run `hoot issue create-batch ISS-7 --file <file>`.',
-        "  Run `hoot issue edit ISS-7 --add-label 'waiting on sub-issues'`, then stop.",
+        '  Run `hoot issue create-batch "#7" --file <file>`.',
+        `  Run \`hoot issue edit "#7" --add-label 'waiting on sub-issues'\`, then stop.`,
       ].join('\n'),
     )
     expect(text).not.toContain('{issue}')
@@ -174,7 +174,7 @@ describe('outcomeInstructions', () => {
 describe('firstMessage', () => {
   const message = firstMessage({
     workflow: BUILT_IN_WORKFLOW,
-    identifier: 'ISS-7',
+    identifier: '#7',
     issueFile: '/work/a/.hoot/tmp/issue-x/issue.md',
     workflowFile: '/work/a/.hoot/tmp/issue-x/workflow.md',
     branch: 'iss-7-fix-it',
@@ -187,7 +187,7 @@ describe('firstMessage', () => {
         'The issue is in `/work/a/.hoot/tmp/issue-x/issue.md`.',
         'This is a Git worktree of the project, on the branch `iss-7-fix-it`, made for this issue.',
         TRIAGE_PROMPT,
-        outcomeInstructions(BUILT_IN_WORKFLOW, triage, 'ISS-7'),
+        outcomeInstructions(BUILT_IN_WORKFLOW, triage, '#7'),
       ].join('\n\n'),
     )
   })
@@ -200,7 +200,7 @@ describe('firstMessage', () => {
     expect(
       firstMessage({
         workflow: BUILT_IN_WORKFLOW,
-        identifier: 'ISS-7',
+        identifier: '#7',
         issueFile: '/work/a/.hoot/tmp/issue-x/issue.md',
         workflowFile: '/work/a/.hoot/tmp/issue-x/workflow.md',
         branch: 'iss-7-fix-it',
@@ -219,7 +219,7 @@ describe('firstMessage', () => {
   it('says where the file of the workflow is too when the step may go on to another', () => {
     const at = firstMessage({
       workflow: SAMPLE,
-      identifier: 'ISS-7',
+      identifier: '#7',
       issueFile: '/i.md',
       workflowFile: '/w.md',
       branch: 'b',
@@ -233,14 +233,14 @@ describe('firstMessage', () => {
   it('gives the prompt and the outcomes of the step it is given', () => {
     const at = firstMessage({
       workflow: SAMPLE,
-      identifier: 'ISS-7',
+      identifier: '#7',
       issueFile: '/i.md',
       workflowFile: '/w.md',
       branch: 'b',
       step: make,
     })
     expect(at).toContain('Make: build it.')
-    expect(at).toContain("`hoot issue edit ISS-7 --add-label 'made well'`")
+    expect(at).toContain(`\`hoot issue edit "#7" --add-label 'made well'\``)
     expect(at).not.toContain('/w.md')
   })
 })
@@ -256,24 +256,24 @@ describe('plainFirstMessage', () => {
 
 describe('workflowFileText', () => {
   it('gives the name, each step in order with its label, prompt and outcomes, and the end labels', () => {
-    expect(workflowFileText(SAMPLE, 'ISS-7')).toBe(
+    expect(workflowFileText(SAMPLE, '#7')).toBe(
       [
         '# Sample',
         '',
-        'The workflow ISS-7 goes through. How far the issue has come is the label of the group Sample it carries: none before it starts, the label of the step it is at, or an end label once it is finished. An issue carries one label of the group at most: adding one with `hoot issue edit ISS-7 --add-label <label>` takes the other off.',
+        'The workflow #7 goes through. How far the issue has come is the label of the group Sample it carries: none before it starts, the label of the step it is at, or an end label once it is finished. An issue carries one label of the group at most: adding one with `hoot issue edit "#7" --add-label <label>` takes the other off.',
         '',
         '## 1. Look',
         '',
         'Label: `Looking`',
         '',
-        'Look: read ISS-7.',
+        'Look: read #7.',
         '',
         'Outcomes:',
         '',
         '- It is worth making.',
-        '  Run `hoot issue edit ISS-7 --add-label Making`, then go on with the step Make.',
-        '- Drop ISS-7.',
-        '  Run `hoot issue edit ISS-7 --add-label Dropped`, then stop.',
+        '  Run `hoot issue edit "#7" --add-label Making`, then go on with the step Make.',
+        '- Drop #7.',
+        '  Run `hoot issue edit "#7" --add-label Dropped`, then stop.',
         '',
         '## 2. Make',
         '',
@@ -284,7 +284,7 @@ describe('workflowFileText', () => {
         'Outcomes:',
         '',
         '- It is made.',
-        "  Run `hoot issue edit ISS-7 --add-label 'made well'`, then stop.",
+        `  Run \`hoot issue edit "#7" --add-label 'made well'\`, then stop.`,
         '',
         '## End labels',
         '',
@@ -307,7 +307,7 @@ describe('workflowFileText', () => {
         },
       ],
     }
-    const text = workflowFileText(workflow, 'ISS-7')
+    const text = workflowFileText(workflow, '#7')
     expect(text).toContain(
       "it carries: none before it starts, a step's ready label while it waits for a session of that step, the label of the step it is at, or an end label once it is finished.",
     )

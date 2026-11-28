@@ -502,10 +502,10 @@ const IssueWindowIssues = memo(function IssueWindowIssues({
       (status) => listed.find((group) => group.status === status) ?? { status, issues: [] },
     )
   }, [shown, drop.dragging])
-  const identifierWidth = useMemo(
-    () => Math.max(0, ...shown.map((issue) => issueIdentifier(issue.id).length)),
-    [shown],
-  )
+  const identifierWidth = useMemo(() => {
+    const longest = Math.max(0, ...shown.map((issue) => issueIdentifier(issue.id).length))
+    return longest === 0 ? 0 : longest + 0.5
+  }, [shown])
 
   /**
    * Back to an issue's row once its menu closes, wherever its status now

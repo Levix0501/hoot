@@ -57,7 +57,7 @@ const percent = (statuses: IssueStatus[]) =>
 describe('issueJson', () => {
   it('has the identifier, number, title, description, status and priority names, and the times in UTC', () => {
     expect(issueJson(issue)).toStrictEqual({
-      identifier: 'ISS-12',
+      identifier: '#12',
       number: 12,
       title: 'Restore sessions',
       description: '',
@@ -80,29 +80,29 @@ describe('issueJson', () => {
   it('has the parent and the sub-issues, in order, and the progress of those not canceled', () => {
     const json = issueJson(family)
     expect(json.parent).toStrictEqual({
-      identifier: 'ISS-4',
+      identifier: '#4',
       number: 4,
       title: 'Issue 4',
       status: 'todo',
       project: null,
     })
     expect(json.subIssues).toStrictEqual([
-      { identifier: 'ISS-20', number: 20, title: 'Issue 20', status: 'done', project: 'gamma' },
+      { identifier: '#20', number: 20, title: 'Issue 20', status: 'done', project: 'gamma' },
       {
-        identifier: 'ISS-21',
+        identifier: '#21',
         number: 21,
         title: 'Issue 21',
         status: 'in-progress',
         project: 'hotel',
       },
       {
-        identifier: 'ISS-103',
+        identifier: '#103',
         number: 103,
         title: 'Issue 103',
         status: 'canceled',
         project: 'gamma',
       },
-      { identifier: 'ISS-22', number: 22, title: 'Issue 22', status: 'backlog', project: null },
+      { identifier: '#22', number: 22, title: 'Issue 22', status: 'backlog', project: null },
     ])
     expect(json.subIssuesSummary).toStrictEqual({ total: 3, completed: 1, percentCompleted: 33 })
     expect(Object.keys(json.subIssuesSummary)).toEqual(['total', 'completed', 'percentCompleted'])
@@ -115,11 +115,11 @@ describe('issueJson', () => {
       blocking: [related(32, 'backlog', null)],
     })
     expect(json.blockedBy).toStrictEqual([
-      { identifier: 'ISS-30', number: 30, title: 'Issue 30', status: 'done', project: 'gamma' },
-      { identifier: 'ISS-31', number: 31, title: 'Issue 31', status: 'todo', project: 'hotel' },
+      { identifier: '#30', number: 30, title: 'Issue 30', status: 'done', project: 'gamma' },
+      { identifier: '#31', number: 31, title: 'Issue 31', status: 'todo', project: 'hotel' },
     ])
     expect(json.blocking).toStrictEqual([
-      { identifier: 'ISS-32', number: 32, title: 'Issue 32', status: 'backlog', project: null },
+      { identifier: '#32', number: 32, title: 'Issue 32', status: 'backlog', project: null },
     ])
   })
 
@@ -146,10 +146,10 @@ describe('issueText', () => {
   it('ends the description with a line break, without adding a second one', () => {
     const created = `Created ${localMinute(issue.createdAt)}`
     expect(issueText({ ...issue, description: 'One\n\nTwo' }, gamma)).toBe(
-      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n\nTwo\n`,
+      `#12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n\nTwo\n`,
     )
     expect(issueText({ ...issue, description: 'One\n' }, gamma)).toBe(
-      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n`,
+      `#12 Restore sessions\nIn Progress · Medium · ${created}\n\nOne\n`,
     )
   })
 
@@ -157,17 +157,17 @@ describe('issueText', () => {
     const created = `Created ${localMinute(issue.createdAt)}`
     expect(issueText(family, gamma)).toBe(
       [
-        'ISS-12 Restore sessions',
+        '#12 Restore sessions',
         `In Progress · Medium · ${created}`,
-        'Sub-issue of ISS-4 Issue 4 (Todo · No project)',
+        'Sub-issue of #4 Issue 4 (Todo · No project)',
         '',
         'About it',
         '',
         'Sub-issues · 1/3 (33%)',
-        'Done         ISS-20   Issue 20',
-        'In Progress  ISS-21   Issue 21 (hotel)',
-        'Canceled     ISS-103  Issue 103',
-        'Backlog      ISS-22   Issue 22 (No project)',
+        'Done         #20   Issue 20',
+        'In Progress  #21   Issue 21 (hotel)',
+        'Canceled     #103  Issue 103',
+        'Backlog      #22   Issue 22 (No project)',
         '',
       ].join('\n'),
     )
@@ -179,12 +179,12 @@ describe('issueText', () => {
       issueText({ ...issue, parent: related(4, 'done'), subIssues: [related(5, 'todo')] }, gamma),
     ).toBe(
       [
-        'ISS-12 Restore sessions',
+        '#12 Restore sessions',
         `In Progress · Medium · ${created}`,
-        'Sub-issue of ISS-4 Issue 4 (Done)',
+        'Sub-issue of #4 Issue 4 (Done)',
         '',
         'Sub-issues · 0/1 (0%)',
-        'Todo  ISS-5  Issue 5',
+        'Todo  #5  Issue 5',
         '',
       ].join('\n'),
     )
@@ -209,25 +209,25 @@ describe('issueText with dependencies', () => {
       ),
     ).toBe(
       [
-        'ISS-12 Restore sessions',
+        '#12 Restore sessions',
         `In Progress · Medium · ${created}`,
-        'Sub-issue of ISS-4 Issue 4 (Todo · No project)',
+        'Sub-issue of #4 Issue 4 (Todo · No project)',
         '',
         'About it',
         '',
         'Sub-issues · 1/3 (33%)',
-        'Done         ISS-20   Issue 20',
-        'In Progress  ISS-21   Issue 21 (hotel)',
-        'Canceled     ISS-103  Issue 103',
-        'Backlog      ISS-22   Issue 22 (No project)',
+        'Done         #20   Issue 20',
+        'In Progress  #21   Issue 21 (hotel)',
+        'Canceled     #103  Issue 103',
+        'Backlog      #22   Issue 22 (No project)',
         '',
         'Blocked by',
-        'Done         ISS-30   Issue 30',
-        'In Progress  ISS-131  Issue 131 (hotel)',
-        'Todo         ISS-32   Issue 32 (No project)',
+        'Done         #30   Issue 30',
+        'In Progress  #131  Issue 131 (hotel)',
+        'Todo         #32   Issue 32 (No project)',
         '',
         'Blocking',
-        'Backlog  ISS-33  Issue 33',
+        'Backlog  #33  Issue 33',
         '',
       ].join('\n'),
     )
@@ -236,7 +236,7 @@ describe('issueText with dependencies', () => {
   it('leaves out a section without issues', () => {
     const created = `Created ${localMinute(issue.createdAt)}`
     expect(issueText({ ...issue, blocking: [related(5, 'todo')] }, gamma)).toBe(
-      `ISS-12 Restore sessions\nIn Progress · Medium · ${created}\n\nBlocking\nTodo  ISS-5  Issue 5\n`,
+      `#12 Restore sessions\nIn Progress · Medium · ${created}\n\nBlocking\nTodo  #5  Issue 5\n`,
     )
   })
 })
@@ -269,7 +269,7 @@ describe('issueListText', () => {
         { ...issue, id: 9, status: 'todo', priority: 0, title: 'Nine' },
         { ...issue, id: 10, status: 'backlog', priority: 1, title: 'Ten' },
       ]),
-    ).toBe('ISS-9   Todo     No priority  Nine\nISS-10  Backlog  Urgent       Ten\n')
+    ).toBe('#9   Todo     No priority  Nine\n#10  Backlog  Urgent       Ten\n')
     expect(issueListText([])).toBe('')
   })
 
@@ -284,7 +284,7 @@ describe('issueListText', () => {
           ],
         },
       ]),
-    ).toBe('ISS-12  In Progress  Medium  Restore sessions  [Spec-driven › Design, ui]\n')
+    ).toBe('#12  In Progress  Medium  Restore sessions  [Spec-driven › Design, ui]\n')
   })
 })
 

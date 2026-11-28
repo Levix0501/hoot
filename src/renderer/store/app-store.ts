@@ -784,7 +784,7 @@ export interface AppState {
    * new issue, or `null` when none was created.
    */
   createDependentIssue(draft: NewIssueDraft): Promise<Issue | null>
-  /** Puts an issue's identifier, such as "ISS-12", on the clipboard. */
+  /** Puts an issue's identifier, such as "#12", on the clipboard. */
   copyIssueIdentifier(issueId: number): void
   copyIssueTitle(issueId: number): void
   /**

@@ -100,10 +100,10 @@ project. Agents use it to report their progress on an issue, and you can run it 
 
 ```sh
 hoot issue list                                   # open issues of this project
-hoot issue view ISS-12
+hoot issue view 12
 hoot issue create --title "Fix the login bug" --priority high
-hoot issue edit ISS-12 --add-label bug
-hoot session start ISS-14                         # hand ISS-14 to Claude Code
+hoot issue edit 12 --add-label bug
+hoot session start 14                             # hand #14 to Claude Code
 ```
 
 Run `hoot --help` for every command and option.

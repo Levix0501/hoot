@@ -719,15 +719,15 @@ export interface AppState {
   closeNewIssue(): void
   updateNewIssueDraft(changes: Partial<NewIssueDraft>): void
   /**
-   * Creates an issue from what is entered in the new issue dialog, closes
-   * the dialog and says so; with `open`, it shows the new issue instead.
-   * Settles with the new issue, or `null` when none was created.
+   * Creates an issue from what is entered in the new issue dialog and closes
+   * the dialog; with `open`, it shows the new issue. Settles with the new
+   * issue, or `null` when none was created.
    */
   createIssue(options?: { open?: boolean }): Promise<Issue | null>
   /**
    * Creates an issue noted in the Issues window, apart from what is entered
-   * in the new issue dialog, and says so. Settles with the new issue, or
-   * `null` when none was created.
+   * in the new issue dialog. Settles with the new issue, or `null` when none
+   * was created.
    */
   noteIssue(issue: NewIssue): Promise<Issue | null>
   /** Opens the Issues window, or closes it to its button, and saves which. */
@@ -780,8 +780,8 @@ export interface AppState {
   closeDependentIssue(): void
   /**
    * Creates an issue from what is entered in the dialog for a new issue with a
-   * dependency, with that dependency, and says so; or says why it cannot.
-   * Settles with the new issue, or `null` when none was created.
+   * dependency, with that dependency, or says why it cannot. Settles with the
+   * new issue, or `null` when none was created.
    */
   createDependentIssue(draft: NewIssueDraft): Promise<Issue | null>
   /** Puts an issue's identifier, such as "ISS-12", on the clipboard. */
@@ -2284,14 +2284,6 @@ export const useAppStore = create<AppState>()((set, get) => {
     return issue
   }
 
-  /** Says that an issue was created, with a button that shows it. */
-  const announceIssue = (issue: Issue) => {
-    toast.success(`${issueIdentifier(issue.id)} created`, {
-      description: userText(issue.title),
-      action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
-    })
-  }
-
   /** How each session opened from an issue is to start, by its id, until it starts. */
   const launchOptions = new Map<string, { by: LabelActor; prompt: string | null }>()
   /** The sessions whose process has been asked to start, which is asked only once. */
@@ -3470,11 +3462,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (issue === null) return
         created = issue
         set({ newIssueDraft: emptyNewIssueDraft, newIssueDialogOpen: false })
-        if (open) {
-          get().showIssue(issue.id)
-          return
-        }
-        announceIssue(issue)
+        if (open) get().showIssue(issue.id)
       })
       return created
     },
@@ -3483,7 +3471,6 @@ export const useAppStore = create<AppState>()((set, get) => {
       let created: Issue | null = null
       await once('note', async () => {
         created = await saveNewIssue(newIssue)
-        if (created !== null) announceIssue(created)
       })
       return created
     },
@@ -3647,10 +3634,6 @@ export const useAppStore = create<AppState>()((set, get) => {
             state.dependentIssueDialog === dialog ? null : state.dependentIssueDialog,
         }))
         created = issue
-        toast.success(`${issueIdentifier(issue.id)} created`, {
-          description: userText(issue.title),
-          action: { label: 'View issue', onClick: () => get().showIssue(issue.id) },
-        })
       })
       return created
     },

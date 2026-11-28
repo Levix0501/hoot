@@ -1,5 +1,17 @@
 # hoot
 
+## 0.1.0-alpha.38
+
+### Patch Changes
+
+- [`4c8df8f`](https://github.com/Levix0501/hoot/commit/4c8df8fe8a1168a13c76107beb406ae79d70724b) - Issues are now numbered #N instead of ISS-N, hoot's commands take an issue by its number, such as `hoot issue view 12`, and an issue dropped on an agent's terminal pastes its title as a heading above its description.
+
+- [`bc37af0`](https://github.com/Levix0501/hoot/commit/bc37af096e753a2d671a151ec0b89b496d177dee) - Creating an issue no longer shows a success notification.
+
+- [`174ad26`](https://github.com/Levix0501/hoot/commit/174ad260872f7e3ec81126a0343356e91181742d) - Harnesses on the Agents page can now be reordered by dragging, and the chosen order carries over to the Default agent picker, new session and chat menus, and the New worktree dialog without changing the default agent.
+
+- [`ce7227f`](https://github.com/Levix0501/hoot/commit/ce7227fd17f2ede6bfc2ec991cb9220c67985ff4) - Open issues have a send button, on the Issues page, on the issue's page and in the Issues window, that picks an agent and starts it in a new worktree for the issue with the issue as its first message, moving the issue to In Progress.
+
 ## 0.1.0-alpha.37
 
 ### Patch Changes

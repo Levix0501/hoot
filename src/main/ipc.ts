@@ -75,6 +75,7 @@ import type {
   CreateWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  SendIssueToAgentResult,
   StartDeletionResult,
   StartMergeResult,
 } from '../shared/worktrees'
@@ -98,7 +99,7 @@ import type { ProjectStore } from './projects/project-store'
 import type { QuitGuard } from './quit-guard'
 import type { ModelsDev } from './providers/models-dev'
 import type { ProviderService } from './providers/provider-service'
-import type { AgentLaunch, SentIssue } from './session/launch'
+import { issueAgentFirstMessage, type AgentLaunch, type SentIssue } from './session/launch'
 import { SessionError, type SessionManager } from './session/session-manager'
 import type { SessionStartRequests } from './session/session-starts'
 import type { AppearanceStore } from './settings/appearance-store'
@@ -1244,6 +1245,40 @@ export function registerIpc(deps: IpcDependencies): void {
       return deps.worktrees.createForIssue(root, found.issue)
     },
   )
+
+  handle(IpcChannel.sendIssueToAgent, async (_event, ...args): Promise<SendIssueToAgentResult> => {
+    const parsed = z.tuple([projectRoot, rowId, agentId]).safeParse(args)
+    if (!parsed.success) return { ok: false, reason: 'invalid', message: 'Invalid request.' }
+    const [root, issueId, id] = parsed.data
+    const project = deps.projects.find(root)
+    if (!project) {
+      return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
+    }
+    const agent = chatAgentOf(id)
+    if (agent === null) {
+      return { ok: false, reason: 'invalid', message: 'The agent no longer exists.' }
+    }
+    const found = issueOfProject(deps.issues, project.id, issueId)
+    if (!found.ok) return { ok: false, reason: 'invalid', message: found.message }
+    const created = await deps.worktrees.createForIssue(root, found.issue)
+    if (!created.ok) return created
+    if (!deps.projects.find(root)) {
+      return { ok: false, reason: 'invalid', message: 'The project is not in the list.' }
+    }
+    try {
+      const firstMessage = await issueAgentFirstMessage(created.path, found.issue)
+      const session = deps.chats.createSavedSession(root, created.path, agent, { firstMessage })
+      return {
+        ok: true,
+        path: created.path,
+        branch: created.branch,
+        session,
+        warning: created.warning,
+      }
+    } catch (error) {
+      return { ok: false, reason: 'failed', message: errorMessage(error) }
+    }
+  })
 
   handle(IpcChannel.readWorktrees, (_event, value) => {
     const parsed = projectRoot.safeParse(value)

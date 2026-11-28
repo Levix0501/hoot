@@ -58,6 +58,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { StatusIcon } from './issue-icons'
 import { focusNoteOnShow, IssueNote } from './issue-note'
+import { IssueSendButton } from './issue-send-button'
 import { pickByDigit, PropertyMenuItems, type PropertyMenu } from './property-menu'
 import { StatusOptionIcon } from './property-picker'
 import { useNow } from './relative-time'
@@ -210,10 +211,11 @@ function HeaderButton({
 
 /**
  * An issue in the window: its identifier, status, title and age. A click
- * shows the issue's page, and a right-click changes its status. Dragged
- * into another group of the window, it takes that group's status; onto the
- * terminal of a running agent, it pastes the issue into the agent's input,
- * unsent.
+ * shows the issue's page, a right-click changes its status, and pointing at
+ * the row reveals its send button, which picks an agent to send the issue to
+ * in a new worktree. Dragged into another group of the window, it takes that
+ * group's status; onto the terminal of a running agent, it pastes the issue
+ * into the agent's input, unsent.
  */
 function IssueWindowRow({
   issue,
@@ -230,7 +232,10 @@ function IssueWindowRow({
 }) {
   const showIssue = useAppStore((state) => state.showIssue)
   const updateIssue = useAppStore((state) => state.updateIssue)
+  const sending = useAppStore((state) => state.sendingIssues.includes(issue.id))
   const [menuOpen, setMenuOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
+  const showSend = sendOpen || sending
   const status: PropertyMenu<IssueStatus> = {
     Icon: StatusOptionIcon,
     options: STATUS_OPTIONS,
@@ -239,15 +244,15 @@ function IssueWindowRow({
   }
   return (
     <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
-      <ContextMenuTrigger render={<li />}>
+      <ContextMenuTrigger render={<li />} className="group/row relative">
         <button
           type="button"
           draggable
           onDragStart={(event) => startIssueDrag(event, issue)}
           onDragEnd={endIssueDrag}
           onClick={() => showIssue(issue.id)}
-          className="flex h-8 w-full cursor-default items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent data-popup-open:bg-accent"
-          data-popup-open={menuOpen || undefined}
+          className="flex h-8 w-full cursor-default items-center gap-2 rounded-md px-2 text-left outline-none group-hover/row:bg-accent focus-visible:bg-accent data-popup-open:bg-accent"
+          data-popup-open={menuOpen || sendOpen || undefined}
           data-testid="issue-window-row"
           data-issue-id={issue.id}
           data-status={issue.status}
@@ -263,12 +268,37 @@ function IssueWindowRow({
             {issue.title}
           </span>
           <time
-            className="shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
+            className={cn(
+              'shrink-0 pl-1 text-xs text-muted-foreground tabular-nums group-hover/row:hidden group-has-focus-visible/row:hidden',
+              showSend && 'hidden',
+            )}
             dateTime={new Date(issue.createdAt).toISOString()}
           >
             {shortTimeAgo(issue.createdAt, now)}
           </time>
+          {/* Room for the send button while it shows in place of the age. */}
+          <span
+            className={cn(
+              'hidden w-5 shrink-0 group-hover/row:block group-has-focus-visible/row:block',
+              showSend && 'block',
+            )}
+            aria-hidden
+          />
         </button>
+        {/* Beside the row's button, which it cannot be inside: clicking it does not show the issue. */}
+        <IssueSendButton
+          issue={issue}
+          size="icon-xs"
+          tooltipSide="top"
+          open={sendOpen}
+          onOpenChange={setSendOpen}
+          finalFocus={() => focusAfterMenu(issue.id)}
+          className={cn(
+            'absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100',
+            showSend && 'opacity-100',
+          )}
+          buttonClassName="hover:bg-foreground/10 aria-expanded:bg-foreground/10 dark:hover:bg-foreground/10 dark:aria-expanded:bg-foreground/10"
+        />
       </ContextMenuTrigger>
       <ContextMenuContent
         className="min-w-44 [app-region:no-drag]"

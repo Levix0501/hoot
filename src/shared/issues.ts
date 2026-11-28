@@ -189,3 +189,15 @@ export function issuePasteParts(issue: Pick<Issue, 'title' | 'description'>): st
   const description = issue.description.trim()
   return description === '' ? [head] : [`${head}\n\n`, description]
 }
+
+/**
+ * The first message sent to an agent when an issue is handed to it in a new
+ * worktree: its title as a Markdown heading, followed by its description
+ * after a blank line, if any. Starting with `# `, the text never starts as a
+ * command or a mode of the agent's input would, such as `/` or `!`.
+ */
+export function issueFirstMessage(issue: Pick<Issue, 'title' | 'description'>): string {
+  const head = `# ${issue.title}`
+  const description = issue.description.trim()
+  return description === '' ? head : `${head}\n\n${description}`
+}

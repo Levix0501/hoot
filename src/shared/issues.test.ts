@@ -3,6 +3,7 @@ import {
   inView,
   isCompleted,
   isIssueOpen,
+  issueFirstMessage,
   issueGroups,
   issueIdentifier,
   issuePasteParts,
@@ -157,5 +158,27 @@ describe('issuePasteParts', () => {
     expect(issuePasteParts({ title: '/compact the logs', description: '' })).toEqual([
       '# /compact the logs',
     ])
+  })
+})
+
+describe('issueFirstMessage', () => {
+  it('joins the heading with the trimmed description after a blank line', () => {
+    expect(
+      issueFirstMessage({
+        title: 'Fix the login button',
+        description: '\n  It is cut off.\n\n- On Windows\n',
+      }),
+    ).toBe('# Fix the login button\n\nIt is cut off.\n\n- On Windows')
+  })
+
+  it('uses only the heading when there is no description', () => {
+    expect(issueFirstMessage({ title: 'Tidy up', description: '' })).toBe('# Tidy up')
+    expect(issueFirstMessage({ title: 'B', description: ' \n\t' })).toBe('# B')
+  })
+
+  it('starts with # , whatever the title starts with', () => {
+    expect(issueFirstMessage({ title: '/compact the logs', description: '' })).toBe(
+      '# /compact the logs',
+    )
   })
 })

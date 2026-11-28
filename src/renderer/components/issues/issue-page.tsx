@@ -39,6 +39,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { DescriptionEditor, type DescriptionEditorHandle } from './description-editor'
 import { IssueActivity } from './issue-activity'
 import { IssueProperties } from './issue-properties'
+import { IssueSendButton } from './issue-send-button'
 import { IssueStartButton } from './issue-start-button'
 import { IssuesBreadcrumb, IssuesTopRow } from './issues-top-row'
 import { ParentLine, SubIssuesSection, type SubIssuesHandle } from './sub-issues'
@@ -349,7 +350,12 @@ export function IssuePage({ issueId }: { issueId: number }) {
             className="flex min-h-7 justify-end gap-2 [grid-area:toolbar]"
             data-testid="issue-actions"
           >
-            {isIssueOpen(issue) && <IssueStartButton issue={issue} tooltipSide="bottom" />}
+            {isIssueOpen(issue) &&
+              (ISSUE_WORKFLOW === null ? (
+                <IssueSendButton issue={issue} tooltipSide="bottom" />
+              ) : (
+                <IssueStartButton issue={issue} tooltipSide="bottom" />
+              ))}
           </div>
           <div className="min-w-0 [grid-area:title]">
             <IssueTitle issue={issue} onEnter={() => description.current?.focus()} />

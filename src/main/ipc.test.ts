@@ -265,6 +265,7 @@ const worktrees = Object.assign(emitter(), {
     message: 'No.',
   })),
   createNamed: vi.fn<(request: unknown) => Promise<unknown>>(),
+  createForIssue: vi.fn<(root: string, issue: unknown) => Promise<unknown>>(),
   removeMissing: vi.fn<
     (root: string, worktreePath: string, closeSessions: () => Promise<void>) => Promise<unknown>
   >(async () => ({ ok: true })),
@@ -903,6 +904,103 @@ describe('the messages of chats', () => {
       saved.worktreePath,
       claudeChatAgent,
     )
+  })
+
+  it('sends an issue to an agent by creating a new worktree and a saved session with the issue as its first message', async () => {
+    const projectIssue: Issue = {
+      ...created,
+      id: 12,
+      projectId: project.id,
+      title: 'Fix login',
+      description: 'Broken on Safari.',
+    }
+    issues.get.mockImplementation((id) =>
+      id === projectIssue.id ? projectIssue : id === 3 ? created : null,
+    )
+    const worktreePath = '/work/project/iss-12-fix-login'
+    const issueSession: SavedSessionInfo = {
+      ...saved,
+      id: 'saved-issue-12',
+      toolId: 'codex',
+      folder: worktreePath,
+      worktreePath,
+      providerId: OWN_PROVIDER_IDS.codex,
+      agentId: 'codex',
+    }
+    worktrees.createForIssue.mockResolvedValueOnce({
+      ok: true,
+      path: worktreePath,
+      branch: 'iss-12-fix-login',
+      warning: 'post-checkout failed',
+    })
+    chats.createSavedSession.mockReturnValueOnce(issueSession)
+    try {
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, 12, 'codex')).toEqual({
+        ok: true,
+        path: worktreePath,
+        branch: 'iss-12-fix-login',
+        session: issueSession,
+        warning: 'post-checkout failed',
+      })
+      expect(worktrees.createForIssue).toHaveBeenCalledWith(project.root, projectIssue)
+      expect(chats.createSavedSession).toHaveBeenCalledWith(
+        project.root,
+        worktreePath,
+        {
+          toolId: 'codex',
+          providerId: OWN_PROVIDER_IDS.codex,
+          model: null,
+          agentId: 'codex',
+        },
+        { firstMessage: '# Fix login\n\nBroken on Safari.' },
+      )
+
+      // Worktree creation failure stops before making a saved session.
+      vi.clearAllMocks()
+      worktrees.createForIssue.mockResolvedValueOnce({
+        ok: false,
+        reason: 'no-base',
+        message: 'Detached HEAD.',
+      })
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, 12, 'claude')).toEqual({
+        ok: false,
+        reason: 'no-base',
+        message: 'Detached HEAD.',
+      })
+      expect(chats.createSavedSession).not.toHaveBeenCalled()
+
+      // Invalid requests, unknown projects/agents, and issues outside the project are refused before creating a worktree.
+      vi.clearAllMocks()
+      expect(await invoke(IpcChannel.sendIssueToAgent, '/work/other', 12, 'claude')).toEqual({
+        ok: false,
+        reason: 'invalid',
+        message: 'The project is not in the list.',
+      })
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, 12, 'gone')).toEqual({
+        ok: false,
+        reason: 'invalid',
+        message: 'The agent no longer exists.',
+      })
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, 3, 'claude')).toEqual({
+        ok: false,
+        reason: 'invalid',
+        message: 'The issue is no longer in this project.',
+      })
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, 999, 'claude')).toEqual({
+        ok: false,
+        reason: 'invalid',
+        message: 'The issue no longer exists.',
+      })
+      expect(await invoke(IpcChannel.sendIssueToAgent, project.root, '12', 'claude')).toEqual({
+        ok: false,
+        reason: 'invalid',
+        message: 'Invalid request.',
+      })
+      expect(worktrees.createForIssue).not.toHaveBeenCalled()
+      expect(chats.createSavedSession).not.toHaveBeenCalled()
+    } finally {
+      issues.get.mockImplementation((id) => (id === 3 ? created : null))
+    }
   })
 
   it('starts a saved session in its worktree, continuing its conversation', async () => {

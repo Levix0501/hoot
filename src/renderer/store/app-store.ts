@@ -369,6 +369,11 @@ export interface AppState {
    */
   startingIssues: readonly number[]
   /**
+   * The issues whose send button is creating a worktree for them, until
+   * their session opens or creating it fails.
+   */
+  sendingIssues: readonly number[]
+  /**
    * The issues whose start button or Start new session was clicked to start
    * a session for them, from the click until their session shows in the
    * sidebar, or the start ends without one: one entry for each start.
@@ -657,6 +662,12 @@ export interface AppState {
    * given; settles once it has started, or could not.
    */
   startSessionForAgent(issueId: number, prompt: string | null): Promise<SessionStartAnswer>
+  /**
+   * Creates a new worktree for an issue in its project and opens a new saved
+   * session of the chosen agent in it, sent the issue as its first message.
+   * Moves an issue in the backlog or to do to In Progress once sent.
+   */
+  sendIssueToAgent(issueId: number, agentId: string): Promise<void>
   /** Starts a session's process; settles with whether it started, and why not. */
   launchSession(id: string, cols: number, rows: number): Promise<LaunchResult>
   /** Shows a session and puts the keyboard focus in its terminal. */
@@ -2243,6 +2254,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     })
   }
 
+  /** Shows on an issue's send button whether a worktree is being created for it. */
+  const setSending = (issueId: number, sending: boolean) => {
+    set((state) => {
+      if (state.sendingIssues.includes(issueId) === sending) return state
+      return {
+        sendingIssues: sending
+          ? [...state.sendingIssues, issueId]
+          : state.sendingIssues.filter((id) => id !== issueId),
+      }
+    })
+  }
+
   /** Changes to issues under way, so that a second click does not repeat one. */
   const issueRequests = new Set<string>()
   const once = async (key: string, request: () => Promise<void>) => {
@@ -2419,6 +2442,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     tabOrders: {},
     addProjectConfirmation: null,
     startingIssues: [],
+    sendingIssues: [],
     issueStarts: [],
     currentPage: null,
     history: emptyHistory,
@@ -3223,6 +3247,61 @@ export const useAppStore = create<AppState>()((set, get) => {
 
     startSessionForAgent(issueId, prompt) {
       return openIssueSession(issueId, { show: false, by: 'agent', prompt })
+    },
+
+    async sendIssueToAgent(issueId, agentId) {
+      // Clicking again while a worktree is being created for this issue does nothing.
+      if (get().sendingIssues.includes(issueId)) return
+      const { tools, providers } = get()
+      if (agentsChecking(tools, providers)) return
+      if (!usableChatAgents(tools, providers).some((agent) => agent.id === agentId)) {
+        toast.error('Could not start a session.', {
+          description: 'Set up an agent in the Agents page first.',
+        })
+        get().showSettings('agents')
+        return
+      }
+      setSending(issueId, true)
+      try {
+        // Save pending edits before naming the worktree and sending the issue.
+        for (const flush of issueEditorFlushes) flush()
+        await get().whenIssueSaved(issueId)
+        const issue = findIssue(issueId)
+        if (!issue) return
+        const project = get().projects.find((candidate) => candidate.id === issue.projectId)
+        if (!project) {
+          toast.error(`Could not send ${issueIdentifier(issueId)}.`, {
+            description:
+              "Set a Project for this issue first: its worktree is created in the issue's project.",
+          })
+          return
+        }
+        const result = await api
+          .sendIssueToAgent(project.root, issueId, agentId)
+          .catch((error: unknown) => ({
+            ok: false as const,
+            reason: 'failed' as const,
+            message: errorMessage(error),
+          }))
+        if (!result.ok) {
+          failToCreateIssueWorktree(issueId, result)
+          return
+        }
+        // Unless its project left the list meanwhile.
+        if (!get().projects.some((candidate) => candidate.id === project.id)) return
+        if (result.warning) warnAboutWorktree(result.warning)
+        const latest = findIssue(issueId)
+        const status = latest && statusOnceStarted(latest.status)
+        if (latest && status && status !== latest.status) {
+          get().updateIssue(latest.id, { status })
+        }
+        get().setGroupExpanded('projects', true)
+        get().setProjectExpanded(project.id, true)
+        get().setWorktreeExpanded(project.root, result.path, true)
+        get().openCreatedSession(result.session)
+      } finally {
+        setSending(issueId, false)
+      }
     },
 
     async launchSession(id, cols, rows) {

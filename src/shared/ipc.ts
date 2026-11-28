@@ -42,6 +42,7 @@ import type {
   CreateWorktreeResult,
   NewWorktreeOptionsResult,
   RemoveWorktreeResult,
+  SendIssueToAgentResult,
   StartDeletionResult,
   StartMergeResult,
   WorktreeInfo,
@@ -420,6 +421,7 @@ export const IpcChannel = {
   createIssue: 'issues:create',
   updateIssue: 'issues:update',
   deleteIssue: 'issues:delete',
+  sendIssueToAgent: 'issues:send-to-agent',
   issueCreated: 'issues:created',
   createSubIssue: 'issues:create-sub-issue',
   listSubIssues: 'issues:list-sub-issues',
@@ -861,6 +863,15 @@ export interface HootApi {
   updateIssue(id: number, changes: IssueChanges): Promise<IssueResult>
   /** Deletes an issue for good. */
   deleteIssue(id: number): Promise<{ ok: boolean; message?: string }>
+  /**
+   * Creates a new worktree for an issue of a project and makes a saved
+   * session of an agent in it, sent the issue as its first message.
+   */
+  sendIssueToAgent(
+    projectRoot: string,
+    issueId: number,
+    agentId: string,
+  ): Promise<SendIssueToAgentResult>
   /** An issue was created other than from the window: by hoot, in a session. */
   onIssueCreated(listener: (issue: Issue) => void): () => void
   /** Creates an issue as the last sub-issue of a parent. */

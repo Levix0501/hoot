@@ -37,6 +37,7 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import { PriorityIcon, StatusIcon } from './issue-icons'
+import { IssueSendButton } from './issue-send-button'
 import { IssueStartButton } from './issue-start-button'
 import { LabelChip } from './labels'
 import { pickByDigit, PropertyMenuItems, type PropertyMenu } from './property-menu'
@@ -129,6 +130,7 @@ export function IssueRow({
   const setIssueParents = useAppStore((state) => state.setIssueParents)
   const hasParent = useAppStore((state) => shownParentOf(state, issue.id) !== undefined)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
   const labels = useAppStore((state) => issueLabelsOf(state, issue.id))
   const startNewSession = useAppStore((state) => state.startNewSession)
   const canStart = useAppStore((state) => startBlockersOf(state, issue).length === 0)
@@ -142,18 +144,12 @@ export function IssueRow({
         className="group/row relative"
         onMouseEnter={() => onHover(issue.id)}
       >
-        {/*
-          While the issues' workflow runs, room is left at the end of every row
-          for the start button, so that the dates line up.
-        */}
+        {/* Room is left at the end of every row for the action button, so that the dates line up. */}
         <button
           type="button"
-          className={cn(
-            'flex h-11 w-full items-center gap-2.5 rounded-lg pl-3 text-left text-[13px] outline-none group-hover/row:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted',
-            ISSUE_WORKFLOW === null ? 'pr-3' : 'pr-11',
-          )}
+          className="flex h-11 w-full items-center gap-2.5 rounded-lg pr-11 pl-3 text-left text-[13px] outline-none group-hover/row:bg-muted/50 focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50 data-popup-open:bg-muted"
           onClick={() => showIssue(issue.id)}
-          data-popup-open={menuOpen || undefined}
+          data-popup-open={menuOpen || sendOpen || undefined}
           data-testid="issue-row"
           data-issue-id={issue.id}
           data-status={issue.status}
@@ -218,13 +214,22 @@ export function IssueRow({
           </time>
         </button>
         {/* Beside the row's button, which it cannot be inside: clicking it does not show the issue. */}
-        {isIssueOpen(issue) && (
-          <IssueStartButton
-            issue={issue}
-            tooltipSide="top"
-            className="absolute top-1/2 right-2 -translate-y-1/2"
-          />
-        )}
+        {isIssueOpen(issue) &&
+          (ISSUE_WORKFLOW === null ? (
+            <IssueSendButton
+              issue={issue}
+              tooltipSide="top"
+              open={sendOpen}
+              onOpenChange={setSendOpen}
+              className="absolute top-1/2 right-2 -translate-y-1/2"
+            />
+          ) : (
+            <IssueStartButton
+              issue={issue}
+              tooltipSide="top"
+              className="absolute top-1/2 right-2 -translate-y-1/2"
+            />
+          ))}
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-48 [app-region:no-drag]" finalFocus={focusAfterOverlay}>
         <PropertySubmenu

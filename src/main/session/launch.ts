@@ -5,7 +5,7 @@ import { quote } from 'shell-quote'
 import { agentLaunchArguments } from '../../shared/launch-command'
 import type { AgentLaunchSettings } from '../../shared/launch-settings'
 import { HOOK_EVENTS, HOOT_ENV, MODEL_SWITCH_EVENT } from '../../shared/hoot-cli'
-import type { Issue } from '../../shared/issues'
+import { issueFirstMessage, type Issue } from '../../shared/issues'
 import {
   agentModels,
   catalogModelOf,
@@ -192,6 +192,14 @@ const ISSUE_FILE_NAME = 'issue.md'
 
 /** The name of the file of the issue's workflow, beside the issue's file. */
 const WORKFLOW_FILE_NAME = 'workflow.md'
+
+/**
+ * The longest issue message, in UTF-16 code units, sent inline on an agent's
+ * command line: well below Windows' command-line limit and Linux's
+ * per-argument limit. Longer issues are written to a file in
+ * `TEMPORARY_FOLDER` inside the worktree and referenced by path instead.
+ */
+export const MAX_INLINE_ISSUE_MESSAGE_LENGTH = 16_000
 
 /**
  * Text without its NUL characters: a program's arguments end at the first
@@ -441,6 +449,29 @@ async function writeIssueFolder(cwd: string, issue: SentIssue): Promise<string> 
       `Could not write the issue's file: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+}
+
+/**
+ * The first message sent to an agent when an issue is handed to it in a new
+ * worktree: its title as a Markdown heading and its description directly when
+ * they fit on the command line, or a short message pointing to the issue's
+ * file written inside the worktree when they do not.
+ */
+export async function issueAgentFirstMessage(
+  cwd: string,
+  issue: Pick<Issue, 'title' | 'description'>,
+): Promise<string> {
+  const inline = issueFirstMessage(issue)
+  if (inline.length <= MAX_INLINE_ISSUE_MESSAGE_LENGTH) return inline
+  const folder = await writeIssueFolder(cwd, {
+    title: issue.title,
+    description: issue.description,
+    branch: '',
+    workflowFile: null,
+    firstMessage: () => '',
+  })
+  const file = path.join(folder, ISSUE_FILE_NAME)
+  return `# ${issue.title}\n\nThe full issue is in \`${file}\`.`
 }
 
 async function checkFolder(cwd: string): Promise<void> {

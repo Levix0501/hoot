@@ -199,6 +199,8 @@ const api: HootApi = {
   createIssue: (issue) => ipcRenderer.invoke(IpcChannel.createIssue, issue),
   updateIssue: (id, changes) => ipcRenderer.invoke(IpcChannel.updateIssue, id, changes),
   deleteIssue: (id) => ipcRenderer.invoke(IpcChannel.deleteIssue, id),
+  sendIssueToAgent: (projectRoot, issueId, agentId) =>
+    ipcRenderer.invoke(IpcChannel.sendIssueToAgent, projectRoot, issueId, agentId),
   onIssueCreated: (listener) => subscribe(IpcChannel.issueCreated, listener),
   createSubIssue: (parentId, issue) =>
     ipcRenderer.invoke(IpcChannel.createSubIssue, parentId, issue),

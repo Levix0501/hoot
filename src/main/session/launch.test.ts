@@ -26,10 +26,12 @@ import type { WorkflowStep } from '../../shared/workflows'
 import type { SessionFiles } from '../workflows/workflow-executor'
 import {
   CODEX_HOOK_SETTING,
+  MAX_INLINE_ISSUE_MESSAGE_LENGTH,
   claudeCodeSettings,
   claudeSettingsFilePath,
   codexCatalogFilePath,
   firstMessageArguments,
+  issueAgentFirstMessage,
   issueFileText,
   resolveLaunch,
   sentIssueArgs,
@@ -1483,5 +1485,29 @@ describe('the issue, the first message and the arguments that send them', () => 
       const issue = { ...sentIssue('T', '', 'b'), firstMessage: () => prompt }
       expect(sentIssueArgs('/w/.hoot/tmp/issue-1', issue)).toEqual(['--name=T', '--', prompt])
     }
+  })
+
+  it('sends an issue inline when short, and writes it to a worktree file when longer than the command-line budget', async () => {
+    const worktree = fs.mkdtempSync(path.join(root, 'issue-msg-'))
+    const short = await issueAgentFirstMessage(worktree, {
+      title: 'Fix login',
+      description: 'Broken on Safari.',
+    })
+    expect(short).toBe('# Fix login\n\nBroken on Safari.')
+    expect(fs.existsSync(path.join(worktree, '.hoot'))).toBe(false)
+
+    const longDescription = 'a'.repeat(MAX_INLINE_ISSUE_MESSAGE_LENGTH + 100)
+    const overflow = await issueAgentFirstMessage(worktree, {
+      title: 'Long issue',
+      description: longDescription,
+    })
+    const match = /`([^`]+)`\.$/.exec(overflow)
+    expect(match).not.toBeNull()
+    const file = match![1]!
+    expect(overflow).toBe(`# Long issue\n\nThe full issue is in \`${file}\`.`)
+    expect(fs.readFileSync(file, 'utf8')).toBe(`# Long issue\n\n${longDescription}\n`)
+    expect(fs.readFileSync(path.join(worktree, '.hoot', 'tmp', '.gitignore'), 'utf8')).toContain(
+      '*',
+    )
   })
 })

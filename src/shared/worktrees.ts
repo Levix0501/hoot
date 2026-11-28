@@ -304,6 +304,26 @@ export type CreateIssueWorktreeResult =
       message: string
     }
 
+/**
+ * What sending an issue to an agent came to: the new worktree created for
+ * the issue and the saved session opened in it, or why it could not be sent.
+ */
+export type SendIssueToAgentResult =
+  | {
+      ok: true
+      path: string
+      branch: string
+      /** The saved session opened in the new worktree, sent the issue as its first message. */
+      session: SavedSessionInfo
+      /** Set when Git reported a problem (such as a failing hook) for a member it created. */
+      warning: string | null
+    }
+  | {
+      ok: false
+      reason: 'no-base' | 'failed' | 'invalid'
+      message: string
+    }
+
 export type RemoveWorktreeResult = { ok: true } | { ok: false; message: string }
 
 /**
